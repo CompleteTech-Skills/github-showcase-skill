@@ -80,7 +80,7 @@ Verbatim excerpt from `decisions/USER_DECISIONS.md` (Timothy Wayne Gregg, 2026-1
     - Exceptions: watching-org forks (not the user's work), and T3 orgs until their co-owners sign off.
     - TouchedByAnAgent is included on this instruction. `STANDARD.md` §12.5 #4 had left it open; confirm on the review page.
 
-19. **Brand master: use the better logo version.** The complete.tech website has `theme/spintech-child/assets/images/complete-tech-logo-dark-full.png` in `CompleteTech-LLC/complete.tech`.
+19. **Brand master: use the better logo version.** The complete.tech website's theme has a dark full logo, `complete-tech-logo-dark-full.png`.
     - It is 1200×599 with a transparent background and a gradient wordmark. A copy is in `art/brand-candidates/`, with `logo-compare.png` showing it on both GitHub themes.
     - It is the preferred **dark** master, pending the user's confirmation on the review page. The current `logo.png` stays the **light** master until a transparent light version exists.
     - If adopted, the estate planner re-measures the `STANDARD.md` §9.2 crop boxes (`mark-dark.png`, `bulb-dark.png`) on the new master in P0. Never reuse the old pixel coordinates.

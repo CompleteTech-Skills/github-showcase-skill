@@ -280,7 +280,9 @@ def test_star_list_cap_and_holds(make_estate):
 # ----------------------------------------------------------------------------------------------- labels
 def test_labels_plan_per_repository(make_estate):
     est = make_estate()
-    est.meta(f"{N}/support-triage-agent")["files"] = ["README.md"]  # a complete tree: rule 0 has nothing to read
+    # complete trees of the repository and of the org's .github: rule 0 has nothing to read in either
+    est.meta(f"{N}/support-triage-agent").update(files=["README.md"], files_complete=True)
+    est.meta(f"{N}/.github").update(files=["README.md", "profile/README.md"], files_complete=True)
     res, code = O.labels_plan(est, N)
     assert code == OK
     by = {r["repo"].split("/")[1]: r for r in res["repos"]}

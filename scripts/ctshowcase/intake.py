@@ -39,9 +39,10 @@ def _job(jid: str, argv: list[str], full: str, note: str, approval_id: str | Non
 # ------------------------------------------------------------------------------------------------------------------
 # adopt
 # ------------------------------------------------------------------------------------------------------------------
-def adopt(ctx, resolver=None, *, approval_id: str | None = None, fresh: bool = False) -> dict:
+def adopt(ctx, resolver=None, *, approval_id: str | None = None, fresh: bool = False, org_defaults=None) -> dict:
     """Phase 3 change records and writer jobs for one repository. `fresh` marks a repository `new` has just planned:
-    it has no wiki, Projects or Discussions yet and its live labels are unknown until it exists."""
+    it has no wiki, Projects or Discussions yet and its live labels are unknown until it exists. `org_defaults` is a
+    checkout or the metadata JSON of the owner's `.github` repository, which §6.4 rule 0 also reads."""
     from . import labels as labelsmod
     from . import records
     from . import topics as topicsmod
@@ -103,14 +104,18 @@ def adopt(ctx, resolver=None, *, approval_id: str | None = None, fresh: bool = F
                                "already seed them)", "next": f"showcase.py meta --from-gh {full}, then adopt again or "
                                "labels --plan --jobs FILE"})
     else:
-        ops, lg = labelsmod.plan(meta.get("labels") or [], ctx.repo_dir, files=meta.get("files"))
+        ops, lg = labelsmod.plan(meta.get("labels") or [], ctx.repo_dir, files=meta.get("files"),
+                                 complete=meta.get("files_complete") is True,
+                                 defaults=labelsmod.defaults_for(owner, repo, repo_dir=ctx.repo_dir, meta=meta,
+                                                                 path=org_defaults))
         logs += lg
         unchecked = [o for o in ops if o.get("log") == labelsmod.NEEDS_CHECKOUT]
         if unchecked:  # §6.4 rule 0 could not run: the rename stays out of the jobs until a checkout is read
             pending.append({"why": "labels: renames held until §6.4 rule 0 reads " +
                                    ", ".join(sorted({f for o in unchecked for f in o["check_files"]})) + " (" +
                                    ", ".join(f"{o['name']} -> {o['new_name']}" for o in unchecked) + ")",
-                            "next": f"showcase.py --repo-dir <checkout of {full}> adopt {full} (or labels --plan)"})
+                            "next": f"showcase.py --repo-dir <checkout of {full}> adopt {full} --org-defaults "
+                                    f"<checkout of {full.split('/')[0]}/.github> (or labels --plan)"})
         writes = [o for o in ops if o["op"] != "skip"]
         for i, argv in enumerate(label_ops_argv(full, writes), 1):
             jobs.append(_job(_jid("p3", "label", sid, f"{i:02d}"), argv, full, "§6.3 pass A renames before pass B "

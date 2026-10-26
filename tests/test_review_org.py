@@ -91,6 +91,7 @@ def _list_estate(labs_brand):
     est = _estate(labs_brand, _registry())
     raw = json.loads((FIX / "meta" / f"{N}__.github.json").read_text(encoding="utf-8"))
     raw["files"] = list(GH_FILES)
+    raw["files_complete"] = True  # GitHub returned the recursive tree with truncated: false
     raw["visibility"] = "public"
     est.add_meta(raw)
     return est

@@ -23,12 +23,16 @@ def test_emit_yml_matches_standard():
     assert len(labels.standard_labels()) == 23
 
 
+# the owner's .github captured whole with no default issue form: rule 0 has nothing to read there either
+CLEAN = labels.defaults_source("Northwind-Trading-Co/.github", meta={"files": ["README.md"], "files_complete": True})
+
+
 def test_github_defaults_plan():
-    ops, logs = labels.plan(existing(), files=["README.md"])  # a complete tree with no file rule 0 reads
+    ops, logs = labels.plan(existing(), files=["README.md"], complete=True, defaults=CLEAN)  # nothing rule 0 reads
     kinds = [o["op"] for o in ops]
     assert kinds.count("rename") == 7 and kinds.count("create") == 14 and kinds.count("patch") == 2
     with_acc = existing(DEFAULTS + [("accessibility", "f143ab", "x")])
-    kinds = [o["op"] for o in labels.plan(with_acc, files=["README.md"])[0]]
+    kinds = [o["op"] for o in labels.plan(with_acc, files=["README.md"], complete=True, defaults=CLEAN)[0]]
     assert kinds.count("rename") == 8 and kinds.count("create") == 13
 
 

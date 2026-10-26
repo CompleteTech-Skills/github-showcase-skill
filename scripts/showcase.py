@@ -478,7 +478,10 @@ def cmd_labels(args):
     if not existing and args.plan:
         existing = live_labels()  # read-only GET; the writer re-reads the live labels before it applies the jobs
     # §6.4 rule 0 always runs: in the checkout, else against the captured file list (unproven renames are held)
-    ops, logs = labels.plan(existing or [], ctx.repo_dir, files=ctx.meta.get("files"))
+    ops, logs = labels.plan(existing or [], ctx.repo_dir, files=ctx.meta.get("files"),
+                            complete=ctx.meta.get("files_complete") is True,
+                            defaults=labels.defaults_for(ctx.owner, ctx.repo, repo_dir=ctx.repo_dir, meta=ctx.meta,
+                                                         path=getattr(args, "org_defaults", None)))
     writes = [o for o in ops if o["op"] != "skip"]
     if args.records:
         records.append(args.records, [records.record(ctx.owner, ctx.repo, "label", o["name"], o["name"], o, o["rule"])
@@ -495,11 +498,13 @@ def cmd_labels(args):
         out["needs_checkout"] = unchecked
         for u in unchecked if not args.quiet else ():
             print(f"labels: rename {u['label']} -> {u['new_name']} held: rule 0 needs a checkout to read "
-                  f"{', '.join(u['check_files'])}; re-plan with --repo-dir", file=sys.stderr)
+                  f"{', '.join(u['check_files'])}; re-plan with --repo-dir (and --org-defaults for the owner's "
+                  ".github)", file=sys.stderr)
     if held:
         out["rewrite_first"] = held
         for h in held if not args.quiet else ():
-            print(f"labels: rewrite {h['path']}:{h['line']} ({h['text']}) from {h['label']} to {h['new_name']} in the "
+            where = f"{h['repo']}:{h['path']}" if h.get("repo") else h["path"]
+            print(f"labels: rewrite {where}:{h['line']} ({h['text']}) from {h['label']} to {h['new_name']} in the "
                   f"estate/polish PR; the rename job is withheld until then", file=sys.stderr)
     full = f"{ctx.owner}/{ctx.repo}"
     argvs = label_ops_argv(full, writes)
@@ -729,7 +734,7 @@ def cmd_adopt(args):
         m = M.from_gh(args.slug)
     rd = Path(args.repo_dir) if args.repo_dir and not args.no_repo_dir else None
     ctx = RepoContext(b, m, rd, type_override=getattr(args, "type_override", None))
-    res = intake.adopt(ctx, _resolver_args(args), approval_id=args.approval_id)
+    res = intake.adopt(ctx, _resolver_args(args), approval_id=args.approval_id, org_defaults=getattr(args, "org_defaults", None))
     _intake_jobs(args, res)
     return res, OK
 
@@ -978,6 +983,10 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--references", action="store_true",
                    help="kept for compatibility: the §6.4 rule 0 reference check always runs (a rename it cannot check "
                         "without --repo-dir is held as needs-input:label-references)")
+    s.add_argument("--org-defaults", metavar="PATH",
+                   help="§6.4 rule 0 in the owner's .github repository, whose default issue forms apply to a repository "
+                        "without .github/ISSUE_TEMPLATE/: a checkout of it, or its `meta --from-gh OWNER/.github` JSON "
+                        "(without it, such a rename is held as needs-input:label-references)")
     s.add_argument("--records")
     s.add_argument("--gh", action="store_true", help="also print the plan as gh command lines")
     s.add_argument("--jobs", metavar="FILE", help="append the writer jobs (JSON lines) to FILE")
@@ -1059,6 +1068,8 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--records", help="append change records (JSON lines)")
     s.add_argument("--jobs", help="append the scripts/writer.py jobs (JSON lines)")
     s.add_argument("--approval-id", help="approval id stamped on every job (the approved NEW_PROPOSALS item)")
+    s.add_argument("--org-defaults", metavar="PATH",
+                   help="a checkout or the metadata JSON of the owner's .github repository, for §6.4 rule 0 (labels)")
     _resolver_flags(s, "")
     s.set_defaults(func=cmd_adopt)
 

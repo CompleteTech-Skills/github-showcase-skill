@@ -15,6 +15,8 @@ LIVE = [{"name": "bug", "color": "d73a4a", "description": "Something isn't worki
         {"name": "enhancement", "color": "a2eeef", "description": "New feature or request"}]
 PLAIN = ["README.md", "LICENSE", "src/triage/agent.py", ".github/CODEOWNERS", ".github/pull_request_template.md"]
 HOLD = "needs-input:label-references"
+GH = "Northwind-Trading-Co/.github"
+CLEAN = labels.defaults_source(GH, meta={"files": ["README.md", "profile/README.md"], "files_complete": True})
 
 
 def _renames(ops):
@@ -37,7 +39,7 @@ def test_no_checkout_and_no_file_list_holds_every_rename():
 
 
 def test_complete_file_list_without_reference_files_emits_the_rename():
-    ops, logs = labels.plan(LIVE, files=PLAIN)
+    ops, logs = labels.plan(LIVE, files=PLAIN, complete=True, defaults=CLEAN)
     assert _renames(ops) == {"bug": "type:bug", "enhancement": "type:feature"}
     assert HOLD not in logs
 
@@ -46,7 +48,7 @@ def test_complete_file_list_without_reference_files_emits_the_rename():
                                   ".github/dependabot.yml", ".github/workflows/triage.yml", ".github/release.yml",
                                   ".github/labeler.yml", "renovate.json", ".github/renovate.json"])
 def test_file_list_naming_a_reference_file_holds_the_rename(path):
-    ops, logs = labels.plan(LIVE, files=PLAIN + [path])
+    ops, logs = labels.plan(LIVE, files=PLAIN + [path], complete=True, defaults=CLEAN)
     assert _renames(ops) == {}
     assert _held(ops)["bug"]["check_files"] == [path] and HOLD in logs
 
@@ -59,7 +61,8 @@ def test_fixture_file_map_cannot_prove_absence():
 
 def test_checkout_keeps_the_scan(tmp_path):
     (tmp_path / "src").mkdir()
-    ops, logs = labels.plan(LIVE, tmp_path, files=[".github/workflows/x.yml"])  # a checkout wins over the capture
+    ops, logs = labels.plan(LIVE, tmp_path, files=[".github/workflows/x.yml"], complete=True,
+                            defaults=CLEAN)  # a checkout wins over the capture
     assert _renames(ops) == {"bug": "type:bug", "enhancement": "type:feature"} and HOLD not in logs
 
 
@@ -74,9 +77,12 @@ def test_labels_cli_without_repo_dir_holds_the_rename(tmp_path):
     assert HOLD in out["logs"] and out["result"] != "pass" and p.returncode != 0
     assert {x["label"] for x in out["needs_checkout"]} == {"bug", "enhancement"}
     # with a complete tree that has no reference file, the renames leave as jobs
-    m.write_text(json.dumps(meta_dict(labels=LIVE, files=PLAIN)))
+    m.write_text(json.dumps(meta_dict(labels=LIVE, files=PLAIN, files_complete=True)))
+    gh = tmp_path / "dot-github.json"
+    gh.write_text(json.dumps(meta_dict(repo=".github", files=["README.md", "profile/README.md"], files_complete=True)))
     jobs.unlink(missing_ok=True)
-    out = json.loads(run_cli("--format", "json", "--meta", m, "--no-repo-dir", "labels", "--plan", "--jobs", jobs).stdout)
+    out = json.loads(run_cli("--format", "json", "--meta", m, "--no-repo-dir", "labels", "--plan", "--jobs", jobs,
+                             "--org-defaults", gh).stdout)
     assert any(a[:6] == ["gh", "label", "edit", "bug", "--name", "type:bug"] for a in out["argv"])
     assert HOLD not in out["logs"] and "needs_checkout" not in out
 
@@ -103,7 +109,8 @@ def test_org_labels_holds_renames_it_cannot_check(brand):
     by = {r["repo"]: r for r in res["repos"]}
     assert by[full]["needs_checkout"][0]["label"] == "bug" and HOLD in res["logs"]
     # a captured tree with no reference file lets the rename through
-    est.meta(full)["files"] = list(PLAIN)
+    est.meta(full).update(files=list(PLAIN), files_complete=True)
+    est.meta(GH).update(files=["README.md", "profile/README.md"], files_complete=True)
     res, _ = O.labels_plan(est, "Northwind-Trading-Co")
     first = next(j for j in res["jobs"] if j.get("repo") == full)
     assert first["argv"][:6] == ["gh", "label", "edit", "bug", "--name", "type:bug"]
@@ -116,4 +123,5 @@ def test_labels_cli_hold_only_is_needs_input_not_pass(tmp_path):
     p = run_cli("--format", "json", "--meta", m, "--no-repo-dir", "labels", "--plan")
     out = json.loads(p.stdout)
     assert out["argv"] == [] and out["result"] == "needs-input" and p.returncode == 4
-    assert out["needs_checkout"][0]["check_files"] == list(labels.REFERENCE_PATTERNS)
+    assert out["needs_checkout"][0]["check_files"] == list(labels.REFERENCE_PATTERNS) + [
+        f"{GH}:{p}" for p in labels.DEFAULT_PATTERNS]  # no capture: R's own files and the owner's default forms

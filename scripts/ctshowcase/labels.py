@@ -25,26 +25,48 @@ def standard_labels() -> list[dict]:
     return yaml.safe_load(emit_yml())
 
 
-_LABELS_KEY = re.compile(r"^(\s*(?:-\s+)?)labels\s*:(.*)$")
+_LABELS_KEY = re.compile(r"""^(\s*(?:-\s+)?)["']?labels["']?\s*:(.*)$""")
+BOM = "﻿"
 
 
 def _uncomment(text: str) -> str:
     return re.sub(r"\s+#.*$", "", text)
 
 
-def _label_entries(rel: str, text: str) -> list[tuple[int, str]]:
-    """The (line number, line) pairs that assign labels in a file rule 0 rewrites: the `labels:` key of an issue form
-    (`.github/ISSUE_TEMPLATE/*.yml`), the `labels:` key in the front matter of a Markdown issue template, and the
-    `labels:` entries of `.github/dependabot.yml`, each with its inline value or the `- item` lines under it. Prose
-    (form descriptions and field labels, the PR template, CONTRIBUTING.md) names no label and is never returned."""
+def _form_kind(rel: str) -> str | None:
+    """'form' (an issue form directly in `.github/ISSUE_TEMPLATE/`), 'md' (a Markdown issue template there),
+    'dependabot' (`.github/dependabot.yml`), else None: only these assign labels."""
     low = rel.lower()
     in_templates = low.startswith(".github/issue_template/") and low.count("/") == 2
-    if in_templates and low.endswith((".yml", ".yaml")) or low in (".github/dependabot.yml", ".github/dependabot.yaml"):
-        lines = list(enumerate(text.splitlines(), 1))
-    elif in_templates and low.endswith(".md"):
-        raw = text.splitlines()
-        end = next((i for i in range(1, len(raw)) if raw[i].strip() == "---"), None) if raw and raw[0].strip() == "---" else None
-        lines = list(enumerate(raw[1:end], 2)) if end else []
+    if in_templates and low.endswith((".yml", ".yaml")):
+        return "form"
+    if in_templates and low.endswith(".md"):
+        return "md"
+    return "dependabot" if low in (".github/dependabot.yml", ".github/dependabot.yaml") else None
+
+
+def _front_matter(text: str) -> tuple[list[tuple[int, str]], bool]:
+    """The (line number, line) pairs of a Markdown template's front matter and whether it is well formed: an
+    unterminated block returns every line and False, so the caller fails closed."""
+    raw = text.lstrip(BOM).splitlines()
+    if not raw or raw[0].strip() != "---":
+        return [], True
+    end = next((i for i in range(1, len(raw)) if raw[i].strip() == "---"), None)
+    if end is None:
+        return list(enumerate(raw, 1)), False
+    return list(enumerate(raw[1:end], 2)), True
+
+
+def _label_entries(rel: str, text: str, kind: str | None = None) -> list[tuple[int, str]]:
+    """The (line number, line) pairs that assign labels in a file rule 0 rewrites, for reporting `path:line`: the
+    `labels:` key of an issue form, the `labels:` key in the front matter of a Markdown issue template, and the
+    `labels:` entries of `.github/dependabot.yml`, each with its inline value or the `- item` lines under it. Whether
+    the file names a label is decided by parsing it (`_names_label`), not by this scan."""
+    kind = kind or _form_kind(rel)
+    if kind in ("form", "dependabot"):
+        lines = list(enumerate(text.lstrip(BOM).splitlines(), 1))
+    elif kind == "md":
+        lines = _front_matter(text)[0]
     else:
         return []
     out: list[tuple[int, str]] = []
@@ -73,10 +95,81 @@ def _label_entries(rel: str, text: str) -> list[tuple[int, str]]:
     return out
 
 
+def _label_values(v) -> set[str] | None:
+    """The lower-cased label names a `labels` value assigns (a list, or a comma-separated string); None when the value
+    has a shape GitHub's forms, templates and dependabot.yml do not use, so the caller fails closed."""
+    if v is None:
+        return set()
+    if isinstance(v, str):
+        return {x.strip().lower() for x in v.split(",") if x.strip()}
+    if isinstance(v, list) and all(isinstance(x, (str, int, float)) for x in v):
+        return {str(x).strip().lower() for x in v}
+    return None
+
+
+def _names_label(kind: str, text: str, name: str) -> bool | None:
+    """Whether the parsed file assigns label `name` (case-insensitively, as GitHub matches it): the top-level `labels`
+    of an issue form or of a Markdown template's front matter, or any `updates[*].labels` of dependabot.yml. None when
+    the YAML cannot be read (a parse error, an unterminated front matter, an unexpected shape)."""
+    import yaml
+    body = text.lstrip(BOM)
+    if kind == "md":
+        lines, ok = _front_matter(body)
+        if not ok:
+            return None
+        body = "\n".join(ln for _, ln in lines)
+    try:
+        doc = yaml.safe_load(body) if body.strip() else None
+    except yaml.YAMLError:
+        return None
+    if doc is None:
+        return False
+    if not isinstance(doc, dict):
+        return None
+    if kind == "dependabot":
+        ups = doc.get("updates")
+        if ups is None:
+            return False
+        if not isinstance(ups, list) or not all(isinstance(u, dict) for u in ups):
+            return None
+        vals = [u["labels"] for u in ups if "labels" in u]
+    else:
+        vals = [doc["labels"]] if "labels" in doc else []
+    want = name.lower()
+    for v in vals:
+        got = _label_values(v)
+        if got is None:
+            return None
+        if want in got:
+            return True
+    return False
+
+
+def _form_hits(rel: str, kind: str, text: str, name: str, repo: str | None = None) -> list[dict]:
+    """The {path, line, text} to rewrite when the parsed file assigns `name`. A file that cannot be parsed fails closed:
+    every line naming the label as a whole token is reported (a form's prose then holds the rename until the file
+    parses). A file that parses and does not assign it returns nothing, whatever its prose says."""
+    named = _names_label(kind, text, name)
+    if named is False:
+        return []
+    key_pat = re.compile(rf"(?<![\w:-]){re.escape(name)}(?![\w:-])", re.IGNORECASE)
+    lines = [(n, ln) for n, ln in _label_entries(rel, text, kind) if key_pat.search(_uncomment(ln))] if named else []
+    if not lines:  # a multi-line flow sequence, an alias, or an unreadable file: report each line naming the label
+        lines = [(n, ln) for n, ln in enumerate(text.lstrip(BOM).splitlines(), 1) if key_pat.search(ln)]
+    if not lines and named:
+        lines = [(1, "labels")]
+    extra = {"repo": repo} if repo else {}
+    return [{**extra, "path": rel, "line": n, "text": ln.strip()} for n, ln in lines]
+
+
 # the paths rule 0 can act on, as glob patterns: a capture with none of them proves no rename needs a checkout
 REFERENCE_PATTERNS = (".github/ISSUE_TEMPLATE/*", ".github/dependabot.yml", ".github/dependabot.yaml",
                       ".github/workflows/*", ".github/**/release.yml", ".github/**/labeler.yml", ".github/**/renovate.json",
                       "renovate.json")
+# where the owner's `.github` repository keeps the default issue forms GitHub applies to every repository without a
+# `.github/ISSUE_TEMPLATE/` of its own (read case-insensitively, so a capture errs toward a hold)
+DEFAULT_FORM_DIRS = (".github/ISSUE_TEMPLATE", "ISSUE_TEMPLATE", "docs/ISSUE_TEMPLATE")
+DEFAULT_PATTERNS = tuple(f"{d}/*" for d in DEFAULT_FORM_DIRS)
 
 
 def reference_file(rel: str) -> bool:
@@ -95,14 +188,97 @@ def reference_file(rel: str) -> bool:
     return low in (".github/dependabot.yml", ".github/dependabot.yaml")
 
 
-def reference_files(files) -> tuple[list[str], bool]:
-    """(reference-bearing paths the capture lists, complete) from a metadata `files` value: `meta --from-gh`'s complete
-    list of blob paths, or the fixtures' partial {path: value} map. Only a complete list with none of them proves that
-    rule 0 has nothing to find; a map, a missing capture or a listed reference file needs a checkout."""
+def default_form_file(rel: str) -> bool:
+    """True for a file directly in one of DEFAULT_FORM_DIRS of the owner's `.github` repository (case-insensitive)."""
+    low = rel.lower().lstrip("/")
+    return any(low.startswith(d.lower() + "/") and "/" not in low[len(d) + 1:] for d in DEFAULT_FORM_DIRS)
+
+
+def _capture(files, complete: bool) -> tuple[dict, bool]:
     from .org import _captured_files
-    cap, complete = _captured_files({"files": files})
+    return _captured_files({"files": files, "files_complete": complete})
+
+
+def reference_files(files, complete: bool = False) -> tuple[list[str], bool]:
+    """(reference-bearing paths the capture lists, complete) from a metadata `files` value: `meta --from-gh`'s list of
+    blob paths (complete only when the capture records `files_complete: true`, i.e. GitHub did not truncate the
+    recursive tree), or the fixtures' partial {path: value} map. Only a complete list with none of them proves that rule
+    0 has nothing to find; a map, a truncated or unmarked list, a missing capture or a listed reference file needs a
+    checkout."""
+    cap, complete = _capture(files, complete)
     found = sorted(p for p, v in cap.items() if v is not None and v is not False and reference_file(p))
     return found, complete
+
+
+def defaults_source(repo: str, *, repo_dir: str | Path | None = None, meta: dict | None = None) -> dict:
+    """The owner's `.github` repository as rule 0 reads it: a checkout, else its captured metadata (None: unknown)."""
+    m = meta or {}
+    return {"repo": repo, "dir": Path(repo_dir) if repo_dir else None, "files": m.get("files"),
+            "complete": m.get("files_complete") is True}
+
+
+def defaults_for(owner: str, repo: str, *, repo_dir=None, meta: dict | None = None, path: str | Path | None = None) -> dict:
+    """The owner's `.github` repository for rule 0 in R = owner/repo: R itself when R is `.github`, else `path` (a
+    checkout of it, or its metadata JSON from `meta --from-gh OWNER/.github`), else unknown (renames then hold)."""
+    full = f"{owner}/.github"
+    if repo == ".github":
+        return defaults_source(full, repo_dir=repo_dir, meta=meta)
+    if not path:
+        return defaults_source(full)
+    p = Path(path)
+    if p.is_dir():
+        return defaults_source(full, repo_dir=p)
+    import json
+    from .errors import ShowcaseError
+    try:
+        raw = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raise ShowcaseError(f"--org-defaults {p}: neither a checkout of {full} nor its metadata JSON", log="usage") from None
+    name = (raw.get("repo") or raw.get("name") or str(raw.get("full_name") or "/").split("/")[-1]) if isinstance(raw, dict) else None
+    if name and name != ".github":
+        raise ShowcaseError(f"--org-defaults {p} describes {name}, not {full}", log="usage")
+    return defaults_source(full, meta=raw if isinstance(raw, dict) and not raw.get("error") else None)
+
+
+def _own_forms(rd: Path | None, files, complete: bool) -> bool | None:
+    """True when R has a file directly in its own `.github/ISSUE_TEMPLATE/` (exact case: GitHub then ignores the
+    owner's default forms), False when a checkout or a complete capture shows none, None when the capture cannot tell."""
+    if rd is not None:
+        d = rd / ".github" / "ISSUE_TEMPLATE"
+        return d.is_dir() and any(p.is_file() for p in d.iterdir())
+    cap, complete = _capture(files, complete)
+    if any(v is not None and v is not False and re.fullmatch(r"\.github/ISSUE_TEMPLATE/[^/]+", p) for p, v in cap.items()):
+        return True
+    return False if complete else None
+
+
+def _default_forms(defaults: dict | None, name: str) -> tuple[str | None, list]:
+    """Rule 0 on the owner's `.github` repository: ('rewrite', hits) when a default form there assigns `name`,
+    ('unchecked', check_files) when its checkout is not given and its capture does not prove it has no default form,
+    else (None, [])."""
+    repo = (defaults or {}).get("repo") or "<owner>/.github"
+    d = (defaults or {}).get("dir")
+    if d is not None:
+        hits: list[dict] = []
+        for sub in DEFAULT_FORM_DIRS:
+            parent = d
+            for part in sub.split("/"):  # case-insensitive walk, so an unusual casing is still read
+                parent = next((c for c in sorted(parent.iterdir()) if c.is_dir() and c.name.lower() == part.lower()), None) \
+                    if parent is not None and parent.is_dir() else None
+            for p in sorted(parent.iterdir()) if parent is not None else []:
+                if not p.is_file():
+                    continue
+                low = p.name.lower()
+                kind = "form" if low.endswith((".yml", ".yaml")) else "md" if low.endswith(".md") else None
+                if kind:
+                    hits += _form_hits(p.relative_to(d).as_posix(), kind, p.read_text(encoding="utf-8", errors="ignore"),
+                                       name, repo=repo)
+        return ("rewrite" if hits else None), hits
+    cap, complete = _capture((defaults or {}).get("files"), bool((defaults or {}).get("complete")))
+    found = sorted(p for p, v in cap.items() if v is not None and v is not False and default_form_file(p))
+    if found or not complete:
+        return "unchecked", [f"{repo}:{p}" for p in found + ([] if complete else list(DEFAULT_PATTERNS))]
+    return None, []
 
 
 def _referenced(repo_dir: Path | None, name: str) -> tuple[str | None, list[dict]]:
@@ -112,7 +288,6 @@ def _referenced(repo_dir: Path | None, name: str) -> tuple[str | None, list[dict
     if repo_dir is None:
         return None, []
     pat = re.compile(rf"(?<![\w:-]){re.escape(name)}(?![\w:-])")
-    key_pat = re.compile(pat.pattern, re.IGNORECASE)  # GitHub matches a form's label names case-insensitively
     hits: list[dict] = []
     cands = sorted((repo_dir / ".github").rglob("*")) if (repo_dir / ".github").is_dir() else []
     if (repo_dir / "renovate.json").is_file():
@@ -127,31 +302,42 @@ def _referenced(repo_dir: Path | None, name: str) -> tuple[str | None, list[dict
         rel = p.relative_to(repo_dir).as_posix()
         if (rel.startswith(".github/workflows/") or rel.endswith(REF_FILES_BLOCK[1:])) and pat.search(text):
             return "block", [{"path": rel}]
-        hits += [{"path": rel, "line": n, "text": ln.strip()} for n, ln in _label_entries(rel, text)
-                 if key_pat.search(_uncomment(ln))]
+        kind = _form_kind(rel)
+        if kind:
+            hits += _form_hits(rel, kind, text, name)
     return ("rewrite" if hits else None), hits
 
 
-def _rename_or_hold(rd: Path | None, files, cur: str, new: str, color: str, description: str, rule: str,
-                    ops: list[dict], logs: list[str]) -> None:
-    """Rule 0 for one rename. A form or dependabot.yml reference is a content change for the estate/polish PR, not a
-    label job: the rename is held (op skip, log label-rewrite-first, with the lines to rewrite) until a re-plan of the
-    merged checkout no longer finds them, so no plan ever emits a rename that leaves a form naming a missing label.
-    Without a checkout the check fails closed: the rename leaves only when the captured file list proves no file rule 0
-    reads exists; otherwise it is held (needs-input:label-references) with the files a checkout must be read for."""
+def _rename_or_hold(rd: Path | None, files, complete: bool, defaults: dict | None, cur: str, new: str, color: str,
+                    description: str, rule: str, ops: list[dict], logs: list[str]) -> None:
+    """Rule 0 for one rename, in R and in the owner's `.github` repository (whose default issue forms apply to R when R
+    has no `.github/ISSUE_TEMPLATE/` of its own). A form or dependabot.yml reference is a content change for the
+    estate/polish PR, not a label job: the rename is held (op skip, log label-rewrite-first, with the lines to rewrite)
+    until a re-plan of the merged checkout no longer finds them, so no plan ever emits a rename that leaves a form
+    naming a missing label. Without a checkout the check fails closed: the rename leaves only when the captured file
+    lists prove no file rule 0 reads exists; otherwise it is held (needs-input:label-references) with the files a
+    checkout must be read for."""
+    check: list[str] = []
     if rd is None:
-        found, complete = reference_files(files)
-        if found or not complete:  # an unlisted path of a partial (or missing) capture may still exist
-            ops.append({"op": "skip", "name": cur, "new_name": new, "rule": "§6.4 rule 0", "log": NEEDS_CHECKOUT,
-                        "check_files": found if complete else found + list(REFERENCE_PATTERNS)})
-            logs.append(NEEDS_CHECKOUT)
-            return
+        found, proven = reference_files(files, complete)
+        if found or not proven:  # an unlisted path of a partial, truncated or missing capture may still exist
+            check = found if proven else found + list(REFERENCE_PATTERNS)
         ref, hits = None, []
     else:
         ref, hits = _referenced(rd, cur)
+    if ref != "block" and _own_forms(rd, files, complete) is not True:
+        dref, got = _default_forms(defaults, cur)
+        if dref == "rewrite":
+            ref, hits = "rewrite", hits + got
+        elif dref == "unchecked":
+            check += got
     if ref == "block":
         ops.append({"op": "skip", "name": cur, "new_name": new, "rule": "§6.4 rule 0", "log": "label-referenced"})
         logs.append("label-referenced")
+    elif check:
+        ops.append({"op": "skip", "name": cur, "new_name": new, "rule": "§6.4 rule 0", "log": NEEDS_CHECKOUT,
+                    "check_files": check, **({"rewrite_references": hits} if hits else {})})
+        logs.append(NEEDS_CHECKOUT)
     elif ref == "rewrite":
         ops.append({"op": "skip", "name": cur, "new_name": new, "rule": "§6.4 rule 0", "log": "label-rewrite-first",
                     "rewrite_references": hits})
@@ -160,9 +346,12 @@ def _rename_or_hold(rd: Path | None, files, cur: str, new: str, color: str, desc
         ops.append({"op": "rename", "name": cur, "new_name": new, "color": color, "description": description, "rule": rule})
 
 
-def plan(existing: list[dict], repo_dir: str | Path | None = None, files=None) -> tuple[list[dict], list[str]]:
+def plan(existing: list[dict], repo_dir: str | Path | None = None, files=None, *, complete: bool = False,
+         defaults: dict | None = None) -> tuple[list[dict], list[str]]:
     """§6.3 passes A and B against the live labels. Every rename passes §6.4 rule 0: scanned in `repo_dir` when a
-    checkout is given, else checked against `files` (the metadata's captured file list) and held when unproven."""
+    checkout is given, else checked against `files` (the metadata's captured file list, `complete` when the capture
+    records `files_complete: true`), and held when unproven. `defaults` is the owner's `.github` repository
+    (`defaults_source`); None means it is unknown, so a rename in a repository without forms of its own is held."""
     std = standard_labels()
     rd = Path(repo_dir) if repo_dir else None
     by_low = {lb["name"].lower(): dict(lb) for lb in existing}
@@ -195,7 +384,7 @@ def plan(existing: list[dict], repo_dir: str | Path | None = None, files=None) -
             a = present[0]
             cur = by_low[a]
             claimed.add(a)
-            _rename_or_hold(rd, files, cur["name"], name, L["color"], L["description"], f"§6.3 {cur['name']}→{name}",
+            _rename_or_hold(rd, files, complete, defaults, cur["name"], name, L["color"], L["description"], f"§6.3 {cur['name']}→{name}",
                             ops, logs)
             for other in present[1:]:
                 ops.append({"op": "skip", "name": by_low[other]["name"], "rule": "§6.4 rule 2", "log": "label-conflict"})
@@ -207,7 +396,7 @@ def plan(existing: list[dict], repo_dir: str | Path | None = None, files=None) -
         ops.append({"op": "create", "name": L["name"], "color": L["color"], "description": L["description"], "rule": "§6.3 pass B"})
     # epic -> scope:epic extension, only if it exists
     if "epic" in by_low and "scope:epic" not in by_low:
-        _rename_or_hold(rd, files, by_low["epic"]["name"], "scope:epic", NAMESPACE_COLORS["scope"], "Scope: epic",
+        _rename_or_hold(rd, files, complete, defaults, by_low["epic"]["name"], "scope:epic", NAMESPACE_COLORS["scope"], "Scope: epic",
                         "§6.3 epic→scope:epic", ops, logs)
     return ops, sorted(set(logs))
 

@@ -67,7 +67,9 @@ def row(ctx: RepoContext) -> dict:
     elif ctx.owner == "AI-Ascension":
         cells["R6"] = "pass" if any(lb["name"] == "dependencies" and lb["color"] == "0366d6" for lb in ctx.meta["labels"]) else "fail"
     else:
-        ops, lg = labelsmod.plan(ctx.meta["labels"], rd, files=ctx.meta.get("files"))
+        ops, lg = labelsmod.plan(ctx.meta["labels"], rd, files=ctx.meta.get("files"),
+                                 complete=ctx.meta.get("files_complete") is True,
+                                 defaults=labelsmod.defaults_for(ctx.owner, ctx.repo, repo_dir=rd, meta=ctx.meta))
         cells["R6"] = "pass" if all(o["op"] == "skip" and not o.get("log") for o in ops) else "fail"
     readme = rd / "README.md" if rd else None
     if readme and readme.is_file():

@@ -93,6 +93,11 @@ def merge(ctx: RepoContext, also_in: list[str] | None = None) -> dict:
     vocab = set(t["brand_topics"]) | set(t["family_topics"]) | set(t["type_topics"]) | set(t["featured"]) | \
         set(t["allowed"]) | set(t["domain"])
     private = meta.get("visibility") == "private"
+    # owner identity through the shared resolver (CQ-03): an approved org rename (CompleTetech-Security ->
+    # CompleteTech-Security) or a re-cased login must not change the repository's required topics
+    res = ctx.brand.resolver()
+    cve_vendor = slug.split("-")[0] if res.same(owner, standard("types")["security_owner"]) and \
+        re.search(r"-cve-\d{4}-\d+-check$", slug) else None
 
     def alias(x):
         x = x.lower()
@@ -109,8 +114,7 @@ def merge(ctx: RepoContext, also_in: list[str] | None = None) -> dict:
             continue
         if a in t["type_topics"] and a != typ:
             continue
-        vendor = owner == "CompleTetech-Security" and re.search(r"-cve-\d{4}-\d+-check$", slug) and a == slug.split("-")[0]
-        if a not in vocab and not vendor:
+        if a not in vocab and a != cve_vendor:
             continue
         if private and a in t["private_banned"]:
             continue
@@ -153,13 +157,13 @@ def merge(ctx: RepoContext, also_in: list[str] | None = None) -> dict:
     proposed.append(typ)
     # domain (§5.9)
     text = f"{meta.get('description') or ''} {ctx.facts.h1() or ''}"
-    vocab_dom = t["touchedbyanagent_domain"] if owner == "TouchedByAnAgent" else t["domain"]
+    vocab_dom = t["touchedbyanagent_domain"] if res.same(owner, "TouchedByAnAgent") else t["domain"]
     found = domain_candidates(text, vocab_dom)
     existing_dom = [x for x in surviving if x in vocab_dom]
     ranked = [x for x in found if x in existing_dom] + sorted(x for x in existing_dom if x not in found) + \
         [x for x in found if x not in existing_dom]
-    if owner == "CompleTetech-Security" and re.search(r"-cve-\d{4}-\d+-check$", slug):
-        ranked = [slug.split("-")[0]] + ranked
+    if cve_vendor:
+        ranked = [cve_vendor] + ranked
     domain = [x for x in dict.fromkeys(ranked) if x not in proposed][:3]
     if not domain:
         logs.append("needs-input:domain-topic")

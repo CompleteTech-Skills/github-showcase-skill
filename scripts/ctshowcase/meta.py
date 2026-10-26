@@ -76,7 +76,8 @@ def normalize(raw: dict) -> dict:
     for k in ("health_percentage", "has_issues", "has_wiki", "has_projects", "has_discussions",
               "delete_branch_on_merge", "homepage_status"):
         m[k] = raw.get(k)
-    for k in ("files", "manifests", "file_sizes", "pushed_at", "last_substantive_commit", "last_substantive_sha"):
+    for k in ("files", "files_complete", "manifests", "file_sizes", "pushed_at", "last_substantive_commit",
+              "last_substantive_sha"):
         if raw.get(k) is not None:
             m[k] = raw[k]
     if raw.get("also_in") is not None:  # registry cross-listing (§5.3a org membership topics)
@@ -197,6 +198,8 @@ def from_gh(full_name: str) -> dict:
     if isinstance(tree, dict) and isinstance(tree.get("tree"), list):
         blobs = [t for t in tree["tree"] if t.get("type") == "blob"]
         raw["files"] = sorted(t["path"] for t in blobs)
+        # GitHub cuts a large recursive tree short: only an untruncated listing proves that an unlisted path is absent
+        raw["files_complete"] = tree.get("truncated") is False
         raw["file_sizes"] = {t["path"]: t.get("size", 0) for t in blobs}
         manifests = {}
         for p in MANIFEST_PATHS:

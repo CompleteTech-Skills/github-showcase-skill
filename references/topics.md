@@ -202,5 +202,5 @@ Every entry is public-safe:
 
 1. Candidates are Domain vocabulary entries found as whole words in the description, then in the H1, in order of first occurrence. Spaces become hyphens, and both sides are compared in singular form (`sprite animations` matches `sprite-animation`; `patent` matches `patents`). The entry is written as listed.
 2. Existing topics that are in Domain vocabulary rank first: those found in the text in occurrence order, then the rest alphabetically.
-3. CompleTetech-Security repos whose slug matches `-cve-\d{4}-\d+-check$` put the slug's first token (the vendor, for example `netscaler`) first.
+3. CompleTetech-Security repos whose slug matches `-cve-\d{4}-\d+-check$` put the slug's first token (the vendor, for example `netscaler`) first, and keep that vendor topic through step 2's vocabulary drop. The owner is matched through the shared resolver (CQ-03), so after the approved rename to `CompleteTech-Security` (or under any letter case) the same repository keeps the same topics; the TouchedByAnAgent domain list below is matched the same way.
 4. Keep at most 3. No match means no domain topic; log `needs-input:domain-topic`.

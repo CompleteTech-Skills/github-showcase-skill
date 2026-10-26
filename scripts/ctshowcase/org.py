@@ -132,11 +132,14 @@ class Estate:
         return any(EXPOSURE.match(str(f)) and "false-positive" not in str(f) for f in flags)
 
     def owns(self, owner: str) -> bool:
-        """An estate owner under any of its logins (registry or brand row, the steward account, or a HOLD, T3 or
-        watching owner): its repositories are subject to the public-slice rules wherever they are named."""
+        """An estate owner under any of its logins (registry or brand row, the steward account, a registry placeholder
+        or merge-source org, or an excluded, HOLD, T3 or watching owner): its repositories are subject to the
+        public-slice rules wherever they are named."""
         r = self.resolver
         return bool(owner) and (r.registry_key(owner) is not None or r.brand_key(owner) is not None
-                                or r.same(owner, USER_LOGIN) or r.owner_status(owner) in ("hold", "t3", "watching"))
+                                or r.same(owner, USER_LOGIN) or r.is_placeholder(owner)
+                                or not r.same(r.successor(owner), owner)
+                                or r.owner_status(owner) in ("excluded", "hold", "t3", "watching"))
 
     def is_public(self, full: str) -> bool:
         """The public slice (OPS-03): public, not on HOLD, not an exposure repo. Unknown visibility fails closed."""
@@ -303,20 +306,22 @@ def _family_group(estate: Estate, org: str, fam: str | None) -> list[str]:
 
 def public_favorites(estate: Estate, reg: dict) -> tuple[list[str], list[str]]:
     """The registry favorites that may be named in public (the profile's Favorites and the org's public star List):
-    someone else's project as written; an estate favorite only when it is in the public slice (public, not HOLD, not an
-    exposure repo), under today's slug. A private, HOLD or exposure one is dropped and logged without its name (q24);
-    one with unknown visibility fails closed and is logged needs-input:favorite-visibility until it is captured."""
+    someone else's project with no captured metadata as written; an estate favorite, or any favorite whose metadata
+    was captured, only when it is in the public slice (public, not HOLD or excluded, not an exposure repo), under
+    today's slug. A private, HOLD, excluded-owner or exposure one is dropped and logged without its name (q24); an
+    estate one with unknown visibility fails closed and is logged needs-input:favorite-visibility until it is captured."""
     r = estate.resolver
     favorites, logs = [], []
     for f in reg.get("favorites") or []:
         full = f.get("full_name") if isinstance(f, dict) else None
         if not full:
             continue
-        if "/" not in full or not estate.owns(full.split("/")[0]):
+        owner = full.split("/")[0]
+        if "/" not in full or not estate.owns(owner) and estate.meta(r.slug(full)) is None:
             favorites.append(full)  # someone else's project: public on GitHub, outside the estate's slice
         elif estate.is_public(r.slug(full)):
             favorites.append(estate.current(r.slug(full)))
-        elif estate.visibility(r.slug(full)) == "unknown":
+        elif estate.visibility(r.slug(full)) == "unknown" and r.owner_status(owner) != "excluded":
             logs.append(f"needs-input:favorite-visibility:{full}")  # fails closed until its metadata is captured
         else:
             logs.append("favorite-dropped:private-or-unknown")  # private, HOLD or exposure: never named (q24)
@@ -452,13 +457,13 @@ def _private_names(estate: Estate, org: str, data: dict) -> set[str]:
         full = r.slug(x.get("repo") or "") if isinstance(x, dict) else ""
         if "/" in full and not estate.is_public(full):
             out.add(full)
-    for f in reg.get("favorites") or []:  # an estate favorite left out of the slice (private, HOLD, exposure, unknown)
+    for f in reg.get("favorites") or []:  # a favorite left out of the slice (private, HOLD, excluded, exposure, unknown)
         full = r.slug(f.get("full_name") or "") if isinstance(f, dict) else ""
-        if "/" in full and estate.owns(full.split("/")[0]) and not estate.is_public(full):
+        if "/" in full and (estate.owns(full.split("/")[0]) or estate.meta(full) is not None) and not estate.is_public(full):
             out.add(full)
-    for m in estate.metas.values():  # every other estate repository captured as not public, in any org
+    for m in estate.metas.values():  # every other repository captured as not public, in any org, whoever the owner
         full = m["_full"]
-        if m["_repo"] != ".github" and full.lower() not in shown and estate.owns(m["_owner"]) and estate.visibility(full) != "unknown" \
+        if m["_repo"] != ".github" and full.lower() not in shown and estate.visibility(full) != "unknown" \
                 and not estate.is_public(full):
             out.add(full)
     return out | {estate.current(f) for f in out}  # a pending rename's private repository is guarded under both slugs
@@ -614,12 +619,14 @@ def _md_text(s: str) -> str:
 def _captured_files(meta: dict | None) -> tuple[dict, bool]:
     """The captured `files` of a repository as ({path: value}, complete). Two shapes are supported: the fixtures'
     richer map {path: {bytes, head} | true | null | false}, and `meta --from-gh`'s sorted list of every blob path in
-    the default branch's recursive tree (every listed path present; complete, so an unlisted path is absent)."""
+    the default branch's recursive tree (every listed path present). The list is complete, so an unlisted path is
+    absent, only when the capture records `files_complete: true`: GitHub cuts a large recursive tree short
+    (`truncated`), and a capture that does not say it is whole proves nothing about an unlisted path."""
     cap = (meta or {}).get("files")
     if isinstance(cap, dict):
         return cap, False
     if isinstance(cap, (list, tuple)):
-        return {str(p): True for p in cap if p}, True
+        return {str(p): True for p in cap if p}, (meta or {}).get("files_complete") is True
     return {}, False
 
 
@@ -1490,6 +1497,7 @@ def labels_plan(estate: Estate, org: str, *, allow_t3: bool = False) -> tuple[di
     dep = next((lb for lb in std if lb["name"] == "dependencies"), None)
     names = estate.repos_of(org)
     names.sort(key=lambda n: (estate.visibility(f"{login}/{n}") != "public", n.lower()))  # public first (§6.1)
+    defaults = labelsmod.defaults_source(f"{login}/.github", meta=estate.meta(f"{login}/.github"))
     for n in names:
         m = estate.meta(f"{login}/{n}")
         full = estate.current(f"{login}/{n}")  # labels are written where the repository is today
@@ -1514,8 +1522,10 @@ def labels_plan(estate: Estate, org: str, *, allow_t3: bool = False) -> tuple[di
                  "description": dep["description"], "rule": "§6.1 AI-Ascension dependencies"}]
             lg: list[str] = []
         else:
-            # no checkout here: §6.4 rule 0 runs against the captured file list, and an unproven rename is held
-            ops, lg = labelsmod.plan(existing, None, files=m.get("files"))
+            # no checkout here: §6.4 rule 0 runs against the captured file lists of the repository and of the org's
+            # .github (its default issue forms apply to a repository without forms of its own); unproven renames are held
+            ops, lg = labelsmod.plan(existing, None, files=m.get("files"), complete=m.get("files_complete") is True,
+                                     defaults=defaults)
         writes = [o for o in ops if o["op"] != "skip"]
         logs += lg
         unchecked = [{"label": o["name"], "new_name": o["new_name"], "check_files": o["check_files"]} for o in ops

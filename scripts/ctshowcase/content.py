@@ -2183,6 +2183,7 @@ def add_parser(sub, cli=None):
     a.add_argument("--out", help="prompt: the prompt file (art/prompts/<org>/<repo>/icon.md); normalize: the icon "
                                  "(default assets/icon.png in the checkout); check: the icon to check")
     a.add_argument("--preview", help="normalize: also write a 48 px preview on the card colour")
+    a.add_argument("--allow-hold", action="store_true", help="work on a family that is on hold (as banner and card)")
 
     a = cs.add_parser("links", parents=[common], help="CQ-04: relative links, anchors and remote targets")
     a.add_argument("files", nargs="*", help="Markdown files (default: displayed README, docs/**, .github/*.md, profile)")
@@ -2451,6 +2452,10 @@ def _cmd_icon(args, cli, resolver, head):
         why = "exempt:placeholder-org"
     if why and why.startswith("exempt"):
         return dict(head, owner=ctx.owner, repo=ctx.repo, result="exempt", logs=[why]), OK
+    if why == "t3-signoff":
+        raise Refused(f"{ctx.owner} is T3; needs co-owner sign-off", log="t3-signoff")
+    if why == "hold" and not getattr(args, "allow_hold", False):  # a family on hold (brand.yaml style `hold`), as banner and card refuse
+        raise ShowcaseError(f"{ctx.owner} family is on hold; pass --allow-hold", log="hold")
     head.update(owner=ctx.owner, repo=ctx.repo, icon_action=args.icon_action)
     card = ctx.style["tokens"]["card_fill"]
     org = org_row(resolver, ctx.brand, ctx.owner)

@@ -150,11 +150,14 @@ def test_labels_plan_reads_live_labels_and_emits_jobs(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: calls.append(cmd))
     # a captured tree with no file §6.4 rule 0 reads proves the renames need no checkout
-    m = _meta(tmp_path, labels=[], files=["README.md", "src/invoice_parser/cli.py"])
+    m = _meta(tmp_path, labels=[], files=["README.md", "src/invoice_parser/cli.py"], files_complete=True)
+    gh = tmp_path / "dot-github.json"  # the owner's .github, captured whole, has no default issue form
+    gh.write_text(json.dumps({"owner": "CompleteTech-LLC", "repo": ".github", "files": ["README.md"], "files_complete": True}))
     with pytest.raises(SystemExit):  # the write flags no longer exist
         cli.parser().parse_args(["--meta", str(m), "--no-repo-dir", "labels", "--apply", "--yes"])
     jobs = tmp_path / "jobs.jsonl"
-    args = cli.parser().parse_args(["--meta", str(m), "--no-repo-dir", "labels", "--plan", "--jobs", str(jobs)])
+    args = cli.parser().parse_args(["--meta", str(m), "--no-repo-dir", "labels", "--plan", "--jobs", str(jobs),
+                                    "--org-defaults", str(gh)])
     args.format = "json"
     out, code = cli.cmd_labels(args)
     renames = [o for o in out["ops"] if o["op"] == "rename"]

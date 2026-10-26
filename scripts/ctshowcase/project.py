@@ -592,6 +592,22 @@ def workstream_options(have: list[dict], wanted: list[dict]) -> tuple[list[dict]
     return out, logs, renames
 
 
+def rename_filter_values(flt: str, renames: dict) -> str:
+    """Point a view filter at renamed options, quoted (`workstream:"Research"`) or bare (`workstream:Research`) alike,
+    in one pass so swapped names never chain. A quoted value stays quoted; a bare one is quoted when the new name
+    has a space."""
+    if not flt or not renames:
+        return flt
+    olds = sorted((o for o in renames if o), key=len, reverse=True)
+    alt = "|".join(re.escape(o) for o in olds)
+    pat = re.compile(rf'"({alt})"(?![\w"])|(?<![\w"])({alt})(?![\w"])')
+
+    def sub(m):
+        new_name = renames[m.group(1) if m.group(1) is not None else m.group(2)]
+        return f'"{new_name}"' if m.group(1) is not None or re.search(r"[\s,]", new_name) else new_name
+    return pat.sub(sub, flt)
+
+
 def view_body(want: dict, spec: dict) -> tuple[dict, list[str]]:
     """REST view body with integer field ids (databaseId); a field without an id becomes a browser step."""
     ids = {(f.get("name") or "").lower(): f.get("databaseId") for f in spec.get("fields") or []}
@@ -746,9 +762,7 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
         have = _view(spec, want["name"])
         if have is not None:
             flt = have.get("filter") or ""
-            new = flt
-            for old_name, new_name in renames.items():
-                new = re.sub(rf'(?<![\w"]){re.escape(old_name)}(?![\w"])', new_name if " " not in new_name else f'"{new_name}"', new)
+            new = rename_filter_values(flt, renames)
             if i > 0 and flt != want["filter"] and role != "org":
                 new = want["filter"]
             if new != flt and have.get("id"):
@@ -856,7 +870,9 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
                     "\n\n**Risks and blocks**\nNone recorded.\n\n**Asks and dependencies**\nNone recorded.")
             jobs.append(_gql_job(f"{pid}-{num}-status-1", owner, m_status_update(date.today().isoformat(), _quarter_end()),
                                  "§13.8 first status update, right after rollout.", {"p": project_id, "body": body}))
-    if resolver is not None and owner != "@me" and resolver.project_visibility_approved(owner):
+    if role != "org":  # §13.2: the template and the Estate always stay private, whatever is approved
+        logs.append(f"visibility:private ({role} stays private)")
+    elif resolver is not None and owner != "@me" and resolver.project_visibility_approved(owner):
         jobs.append(_browser(f"{pid}-{num}-visibility", owner, f"{url}/settings",
                              [f"Open {url}/settings.", "Under 'Visibility', choose Public and confirm.", "Screenshot it."],
                              "project-visibility", "Approved visibility item only (§13.2)."))
