@@ -1,0 +1,9 @@
+[project]
+name = "support-triage-agent"
+version = "0.3.0"
+description = "Northwind customer support email triage agent (synthetic example)"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+triage = "triage.cli:main"

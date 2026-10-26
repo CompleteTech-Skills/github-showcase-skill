@@ -1,0 +1,224 @@
+name: CompleteTech Showcase
+description: Regenerate the README hero banner and repo card when the description, topics or icon change.
+author: CompleteTech LLC
+branding:
+  icon: image
+  color: blue
+
+inputs:
+  token:
+    description: "Token with contents:write (GITHUB_TOKEN)"
+    required: true
+  outputs:
+    description: "Comma list: banner,card"
+    required: false
+    default: "banner,card"
+  readme:
+    description: "none | header (marker blocks only) | bootstrap"
+    required: false
+    default: "header"
+  commit:
+    description: "Commit and push changes"
+    required: false
+    default: "true"
+  commit-message:
+    description: "Commit message for regenerated files"
+    required: false
+    default: "docs: regenerate showcase banner and card (ct-std-v1) [skip ci]"
+  on-protected:
+    description: "pr | fail when the push is rejected"
+    required: false
+    default: "pr"
+  force:
+    description: "Ignore the fingerprint"
+    required: false
+    default: "false"
+  python-version:
+    description: "Python used to install the typesetting dependencies"
+    required: false
+    default: "3.12"
+  allow-unmeasured:
+    description: "Render families whose palette is not yet measured (Jev-Engineering, LibreEvolve, romgenie); ct-std-v1.1 pending"
+    required: false
+    default: "false"
+
+outputs:
+  changed:
+    description: "true when the inputs fingerprint differs from docs/images/.showcase.json"
+    value: ${{ steps.fp.outputs.changed }}
+  fingerprint:
+    description: "sha256 of the canonical showcase inputs"
+    value: ${{ steps.fp.outputs.fingerprint }}
+
+runs:
+  using: composite
+  steps:
+    # Read-only metadata (gh api GETs). Refused owners (excluded, hold, T3), forks and
+    # archived repositories end the run here with a notice and exit 0.
+    - id: meta
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+      run: |
+        rc=0
+        python3 "$GITHUB_ACTION_PATH/scripts/showcase.py" meta --from-gh "$GITHUB_REPOSITORY" --out "$RUNNER_TEMP/meta.json" || rc=$?
+        if [ "$rc" -eq 2 ]; then
+          echo "::notice title=CompleteTech Showcase::$GITHUB_REPOSITORY is refused by the estate standard (excluded, hold or T3 owner); nothing to regenerate."
+          echo "skip=true" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        [ "$rc" -eq 0 ] || exit "$rc"
+        python3 - "$RUNNER_TEMP/meta.json" <<'PY'
+        import json
+        import os
+        import sys
+
+        with open(sys.argv[1], encoding="utf-8") as handle:
+            meta = json.load(handle)
+        reason = "fork" if meta.get("fork") else "archived" if meta.get("archived") else ""
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+            out.write(f"skip={'true' if reason else 'false'}\n")
+            out.write(f"is_template={'true' if meta.get('is_template') else 'false'}\n")
+        if reason:
+            print(f"::notice title=CompleteTech Showcase::{reason} repository; nothing to regenerate.")
+        PY
+
+    # Stdlib-only fingerprint of description, topics, type, icon, override file and brand config.
+    - id: fp
+      if: steps.meta.outputs.skip != 'true'
+      shell: bash
+      run: python3 "$GITHUB_ACTION_PATH/scripts/showcase.py" --meta "$RUNNER_TEMP/meta.json" --repo-dir . fingerprint --github-output
+
+    - if: steps.meta.outputs.skip != 'true' && (steps.fp.outputs.changed == 'true' || inputs.force == 'true')
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - if: steps.meta.outputs.skip != 'true' && (steps.fp.outputs.changed == 'true' || inputs.force == 'true')
+      shell: bash
+      run: python -m pip install --disable-pip-version-check -r "$GITHUB_ACTION_PATH/requirements.txt"
+
+    - id: generate
+      if: steps.meta.outputs.skip != 'true' && (steps.fp.outputs.changed == 'true' || inputs.force == 'true')
+      shell: bash
+      env:
+        SHOWCASE_OUTPUTS: ${{ inputs.outputs }}
+        SHOWCASE_README: ${{ inputs.readme }}
+        SHOWCASE_IS_TEMPLATE: ${{ steps.meta.outputs.is_template }}
+        SHOWCASE_ALLOW_UNMEASURED: ${{ inputs.allow-unmeasured }}
+      run: |
+        set -euo pipefail
+        case "$SHOWCASE_README" in
+          none|header|bootstrap) ;;
+          *)
+            echo "::error title=CompleteTech Showcase::unknown readme mode '$SHOWCASE_README' (none | header | bootstrap)"
+            exit 2
+            ;;
+        esac
+        S=(python "$GITHUB_ACTION_PATH/scripts/showcase.py" --meta "$RUNNER_TEMP/meta.json" --repo-dir .)
+        P=(python "$GITHUB_ACTION_PATH/scripts/action_prepare.py")
+        extra=()
+        [ "$SHOWCASE_ALLOW_UNMEASURED" = "true" ] && extra+=(--allow-unmeasured)
+        # Art generated for another repository (the template's own banner, card, sidecar and icon, copied into
+        # a new repository) must never show under this repository's name. Decide once, before anything is written.
+        # Only proof counts (a template's sidecar, or another repository id than GITHUB_REPOSITORY_ID): after a
+        # rename or transfer the art and assets/icon.png are this repository's own and are kept.
+        foreign="$("${P[@]}" foreign "$GITHUB_REPOSITORY")"
+        # Exit 4 (needs-input: no description yet, a palette awaiting ct-std-v1.1), exit 2 (a family on hold) and
+        # an "exempt" result are expected states, not failures: annotate, skip that output, keep the run green.
+        skipped=0
+        art() {
+          local kind="$1" file="$2"; shift 2
+          local rc=0 result
+          "${S[@]}" --format json "$kind" --out "docs/images/$file" "$@" > "$RUNNER_TEMP/art.json" || rc=$?
+          cat "$RUNNER_TEMP/art.json"
+          result="$(python -c 'import json,sys;print(json.load(open(sys.argv[1])).get("result",""))' "$RUNNER_TEMP/art.json" 2>/dev/null || true)"
+          if [ "$rc" -eq 0 ] && [ "$result" != "exempt" ]; then
+            [ "$result" = "incomplete" ] && echo "::warning title=CompleteTech Showcase::$kind has fewer than two fact chips; add chips to .github/showcase.yml"
+            return 0
+          fi
+          if [ "$rc" -eq 4 ] || [ "$rc" -eq 2 ] || [ "$result" = "exempt" ]; then
+            echo "::warning title=CompleteTech Showcase::$kind skipped: $(python -c 'import json,sys;d=json.load(open(sys.argv[1]));print(d.get("error") or " ".join(d.get("logs") or []))' "$RUNNER_TEMP/art.json" 2>/dev/null)"
+            skipped=1
+            if [ "$foreign" = "true" ]; then
+              "${P[@]}" drop "$file"
+              echo "::notice title=CompleteTech Showcase::removed the template's $file until this repository's own can be generated"
+            fi
+            return 0
+          fi
+          return "$rc"
+        }
+        if [[ ",$SHOWCASE_OUTPUTS," == *",banner,"* ]]; then
+          art banner banner.png --allow-few-chips "${extra[@]}"
+        fi
+        if [[ ",$SHOWCASE_OUTPUTS," == *",card,"* ]]; then
+          art card card.svg --png "$RUNNER_TEMP/card.png" "${extra[@]}"
+        fi
+        # A held repository (exit 2: a watching-org repository that is neither a fork nor `.github`) keeps its
+        # README untouched until someone decides; like a held art family, that skips the output and keeps the run green.
+        # Only a hold or owner refusal is skipped: any other exit 2 (a `.github/showcase.yml` that fails its schema,
+        # a usage error) still fails the run.
+        readme_step() {
+          local rc=0 held
+          "${S[@]}" --format json readme "$@" > "$RUNNER_TEMP/readme.json" || rc=$?
+          cat "$RUNNER_TEMP/readme.json"
+          if [ "$rc" -eq 2 ]; then
+            held="$(python -c 'import json,sys;d=json.load(open(sys.argv[1]));print("yes" if d.get("result") == "refused" or any(str(x).startswith("hold") for x in d.get("logs") or []) else "")' "$RUNNER_TEMP/readme.json" 2>/dev/null || true)"
+            if [ "$held" = "yes" ]; then
+              echo "::warning title=CompleteTech Showcase::README skipped: this repository is on hold (see the log above)"
+              skipped=1
+              return 0
+            fi
+            echo "::error title=CompleteTech Showcase::readme failed (exit 2, see the log above)"
+          fi
+          return "$rc"
+        }
+        bootstrapped=false
+        case "$SHOWCASE_README" in
+          header)
+            readme_step --mode header --write
+            ;;
+          bootstrap)
+            # The template repository keeps its own body. Elsewhere, a README whose template body is still the
+            # generated one (its pristine marker carries the sha256 of the block) is filled for the detected type;
+            # a body a person has edited is never overwritten (the marker is dropped instead).
+            if [ "$SHOWCASE_IS_TEMPLATE" != "true" ] && [ -f README.md ]; then
+              before="$(sha256sum README.md)"
+              readme_step --bootstrap --write
+              [ "$before" != "$(sha256sum README.md)" ] && bootstrapped=true
+            fi
+            readme_step --mode header --write
+            ;;
+          none)
+            ;;
+        esac
+        echo "skipped=$skipped" >> "$GITHUB_OUTPUT"
+        echo "bootstrapped=$bootstrapped" >> "$GITHUB_OUTPUT"
+        # Description and topic proposals for the people who own the About box (the Action never edits it).
+        "${P[@]}" summary "$RUNNER_TEMP/meta.json" || true
+
+    - if: steps.meta.outputs.skip != 'true' && (steps.fp.outputs.changed == 'true' || inputs.force == 'true') && inputs.commit == 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        SHOWCASE_COMMIT_MESSAGE: ${{ inputs.commit-message }}
+        SHOWCASE_ON_PROTECTED: ${{ inputs.on-protected }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/action_commit.sh" "$SHOWCASE_COMMIT_MESSAGE" "$SHOWCASE_ON_PROTECTED"
+
+    # Lint after the commit, so a first run always lands the bootstrap and the new art. On the bootstrap run, and
+    # while an output is skipped, findings are warnings; afterwards a failing check fails the run.
+    - if: steps.meta.outputs.skip != 'true' && (steps.fp.outputs.changed == 'true' || inputs.force == 'true')
+      shell: bash
+      env:
+        SHOWCASE_SKIPPED: ${{ steps.generate.outputs.skipped }}
+        SHOWCASE_BOOTSTRAPPED: ${{ steps.generate.outputs.bootstrapped }}
+      run: |
+        rc=0
+        python "$GITHUB_ACTION_PATH/scripts/showcase.py" --meta "$RUNNER_TEMP/meta.json" --repo-dir . lint all || rc=$?
+        if [ "$rc" -ne 0 ]; then
+          if [ "$SHOWCASE_SKIPPED" = "1" ] || [ "$SHOWCASE_BOOTSTRAPPED" = "true" ]; then
+            echo "::warning title=CompleteTech Showcase::lint all reported findings (first run or a skipped output); see the log above"
+          else
+            exit "$rc"
+          fi
+        fi

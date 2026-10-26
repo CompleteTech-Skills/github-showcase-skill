@@ -1,0 +1,8 @@
+# Validated enterprise read (audit/research/enterprise.md Appendix A, q_romgenie): the seat-check preflight.
+query($slug:String!){enterprise(slug:$slug){
+ members(first:5,query:"romgenie"){nodes{... on EnterpriseUserAccount{login organizations(first:100){edges{role node{login}}}}}}
+ enterpriseTeams(first:50,userLogins:["romgenie"]){nodes{slug}}
+ ownerInfo{admins(first:10,query:"romgenie"){edges{role node{login}}}
+  outsideCollaborators(first:10,login:"romgenie"){edges{repositories(first:100){nodes{nameWithOwner isPrivate}}}}
+  pendingMemberInvitations(first:20,query:"romgenie"){totalCount nodes{organization{login} role}}
+  pendingCollaboratorInvitations(first:20,query:"romgenie"){totalCount}}}}

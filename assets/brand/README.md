@@ -1,0 +1,13 @@
+# Brand masters
+
+The generators read these files through the `brand_assets` paths in `references/brand.yaml` and place them unaltered: never cropped, masked, recoloured or redrawn at runtime. They are CompleteTech LLC brand assets, reserved under [BRAND_ASSETS.md](../../BRAND_ASSETS.md), and they are excluded from the ClawHub text bundle.
+
+| File | Pixels | Mode | Bytes | sha256 | Source and use |
+|---|---|---|---|---|---|
+| `logo.png` | 2400×1198 | RGB, opaque `#F8FAFC` ground | 243,500 | `a5c3c4ef55336ed4b883d3bc3bb6e1e942b836469bd2b2933bc8cc230b321621` | The current light master, byte-identical to `CompleteTech-LLC/.github/brand/logo.png` and to the Skills `assets/logo.png`. `brand_assets.logo_light`: the full logo on the banner's light card when a repository has no icon and no org mark (the golden look). |
+| `logo-dark.png` | 2400×1198 | RGBA, transparent | 210,785 | `0dc00c0e5159518ff1d552b7052293b4e545ddd35be489e6d114e3ea64db27ec` | The current dark master, byte-identical to `CompleteTech-LLC/.github/brand/logo-dark.png`. `brand_assets.logo_dark`, used on navy surfaces (intro, org tile) while `dark_master: current`. |
+| `logo-dark-full.png` | 1200×599 | RGBA, transparent | 175,690 | `b21ca593975808302f919ca6fab9b10d69866a17c9683d3bff0999a99d7f578e` | The candidate dark master from the complete.tech website's theme (`complete-tech-logo-dark-full.png`), gradient wordmark. `brand_assets.logo_dark_candidate`; selected by setting `dark_master: candidate` once the user confirms decision 19. |
+| `mark-light.png` | 984×643 | RGB, opaque `#F8FAFC` ground | 130,704 | `45a047866068a2c028acbb252f2b9430ecdd3ec3e496b1188867253220f41f78` | The cloud-and-bulb crop (697, 26, 1681, 669) of `logo.png`: the same alpha bounds as the §9.2 `mark-dark.png` box, measured on `logo.png`. `brand_assets.mark_light`: used instead of the full logo in icon boxes under 200 px (the repo card's tile), where the wordmark would be about 3 px tall. Cropped once and committed (never at runtime); a §9.1 rule 2 approval is pending in `state/proposals.md` (set `mark_light: null` to withdraw it). |
+| `mark-dark.png` | — | — | — | — | Not shipped yet. The cloud-and-bulb mark is cropped once by the estate planner, on the chosen dark master, after decision 19 is confirmed. Until it exists, navy surfaces place the full dark logo scaled to fit and log `needs-input:mark-dark`. |
+
+To switch the dark master, change one line in `references/brand.yaml` (`dark_master: candidate`), run `python scripts/showcase.py config --write-lock`, and re-render; nothing in `scripts/` changes.

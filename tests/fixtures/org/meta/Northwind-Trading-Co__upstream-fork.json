@@ -1,0 +1,23 @@
+{
+ "owner": "Northwind-Trading-Co",
+ "repo": "upstream-fork",
+ "description": "Fork of an upstream ticket parser.",
+ "homepage": "",
+ "topics": [],
+ "fork": true,
+ "archived": false,
+ "visibility": "public",
+ "default_branch": "main",
+ "stargazers_count": 0,
+ "pushed_at": "2026-10-01T00:00:00Z",
+ "language": "Python",
+ "license": null,
+ "has_issues": true,
+ "labels": [
+  {
+   "name": "bug",
+   "color": "d73a4a",
+   "description": "Something isn't working"
+  }
+ ]
+}

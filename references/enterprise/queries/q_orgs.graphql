@@ -1,0 +1,8 @@
+query($slug: String!, $after: String) {
+  enterprise(slug: $slug) {
+    organizations(first: 100, after: $after) {
+      totalCount pageInfo { hasNextPage endCursor }
+      nodes { id login name isVerified websiteUrl email viewerCanAdminister }
+    }
+  }
+}

@@ -1,0 +1,1 @@
+mutation($id: ID!) { verifyVerifiableDomain(input: {id: $id}) { domain { id domain isVerified hasFoundHostName hasFoundVerificationToken } } }

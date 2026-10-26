@@ -1,0 +1,2 @@
+# Preflight node ids (audit/research/orgs-and-projects.md §4.0).
+query($o: String!) { organization(login: $o) { id } viewer { id databaseId login } }

@@ -1,0 +1,25 @@
+# CompleteTech label standard ct-std-v1. Apply with the §6.3 algorithm: rename aliases with
+# PATCH new_name (pass A), then create what is missing (pass B). Never `gh label create --force`.
+- {name: "type:bug",            color: "1d76db", description: "Type: something is broken or behaves incorrectly", aliases: ["bug"]}
+- {name: "type:feature",        color: "1d76db", description: "Type: new capability or enhancement", aliases: ["enhancement", "feature"]}
+- {name: "type:docs",           color: "1d76db", description: "Type: documentation, README or examples", aliases: ["documentation", "docs", "type:documentation"]}
+- {name: "type:maintenance",    color: "1d76db", description: "Type: refactor, tooling, CI or dependency upkeep", aliases: ["maintenance", "chore"]}
+- {name: "type:security",       color: "1d76db", description: "Type: security hardening; report vulnerabilities privately per SECURITY.md", aliases: ["security"]}
+- {name: "type:research",       color: "1d76db", description: "Type: investigation or evidence needed before implementation", aliases: ["research"]}
+- {name: "type:question",       color: "1d76db", description: "Type: question or request for information", aliases: ["question"]}
+- {name: "type:accessibility",  color: "1d76db", description: "Type: accessibility barrier or improvement", aliases: ["accessibility"]}
+- {name: "priority:p0",         color: "b60205", description: "Priority: immediate; security, data loss or release blocker"}
+- {name: "priority:p1",         color: "d93f0b", description: "Priority: major functional blocker or shared prerequisite"}
+- {name: "priority:p2",         color: "fbca04", description: "Priority: important planned work"}
+- {name: "priority:p3",         color: "c2e0c6", description: "Priority: lower-impact enhancement or maintenance"}
+- {name: "status:needs-triage", color: "f9d0c4", description: "Status: new; needs review and labels"}
+- {name: "status:ready",        color: "f9d0c4", description: "Status: triaged and ready to work on"}
+- {name: "status:blocked",      color: "f9d0c4", description: "Status: waiting on another issue, decision or dependency", aliases: ["blocked"]}
+- {name: "status:needs-review", color: "f9d0c4", description: "Status: work done; needs review or verification"}
+- {name: "status:deferred",     color: "f9d0c4", description: "Status: valid but intentionally postponed"}
+- {name: "resolution:duplicate", color: "cfd3d7", description: "Resolution: already tracked in another issue or pull request", aliases: ["duplicate"]}
+- {name: "resolution:invalid",  color: "cfd3d7", description: "Resolution: not a valid issue for this repository", aliases: ["invalid"]}
+- {name: "resolution:wont-fix", color: "cfd3d7", description: "Resolution: will not be worked on", aliases: ["wontfix", "won't fix"]}
+- {name: "good first issue",    color: "7057ff", description: "Good for newcomers"}
+- {name: "help wanted",         color: "008672", description: "Extra attention is needed"}
+- {name: "dependencies",        color: "0366d6", description: "Pull requests that update a dependency file"}

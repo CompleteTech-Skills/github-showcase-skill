@@ -1,0 +1,5 @@
+# Showcase overrides for php2shell-check (content only; colours and fonts come from brand.yaml).
+subtitle: "Passive PHP2Shell exposure triage for websites"
+chips:
+  key: ["CVE-2026-109618", "CVE-2026-109619"]
+  attrs: ["No exploit payloads"]

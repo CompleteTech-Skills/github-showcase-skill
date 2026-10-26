@@ -1,0 +1,2 @@
+# Validated enterprise read (audit/research/enterprise.md Appendix A, q_discover).
+query { viewer { login enterprises(first: 10, membershipType: ADMIN) { nodes { id slug name url viewerIsAdmin } } } }

@@ -1,0 +1,7 @@
+{"total_count": 5, "workflows": [
+ {"id": 11, "name": "Tests", "path": ".github/workflows/tests.yml", "state": "active", "badge_url": "https://github.com/Northwind-Trading-Co/support-triage-agent/workflows/Tests/badge.svg"},
+ {"id": 12, "name": "Deploy site", "path": ".github/workflows/deploy.yml", "state": "active"},
+ {"id": 13, "name": "Docs lint", "path": ".github/workflows/docs.yml", "state": "active"},
+ {"id": 14, "name": "Notify", "path": ".github/workflows/notify.yml", "state": "active"},
+ {"id": 15, "name": "Nightly publish", "path": ".github/workflows/nightly.yml", "state": "disabled_inactivity"}
+]}

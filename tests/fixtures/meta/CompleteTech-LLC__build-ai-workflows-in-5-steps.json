@@ -1,0 +1,82 @@
+{
+ "archived": false,
+ "created_at": "2026-04-11T15:12:46Z",
+ "default_branch": "main",
+ "description": "Provider-agnostic Jupyter lesson on context priming, task decomposition and workflow crystallization, from goal image to code.",
+ "fork": false,
+ "has_discussions": false,
+ "has_issues": true,
+ "has_projects": true,
+ "has_wiki": false,
+ "health_percentage": 100,
+ "homepage": null,
+ "is_template": false,
+ "labels": [
+  {
+   "color": "d73a4a",
+   "description": "Something isn't working",
+   "name": "bug"
+  },
+  {
+   "color": "0075ca",
+   "description": "Improvements or additions to documentation",
+   "name": "documentation"
+  },
+  {
+   "color": "cfd3d7",
+   "description": "This issue or pull request already exists",
+   "name": "duplicate"
+  },
+  {
+   "color": "a2eeef",
+   "description": "New feature or request",
+   "name": "enhancement"
+  },
+  {
+   "color": "7057ff",
+   "description": "Good for newcomers",
+   "name": "good first issue"
+  },
+  {
+   "color": "008672",
+   "description": "Extra attention is needed",
+   "name": "help wanted"
+  },
+  {
+   "color": "e4e669",
+   "description": "This doesn't seem right",
+   "name": "invalid"
+  },
+  {
+   "color": "d876e3",
+   "description": "Further information is requested",
+   "name": "question"
+  },
+  {
+   "color": "ffffff",
+   "description": "This will not be worked on",
+   "name": "wontfix"
+  }
+ ],
+ "language": "Python",
+ "languages": {
+  "Jupyter Notebook": 65365,
+  "Mermaid": 2299,
+  "Python": 77596
+ },
+ "license": "MIT",
+ "owner": "CompleteTech-LLC",
+ "repo": "build-ai-workflows-in-5-steps",
+ "stargazers_count": 16,
+ "topics": [
+  "anthropic",
+  "complete-tech",
+  "education",
+  "jupyter",
+  "llm",
+  "openai",
+  "prompt-engineering",
+  "tutorial"
+ ],
+ "visibility": "public"
+}

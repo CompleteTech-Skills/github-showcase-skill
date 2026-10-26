@@ -1,0 +1,28 @@
+{
+ "owner": "Northwind-Trading-Co",
+ "repo": ".github",
+ "kind_hint": "org-profile-repo",
+ "files": {
+  "profile/README.md": {
+   "bytes": 10,
+   "head": "# Northwind"
+  },
+  "README.md": {
+   "bytes": 5,
+   "head": "#"
+  },
+  "CONTRIBUTING.md": {
+   "bytes": 5,
+   "head": "#"
+  },
+  "SECURITY.md": null,
+  "CODE_OF_CONDUCT.md": {
+   "bytes": 5,
+   "head": "#"
+  },
+  ".github/ISSUE_TEMPLATE/config.yml": {
+   "bytes": 5,
+   "head": "blank_issues_enabled: false"
+  }
+ }
+}

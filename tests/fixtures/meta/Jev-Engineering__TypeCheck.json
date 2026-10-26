@@ -1,0 +1,88 @@
+{
+ "archived": false,
+ "created_at": "2026-10-16T03:11:39Z",
+ "default_branch": "main",
+ "description": "Opt-in text and image moderation for Discord, powered by Jev, with reusable moderation packs. Formerly Jev Image Guard.",
+ "fork": false,
+ "has_discussions": false,
+ "has_issues": true,
+ "has_projects": true,
+ "has_wiki": false,
+ "health_percentage": 87,
+ "homepage": null,
+ "is_template": false,
+ "labels": [
+  {
+   "color": "f143ab",
+   "description": "Barrier affecting people with disabilities",
+   "name": "accessibility"
+  },
+  {
+   "color": "d73a4a",
+   "description": "Something isn't working",
+   "name": "bug"
+  },
+  {
+   "color": "0075ca",
+   "description": "Improvements or additions to documentation",
+   "name": "documentation"
+  },
+  {
+   "color": "cfd3d7",
+   "description": "This issue or pull request already exists",
+   "name": "duplicate"
+  },
+  {
+   "color": "a2eeef",
+   "description": "New feature or request",
+   "name": "enhancement"
+  },
+  {
+   "color": "7057ff",
+   "description": "Good for newcomers",
+   "name": "good first issue"
+  },
+  {
+   "color": "008672",
+   "description": "Extra attention is needed",
+   "name": "help wanted"
+  },
+  {
+   "color": "e4e669",
+   "description": "This doesn't seem right",
+   "name": "invalid"
+  },
+  {
+   "color": "d876e3",
+   "description": "Further information is requested",
+   "name": "question"
+  },
+  {
+   "color": "ffffff",
+   "description": "This will not be worked on",
+   "name": "wontfix"
+  }
+ ],
+ "language": "TypeScript",
+ "languages": {
+  "CSS": 25059,
+  "Dockerfile": 1660,
+  "HTML": 9973,
+  "JavaScript": 189244,
+  "PLpgSQL": 4064,
+  "Python": 51475,
+  "Shell": 6494,
+  "TypeScript": 784459
+ },
+ "license": "MIT",
+ "owner": "Jev-Engineering",
+ "repo": "TypeCheck",
+ "stargazers_count": 2,
+ "topics": [
+  "discord",
+  "image-moderation",
+  "text-moderation",
+  "typescript"
+ ],
+ "visibility": "public"
+}

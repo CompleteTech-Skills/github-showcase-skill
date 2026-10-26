@@ -1,0 +1,2 @@
+# Node id of one repository (the itemId of updateUserListsForItem).
+query RepoId($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { id nameWithOwner isPrivate } }

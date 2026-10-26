@@ -1,0 +1,2 @@
+# Optional: renders SVG inputs (the intro's static frame) on contact sheets. Not needed by any generator or the Action.
+resvg_py==0.5.0

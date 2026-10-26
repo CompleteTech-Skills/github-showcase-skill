@@ -1,0 +1,3 @@
+mutation($owner: ID!, $domain: URI!) {
+  addVerifiableDomain(input: {ownerId: $owner, domain: $domain}) { domain { id domain dnsHostName verificationToken tokenExpirationTime isVerified } }
+}

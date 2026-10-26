@@ -1,0 +1,18 @@
+# Validated enterprise read (audit/research/enterprise.md Appendix A, q_snapshot). Page organizations, members and
+# outsideCollaborators with after: while hasNextPage.
+query($slug:String!){enterprise(slug:$slug){id slug name description websiteUrl location avatarUrl securityContactEmail billingEmail readme url viewerIsAdmin
+ billingInfo{totalLicenses totalAvailableLicenses allLicensableUsersCount}
+ organizations(first:100){totalCount pageInfo{hasNextPage endCursor} nodes{id login name isVerified websiteUrl email viewerCanAdminister}}
+ members(first:100){totalCount pageInfo{hasNextPage endCursor} nodes{... on EnterpriseUserAccount{login organizations(first:100){edges{role node{login}}}}}}
+ rulesets(first:50){nodes{databaseId name target enforcement}}
+ ownerInfo{admins(first:25){edges{role node{login}}} domains(first:25){nodes{id domain isVerified isApproved dnsHostName}}
+  outsideCollaborators(first:100){totalCount edges{node{login} repositories(first:100){nodes{nameWithOwner isPrivate}}}}
+  pendingMemberInvitations(first:100){totalCount nodes{invitee{login} organization{login} role}}
+  pendingCollaboratorInvitations(first:100){totalCount}
+  failedInvitations(first:100){totalCount}
+  isUpdatingDefaultRepositoryPermission
+  defaultRepositoryPermissionSetting membersCanCreateRepositoriesSetting membersCanDeleteRepositoriesSetting
+  membersCanChangeRepositoryVisibilitySetting allowPrivateRepositoryForkingSetting allowPrivateRepositoryForkingSettingPolicyValue membersCanInviteCollaboratorsSetting
+  membersCanDeleteIssuesSetting membersCanUpdateProtectedBranchesSetting membersCanViewDependencyInsightsSetting membersCanMakePurchasesSetting
+  organizationProjectsSetting repositoryProjectsSetting repositoryDeployKeySetting twoFactorRequiredSetting ipAllowListEnabledSetting
+  notificationDeliveryRestrictionEnabledSetting affiliatedUsersWithTwoFactorDisabledExist samlIdentityProvider{id}}}}

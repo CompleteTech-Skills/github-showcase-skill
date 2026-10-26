@@ -1,0 +1,904 @@
+{
+ "descriptions": {
+  "brand_fixes": {
+   "COMPLETETECH LLC": "CompleteTech LLC",
+   "CompleTetech LLC": "CompleteTech LLC",
+   "Complete Tech": "CompleteTech",
+   "Complete Tech LLC": "CompleteTech LLC",
+   "Completetech LLC": "CompleteTech LLC"
+  },
+  "d4_banned_first": [
+   "A",
+   "An",
+   "The",
+   "This"
+  ],
+  "d5_regex": "\\b(wip|todo|beta|alpha|deprecated|experimental|coming soon|best|awesome|ultimate|world-class|cutting-edge|revolutionary|next-gen)\\b",
+  "d7_regex": "\\bv?\\d+\\.\\d+(\\.\\d+)*\\b",
+  "d8_filler": [
+   "a",
+   "an",
+   "and",
+   "for",
+   "of",
+   "the",
+   "tool"
+  ],
+  "disclaimer_regex": "[,;.]?\\s*(?:Not affiliated with[^.]*|Unofficial[^.]*|Independent[^.]*not endorsed[^.]*)(?=\\.?$)",
+  "max_existing": 140,
+  "max_new": 120,
+  "prefix_types": {
+   "backup": "Archived: ",
+   "fork": "Fork of ",
+   "website": "Source for "
+  },
+  "skill_suffix": "\\s*\\(CompleteTech LLC skill\\)",
+  "standard": "ct-std-v1",
+  "templates": {
+   "agent-skills": "<Verb> [branded CompleteTech LLC] <artifacts> <for whom / from what>[, <qualifier>].",
+   "backup": "Archived: <what it was>[; superseded by <owner>/<repo>].",
+   "fork": "Fork of <parent.full_name>.",
+   "fork-ahead": "Fork of <parent.full_name> with <Steward> changes.",
+   "fork-watching": "Fork of <parent.full_name>, followed for reference.",
+   "game": "<Product>: play <game kind>[ <context>].",
+   "game-jevplay": "<Product>: play <game kind> against Jev at jevplay.games.",
+   "github": "Organization profile and default community health files for <name>.",
+   "noun-type": "<Noun phrase: what it is> <for whom / scope>.",
+   "profile": "Profile README for the CompleteDotTech account of CompleteTech LLC.",
+   "security-check-cve": "Check <Product> versions for CVE-<id> (<short title>), offline and dependency-free.",
+   "security-check-issue": "Check <product> versions for <issue name> exposure, offline and dependency-free.",
+   "verb-type": "<Verb> <object> <context>[, <key property>].",
+   "website": "Source for <fqdn>, <what the site offers>."
+  },
+  "verb_types": [
+   "agent-skills",
+   "cli",
+   "library",
+   "api",
+   "mcp-server",
+   "bot",
+   "discord-bot",
+   "plugin",
+   "chrome-extension",
+   "security-check",
+   "template",
+   "infrastructure",
+   "hardware",
+   "workspace"
+  ],
+  "verbs": [
+   "Generate",
+   "Create",
+   "Draft",
+   "Check",
+   "Track",
+   "Compile",
+   "Serve",
+   "Coordinate",
+   "Build",
+   "Run",
+   "Convert",
+   "Extract",
+   "Monitor",
+   "Scan",
+   "Sync",
+   "Manage",
+   "Render",
+   "Automate",
+   "Analyze",
+   "Collect",
+   "Deploy",
+   "Export",
+   "Index",
+   "Map",
+   "Search",
+   "Test",
+   "Validate",
+   "Visualize",
+   "Control",
+   "Read",
+   "Record"
+  ]
+ },
+ "naming": {
+  "exempt_full": [
+   "CompleteDotTech/CompleteDotTech"
+  ],
+  "exempt_names": [
+   ".github"
+  ],
+  "exempt_patterns": [
+   "\\.github\\.io$"
+  ],
+  "n1": "^[a-z0-9]+(-[a-z0-9]+)*(\\.[a-z0-9]+(-[a-z0-9]+)*)*$",
+  "n1_dot_suffix": "\\.(com|tech|llc|club|app|ai|games|io|net|org)$",
+  "n2": "^[a-z]",
+  "n4_backup": "-backup-\\d{8}$",
+  "n4_date": "\\d{8}",
+  "n4_filler": "-(repo|project|code|new|final|test|v\\d+)$",
+  "n5_max": 40,
+  "standard": "ct-std-v1"
+ },
+ "readme-variants": {
+  "aliases_for_status": {
+   "D": {
+    "Findings": [
+     "Status"
+    ]
+   }
+  },
+  "callouts": {
+   "I": "> [!IMPORTANT]\n> Internal <who> repository. Not for distribution."
+  },
+  "game_disclaimers": {
+   "jev-2048-arcade": "2048",
+   "jev-connect-four": "Connect Four",
+   "jev-guess-who": "Guess Who?",
+   "jev-mastermind": "Mastermind"
+  },
+  "header_order": [
+   "banner",
+   "nav",
+   "title"
+  ],
+  "license_rows": {
+   "other": "Licensed under the <license>; see `<path>`. <Brand> names and logos are reserved and are not licensed for reuse except to identify this project.",
+   "private": "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved.",
+   "private_hold": "Proprietary. All rights reserved.",
+   "security": "Available under the GNU AGPL-3.0 or a commercial license; see `LICENSE` and `LICENSING.md`.",
+   "skills_mit": "Code, templates, and documentation are licensed under the MIT License. CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project. See `LICENSE` and `BRAND_ASSETS.md`.",
+   "t1_mit": "Code and documentation are licensed under the MIT License; see `LICENSE`. CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project.",
+   "t2_mit": "Code and documentation are licensed under the MIT License; see `LICENSE`. <Brand> names and logos are reserved and are not licensed for reuse except to identify this project."
+  },
+  "placeholder_regex": "\\b(TBD|TODO|Coming soon|N/A|Lorem)\\b",
+  "renames": {
+   "getting started": "Quick Start",
+   "installation": "Install",
+   "licence": "License",
+   "quick start": "Quick Start",
+   "quickstart": "Quick Start"
+  },
+  "standard": "ct-std-v1",
+  "title_keep_case": [
+   "AI",
+   "API",
+   "CLI",
+   "MCP",
+   "CVE",
+   "LLM",
+   "OBS",
+   "PDF",
+   "QR",
+   "SDK",
+   "STS2",
+   "TCG",
+   "UI",
+   "URL",
+   "GitHub",
+   "CompleteTech",
+   "LibreEvolve",
+   "NetScaler",
+   "KiCad",
+   "jevplay.games",
+   "romgenie"
+  ],
+  "title_small_words": [
+   "a",
+   "an",
+   "and",
+   "as",
+   "at",
+   "but",
+   "by",
+   "for",
+   "in",
+   "of",
+   true,
+   "or",
+   "the",
+   "to",
+   "via",
+   "vs"
+  ],
+  "variants": {
+   "A": [
+    [
+     "About",
+     "R"
+    ],
+    [
+     "OpenClaw / ClawHub Metadata",
+     "R"
+    ],
+    [
+     "Workflow Diagram",
+     "R"
+    ],
+    [
+     "What It Does",
+     "R"
+    ],
+    [
+     "Contents",
+     "R"
+    ],
+    [
+     "Quick Start",
+     "R"
+    ],
+    [
+     "Example",
+     "R"
+    ],
+    [
+     "Inputs",
+     "O"
+    ],
+    [
+     "Assets",
+     "O"
+    ],
+    [
+     "Brand Notes",
+     "R"
+    ],
+    [
+     "Runtime Permissions",
+     "R"
+    ],
+    [
+     "Network Boundary",
+     "R"
+    ],
+    [
+     "Source",
+     "O"
+    ],
+    [
+     "License",
+     "R"
+    ]
+   ],
+   "B": [
+    [
+     "About",
+     "R"
+    ],
+    [
+     "Live Site",
+     "R"
+    ],
+    [
+     "Features",
+     "R"
+    ],
+    [
+     "Tech Stack",
+     "R"
+    ],
+    [
+     "Quick Start",
+     "R"
+    ],
+    [
+     "Deployment",
+     "O"
+    ],
+    [
+     "Status",
+     "O"
+    ],
+    [
+     "License",
+     "R"
+    ]
+   ],
+   "C": [
+    [
+     "About",
+     "R"
+    ],
+    [
+     "Install",
+     "R"
+    ],
+    [
+     "Quick Start",
+     "R"
+    ],
+    [
+     "Usage",
+     "R"
+    ],
+    [
+     "Configuration",
+     "O"
+    ],
+    [
+     "Workflow Diagram",
+     "O"
+    ],
+    [
+     "Development",
+     "O"
+    ],
+    [
+     "License",
+     "R"
+    ]
+   ],
+   "D": [
+    [
+     "About",
+     "R"
+    ],
+    [
+     "Findings",
+     "R"
+    ],
+    [
+     "Method",
+     "R"
+    ],
+    [
+     "Data and Sources",
+     "R"
+    ],
+    [
+     "Reproduce",
+     "O"
+    ],
+    [
+     "Limits",
+     "R"
+    ],
+    [
+     "Citation",
+     "O"
+    ],
+    [
+     "License",
+     "R"
+    ]
+   ],
+   "E": [
+    [
+     "About",
+     "R"
+    ],
+    [
+     "Play",
+     "R"
+    ],
+    [
+     "How to Play",
+     "R"
+    ],
+    [
+     "Run Locally",
+     "O"
+    ],
+    [
+     "Credits and Disclaimer",
+     "R"
+    ],
+    [
+     "License",
+     "R"
+    ]
+   ],
+   "F": [
+    [
+     "Quick Start",
+     "R"
+    ],
+    [
+     "The Report",
+     "R"
+    ],
+    [
+     "Version Rules",
+     "R"
+    ],
+    [
+     "Configuration Observations",
+     "O"
+    ],
+    [
+     "Limits",
+     "R"
+    ],
+    [
+     "Reference",
+     "O"
+    ],
+    [
+     "Licensing",
+     "R"
+    ]
+   ],
+   "G": [],
+   "H": [],
+   "I": [
+    [
+     "About",
+     "R"
+    ],
+    [
+     "Setup",
+     "R"
+    ],
+    [
+     "Usage",
+     "R"
+    ],
+    [
+     "Runbook",
+     "O"
+    ],
+    [
+     "Ownership",
+     "R"
+    ],
+    [
+     "License",
+     "R"
+    ]
+   ],
+   "J": [
+    [
+     "About",
+     "R"
+    ],
+    [
+     "Files",
+     "R"
+    ],
+    [
+     "License",
+     "R"
+    ]
+   ]
+  }
+ },
+ "topics": {
+  "aliases": {
+   "agent-skill": "agent-skills",
+   "agentic-development": "agentic-ai",
+   "agentic-workflows": "agentic-ai",
+   "agents": "ai-agent",
+   "ai-agents": "ai-agent",
+   "artificial-intelligence": "ai",
+   "c-plus-plus": "cpp",
+   "claude-ai": "claude",
+   "claude-cli": "claude-code",
+   "claude-code-cli": "claude-code",
+   "command-line": "cli",
+   "complete-tech": "completetech",
+   "cplusplus": "cpp",
+   "gen-ai": "generative-ai",
+   "genai": "generative-ai",
+   "github-actions": "actions",
+   "golang": "go",
+   "home-assistant": "home-automation",
+   "js": "javascript",
+   "jupyter": "jupyter-notebook",
+   "large-language-model": "llm",
+   "large-language-models": "llm",
+   "llms": "llm",
+   "mcp-servers": "mcp-server",
+   "model-context-protocol": "mcp",
+   "next-js": "nextjs",
+   "node": "nodejs",
+   "node-js": "nodejs",
+   "pdf-generation": "pdf-generator",
+   "py": "python",
+   "python3": "python",
+   "reactjs": "react",
+   "retrieval-augmented-generation": "rag",
+   "tailwindcss": "tailwind",
+   "ts": "typescript",
+   "vuejs": "vue"
+  },
+  "allowed": [
+   "pdf",
+   "pdf-generator",
+   "reportlab",
+   "streamlit",
+   "vllm",
+   "ollama",
+   "gemini",
+   "anthropic",
+   "discord",
+   "obs",
+   "kicad",
+   "blender",
+   "gltf",
+   "self-hosted",
+   "cve",
+   "reinforcement-learning",
+   "computer-vision",
+   "vue",
+   "c",
+   "csharp",
+   "go",
+   "java",
+   "kotlin",
+   "swift",
+   "shell",
+   "powershell",
+   "html",
+   "css",
+   "lua",
+   "godot"
+  ],
+  "brand_topics": [
+   "completetech",
+   "ai-ascension",
+   "jev",
+   "libreevolve",
+   "touchedbyanagent",
+   "pick-your-ai"
+  ],
+  "domain": [
+   "finance",
+   "trading",
+   "ecommerce",
+   "marketing",
+   "sales",
+   "content-creation",
+   "podcast",
+   "social-media",
+   "publishing",
+   "directory",
+   "patents",
+   "career",
+   "trading-cards",
+   "emulation",
+   "games",
+   "board-game",
+   "puzzle-game",
+   "homelab",
+   "home-automation",
+   "email",
+   "invoice",
+   "billing",
+   "envelope",
+   "contract",
+   "proposal",
+   "case-study",
+   "testimonials",
+   "time-tracking",
+   "usage-tracking",
+   "orchestration",
+   "sprite-animation",
+   "character-animation",
+   "rigging",
+   "benchmarks",
+   "arxiv",
+   "game-agents",
+   "observability",
+   "data-visualization",
+   "ble",
+   "wearables",
+   "smart-ring"
+  ],
+  "drop_noise": "^(wip|todo|beta|alpha|deprecated|archived|latest|stable|experimental|v\\d+(\\.\\d+)*|(19|20)\\d{2})$",
+  "drop_valid": "^[a-z0-9][a-z0-9-]{0,49}$",
+  "family_topics": [
+   "claude-skill",
+   "codex-skill",
+   "agentic-ai",
+   "security",
+   "cve",
+   "ai-research",
+   "homelab",
+   "sts2",
+   "browser-game"
+  ],
+  "featured": [
+   "ai",
+   "llm",
+   "mcp",
+   "ai-agent",
+   "agentic-ai",
+   "claude",
+   "claude-code",
+   "openai",
+   "chatgpt",
+   "generative-ai",
+   "prompt-engineering",
+   "machine-learning",
+   "rag",
+   "langchain",
+   "python",
+   "javascript",
+   "typescript",
+   "nodejs",
+   "rust",
+   "cpp",
+   "react",
+   "nextjs",
+   "astro",
+   "tailwind",
+   "fastapi",
+   "docker",
+   "devops",
+   "actions",
+   "sdk",
+   "automation",
+   "security",
+   "privacy",
+   "vscode-extension",
+   "jupyter-notebook"
+  ],
+  "frameworks": {
+   "@anthropic-ai/sdk": "anthropic",
+   "@modelcontextprotocol/sdk": "mcp",
+   "anthropic": "anthropic",
+   "astro": "astro",
+   "discord.js": "discord",
+   "discord.py": "discord",
+   "fastapi": "fastapi",
+   "fastmcp": "mcp",
+   "langchain": "langchain",
+   "mcp": "mcp",
+   "next": "nextjs",
+   "ollama": "ollama",
+   "openai": "openai",
+   "react": "react",
+   "reportlab": "reportlab",
+   "streamlit": "streamlit",
+   "tailwindcss": "tailwind",
+   "vllm": "vllm"
+  },
+  "languages": {
+   "C": "c",
+   "C#": "csharp",
+   "C++": "cpp",
+   "CSS": "css",
+   "Dockerfile": "docker",
+   "GDScript": "godot",
+   "Go": "go",
+   "HTML": "html",
+   "Java": "java",
+   "JavaScript": "javascript",
+   "Jupyter Notebook": "jupyter-notebook",
+   "Kotlin": "kotlin",
+   "Lua": "lua",
+   "PowerShell": "powershell",
+   "Python": "python",
+   "Rust": "rust",
+   "Shell": "shell",
+   "Swift": "swift",
+   "TypeScript": "typescript"
+  },
+  "max_private": 8,
+  "max_public": 10,
+  "min_private": 3,
+  "min_public": 5,
+  "org_topics": {
+   "AI-Ascension": "ai-ascension",
+   "CompleTetech-Security": "completetech-security",
+   "CompleteTech-Career-Toolkit": "completetech-career-toolkit",
+   "CompleteTech-Commerce": "completetech-commerce",
+   "CompleteTech-Creative": "completetech-creative",
+   "CompleteTech-Data": "completetech-data",
+   "CompleteTech-Directories": "completetech-directories",
+   "CompleteTech-DiscordApps": "completetech-discord-apps",
+   "CompleteTech-Games": "completetech-games",
+   "CompleteTech-Hardware": "completetech-hardware",
+   "CompleteTech-Infrastructure": "completetech-infrastructure",
+   "CompleteTech-LLC": "completetech-llc",
+   "CompleteTech-LLC-AI-Research": "completetech-ai-research",
+   "CompleteTech-ManageEngine": "completetech-manageengine",
+   "CompleteTech-Patent-IP": "completetech-patent-ip",
+   "CompleteTech-Pokemon": "completetech-tcg",
+   "CompleteTech-Skills": "completetech-skills",
+   "CompleteTechDiscord-Games": "completetech-discord-games",
+   "Jev-Engineering": "jev-engineering",
+   "Jevelopers-neatHack-2026": "ticketstub",
+   "LibreEvolve": "libreevolve",
+   "Pick-Your-AI": "pick-your-ai",
+   "TouchedByAnAgent": "touchedbyanagent",
+   "jevplay-games": "jevplay-games",
+   "romgenie-archive-repostiory": null,
+   "romgenie-following-repos": null
+  },
+  "private_banned": [
+   "pokemon",
+   "amongus",
+   "nintendo"
+  ],
+  "standard": "ct-std-v1",
+  "touchedbyanagent_domain": [
+   "ble",
+   "wearables",
+   "smart-ring"
+  ],
+  "type_topics": [
+   "agent-skills",
+   "website",
+   "web-app",
+   "mobile-app",
+   "chrome-extension",
+   "cli",
+   "library",
+   "api",
+   "mcp-server",
+   "bot",
+   "discord-bot",
+   "plugin",
+   "template",
+   "tutorial",
+   "research",
+   "dataset",
+   "game",
+   "security-check",
+   "fork",
+   "backup",
+   "github-profile",
+   "infrastructure",
+   "hardware",
+   "workspace"
+  ]
+ },
+ "types": {
+  "deps": {
+   "api": [
+    "fastapi",
+    "flask",
+    "express"
+   ],
+   "bot": [
+    "python-telegram-bot",
+    "slack_bolt",
+    "slack-bolt",
+    "@slack/bolt",
+    "telegraf",
+    "tmi.js"
+   ],
+   "discord-bot": [
+    "discord.js",
+    "discord.py",
+    "py-cord",
+    "nextcord"
+   ],
+   "mcp-server": [
+    "@modelcontextprotocol/sdk",
+    "mcp",
+    "fastmcp"
+   ],
+   "web-app": [
+    "react",
+    "next",
+    "vue",
+    "svelte",
+    "astro",
+    "streamlit"
+   ]
+  },
+  "domain_tlds": [
+   "com",
+   "tech",
+   "llc",
+   "club",
+   "app",
+   "ai",
+   "games",
+   "io",
+   "net",
+   "org"
+  ],
+  "game_owners": [
+   "jevplay-games",
+   "CompleteTech-Games",
+   "CompleteTechDiscord-Games"
+  ],
+  "research_owner": "CompleteTech-LLC-AI-Research",
+  "security_owner": "CompleTetech-Security",
+  "standard": "ct-std-v1",
+  "types": {
+   "agent-skills": {
+    "category": "Agent skill",
+    "variant": "A",
+    "variant_elsewhere": "C"
+   },
+   "api": {
+    "category": "API service",
+    "variant": "C"
+   },
+   "backup": {
+    "category": null,
+    "variant": "H"
+   },
+   "bot": {
+    "category": "Bot",
+    "variant": "C"
+   },
+   "chrome-extension": {
+    "category": "Chrome extension",
+    "variant": "B"
+   },
+   "cli": {
+    "category": "CLI tool",
+    "variant": "C"
+   },
+   "dataset": {
+    "category": "Dataset",
+    "variant": "D"
+   },
+   "discord-bot": {
+    "category": "Discord bot",
+    "variant": "C"
+   },
+   "fork": {
+    "category": null,
+    "variant": "G"
+   },
+   "game": {
+    "category": "Game",
+    "variant": "E"
+   },
+   "github-profile": {
+    "category": null,
+    "variant": "J"
+   },
+   "hardware": {
+    "category": "Hardware",
+    "variant": "C",
+    "variant_private": "I"
+   },
+   "infrastructure": {
+    "category": "Infrastructure",
+    "variant": "C",
+    "variant_private": "I"
+   },
+   "library": {
+    "category": "Library",
+    "variant": "C"
+   },
+   "mcp-server": {
+    "category": "MCP server",
+    "variant": "C"
+   },
+   "mobile-app": {
+    "category": "Mobile app",
+    "variant": "B"
+   },
+   "plugin": {
+    "category": "Plugin",
+    "variant": "C"
+   },
+   "research": {
+    "category": "Research",
+    "variant": "D"
+   },
+   "security-check": {
+    "category": "CVE checker",
+    "variant": "F"
+   },
+   "template": {
+    "category": "Template",
+    "variant": "C"
+   },
+   "tutorial": {
+    "category": "Tutorial",
+    "variant": "C"
+   },
+   "web-app": {
+    "category": "Web app",
+    "variant": "B"
+   },
+   "website": {
+    "category": "Website",
+    "variant": "B"
+   },
+   "workspace": {
+    "category": "Workspace",
+    "variant": "C",
+    "variant_private": "I"
+   }
+  }
+ }
+}

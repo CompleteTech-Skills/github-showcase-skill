@@ -1,0 +1,18 @@
+flowchart LR
+  A[Repository metadata and checkout] --> B[Detect type, variant and family]
+  B --> C{Description, topics and labels pass?}
+  C -->|No| D[Change records for the writer queue]
+  C -->|Yes| E[Hero banner and repo card]
+  D --> E
+  E --> F[README header, body and footer]
+  F --> G{Lint and doctor pass?}
+  G -->|No| H[needs-input or art-fail logged, nothing written]
+  G -->|Yes| I[Coverage row and contact sheet for review]
+  classDef source fill:#eef6ff,stroke:#3778c2,color:#102a43;
+  classDef gate fill:#fff7e6,stroke:#c97a12,color:#3d2600;
+  classDef output fill:#eefaf0,stroke:#2f8f46,color:#12351d;
+  classDef final fill:#e8fff4,stroke:#15803d,color:#052e16;
+  class A,B source;
+  class C,G gate;
+  class D,E,F,H output;
+  class I final;

@@ -1,0 +1,48 @@
+# Synthetic estate registry for the org, project and content commands (Northwind Trading Co. demo only; no real data).
+# Point the skill at it with SHOWCASE_ESTATE_ROOT=examples/estate (or --registry examples/estate/registry/estate.yaml).
+# The real registry is private: read it, never copy it into a repository (references/org.md).
+version: example
+profile:
+  name: Example Steward
+  org_directory:
+    - group: Northwind
+      orgs: [Northwind-Trading-Co]
+  star_lists:
+    - name: 'Northwind: built on'
+      description: Outside projects Northwind Trading Co. builds on.
+      source_org: Northwind-Trading-Co
+orgs:
+  Northwind-Trading-Co:
+    tier: T1
+    profile:
+      name: Northwind Trading Co.
+      description: Trading tools and support agents for the Northwind demo. A CompleteTech LLC organization.
+      blog: https://www.complete.tech
+      location: Cincinnati, OH
+    final_repos: [.github, support-triage-agent, order-ledger, inventory-sync, private-pricing-engine, upstream-fork]
+    pins_public:
+      - repo: support-triage-agent
+        why: The org's flagship; this note stays in the registry and never reaches the public profile.
+        depends_on: ''
+      - repo: order-ledger
+        why: Second public pin.
+        depends_on: ''
+    pins_members:
+      - repo: private-pricing-engine
+        why: Members-only pin; private repositories never appear on the public profile.
+        depends_on: ''
+    sections:
+      - title: Agents
+        repos: [support-triage-agent]
+      - title: Ledgers
+        repos: [order-ledger]
+    also_in_outgoing: []
+    also_in_incoming: []
+    favorites:
+      - full_name: pallets/flask
+        why: The web framework under the triage agent.
+        evidence: requirements.txt
+    star_list:
+      name: 'Northwind: built on'
+      description: Outside projects Northwind Trading Co. builds on.
+    open_questions: []

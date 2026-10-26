@@ -1,0 +1,21 @@
+# CompleteTech Enterprise standard (decision 24; audit/research/enterprise.md §2). Desired state only: the skill reads
+# it to check a snapshot and to print change records. It is kept out of brand.yaml on purpose, so an enterprise edit
+# never changes the brand config hash that the banner fingerprint of every repository includes.
+standard: ct-std-v1
+profile:                                   # §2.1; each field is its own approval (enterprise/profile)
+  name: CompleteTech
+  description: Enterprise account for CompleteTech LLC's GitHub organizations.   # PROPOSAL
+  websiteUrl: https://www.complete.tech
+  location: Cincinnati, OH
+owners: [CompleteDotTech]                  # must be enterprise OWNER (E4) and OWNER of every in-scope enterprise org (E5)
+domains: [complete.tech, www.complete.tech]  # verified at enterprise level (E7)
+seat_free_user: romgenie                   # decision 3: no org membership, collaborator grant or invitation inside (E6)
+never_inside: [MetatronAngelAgent]         # decision 1: flagged if found inside, never moved (E13)
+# Review-page row ids (decisions/APPROVED_ACTIONS.yaml, written by scripts/build_approvals.py) that `plan` puts in each
+# writer job's approval_id: scripts/writer.py refuses a job whose approval_id is not `approved: true` there.
+approvals:
+  profile: ent-001                         # enterprise profile (name, description, website, location)
+  domains: ent-002                         # add and verify complete.tech and www.complete.tech
+# Danger settings recorded in the first snapshot and expected unchanged (E10). Never written by this skill.
+danger_settings: [twoFactorRequiredSetting, ipAllowListEnabledSetting, notificationDeliveryRestrictionEnabledSetting,
+                  repositoryDeployKeySetting, samlIdentityProvider]

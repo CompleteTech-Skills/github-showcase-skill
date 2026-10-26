@@ -1,0 +1,12 @@
+# STANDARD §3.1 (ct-std-v1): repo naming rules N1-N5 and the exempt list.
+standard: ct-std-v1
+n1: "^[a-z0-9]+(-[a-z0-9]+)*(\\.[a-z0-9]+(-[a-z0-9]+)*)*$"
+n1_dot_suffix: "\\.(com|tech|llc|club|app|ai|games|io|net|org)$"
+n2: "^[a-z]"
+n4_filler: "-(repo|project|code|new|final|test|v\\d+)$"
+n4_date: "\\d{8}"
+n4_backup: "-backup-\\d{8}$"
+n5_max: 40
+exempt_names: [".github"]
+exempt_patterns: ["\\.github\\.io$"]
+exempt_full: ["CompleteDotTech/CompleteDotTech"]

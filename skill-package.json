@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "family": "completetech-skills",
+  "repository": "CompleteTech-Skills/github-showcase-skill",
+  "skill_name": "github-showcase-skill",
+  "kind": "catalog-renderer",
+  "entrypoints": ["scripts/showcase.py"],
+  "example_inputs": ["examples/meta/northwind-support-triage-agent.json", "examples/estate/registry/estate.yaml"],
+  "network_mode": "operator-selected-hosts",
+  "private": false
+}

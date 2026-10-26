@@ -1,0 +1,26 @@
+# Validated capture query (audit/research/orgs-and-projects.md §4.1, 2026-10-25 schema). Read-only; never captures items.
+query CaptureProject($org: String!, $number: Int!) {
+  organization(login: $org) {
+    projectV2(number: $number) {
+      id fullDatabaseId number title url shortDescription readme public closed template
+      repositories(first: 100) { nodes { nameWithOwner } }
+      teams(first: 50) { nodes { slug } }
+      fields(first: 50) { nodes { __typename
+        ... on ProjectV2FieldCommon { id databaseId name dataType isIssueField }
+        ... on ProjectV2SingleSelectField { options { id name color description } }
+        ... on ProjectV2MultiSelectField { multiSelectOptions { id name color description } }
+        ... on ProjectV2IterationField { configuration { duration startDay
+            iterations { id title startDate duration }
+            completedIterations { id title startDate duration } } } } }
+      views(first: 50, orderBy: {field: POSITION, direction: ASC}) { nodes {
+        id number name layout filter
+        fields(first: 50) { nodes { ... on ProjectV2FieldCommon { id databaseId name } } }
+        groupByFields(first: 5) { nodes { ... on ProjectV2FieldCommon { id databaseId name } } }
+        verticalGroupByFields(first: 5) { nodes { ... on ProjectV2FieldCommon { id databaseId name } } }
+        sortByFields(first: 10) { nodes { direction field { ... on ProjectV2FieldCommon { id databaseId name } } } } } }
+      workflows(first: 50) { nodes { id number name enabled } }
+      statusUpdates(first: 10, orderBy: {field: CREATED_AT, direction: DESC}) {
+        nodes { status startDate targetDate body createdAt } }
+    }
+  }
+}

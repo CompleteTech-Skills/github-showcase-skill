@@ -1,0 +1,37 @@
+# STANDARD §4.1-§4.2 (ct-std-v1): description checks D1-D8, V1, P1, B1, X1 and the deterministic templates.
+standard: ct-std-v1
+max_existing: 140
+max_new: 120
+d4_banned_first: [A, An, The, This]
+d5_regex: "\\b(wip|todo|beta|alpha|deprecated|experimental|coming soon|best|awesome|ultimate|world-class|cutting-edge|revolutionary|next-gen)\\b"
+d7_regex: "\\bv?\\d+\\.\\d+(\\.\\d+)*\\b"
+d8_filler: [a, an, and, for, of, the, tool]
+verbs: [Generate, Create, Draft, Check, Track, Compile, Serve, Coordinate, Build, Run, Convert, Extract, Monitor, Scan, Sync,
+        Manage, Render, Automate, Analyze, Collect, Deploy, Export, Index, Map, Search, Test, Validate, Visualize, Control,
+        Read, Record]
+verb_types: [agent-skills, cli, library, api, mcp-server, bot, discord-bot, plugin, chrome-extension, security-check, template,
+             infrastructure, hardware, workspace]
+prefix_types: {website: "Source for ", fork: "Fork of ", backup: "Archived: "}
+brand_fixes:
+  "Complete Tech LLC": CompleteTech LLC
+  "Completetech LLC": CompleteTech LLC
+  "CompleTetech LLC": CompleteTech LLC
+  "COMPLETETECH LLC": CompleteTech LLC
+  "Complete Tech": CompleteTech
+skill_suffix: "\\s*\\(CompleteTech LLC skill\\)"
+disclaimer_regex: "[,;.]?\\s*(?:Not affiliated with[^.]*|Unofficial[^.]*|Independent[^.]*not endorsed[^.]*)(?=\\.?$)"
+templates:
+  agent-skills: "<Verb> [branded CompleteTech LLC] <artifacts> <for whom / from what>[, <qualifier>]."
+  verb-type: "<Verb> <object> <context>[, <key property>]."
+  security-check-cve: "Check <Product> versions for CVE-<id> (<short title>), offline and dependency-free."
+  security-check-issue: "Check <product> versions for <issue name> exposure, offline and dependency-free."
+  website: "Source for <fqdn>, <what the site offers>."
+  noun-type: "<Noun phrase: what it is> <for whom / scope>."
+  game-jevplay: "<Product>: play <game kind> against Jev at jevplay.games."
+  game: "<Product>: play <game kind>[ <context>]."
+  fork-ahead: "Fork of <parent.full_name> with <Steward> changes."
+  fork: "Fork of <parent.full_name>."
+  fork-watching: "Fork of <parent.full_name>, followed for reference."
+  backup: "Archived: <what it was>[; superseded by <owner>/<repo>]."
+  github: "Organization profile and default community health files for <name>."
+  profile: "Profile README for the CompleteDotTech account of CompleteTech LLC."

@@ -1,0 +1,381 @@
+{
+ "data": {
+  "organization": {
+   "projectV2": {
+    "id": "PVT_ref1",
+    "fullDatabaseId": "9001",
+    "number": 1,
+    "title": "Northwind Trading Co. — Research",
+    "url": "https://github.com/orgs/Northwind-Trading-Co/projects/1",
+    "shortDescription": "Northwind research board",
+    "readme": "Research board for the demo.",
+    "public": false,
+    "closed": false,
+    "template": false,
+    "repositories": {
+     "nodes": [
+      {
+       "nameWithOwner": "Northwind-Trading-Co/support-triage-agent"
+      }
+     ]
+    },
+    "teams": {
+     "nodes": []
+    },
+    "fields": {
+     "nodes": [
+      {
+       "__typename": "ProjectV2Field",
+       "id": "PVTF_n1",
+       "databaseId": 1001,
+       "name": "Title",
+       "dataType": "TITLE",
+       "isIssueField": false
+      },
+      {
+       "__typename": "ProjectV2Field",
+       "id": "PVTF_n2",
+       "databaseId": 1002,
+       "name": "Assignees",
+       "dataType": "ASSIGNEES",
+       "isIssueField": false
+      },
+      {
+       "__typename": "ProjectV2SingleSelectField",
+       "id": "PVTF_n3",
+       "databaseId": 1003,
+       "name": "Status",
+       "dataType": "SINGLE_SELECT",
+       "isIssueField": false,
+       "options": [
+        {
+         "id": "opt31",
+         "name": "Todo",
+         "color": "GRAY",
+         "description": ""
+        },
+        {
+         "id": "opt32",
+         "name": "In Progress",
+         "color": "YELLOW",
+         "description": ""
+        },
+        {
+         "id": "opt33",
+         "name": "Done",
+         "color": "GREEN",
+         "description": ""
+        }
+       ]
+      },
+      {
+       "__typename": "ProjectV2Field",
+       "id": "PVTF_n5",
+       "databaseId": 1005,
+       "name": "Repository",
+       "dataType": "REPOSITORY",
+       "isIssueField": false
+      },
+      {
+       "__typename": "ProjectV2Field",
+       "id": "PVTF_n6",
+       "databaseId": 1006,
+       "name": "Sub-issues progress",
+       "dataType": "SUB_ISSUES_PROGRESS",
+       "isIssueField": false
+      },
+      {
+       "__typename": "ProjectV2SingleSelectField",
+       "id": "PVTF_n7",
+       "databaseId": 1007,
+       "name": "Priority",
+       "dataType": "SINGLE_SELECT",
+       "isIssueField": false,
+       "options": [
+        {
+         "id": "opt71",
+         "name": "Urgent",
+         "color": "RED",
+         "description": "This cycle; drop other work"
+        },
+        {
+         "id": "opt72",
+         "name": "High",
+         "color": "ORANGE",
+         "description": "This or next cycle"
+        },
+        {
+         "id": "opt73",
+         "name": "Medium",
+         "color": "YELLOW",
+         "description": "This quarter"
+        },
+        {
+         "id": "opt74",
+         "name": "Low",
+         "color": "GRAY",
+         "description": "When there is room"
+        }
+       ]
+      },
+      {
+       "__typename": "ProjectV2IterationField",
+       "id": "PVTF_n8",
+       "databaseId": 1008,
+       "name": "Iteration",
+       "dataType": "ITERATION",
+       "isIssueField": false,
+       "configuration": {
+        "duration": 14,
+        "startDay": 1,
+        "iterations": [
+         {
+          "id": "it1",
+          "title": "Cycle 2026-11-02",
+          "startDate": "2026-11-02",
+          "duration": 14
+         }
+        ],
+        "completedIterations": []
+       }
+      },
+      {
+       "__typename": "ProjectV2SingleSelectField",
+       "id": "PVTF_n9",
+       "databaseId": 1009,
+       "name": "Workstream",
+       "dataType": "SINGLE_SELECT",
+       "isIssueField": false,
+       "options": [
+        {
+         "id": "opt91",
+         "name": "Model evals",
+         "color": "PURPLE",
+         "description": "[Research] Model and data experiments"
+        },
+        {
+         "id": "opt92",
+         "name": "Website",
+         "color": "BLUE",
+         "description": "[Product] The public site"
+        },
+        {
+         "id": "opt93",
+         "name": "Launch",
+         "color": "GREEN",
+         "description": "[Growth] Launch and community"
+        }
+       ]
+      },
+      {
+       "__typename": "ProjectV2Field",
+       "id": "PVTF_n10",
+       "databaseId": 1010,
+       "name": "Target date",
+       "dataType": "DATE",
+       "isIssueField": false
+      },
+      {
+       "__typename": "ProjectV2Field",
+       "id": "PVTF_n11",
+       "databaseId": 1011,
+       "name": "Start date",
+       "dataType": "DATE",
+       "isIssueField": false
+      },
+      {
+       "__typename": "ProjectV2Field",
+       "id": "PVTF_n12",
+       "databaseId": 1012,
+       "name": "Updated",
+       "dataType": "UPDATED",
+       "isIssueField": false
+      }
+     ]
+    },
+    "views": {
+     "nodes": [
+      {
+       "id": "PVTV_n1",
+       "number": 1,
+       "name": "Workstream Overview",
+       "layout": "BOARD_LAYOUT",
+       "filter": "",
+       "fields": {
+        "nodes": [
+         {
+          "id": "PVTF_n1",
+          "databaseId": 1001,
+          "name": "Title"
+         },
+         {
+          "id": "PVTF_n2",
+          "databaseId": 1002,
+          "name": "Assignees"
+         },
+         {
+          "id": "PVTF_n7",
+          "databaseId": 1007,
+          "name": "Priority"
+         }
+        ]
+       },
+       "groupByFields": {
+        "nodes": [
+         {
+          "id": "PVTF_n9",
+          "databaseId": 1009,
+          "name": "Workstream"
+         }
+        ]
+       },
+       "verticalGroupByFields": {
+        "nodes": [
+         {
+          "id": "PVTF_n3",
+          "databaseId": 1003,
+          "name": "Status"
+         }
+        ]
+       },
+       "sortByFields": {
+        "nodes": [
+         {
+          "direction": "ASC",
+          "field": {
+           "id": "PVTF_n7",
+           "databaseId": 1007,
+           "name": "Priority"
+          }
+         }
+        ]
+       }
+      },
+      {
+       "id": "PVTV_n2",
+       "number": 2,
+       "name": "Roadmap",
+       "layout": "ROADMAP_LAYOUT",
+       "filter": "-status:Done",
+       "fields": {
+        "nodes": [
+         {
+          "id": "PVTF_n1",
+          "databaseId": 1001,
+          "name": "Title"
+         }
+        ]
+       },
+       "groupByFields": {
+        "nodes": [
+         {
+          "id": "PVTF_n9",
+          "databaseId": 1009,
+          "name": "Workstream"
+         }
+        ]
+       },
+       "verticalGroupByFields": {
+        "nodes": []
+       },
+       "sortByFields": {
+        "nodes": [
+         {
+          "direction": "ASC",
+          "field": {
+           "id": "PVTF_n10",
+           "databaseId": 1010,
+           "name": "Target date"
+          }
+         }
+        ]
+       }
+      },
+      {
+       "id": "PVTV_n3",
+       "number": 3,
+       "name": "Priorities",
+       "layout": "TABLE_LAYOUT",
+       "filter": "-status:Done",
+       "fields": {
+        "nodes": [
+         {
+          "id": "PVTF_n1",
+          "databaseId": 1001,
+          "name": "Title"
+         }
+        ]
+       },
+       "groupByFields": {
+        "nodes": [
+         {
+          "id": "PVTF_n7",
+          "databaseId": 1007,
+          "name": "Priority"
+         }
+        ]
+       },
+       "verticalGroupByFields": {
+        "nodes": []
+       },
+       "sortByFields": {
+        "nodes": []
+       }
+      }
+     ]
+    },
+    "workflows": {
+     "nodes": [
+      {
+       "id": "PWF_1",
+       "number": 1,
+       "name": "Item added to project",
+       "enabled": true
+      },
+      {
+       "id": "PWF_2",
+       "number": 2,
+       "name": "Item reopened",
+       "enabled": true
+      },
+      {
+       "id": "PWF_3",
+       "number": 3,
+       "name": "Item closed",
+       "enabled": true
+      },
+      {
+       "id": "PWF_4",
+       "number": 4,
+       "name": "Pull request merged",
+       "enabled": true
+      },
+      {
+       "id": "PWF_5",
+       "number": 5,
+       "name": "Auto-archive items",
+       "enabled": false
+      },
+      {
+       "id": "PWF_6",
+       "number": 6,
+       "name": "Auto-add to project",
+       "enabled": true
+      }
+     ]
+    },
+    "statusUpdates": {
+     "nodes": [
+      {
+       "status": "ON_TRACK",
+       "startDate": "2026-10-01",
+       "targetDate": "2026-12-31",
+       "body": "On track.",
+       "createdAt": "2026-10-20T10:00:00Z"
+      }
+     ]
+    }
+   }
+  }
+ }
+}

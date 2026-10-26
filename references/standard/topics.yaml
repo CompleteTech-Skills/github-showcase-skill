@@ -1,0 +1,132 @@
+# STANDARD §5.2-§5.5 and §5.9 (ct-std-v1): closed topic vocabulary, alias map, language/framework maps, drop rules.
+standard: ct-std-v1
+brand_topics: [completetech, ai-ascension, jev, libreevolve, touchedbyanagent, pick-your-ai]
+family_topics: [claude-skill, codex-skill, agentic-ai, security, cve, ai-research, homelab, sts2, browser-game]
+type_topics: [agent-skills, website, web-app, mobile-app, chrome-extension, cli, library, api, mcp-server, bot, discord-bot,
+              plugin, template, tutorial, research, dataset, game, security-check, fork, backup, github-profile,
+              infrastructure, hardware, workspace]
+featured: [ai, llm, mcp, ai-agent, agentic-ai, claude, claude-code, openai, chatgpt, generative-ai, prompt-engineering,
+           machine-learning, rag, langchain, python, javascript, typescript, nodejs, rust, cpp, react, nextjs, astro, tailwind,
+           fastapi, docker, devops, actions, sdk, automation, security, privacy, vscode-extension, jupyter-notebook]
+allowed: [pdf, pdf-generator, reportlab, streamlit, vllm, ollama, gemini, anthropic, discord, obs, kicad, blender, gltf,
+          self-hosted, cve, reinforcement-learning, computer-vision, vue, c, csharp, go, java, kotlin, swift, shell,
+          powershell, html, css, lua, godot]
+domain: [finance, trading, ecommerce, marketing, sales, content-creation, podcast, social-media, publishing, directory,
+         patents, career, trading-cards, emulation, games, board-game, puzzle-game, homelab, home-automation, email, invoice,
+         billing, envelope, contract, proposal, case-study, testimonials, time-tracking, usage-tracking, orchestration,
+         sprite-animation, character-animation, rigging, benchmarks, arxiv, game-agents, observability, data-visualization,
+         ble, wearables, smart-ring]
+touchedbyanagent_domain: [ble, wearables, smart-ring]
+private_banned: [pokemon, amongus, nintendo]
+languages:
+  Python: python
+  JavaScript: javascript
+  TypeScript: typescript
+  C++: cpp
+  C: c
+  C#: csharp
+  Go: go
+  Rust: rust
+  Java: java
+  Kotlin: kotlin
+  Swift: swift
+  Shell: shell
+  PowerShell: powershell
+  HTML: html
+  CSS: css
+  Jupyter Notebook: jupyter-notebook
+  Dockerfile: docker
+  Lua: lua
+  GDScript: godot
+frameworks:
+  react: react
+  next: nextjs
+  astro: astro
+  tailwindcss: tailwind
+  fastapi: fastapi
+  streamlit: streamlit
+  langchain: langchain
+  reportlab: reportlab
+  "@modelcontextprotocol/sdk": mcp
+  mcp: mcp
+  fastmcp: mcp
+  openai: openai
+  anthropic: anthropic
+  "@anthropic-ai/sdk": anthropic
+  discord.js: discord
+  discord.py: discord
+  ollama: ollama
+  vllm: vllm
+drop_valid: "^[a-z0-9][a-z0-9-]{0,49}$"
+drop_noise: "^(wip|todo|beta|alpha|deprecated|archived|latest|stable|experimental|v\\d+(\\.\\d+)*|(19|20)\\d{2})$"
+max_public: 10
+max_private: 8
+min_public: 5
+min_private: 3
+aliases:
+  artificial-intelligence: ai
+  llms: llm
+  large-language-model: llm
+  large-language-models: llm
+  model-context-protocol: mcp
+  ai-agents: ai-agent
+  agents: ai-agent
+  agent-skill: agent-skills
+  claude-ai: claude
+  claude-cli: claude-code
+  claude-code-cli: claude-code
+  agentic-workflows: agentic-ai
+  agentic-development: agentic-ai
+  genai: generative-ai
+  gen-ai: generative-ai
+  github-actions: actions
+  tailwindcss: tailwind
+  next-js: nextjs
+  reactjs: react
+  vuejs: vue
+  node: nodejs
+  node-js: nodejs
+  py: python
+  python3: python
+  js: javascript
+  ts: typescript
+  golang: go
+  c-plus-plus: cpp
+  cplusplus: cpp
+  jupyter: jupyter-notebook
+  command-line: cli
+  retrieval-augmented-generation: rag
+  pdf-generation: pdf-generator
+  home-assistant: home-automation
+  mcp-servers: mcp-server
+  complete-tech: completetech
+# §5.3a org membership topics (UD 5; RT-11), generated from the registry's `org_topic` (the registry wins if they differ).
+# A repo adds one per `also_in` org, after the family topics and before the type topic; never its home org's own.
+# null: the romgenie utility orgs take no incoming also_in. T3 topics are added only after co-owner sign-off.
+org_topics:
+  CompleteTech-LLC: completetech-llc
+  CompleteTech-Skills: completetech-skills
+  CompleteTech-LLC-AI-Research: completetech-ai-research
+  CompleTetech-Security: completetech-security
+  CompleteTech-Infrastructure: completetech-infrastructure
+  CompleteTech-Commerce: completetech-commerce
+  CompleteTech-Creative: completetech-creative
+  CompleteTech-Pokemon: completetech-tcg
+  CompleteTech-Data: completetech-data
+  CompleteTech-Games: completetech-games
+  CompleteTech-Directories: completetech-directories
+  CompleteTech-Hardware: completetech-hardware
+  CompleteTech-DiscordApps: completetech-discord-apps
+  CompleteTechDiscord-Games: completetech-discord-games
+  CompleteTech-Patent-IP: completetech-patent-ip
+  CompleteTech-Career-Toolkit: completetech-career-toolkit
+  CompleteTech-ManageEngine: completetech-manageengine
+  AI-Ascension: ai-ascension
+  Jev-Engineering: jev-engineering
+  jevplay-games: jevplay-games
+  LibreEvolve: libreevolve
+  TouchedByAnAgent: touchedbyanagent
+  Pick-Your-AI: pick-your-ai
+  Jevelopers-neatHack-2026: ticketstub
+  romgenie-following-repos: null
+  romgenie-archive-repostiory: null

@@ -1,0 +1,50 @@
+{
+ "data": {
+  "viewer": {
+   "login": "CompleteDotTech",
+   "lists": {
+    "totalCount": 3,
+    "nodes": [
+     {
+      "id": "UL_other",
+      "name": "Favourite tools",
+      "slug": "favourite-tools",
+      "description": "Tools.",
+      "isPrivate": false,
+      "items": {
+       "totalCount": 1,
+       "nodes": [
+        {
+         "id": "R_flask",
+         "nameWithOwner": "pallets/flask"
+        }
+       ]
+      }
+     },
+     {
+      "id": "UL_misc",
+      "name": "Misc",
+      "slug": "misc",
+      "description": "",
+      "isPrivate": false,
+      "items": {
+       "totalCount": 0,
+       "nodes": []
+      }
+     },
+     {
+      "id": "UL_nw",
+      "name": "Northwind: built on",
+      "slug": "northwind-built-on",
+      "description": "Old text.",
+      "isPrivate": false,
+      "items": {
+       "totalCount": 0,
+       "nodes": []
+      }
+     }
+    ]
+   }
+  }
+ }
+}

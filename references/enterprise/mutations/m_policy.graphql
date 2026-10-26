@@ -1,0 +1,1 @@
+mutation($e: ID!) { updateEnterpriseMembersCanDeleteRepositoriesSetting(input: {enterpriseId: $e, settingValue: DISABLED}) { message enterprise { ownerInfo { membersCanDeleteRepositoriesSetting } } } }

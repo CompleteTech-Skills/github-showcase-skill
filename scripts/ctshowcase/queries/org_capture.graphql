@@ -1,0 +1,8 @@
+# Org About fields, verified badge and pins for `org doctor` (pinnedItems is the set GitHub shows the viewer).
+query OrgCapture($org: String!) {
+  organization(login: $org) {
+    id login name description websiteUrl location email twitterUsername isVerified avatarUrl
+    pinnedItems(first: 6, types: [REPOSITORY]) { nodes { ... on Repository { nameWithOwner isPrivate isFork isArchived } } }
+    projectsV2(first: 50) { totalCount nodes { number title public closed shortDescription } }
+  }
+}

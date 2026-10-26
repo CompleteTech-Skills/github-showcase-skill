@@ -1,0 +1,45 @@
+# STANDARD §7 (ct-std-v1): H2 order per variant (R required / O optional), renames, licence rows, disclaimers.
+standard: ct-std-v1
+# §7.1 order of the generated header (review q57 `nav` default; brand.yaml readme.nav_first restores nav-first)
+header_order: [banner, nav, title]
+variants:
+  A: [[About, R], [OpenClaw / ClawHub Metadata, R], [Workflow Diagram, R], [What It Does, R], [Contents, R], [Quick Start, R],
+      [Example, R], [Inputs, O], [Assets, O], [Brand Notes, R], [Runtime Permissions, R], [Network Boundary, R], [Source, O],
+      [License, R]]
+  B: [[About, R], [Live Site, R], [Features, R], [Tech Stack, R], [Quick Start, R], [Deployment, O], [Status, O], [License, R]]
+  C: [[About, R], [Install, R], [Quick Start, R], [Usage, R], [Configuration, O], [Workflow Diagram, O], [Development, O],
+      [License, R]]
+  D: [[About, R], [Findings, R], [Method, R], [Data and Sources, R], [Reproduce, O], [Limits, R], [Citation, O], [License, R]]
+  E: [[About, R], [Play, R], [How to Play, R], [Run Locally, O], [Credits and Disclaimer, R], [License, R]]
+  F: [[Quick Start, R], [The Report, R], [Version Rules, R], [Configuration Observations, O], [Limits, R], [Reference, O],
+      [Licensing, R]]
+  G: []
+  H: []
+  I: [[About, R], [Setup, R], [Usage, R], [Runbook, O], [Ownership, R], [License, R]]
+  J: [[About, R], [Files, R], [License, R]]
+aliases_for_status: {D: {Findings: [Status]}}
+renames:
+  installation: Install
+  getting started: Quick Start
+  quickstart: Quick Start
+  quick start: Quick Start
+  licence: License
+title_small_words: [a, an, and, as, at, but, by, for, in, of, on, or, the, to, via, vs]
+title_keep_case: [AI, API, CLI, MCP, CVE, LLM, OBS, PDF, QR, SDK, STS2, TCG, UI, URL, GitHub, CompleteTech, LibreEvolve,
+                  NetScaler, KiCad, jevplay.games, romgenie]
+license_rows:
+  security: "Available under the GNU AGPL-3.0 or a commercial license; see `LICENSE` and `LICENSING.md`."
+  skills_mit: "Code, templates, and documentation are licensed under the MIT License. CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project. See `LICENSE` and `BRAND_ASSETS.md`."
+  t1_mit: "Code and documentation are licensed under the MIT License; see `LICENSE`. CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project."
+  t2_mit: "Code and documentation are licensed under the MIT License; see `LICENSE`. <Brand> names and logos are reserved and are not licensed for reuse except to identify this project."
+  other: "Licensed under the <license>; see `<path>`. <Brand> names and logos are reserved and are not licensed for reuse except to identify this project."
+  private: "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved."
+  private_hold: "Proprietary. All rights reserved."
+game_disclaimers:
+  jev-guess-who: Guess Who?
+  jev-mastermind: Mastermind
+  jev-2048-arcade: "2048"
+  jev-connect-four: Connect Four
+callouts:
+  I: "> [!IMPORTANT]\n> Internal <who> repository. Not for distribution."
+placeholder_regex: "\\b(TBD|TODO|Coming soon|N/A|Lorem)\\b"

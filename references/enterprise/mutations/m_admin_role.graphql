@@ -1,0 +1,1 @@
+mutation($e: ID!) { updateEnterpriseAdministratorRole(input: {enterpriseId: $e, login: "romgenie", role: BILLING_MANAGER}) { message } }

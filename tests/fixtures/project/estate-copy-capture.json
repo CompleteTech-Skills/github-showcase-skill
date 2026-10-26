@@ -1,0 +1,431 @@
+{
+ "data": {
+  "user": {
+   "projectV2": {
+    "id": "PVT_estate7",
+    "fullDatabaseId": "9001",
+    "number": 7,
+    "title": "CompleteTech — Estate",
+    "url": "https://github.com/users/CompleteDotTech/projects/7",
+    "shortDescription": "",
+    "readme": "",
+    "public": false,
+    "closed": false,
+    "template": false,
+    "repositories": {
+     "nodes": []
+    },
+    "teams": {
+     "nodes": []
+    },
+    "fields": {
+     "nodes": [
+      {
+       "__typename": "ProjectV2Field",
+       "id": "PVTF_n1",
+       "databaseId": 1001,
+       "name": "Title",
+       "dataType": "TITLE",
+       "isIssueField": false
+      },
+      {
+       "__typename": "ProjectV2Field",
+       "id": "PVTF_n2",
+       "databaseId": 1002,
+       "name": "Assignees",
+       "dataType": "ASSIGNEES",
+       "isIssueField": false
+      },
+      {
+       "__typename": "ProjectV2SingleSelectField",
+       "id": "PVTF_n3",
+       "databaseId": 1003,
+       "name": "Status",
+       "dataType": "SINGLE_SELECT",
+       "isIssueField": false,
+       "options": [
+        {
+         "id": "opt31",
+         "name": "Todo",
+         "color": "GRAY",
+         "description": ""
+        },
+        {
+         "id": "opt32",
+         "name": "In Progress",
+         "color": "YELLOW",
+         "description": ""
+        },
+        {
+         "id": "opt33",
+         "name": "Done",
+         "color": "GREEN",
+         "description": ""
+        }
+       ]
+      },
+      {
+       "__typename": "ProjectV2Field",
+       "id": "PVTF_n5",
+       "databaseId": 1005,
+       "name": "Repository",
+       "dataType": "REPOSITORY",
+       "isIssueField": false
+      },
+      {
+       "__typename": "ProjectV2Field",
+       "id": "PVTF_n6",
+       "databaseId": 1006,
+       "name": "Sub-issues progress",
+       "dataType": "SUB_ISSUES_PROGRESS",
+       "isIssueField": false
+      },
+      {
+       "__typename": "ProjectV2SingleSelectField",
+       "id": "PVTF_n7",
+       "databaseId": 1007,
+       "name": "Priority",
+       "dataType": "SINGLE_SELECT",
+       "isIssueField": false,
+       "options": [
+        {
+         "id": "opt71",
+         "name": "Urgent",
+         "color": "RED",
+         "description": "This cycle; drop other work"
+        },
+        {
+         "id": "opt72",
+         "name": "High",
+         "color": "ORANGE",
+         "description": "This or next cycle"
+        },
+        {
+         "id": "opt73",
+         "name": "Medium",
+         "color": "YELLOW",
+         "description": "This quarter"
+        },
+        {
+         "id": "opt74",
+         "name": "Low",
+         "color": "GRAY",
+         "description": "When there is room"
+        }
+       ]
+      },
+      {
+       "__typename": "ProjectV2IterationField",
+       "id": "PVTF_n8",
+       "databaseId": 1008,
+       "name": "Iteration",
+       "dataType": "ITERATION",
+       "isIssueField": false,
+       "configuration": {
+        "duration": 14,
+        "startDay": 1,
+        "iterations": [
+         {
+          "id": "it1",
+          "title": "Cycle 2026-11-02",
+          "startDate": "2026-11-02",
+          "duration": 14
+         }
+        ],
+        "completedIterations": []
+       }
+      },
+      {
+       "__typename": "ProjectV2SingleSelectField",
+       "id": "PVTF_n9",
+       "databaseId": 1009,
+       "name": "Workstream",
+       "dataType": "SINGLE_SELECT",
+       "isIssueField": false,
+       "options": [
+        {
+         "id": "opt201",
+         "name": "Product",
+         "color": "BLUE",
+         "description": "[Product] Product / Build"
+        },
+        {
+         "id": "opt202",
+         "name": "Research",
+         "color": "PURPLE",
+         "description": "[Research] Research / Discovery"
+        },
+        {
+         "id": "opt203",
+         "name": "Ops",
+         "color": "GRAY",
+         "description": "[Ops] Ops / Infra / Security / Admin"
+        }
+       ]
+      },
+      {
+       "__typename": "ProjectV2Field",
+       "id": "PVTF_n10",
+       "databaseId": 1010,
+       "name": "Target date",
+       "dataType": "DATE",
+       "isIssueField": false
+      },
+      {
+       "__typename": "ProjectV2Field",
+       "id": "PVTF_n11",
+       "databaseId": 1011,
+       "name": "Start date",
+       "dataType": "DATE",
+       "isIssueField": false
+      },
+      {
+       "__typename": "ProjectV2Field",
+       "id": "PVTF_n12",
+       "databaseId": 1012,
+       "name": "Updated",
+       "dataType": "UPDATED",
+       "isIssueField": false
+      }
+     ]
+    },
+    "views": {
+     "nodes": [
+      {
+       "id": "PVTV_n1",
+       "number": 1,
+       "name": "Workstream Overview",
+       "layout": "BOARD_LAYOUT",
+       "filter": "",
+       "fields": {
+        "nodes": [
+         {
+          "id": "PVTF_n1",
+          "databaseId": 1001,
+          "name": "Title"
+         },
+         {
+          "id": "PVTF_n2",
+          "databaseId": 1002,
+          "name": "Assignees"
+         },
+         {
+          "id": "PVTF_n7",
+          "databaseId": 1007,
+          "name": "Priority"
+         }
+        ]
+       },
+       "groupByFields": {
+        "nodes": [
+         {
+          "id": "PVTF_n9",
+          "databaseId": 1009,
+          "name": "Workstream"
+         }
+        ]
+       },
+       "verticalGroupByFields": {
+        "nodes": [
+         {
+          "id": "PVTF_n3",
+          "databaseId": 1003,
+          "name": "Status"
+         }
+        ]
+       },
+       "sortByFields": {
+        "nodes": [
+         {
+          "direction": "ASC",
+          "field": {
+           "id": "PVTF_n7",
+           "databaseId": 1007,
+           "name": "Priority"
+          }
+         }
+        ]
+       }
+      },
+      {
+       "id": "PVTV_n2",
+       "number": 2,
+       "name": "Roadmap",
+       "layout": "ROADMAP_LAYOUT",
+       "filter": "-status:Done",
+       "fields": {
+        "nodes": [
+         {
+          "id": "PVTF_n1",
+          "databaseId": 1001,
+          "name": "Title"
+         }
+        ]
+       },
+       "groupByFields": {
+        "nodes": [
+         {
+          "id": "PVTF_n9",
+          "databaseId": 1009,
+          "name": "Workstream"
+         }
+        ]
+       },
+       "verticalGroupByFields": {
+        "nodes": []
+       },
+       "sortByFields": {
+        "nodes": [
+         {
+          "direction": "ASC",
+          "field": {
+           "id": "PVTF_n10",
+           "databaseId": 1010,
+           "name": "Target date"
+          }
+         }
+        ]
+       }
+      },
+      {
+       "id": "PVTV_n3",
+       "number": 3,
+       "name": "Priorities",
+       "layout": "TABLE_LAYOUT",
+       "filter": "-status:Done",
+       "fields": {
+        "nodes": [
+         {
+          "id": "PVTF_n1",
+          "databaseId": 1001,
+          "name": "Title"
+         }
+        ]
+       },
+       "groupByFields": {
+        "nodes": [
+         {
+          "id": "PVTF_n7",
+          "databaseId": 1007,
+          "name": "Priority"
+         }
+        ]
+       },
+       "verticalGroupByFields": {
+        "nodes": []
+       },
+       "sortByFields": {
+        "nodes": []
+       }
+      },
+      {
+       "id": "PVTV_n4",
+       "number": 4,
+       "name": "Current cycle",
+       "layout": "BOARD_LAYOUT",
+       "filter": "iteration:@current",
+       "fields": {
+        "nodes": [
+         {
+          "id": "PVTF_n1",
+          "databaseId": 1001,
+          "name": "Title"
+         }
+        ]
+       },
+       "groupByFields": {
+        "nodes": []
+       },
+       "verticalGroupByFields": {
+        "nodes": [
+         {
+          "id": "PVTF_n3",
+          "databaseId": 1003,
+          "name": "Status"
+         }
+        ]
+       },
+       "sortByFields": {
+        "nodes": []
+       }
+      },
+      {
+       "id": "PVTV_n5",
+       "number": 5,
+       "name": "Backlog",
+       "layout": "TABLE_LAYOUT",
+       "filter": "status:Backlog,Ready workstream:Research",
+       "fields": {
+        "nodes": [
+         {
+          "id": "PVTF_n1",
+          "databaseId": 1001,
+          "name": "Title"
+         }
+        ]
+       },
+       "groupByFields": {
+        "nodes": [
+         {
+          "id": "PVTF_n9",
+          "databaseId": 1009,
+          "name": "Workstream"
+         }
+        ]
+       },
+       "verticalGroupByFields": {
+        "nodes": []
+       },
+       "sortByFields": {
+        "nodes": []
+       }
+      }
+     ]
+    },
+    "workflows": {
+     "nodes": [
+      {
+       "id": "PWF_1",
+       "number": 1,
+       "name": "Item added to project",
+       "enabled": true
+      },
+      {
+       "id": "PWF_2",
+       "number": 2,
+       "name": "Item reopened",
+       "enabled": true
+      },
+      {
+       "id": "PWF_3",
+       "number": 3,
+       "name": "Item closed",
+       "enabled": true
+      },
+      {
+       "id": "PWF_4",
+       "number": 4,
+       "name": "Pull request merged",
+       "enabled": true
+      },
+      {
+       "id": "PWF_5",
+       "number": 5,
+       "name": "Auto-archive items",
+       "enabled": false
+      },
+      {
+       "id": "PWF_6",
+       "number": 6,
+       "name": "Auto-add to project",
+       "enabled": true
+      }
+     ]
+    },
+    "statusUpdates": {
+     "nodes": []
+    }
+   }
+  }
+ }
+}

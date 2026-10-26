@@ -1,0 +1,6 @@
+[
+ {"id": "org-001", "owner": "CompleTetech-Security", "repo": "", "action": "org-rename", "target_owner": "", "new_name": "CompleteTech-Security", "default_approve": false},
+ {"id": "org-003", "owner": "romgenie-following-repos", "repo": "", "action": "org-rename", "target_owner": "", "new_name": "CompleteTech-Following", "default_approve": false},
+ {"id": "org-005", "owner": "CompleteTech-Pokemon", "repo": "", "action": "org-rename", "target_owner": "", "new_name": "CompleteTech-TCG", "default_approve": false},
+ {"id": "org-004", "owner": "CompleteTechDiscord-Games", "repo": "", "action": "org-merge", "target_owner": "CompleteTech-Games", "new_name": "", "default_approve": false}
+]

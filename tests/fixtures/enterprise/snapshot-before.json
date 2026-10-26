@@ -1,0 +1,23 @@
+{"schema": 1, "standard": "ct-std-v1", "taken_at": "2026-10-25T00:00:00Z", "slug": "completetech", "id": "E_synthetic1",
+ "sha256": {},
+ "sections": {
+  "profile": {"id": "E_synthetic1", "slug": "completetech", "name": "CompleteTech", "description": null,
+   "websiteUrl": "https://www.complete.tech", "location": null, "readme": null,
+   "billingInfo": {"totalLicenses": 2, "totalAvailableLicenses": 0, "allLicensableUsersCount": 2},
+   "rulesets": {"nodes": []},
+   "ownerInfo": {"admins": {"edges": [{"role": "OWNER", "node": {"login": "CompleteDotTech"}}, {"role": "OWNER", "node": {"login": "romgenie"}}]},
+    "domains": {"nodes": [{"id": "VD_1", "domain": "complete.tech", "isVerified": false, "isApproved": false, "dnsHostName": "_gh-completetech-e.complete.tech"}]},
+    "pendingMemberInvitations": {"totalCount": 1, "nodes": [{"invitee": {"login": "romgenie"}, "organization": {"login": "CompleteTech-Data"}, "role": "DIRECT_MEMBER"}]},
+    "pendingCollaboratorInvitations": {"totalCount": 0},
+    "twoFactorRequiredSetting": "NO_POLICY", "ipAllowListEnabledSetting": "DISABLED",
+    "notificationDeliveryRestrictionEnabledSetting": "DISABLED", "repositoryDeployKeySetting": "NO_POLICY", "samlIdentityProvider": null,
+    "membersCanDeleteRepositoriesSetting": "NO_POLICY"}},
+  "organizations": [
+   {"id": "O_1", "login": "CompleteTech-LLC", "isVerified": false, "websiteUrl": "https://www.complete.tech", "email": null},
+   {"id": "O_2", "login": "CompleteTech-Data", "isVerified": false, "websiteUrl": "https://www.complete.tech", "email": null},
+   {"id": "O_3", "login": "MetatronAngelAgent", "isVerified": false, "websiteUrl": null, "email": null}],
+  "members": [
+   {"login": "CompleteDotTech", "organizations": {"edges": [{"role": "OWNER", "node": {"login": "CompleteTech-LLC"}}, {"role": "MEMBER", "node": {"login": "CompleteTech-Data"}}]}},
+   {"login": "romgenie", "organizations": {"edges": [{"role": "OWNER", "node": {"login": "CompleteTech-LLC"}}]}}],
+  "outside_collaborators": [
+   {"node": {"login": "romgenie"}, "repositories": {"nodes": [{"nameWithOwner": "CompleteTech-Data/ohio-index", "isPrivate": true}, {"nameWithOwner": "CompleteTech-LLC/site", "isPrivate": false}]}}]}}

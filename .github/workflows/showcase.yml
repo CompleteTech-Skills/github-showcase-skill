@@ -1,0 +1,40 @@
+name: Showcase
+
+# Dogfood: this repository regenerates its own README hero banner and repo card
+# with the composite action defined in action.yml at the repository root.
+on:
+  push:
+    branches: [main]
+    paths:
+      - assets/icon.png
+      - .github/showcase.yml
+      - references/brand.yaml
+      - scripts/**
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Regenerate even if nothing changed"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: showcase-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  showcase:
+    if: ${{ !github.event.repository.fork && !github.event.repository.archived }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          outputs: banner,card
+          readme: header
+          force: ${{ inputs.force || false }}

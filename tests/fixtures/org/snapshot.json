@@ -1,0 +1,28 @@
+{
+ "org": {
+  "login": "Northwind-Trading-Co",
+  "name": "Northwind Trading Co.",
+  "description": "Old description.",
+  "blog": "https://www.complete.tech",
+  "location": "Cincinnati, OH",
+  "email": null,
+  "twitter_username": null,
+  "is_verified": false,
+  "avatar_url": "https://avatars.githubusercontent.com/u/1?v=4"
+ },
+ "graphql": {
+  "data": {
+   "organization": {
+    "pinnedItems": {
+     "nodes": [
+      {
+       "nameWithOwner": "Northwind-Trading-Co/support-triage-agent",
+       "isPrivate": false
+      }
+     ]
+    }
+   }
+  }
+ },
+ "profile_readme": null
+}

@@ -1,0 +1,863 @@
+{
+ "badges": {
+  "accent": "1E3A8A",
+  "brand": "005ADD",
+  "label": null,
+  "local_label_bg": "#555555",
+  "local_text": "#FFFFFF",
+  "neutral": "64748B",
+  "positive": "067647"
+ },
+ "brand_assets": {
+  "bulb_dark": "assets/brand/bulb-dark.png",
+  "crops": {
+   "bulb_dark": null,
+   "bulb_mask": {
+    "b_min": 150,
+    "b_minus_g_min": 20,
+    "r_max": 80
+   },
+   "mark_dark": null,
+   "measured": false
+  },
+  "dark_master": "current",
+  "logo_dark": "assets/brand/logo-dark.png",
+  "logo_dark_candidate": "assets/brand/logo-dark-full.png",
+  "logo_light": "assets/brand/logo.png",
+  "mark_dark": "assets/brand/mark-dark.png",
+  "mark_light": "assets/brand/mark-light.png"
+ },
+ "brand_strings": {
+  "company": "CompleteTech LLC",
+  "demo_client": "Northwind Trading Co.",
+  "demo_owner": "Northwind-Trading-Co",
+  "short": "CompleteTech",
+  "tagline": "Innovation at Every Integration",
+  "website": "https://www.complete.tech"
+ },
+ "contrast_candidates": [
+  "#0F172A",
+  "#FFFFFF",
+  "#1E1E1E"
+ ],
+ "defaults": {
+  "banner": "generate",
+  "canvas": {
+   "from": "#0F172A",
+   "grid": "#1E3A8A",
+   "grid_opacity": 0.25,
+   "grid_pitch": 32,
+   "kind": "gradient-grid",
+   "overlay": {
+    "color": "#1E3A8A",
+    "from": 0.0,
+    "to": 0.55
+   },
+   "to": "#001F3F"
+  },
+  "company_label": "COMPLETETECH LLC",
+  "eyebrow_case": "upper",
+  "fonts": {
+   "card_body": "poppins-regular",
+   "card_chip_attr": "poppins-medium",
+   "card_chip_key": "poppins-semibold",
+   "card_name": "mono-medium",
+   "chip": "poppins-semibold",
+   "display": "poppins-semibold",
+   "eyebrow": "poppins-semibold",
+   "subtitle": "poppins-regular",
+   "tagline": "mono-medium",
+   "title": "mono-bold"
+  },
+  "hold": false,
+  "measured": true,
+  "tokens": {
+   "accent": "#00A7FD",
+   "accent_deep": "#005ADD",
+   "accent_mid": "#0081ED",
+   "bar": {
+    "from": "#005ADD",
+    "height": 6,
+    "to": "#005ADD"
+   },
+   "body": "#CBD5E1",
+   "card_edge": "#E2E8F0",
+   "card_fill": "#F8FAFC",
+   "card_ink": "#0F172A",
+   "card_shadow": {
+    "blur": 12,
+    "color": "#000000",
+    "dx": 6,
+    "dy": 8,
+    "opacity": 0.35
+   },
+   "chip_attr": {
+    "bg": "#005ADD",
+    "fg": "#FFFFFF"
+   },
+   "chip_key": {
+    "bg": "#FFC300",
+    "fg": "#0F172A"
+   },
+   "edge": {
+    "color": "#00A7FD",
+    "opacity": 0.28
+   },
+   "eyebrow": "#00A7FD",
+   "gold_trace": "#FFC300",
+   "ink": "#0F172A",
+   "muted": "#94A3B8",
+   "plate_low": "#001F3F",
+   "signal_core": "#E0F4FF",
+   "subtitle": "#CBD5E1",
+   "title": "#F1F5F9"
+  }
+ },
+ "families": {
+  "ai-ascension": {
+   "banner": "keep-existing",
+   "canvas": {
+    "color": "#15120E",
+    "kind": "flat"
+   },
+   "company_label": "AI Ascension",
+   "eyebrow_case": "asis",
+   "fonts": {
+    "card_body": "bricolage-medium",
+    "card_name": "fraunces-semibold",
+    "display": "fraunces-semibold",
+    "eyebrow": "mono-medium",
+    "subtitle": "bricolage-medium",
+    "title": "fraunces-semibold"
+   },
+   "measured": true,
+   "tokens": {
+    "accent": "#F2B75C",
+    "accent_deep": "#E39B3A",
+    "accent_mid": "#E39B3A",
+    "bar": {
+     "from": "#F2B75C",
+     "height": 6,
+     "to": "#E39B3A"
+    },
+    "body": "#EDE4D3",
+    "card_edge": "#C9BFAE",
+    "card_fill": "#EDE4D3",
+    "chip_attr": {
+     "bg": "#E39B3A",
+     "fg": "#15120E"
+    },
+    "chip_key": {
+     "bg": "#F2B75C",
+     "fg": "#15120E"
+    },
+    "edge": {
+     "color": "#F2B75C",
+     "opacity": 0.28
+    },
+    "eyebrow": "#F2B75C",
+    "gold_trace": "#F2B75C",
+    "muted": "#C9BFAE",
+    "plate_low": "#2A241C",
+    "signal_core": "#FFF4E0",
+    "subtitle": "#EDE4D3",
+    "title": "#EDE4D3"
+   }
+  },
+  "completetech": {
+   "measured": true
+  },
+  "jev-engineering": {
+   "canvas": {
+    "color": "#010104",
+    "grid": "#22D3EE",
+    "grid_opacity": 0.07,
+    "kind": "flat-grid"
+   },
+   "company_label": "Jev Engineering",
+   "eyebrow_case": "asis",
+   "measured": false,
+   "tokens": {
+    "accent": "#22D3EE",
+    "accent_deep": "#8B5CF6",
+    "accent_mid": "#8B5CF6",
+    "bar": {
+     "from": "#22D3EE",
+     "height": 6,
+     "to": "#8B5CF6"
+    },
+    "card_fill": "#0C075C",
+    "card_ink": "#F1F5F9",
+    "chip_attr": {
+     "bg": "#8B5CF6",
+     "fg": "#010104"
+    },
+    "chip_key": {
+     "bg": "#22D3EE",
+     "fg": "#010104"
+    },
+    "edge": {
+     "color": "#22D3EE",
+     "opacity": 0.28
+    },
+    "eyebrow": "#22D3EE",
+    "gold_trace": "#22D3EE",
+    "plate_low": "#0C075C",
+    "title": "#F1F5F9"
+   }
+  },
+  "jevplay-games": {
+   "canvas": {
+    "color": "#1E1E1E",
+    "dot": "#E551BA",
+    "dot_opacity": 0.16,
+    "kind": "halftone",
+    "pitch": 12,
+    "radius": 2
+   },
+   "company_label": "jevplay.games",
+   "eyebrow_case": "asis",
+   "icon_pixel_art": true,
+   "measured": true,
+   "tokens": {
+    "accent": "#F386A1",
+    "accent_deep": "#E551BA",
+    "accent_mid": "#E551BA",
+    "bar": {
+     "from": "#E551BA",
+     "height": 6,
+     "to": "#F386A1"
+    },
+    "body": "#E5E7EB",
+    "card_edge": "#F386A1",
+    "card_fill": "#F386A1",
+    "card_shadow": {
+     "blur": 0,
+     "color": "#E551BA",
+     "dx": 6,
+     "dy": 6,
+     "opacity": 1.0
+    },
+    "chip_attr": {
+     "bg": "#3A1A33",
+     "fg": "#F386A1"
+    },
+    "chip_key": {
+     "bg": "#F386A1",
+     "fg": "#1E1E1E"
+    },
+    "edge": {
+     "color": "#F386A1",
+     "opacity": 0.45
+    },
+    "eyebrow": "#F386A1",
+    "gold_trace": "#F386A1",
+    "ink": "#1E1E1E",
+    "muted": "#C9CDD3",
+    "plate_low": "#1E1E1E",
+    "signal_core": "#FFE0E5",
+    "subtitle": "#E5E7EB",
+    "title": "#FFFFFF"
+   }
+  },
+  "libreevolve": {
+   "canvas": {
+    "color": "#021527",
+    "grid": "#10B981",
+    "grid_opacity": 0.07,
+    "kind": "flat-grid"
+   },
+   "company_label": "LibreEvolve",
+   "eyebrow_case": "asis",
+   "measured": false,
+   "tokens": {
+    "accent": "#10B981",
+    "accent_deep": "#065F46",
+    "accent_mid": "#10B981",
+    "bar": {
+     "from": "#065F46",
+     "height": 6,
+     "to": "#10B981"
+    },
+    "card_fill": "#032530",
+    "card_ink": "#F1F5F9",
+    "chip_attr": {
+     "bg": "#065F46",
+     "fg": "#F1F5F9"
+    },
+    "chip_key": {
+     "bg": "#10B981",
+     "fg": "#021527"
+    },
+    "edge": {
+     "color": "#10B981",
+     "opacity": 0.28
+    },
+    "eyebrow": "#10B981",
+    "gold_trace": "#10B981",
+    "plate_low": "#021527",
+    "title": "#F1F5F9"
+   }
+  },
+  "romgenie": {
+   "canvas": {
+    "color": "#002C31",
+    "grid": "#F4C430",
+    "grid_opacity": 0.07,
+    "kind": "flat-grid"
+   },
+   "company_label": "romgenie",
+   "eyebrow_case": "asis",
+   "measured": false,
+   "tokens": {
+    "accent": "#F4C430",
+    "accent_deep": "#B8860B",
+    "accent_mid": "#B8860B",
+    "bar": {
+     "from": "#B8860B",
+     "height": 6,
+     "to": "#F4C430"
+    },
+    "card_fill": "#183B31",
+    "card_ink": "#F8FAFC",
+    "chip_attr": {
+     "bg": "#B8860B"
+    },
+    "chip_key": {
+     "bg": "#F4C430",
+     "fg": "#002C31"
+    },
+    "edge": {
+     "color": "#F4C430",
+     "opacity": 0.28
+    },
+    "eyebrow": "#F4C430",
+    "gold_trace": "#F4C430",
+    "plate_low": "#002C31",
+    "title": "#F8FAFC"
+   }
+  },
+  "touchedbyanagent": {
+   "canvas": {
+    "color": "#1D1116",
+    "grid": "#F59E0B",
+    "grid_opacity": 0.07,
+    "kind": "flat-grid"
+   },
+   "company_label": "Touched By An Agent",
+   "eyebrow_case": "asis",
+   "hold": true,
+   "measured": false,
+   "tokens": {
+    "accent": "#F59E0B",
+    "accent_deep": "#E11D74",
+    "accent_mid": "#E11D74",
+    "bar": {
+     "from": "#E11D74",
+     "height": 6,
+     "to": "#F59E0B"
+    },
+    "card_fill": "#2F0132",
+    "card_ink": "#FDF2F8",
+    "chip_attr": {
+     "bg": "#E11D74"
+    },
+    "chip_key": {
+     "bg": "#F59E0B",
+     "fg": "#1D1116"
+    },
+    "edge": {
+     "color": "#F59E0B",
+     "opacity": 0.28
+    },
+    "eyebrow": "#F59E0B",
+    "gold_trace": "#F59E0B",
+    "plate_low": "#1D1116",
+    "title": "#FDF2F8"
+   }
+  }
+ },
+ "fonts": {
+  "bricolage-medium": "BricolageGrotesque-Medium.ttf",
+  "fraunces-semibold": "Fraunces-SemiBold.ttf",
+  "mono-bold": "JetBrainsMono-Bold.ttf",
+  "mono-medium": "JetBrainsMono-Medium.ttf",
+  "mono-regular": "JetBrainsMono-Regular.ttf",
+  "poppins-medium": "Poppins-Medium.ttf",
+  "poppins-regular": "Poppins-Regular.ttf",
+  "poppins-semibold": "Poppins-SemiBold.ttf",
+  "pressstart": "PressStart2P-Regular.ttf"
+ },
+ "footer": {
+  "alt": "CompleteTech LLC",
+  "href": "https://www.complete.tech",
+  "line_prefix": "Built by",
+  "line_suffix": "· Innovation at Every Integration",
+  "logo_dark_url": "https://raw.githubusercontent.com/CompleteTech-LLC/.github/main/brand/logo-dark.png",
+  "logo_light_url": "https://raw.githubusercontent.com/CompleteTech-LLC/.github/main/brand/logo.png",
+  "width": 200
+ },
+ "languages": {
+  "Astro": "#FF5A03",
+  "C": "#555555",
+  "C#": "#178600",
+  "C++": "#F34B7D",
+  "CSS": "#563D7C",
+  "Dockerfile": "#384D54",
+  "GDScript": "#355570",
+  "Go": "#00ADD8",
+  "HTML": "#E34C26",
+  "Java": "#B07219",
+  "JavaScript": "#F1E05A",
+  "Jupyter Notebook": "#DA5B0B",
+  "Kotlin": "#A97BFF",
+  "Lua": "#000080",
+  "Mermaid": "#FF3670",
+  "PHP": "#4F5D95",
+  "PowerShell": "#012456",
+  "Python": "#3572A5",
+  "Rust": "#DEA584",
+  "Shell": "#89E051",
+  "Svelte": "#FF3E00",
+  "Swift": "#F05138",
+  "TypeScript": "#3178C6",
+  "Vue": "#41B883",
+  "default": "#94A3B8"
+ },
+ "orgs": {
+  "AI-Ascension": {
+   "banner": "keep-existing",
+   "brand_topic": "ai-ascension",
+   "description": "AI game-agent toolkit for Slay the Spire 2. Not affiliated with Mega Crit. Steward: CompleteTech LLC.",
+   "display_name": "AI Ascension",
+   "eyebrow": null,
+   "family": "ai-ascension",
+   "family_topics": [
+    "sts2"
+   ],
+   "family_topics_except": [
+    "jev-factorio-agent"
+   ],
+   "footer": true,
+   "former_slugs": [],
+   "nav_name": "AI Ascension",
+   "tier": "T2"
+  },
+  "CompleTetech-Security": {
+   "banner_category": "SECURITY TOOLS",
+   "brand_topic": "completetech",
+   "description": "Offline, dependency-free CVE version checkers for network appliances and Node.js. A CompleteTech LLC organization.",
+   "display_name": "CompleteTech Security",
+   "eyebrow": "SECURITY",
+   "family": "completetech",
+   "family_topics": [
+    "security",
+    "cve"
+   ],
+   "flagship": true,
+   "footer": true,
+   "former_slugs": [],
+   "license_chip": "AGPL-3.0 or commercial",
+   "mark": "assets/orgs/CompleTetech-Security/mark.png",
+   "nav_name": "CompleteTech Security",
+   "tier": "T1"
+  },
+  "CompleteDotTech": {
+   "brand_topic": "completetech",
+   "description": null,
+   "display_name": "Timothy Wayne Gregg",
+   "eyebrow": null,
+   "family": "completetech",
+   "family_topics": [],
+   "flagship": true,
+   "footer": true,
+   "former_slugs": [],
+   "nav_name": "CompleteTech LLC",
+   "profile": {
+    "chips": [
+     "key:complete.tech",
+     "attr:Founder",
+     "attr:AI integration"
+    ],
+    "eyebrow": "COMPLETETECH LLC · CINCINNATI, OHIO",
+    "name": "Timothy Wayne Gregg"
+   },
+   "tier": "T1-user"
+  },
+  "CompleteTech-Career-Toolkit": {
+   "brand_topic": "completetech",
+   "description": "Resume and career document tooling. A CompleteTech LLC organization.",
+   "display_name": "CompleteTech Career Toolkit",
+   "eyebrow": "CAREER TOOLKIT",
+   "family": "completetech",
+   "family_topics": [],
+   "footer": true,
+   "former_slugs": [],
+   "mark": "assets/orgs/CompleteTech-Career-Toolkit/mark.png",
+   "nav_name": "CompleteTech Career Toolkit",
+   "tier": "T1"
+  },
+  "CompleteTech-Commerce": {
+   "brand_topic": "completetech",
+   "description": "Trading, market research and vending projects. A CompleteTech LLC organization.",
+   "display_name": "CompleteTech Commerce",
+   "eyebrow": "COMMERCE",
+   "family": "completetech",
+   "family_topics": [],
+   "footer": true,
+   "former_slugs": [],
+   "mark": "assets/orgs/CompleteTech-Commerce/mark.png",
+   "nav_name": "CompleteTech Commerce",
+   "tier": "T1"
+  },
+  "CompleteTech-Creative": {
+   "brand_topic": "completetech",
+   "description": "Writing, podcast, social media and content production tools. A CompleteTech LLC organization.",
+   "display_name": "CompleteTech Creative",
+   "eyebrow": "CREATIVE",
+   "family": "completetech",
+   "family_topics": [],
+   "footer": true,
+   "former_slugs": [],
+   "mark": "assets/orgs/CompleteTech-Creative/mark.png",
+   "nav_name": "CompleteTech Creative",
+   "tier": "T1"
+  },
+  "CompleteTech-Data": {
+   "brand_topic": "completetech",
+   "description": "Business directories and public datasets, mostly for Ohio. A CompleteTech LLC organization.",
+   "display_name": "CompleteTech Data",
+   "eyebrow": "DATA",
+   "family": "completetech",
+   "family_topics": [],
+   "footer": true,
+   "former_slugs": [],
+   "mark": "assets/orgs/CompleteTech-Data/mark.png",
+   "nav_name": "CompleteTech Data",
+   "tier": "T1"
+  },
+  "CompleteTech-Directories": {
+   "brand_topic": "completetech",
+   "description": "Directory websites and the data behind them. A CompleteTech LLC organization.",
+   "display_name": "CompleteTech Directories",
+   "eyebrow": "DIRECTORIES",
+   "family": "completetech",
+   "family_topics": [],
+   "footer": true,
+   "former_slugs": [],
+   "mark": "assets/orgs/CompleteTech-Directories/mark.png",
+   "nav_name": "CompleteTech Directories",
+   "tier": "T1"
+  },
+  "CompleteTech-DiscordApps": {
+   "brand_topic": "completetech",
+   "description": "Discord apps and community bots. Not affiliated with Discord Inc. A CompleteTech LLC organization.",
+   "display_name": "CompleteTech Discord Apps",
+   "eyebrow": "DISCORD APPS",
+   "family": "completetech",
+   "family_topics": [],
+   "footer": true,
+   "former_slugs": [],
+   "mark": "assets/orgs/CompleteTech-DiscordApps/mark.png",
+   "nav_name": "CompleteTech Discord Apps",
+   "tier": "T1"
+  },
+  "CompleteTech-Games": {
+   "brand_topic": "completetech",
+   "description": "Crossword, puzzle and strategy game projects. A CompleteTech LLC organization.",
+   "display_name": "CompleteTech Games",
+   "eyebrow": "GAMES",
+   "family": "completetech",
+   "family_topics": [],
+   "footer": true,
+   "former_slugs": [],
+   "mark": "assets/orgs/CompleteTech-Games/mark.png",
+   "nav_name": "CompleteTech Games",
+   "tier": "T1"
+  },
+  "CompleteTech-Hardware": {
+   "brand_topic": "completetech",
+   "description": "KiCad electronics projects and hardware build tooling. A CompleteTech LLC organization.",
+   "display_name": "CompleteTech Hardware",
+   "eyebrow": "HARDWARE",
+   "family": "completetech",
+   "family_topics": [],
+   "footer": true,
+   "former_slugs": [],
+   "mark": "assets/orgs/CompleteTech-Hardware/mark.png",
+   "nav_name": "CompleteTech Hardware",
+   "tier": "T1"
+  },
+  "CompleteTech-Infrastructure": {
+   "brand_topic": "completetech",
+   "description": "Homelab services, self-hosted hosts and Windows helper tools. A CompleteTech LLC organization.",
+   "display_name": "CompleteTech Infrastructure",
+   "eyebrow": "INFRASTRUCTURE",
+   "family": "completetech",
+   "family_topics": [
+    "homelab"
+   ],
+   "footer": true,
+   "former_slugs": [],
+   "mark": "assets/orgs/CompleteTech-Infrastructure/mark.png",
+   "nav_name": "CompleteTech Infrastructure",
+   "tier": "T1"
+  },
+  "CompleteTech-LLC": {
+   "banner_category": null,
+   "brand_topic": "completetech",
+   "description": "Company sites, client tools and AI integration work from Cincinnati, Ohio. Innovation at Every Integration.",
+   "display_name": "CompleteTech LLC",
+   "eyebrow": null,
+   "family": "completetech",
+   "family_topics": [],
+   "flagship": true,
+   "footer": true,
+   "former_slugs": [],
+   "nav_name": "CompleteTech LLC",
+   "tier": "T1"
+  },
+  "CompleteTech-LLC-AI-Research": {
+   "brand_topic": "completetech",
+   "description": "Agent harnesses, game-playing agents, benchmarks and AI experiments. A CompleteTech LLC organization.",
+   "display_name": "CompleteTech AI Research",
+   "eyebrow": "AI RESEARCH",
+   "family": "completetech",
+   "family_topics": [
+    "ai-research"
+   ],
+   "footer": true,
+   "former_slugs": [],
+   "mark": "assets/orgs/CompleteTech-LLC-AI-Research/mark.png",
+   "nav_name": "CompleteTech AI Research",
+   "tier": "T1"
+  },
+  "CompleteTech-ManageEngine": {
+   "brand_topic": "completetech",
+   "description": "ServiceDesk Plus cloud-readiness tools. Not affiliated with ManageEngine or Zoho Corporation. A CompleteTech LLC organization.",
+   "display_name": "CompleteTech ManageEngine Tools",
+   "eyebrow": "MANAGEENGINE TOOLS",
+   "family": "completetech",
+   "family_topics": [],
+   "footer": true,
+   "former_slugs": [],
+   "mark": "assets/orgs/CompleteTech-ManageEngine/mark.png",
+   "nav_name": "CompleteTech ManageEngine Tools",
+   "tier": "T1"
+  },
+  "CompleteTech-Patent-IP": {
+   "brand_topic": "completetech",
+   "description": "Patent research and intellectual-property tracking tools. A CompleteTech LLC organization.",
+   "display_name": "CompleteTech Patent and IP",
+   "eyebrow": "PATENT AND IP",
+   "family": "completetech",
+   "family_topics": [],
+   "footer": true,
+   "former_slugs": [],
+   "mark": "assets/orgs/CompleteTech-Patent-IP/mark.png",
+   "nav_name": "CompleteTech Patent and IP",
+   "tier": "T1"
+  },
+  "CompleteTech-Pokemon": {
+   "brand_topic": "completetech",
+   "description": "Trading-card shop, community site and Game Boy emulation tools. Not affiliated with Nintendo or The Pokémon Company. A CompleteTech LLC organization.",
+   "disclaimer": "Not affiliated with, endorsed by, or sponsored by Nintendo, Game Freak, Creatures or The Pokémon Company.",
+   "display_name": "CompleteTech TCG",
+   "eyebrow": "TCG",
+   "family": "completetech",
+   "family_topics": [],
+   "footer": true,
+   "former_slugs": [],
+   "mark": "assets/orgs/CompleteTech-Pokemon/mark.png",
+   "nav_name": "CompleteTech TCG",
+   "tier": "T1"
+  },
+  "CompleteTech-Skills": {
+   "banner_category": null,
+   "brand_topic": "completetech",
+   "description": "Claude and Codex agent skills for the agentic-services lifecycle, from discovery to invoice. A CompleteTech LLC organization.",
+   "display_name": "CompleteTech Skills",
+   "eyebrow": "SKILLS",
+   "family": "completetech",
+   "family_topics": [
+    "claude-skill",
+    "codex-skill",
+    "agentic-ai"
+   ],
+   "family_topics_omit": {
+    "creative-studio": [
+     "claude-skill"
+    ]
+   },
+   "family_topics_scope": "type:agent-skills",
+   "flagship": true,
+   "footer": true,
+   "former_slugs": [],
+   "hub_url": "https://www.complete.tech",
+   "mark": "assets/orgs/CompleteTech-Skills/mark.png",
+   "nav_name": "CompleteTech LLC Skills",
+   "readme_preserve": [
+    "creative-studio"
+   ],
+   "tier": "T1"
+  },
+  "CompleteTechDiscord-Games": {
+   "brand_topic": "completetech",
+   "description": "Games built as Discord activities. Not affiliated with Discord Inc. A CompleteTech LLC organization.",
+   "display_name": "CompleteTech Discord Games",
+   "eyebrow": "DISCORD GAMES",
+   "family": "completetech",
+   "family_topics": [],
+   "footer": true,
+   "former_slugs": [],
+   "mark": "assets/orgs/CompleteTechDiscord-Games/mark.png",
+   "nav_name": "CompleteTech Discord Games",
+   "tier": "T1"
+  },
+  "Jev-Engineering": {
+   "brand_topic": "jev",
+   "description": "Jev structured-decision research and tooling. Steward: CompleteTech LLC.",
+   "display_name": "Jev Engineering",
+   "eyebrow": null,
+   "family": "jev-engineering",
+   "family_topics": [],
+   "footer": true,
+   "former_slugs": [],
+   "nav_name": "Jev Engineering",
+   "tier": "T2"
+  },
+  "Jevelopers-neatHack-2026": {
+   "brand_topic": null,
+   "description": null,
+   "display_name": "TicketStub",
+   "eyebrow": null,
+   "family": "completetech",
+   "family_topics": [],
+   "footer": false,
+   "former_slugs": [],
+   "nav_name": "TicketStub",
+   "tier": "T3"
+  },
+  "LibreEvolve": {
+   "brand_topic": "libreevolve",
+   "description": "Open-source code-evolution workbench. Steward: CompleteTech LLC.",
+   "display_name": "LibreEvolve",
+   "eyebrow": null,
+   "family": "libreevolve",
+   "family_topics": [],
+   "footer": true,
+   "former_slugs": [],
+   "nav_name": "LibreEvolve",
+   "tier": "T2"
+  },
+  "Northwind-Trading-Co": {
+   "brand_topic": "completetech",
+   "description": null,
+   "display_name": "Northwind Trading Co.",
+   "eyebrow": "DEMO",
+   "family": "completetech",
+   "family_topics": [],
+   "footer": true,
+   "former_slugs": [],
+   "nav_name": "Northwind Trading Co.",
+   "tier": "T1"
+  },
+  "Pick-Your-AI": {
+   "brand_topic": "pick-your-ai",
+   "description": null,
+   "display_name": "Pick Your AI",
+   "eyebrow": null,
+   "family": "completetech",
+   "family_topics": [],
+   "footer": false,
+   "former_slugs": [],
+   "nav_name": "Pick Your AI",
+   "tier": "T3"
+  },
+  "TouchedByAnAgent": {
+   "brand_topic": "touchedbyanagent",
+   "description": null,
+   "display_name": "Touched By An Agent",
+   "eyebrow": null,
+   "family": "touchedbyanagent",
+   "family_topics": [],
+   "footer": true,
+   "former_slugs": [],
+   "hub_url": "https://touchedbyanagent.com",
+   "nav_name": "Touched By An Agent",
+   "tier": "T2"
+  },
+  "jevplay-games": {
+   "brand_topic": "jev",
+   "description": "Browser games played against Jev at jevplay.games. Steward: CompleteTech LLC.",
+   "display_name": "jevplay.games",
+   "eyebrow": null,
+   "family": "jevplay-games",
+   "family_topics": [
+    "browser-game"
+   ],
+   "family_topics_scope": "type:game",
+   "footer": true,
+   "former_slugs": [],
+   "hub_url": "https://jevplay.games",
+   "nav_name": "jevplay.games",
+   "tier": "T2"
+  },
+  "romgenie-archive-repostiory": {
+   "brand_topic": "completetech",
+   "description": "Retired CompleteTech LLC repositories, kept read-only for reference.",
+   "display_name": "romgenie archive",
+   "eyebrow": null,
+   "family": "romgenie",
+   "family_topics": [],
+   "footer": true,
+   "former_slugs": [],
+   "nav_name": "romgenie archive",
+   "tier": "T2-R"
+  },
+  "romgenie-following-repos": {
+   "brand_topic": "completetech",
+   "description": "Forks of AI-agent projects followed by CompleteTech LLC. Credit and licenses belong to their upstream authors.",
+   "display_name": "romgenie following",
+   "eyebrow": null,
+   "family": "romgenie",
+   "family_topics": [],
+   "footer": false,
+   "former_slugs": [],
+   "nav_name": "romgenie following",
+   "tier": "T2-R"
+  }
+ },
+ "owners": {
+  "excluded": [
+   "BunsDev",
+   "GoZippy",
+   "h-mascot",
+   "lmvdz",
+   "GalaxyRuler",
+   "MetatronAngelAgent",
+   "PrompDev"
+  ],
+  "hold": [],
+  "t3": [
+   "Pick-Your-AI",
+   "Jevelopers-neatHack-2026"
+  ],
+  "watching": [
+   "romgenie-following-repos"
+  ]
+ },
+ "readme": {
+  "fork_readme": "note",
+  "nav_first": false,
+  "preserve_banner": "above"
+ },
+ "review": {
+  "bg_dark": "#0D1117",
+  "bg_light": "#FFFFFF",
+  "label_dark": "#8B949E",
+  "label_light": "#57606A"
+ },
+ "schema_version": 1,
+ "standard": "ct-std-v1"
+}

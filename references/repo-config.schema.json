@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/CompleteTech-Skills/github-showcase-skill/references/repo-config.schema.json",
+  "title": "Per-repository showcase override (.github/showcase.yml)",
+  "description": "Content only. Colours and fonts come from brand.yaml and are rejected here.",
+  "type": [
+    "object",
+    "null"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "for": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+      "description": "OWNER/REPO these overrides belong to. A repository created from a template that carries this file ignores them until it sets its own."
+    },
+    "type": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "template",
+        "agent-skills",
+        "security-check",
+        "mcp-server",
+        "chrome-extension",
+        "plugin",
+        "discord-bot",
+        "bot",
+        "game",
+        "mobile-app",
+        "infrastructure",
+        "website",
+        "hardware",
+        "web-app",
+        "api",
+        "cli",
+        "library",
+        "research",
+        "tutorial",
+        "dataset",
+        "workspace",
+        null
+      ],
+      "description": "§5.4 type, used instead of detection (for a new repository whose code has not landed yet). Logged type-config:<type>."
+    },
+    "icon": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[^/\\\\][^:]*\\.png$"
+    },
+    "subtitle": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 120
+    },
+    "category": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 40
+    },
+    "chips": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "maxItems": 2
+        },
+        "attrs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "maxItems": 3
+        }
+      }
+    },
+    "variant": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "A",
+        "B",
+        "C",
+        "D",
+        "E",
+        "F",
+        "G",
+        "H",
+        "I",
+        "J",
+        null
+      ]
+    },
+    "readme": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "header": {
+          "type": "boolean"
+        },
+        "footer": {
+          "type": "boolean"
+        }
+      }
+    },
+    "reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 200
+    }
+  }
+}

@@ -1,0 +1,14 @@
+# Validated Estate sync read (audit/research/orgs-and-projects.md §4.5).
+query EstateItems($login: String!, $number: Int!, $after: String) {
+  user(login: $login) { projectV2(number: $number) {
+    items(first: 50, after: $after) { pageInfo { hasNextPage endCursor }
+      nodes { id
+        content { ... on Issue { url
+          projectItems(first: 20) { nodes {
+            project { number owner { ... on Organization { login } ... on User { login } } }
+            fieldValues(first: 30) { nodes {
+              ... on ProjectV2ItemFieldSingleSelectValue { name field { ... on ProjectV2FieldCommon { name } } }
+              ... on ProjectV2ItemFieldDateValue { date field { ... on ProjectV2FieldCommon { name } } }
+              ... on ProjectV2ItemFieldNumberValue { number field { ... on ProjectV2FieldCommon { name } } }
+              ... on ProjectV2ItemFieldIterationValue { title startDate field { ... on ProjectV2FieldCommon { name } } }
+            } } } } } } } } } } }

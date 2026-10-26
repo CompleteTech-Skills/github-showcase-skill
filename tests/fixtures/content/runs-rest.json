@@ -1,0 +1,5 @@
+{"total_count": 3, "workflow_runs": [
+ {"id": 103, "name": "Tests", "path": ".github/workflows/tests.yml", "workflow_id": 11, "head_branch": "main", "event": "push", "status": "completed", "conclusion": "failure", "created_at": "2026-10-20T10:00:00Z", "head_sha": "c3", "html_url": "https://github.com/Northwind-Trading-Co/support-triage-agent/actions/runs/103"},
+ {"id": 102, "name": "Tests", "path": ".github/workflows/tests.yml", "workflow_id": 11, "head_branch": "main", "event": "push", "status": "completed", "conclusion": "success", "created_at": "2026-10-19T10:00:00Z", "head_sha": "c2", "html_url": "https://github.com/Northwind-Trading-Co/support-triage-agent/actions/runs/102"},
+ {"id": 101, "name": "Deploy site", "path": ".github/workflows/deploy.yml", "workflow_id": 12, "head_branch": "main", "event": "push", "status": "completed", "conclusion": "success", "created_at": "2026-10-19T09:00:00Z", "head_sha": "c2", "html_url": "https://github.com/Northwind-Trading-Co/support-triage-agent/actions/runs/101"}
+]}
