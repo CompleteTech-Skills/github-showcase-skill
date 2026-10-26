@@ -19,7 +19,8 @@ LOGO_SHA = {"assets/logo.png": "a5c3c4ef55336ed4b883d3bc3bb6e1e942b836469bd2b293
 def r1(ctx) -> str:
     n = standard("naming")
     name = ctx.repo
-    if ctx.is_fork or name in n["exempt_names"] or any(re.search(p, name) for p in n["exempt_patterns"]) \
+    # GitHub forks keep the upstream name (§3.1); a non-network copy follows `UPSTREAM-fork`, as the estate proposals
+    if ctx.meta.get("fork") or name in n["exempt_names"] or any(re.search(p, name) for p in n["exempt_patterns"]) \
             or f"{ctx.owner}/{name}" in n["exempt_full"]:
         return "n/a"
     ok = re.match(n["n1"], name) and re.match(n["n2"], name)

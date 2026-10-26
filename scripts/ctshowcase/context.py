@@ -117,9 +117,11 @@ class RepoContext:
     # -- which generated surfaces apply ------------------------------------------------------------------
     @property
     def is_fork(self) -> bool:
-        """GitHub's fork flag or the detected `fork` type (a `-fork` slug or an override): doctor, adopt, the social
-        preview and the watching-org rules all use this one test, so a fork is never a fork to only some of them."""
-        return bool(self.meta.get("fork")) or self.det["type"] == "fork"
+        """Type rule 1 (GitHub's fork flag or a `-fork` slug, even under a repo-config type override) or a detected
+        `fork` type: doctor, adopt, labels, the social preview and the watching-org rules all use this one test, and
+        org labels and the estate proposals use rule 1 itself, so a fork is never a fork to only some of them."""
+        from .detect import is_fork
+        return is_fork(dict(self.meta, repo=self.repo)) or self.det["type"] == "fork"
 
     def social_applicable(self) -> bool:
         """R10: public product repositories, including the personal-profile capstone."""

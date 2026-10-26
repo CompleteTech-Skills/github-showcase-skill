@@ -9,14 +9,16 @@ from ctshowcase import doctor
 from ctshowcase.intake import adopt, classify
 
 
-FORKS = {"github": {"fork": True}, "slug": {"repo": "widget-fork", "fork": False}, "override": {"fork": True}}
+CLI_CONFIG = {".github/showcase.yml": "type: cli\n"}
+FORKS = {"github": {"fork": True}, "slug": {"repo": "widget-fork", "fork": False},
+         "override": {"fork": True, "manifests": CLI_CONFIG},
+         "slug-override": {"repo": "widget-fork", "fork": False, "manifests": CLI_CONFIG}}
 
 
 def fork_ctx(make_ctx, how, **kw):
-    """A fork three ways: GitHub's flag, the `-fork` slug rule, and a GitHub fork whose type was overridden."""
+    """A fork four ways: GitHub's flag, the `-fork` slug rule, and each of them under a `type: cli` repo config."""
     ctx = make_ctx(**FORKS[how], **kw)
-    if how == "override":
-        ctx.det = dict(ctx.det, type="cli")
+    assert (ctx.det["type"] == "cli") == how.endswith("override")
     return ctx
 
 
@@ -49,6 +51,24 @@ def test_doctor_and_adopt_share_the_fork_rule_for_labels(make_ctx, how):
     assert doctor.row(ctx)["cells"]["R6"] == "n/a"
     r = adopt(ctx, ctx.brand.resolver())
     assert "labels:n/a" in r["logs"] and not any(j["kind"] in ("labels", "security") for j in r["jobs"])
+
+
+@pytest.mark.parametrize("how", FORKS)
+def test_slug_forks_keep_the_fork_rule_under_a_type_override(make_ctx, how):
+    ctx = fork_ctx(make_ctx, how, default_branch="develop", has_issues=True, delete_branch_on_merge=True)
+    r = adopt(ctx, ctx.brand.resolver())
+    assert not any("rename-default-branch" in c for c in r["checklist"])
+    assert "rename-default-branch" not in [p["kind"] for p in classify(dict(ctx.meta), ctx.brand, None)]
+
+
+@pytest.mark.parametrize("fork,repo,r1_na,rename", [
+    (True, "Northwind_Widget", True, False),       # GitHub forks keep the upstream name (§3.1)
+    (False, "Northwind_Widget-fork", False, True),  # a non-network copy follows `UPSTREAM-fork` naming
+])
+def test_r1_and_estate_renames_exempt_github_forks_only(make_ctx, brand, fork, repo, r1_na, rename):
+    ctx = make_ctx(repo=repo, fork=fork, files=["a.py"])
+    assert (doctor.r1(ctx) == "n/a") == r1_na
+    assert ("rename" in [p["kind"] for p in classify(dict(ctx.meta), brand, None)]) == rename
 
 
 @pytest.mark.parametrize("meta,proposed", [

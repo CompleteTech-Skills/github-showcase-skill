@@ -304,6 +304,21 @@ def test_labels_plan_skips_slug_forks_like_adopt(make_estate):
     assert by["upstream-fork"]["log"] == "fork" and not any((j.get("repo") or "").endswith("/upstream-fork") for j in res["jobs"])
 
 
+@pytest.mark.parametrize("live,final,skip", [("upstream-fork", "upstream-mirror", True),
+                                              ("support-triage-agent", "support-triage-agent-fork", False)])
+def test_labels_plan_judges_forks_by_the_live_slug(labs_brand, live, final, skip):
+    reg = load_yaml_text((FIX / "registry.yaml").read_text(encoding="utf-8"))  # a pending rename across `-fork`
+    reg["orgs"][N]["final_repos"] = [final if r == live else r for r in reg["orgs"][N]["final_repos"]]
+    appr = dict(approvals(), actions=ACTIONS + [{"id": "ren-950", "owner": N, "repo": live, "action": "rename",
+                                                  "new_name": final}])
+    est = O.Estate(labs_brand, Resolver(labs_brand, reg, appr))
+    O.load_metas(FIX / "meta", est)
+    est.meta(f"{N}/{final}").update(fork=False, has_issues=True)
+    res, _ = O.labels_plan(est, N)
+    row = next(r for r in res["repos"] if r["repo"].lower().endswith("/" + live))
+    assert (row.get("log") == "fork") == skip
+
+
 def test_labels_na_for_romgenie(brand):
     reg = {"orgs": {"romgenie-archive-repostiory": {"final_repos": []}}}
     est = O.Estate(brand, Resolver(brand, reg, approvals()))

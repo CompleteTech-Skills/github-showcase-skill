@@ -33,7 +33,7 @@ def standard_lock_text() -> str:
 
 
 def is_fork(meta: dict) -> bool:
-    """Type rule 1: GitHub's fork flag or a `-fork` slug. RepoContext.is_fork adds a `type: fork` override."""
+    """Type rule 1: GitHub's fork flag or a `-fork` slug. RepoContext.is_fork adds the detected `fork` type."""
     return bool(meta.get("fork")) or (meta.get("repo") or "").endswith("-fork")
 
 
