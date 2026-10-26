@@ -87,6 +87,24 @@ def test_estate_proposals_honour_forks_and_the_keep_decision(brand, meta, propos
     assert ("rename-default-branch" in kinds) == proposed
 
 
+@pytest.mark.parametrize("tier,archived", [("T2-R", False), ("T1", True)])
+def test_content_social_exempts_a_backup_r10_leaves_out(tmp_path, tier, archived):
+    """A backup in the archive org, or an archived one, has no R10 preview: content social exempts it, as before."""
+    import yaml
+    raw = yaml.safe_load((ROOT / "references" / "brand.yaml").read_text(encoding="utf-8"))
+    raw["orgs"]["Northwind-Trading-Co"]["tier"] = tier
+    cfg = tmp_path / "brand.yaml"
+    cfg.write_text(yaml.safe_dump(raw, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    meta = tmp_path / "m.json"
+    meta.write_text(json.dumps(meta_dict(repo="ledger-backup-20240101", archived=archived)), encoding="utf-8")
+    out = tmp_path / "sp.png"
+    p = run_cli("--config", cfg, "--meta", meta, "--no-repo-dir", "--format", "json", "content", "social", "--out", out,
+                "--job")
+    assert p.returncode == 0 and json.loads(p.stdout)["result"] == "exempt" and not out.exists(), p.stdout + p.stderr
+    d = json.loads(run_cli("--config", cfg, "--meta", meta, "--no-repo-dir", "doctor", "--format", "json").stdout)
+    assert d["cells"]["R10"] == "n/a"
+
+
 @pytest.mark.parametrize("owner,repo", [("CompleteDotTech", "CompleteDotTech"),
                                         ("Northwind-Trading-Co", "support-triage-agent-backup-20260101")])
 def test_content_social_renders_what_adopt_uploads(tmp_path, owner, repo):

@@ -1656,7 +1656,7 @@ def labels_plan(estate: Estate, org: str, *, allow_t3: bool = False) -> tuple[di
         if m is None or m.get("error") and "labels" not in m:
             repos.append({"repo": full, "result": "unknown", "log": "needs-input:metadata"})
             continue
-        if is_fork(dict(m, repo=m.get("repo") or n)):  # type rule 1 on today's slug, as adopt and doctor R6
+        if is_fork(dict(m, repo=m.get("_repo") or m.get("repo") or n)):  # rule 1 on the captured slug, as adopt
             repos.append({"repo": full, "result": "skip", "log": "fork"})
             continue
         if m.get("archived"):
