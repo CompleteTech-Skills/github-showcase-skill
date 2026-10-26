@@ -115,6 +115,13 @@ class RepoContext:
         return d
 
     # -- which generated surfaces apply ------------------------------------------------------------------
+    def social_applicable(self) -> bool:
+        """R10: public product repositories, including the personal-profile capstone."""
+        return (self.public and not self.meta.get("archived") and not self.meta.get("fork")
+                and self.det["type"] != "fork" and self.repo != ".github"
+                and not self.repo.lower().endswith(".github.io")
+                and self.tier in ("T1", "T1-user", "T2"))
+
     def art_status(self) -> dict:
         """{"banner": None | code, "card": None | code, "icon": None | code}: None when the surface applies, else why it
         does not (exempt:*, hold, t3-signoff). Shared by banner, card, lint all and doctor so they never disagree.

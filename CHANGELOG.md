@@ -2,6 +2,15 @@
 
 All notable changes to `github-showcase-skill` are recorded here. Versions follow [Semantic Versioning](https://semver.org/): a new major version changes a generated surface, a command's contract or the standard version (`ct-std-v1`); a minor version adds a command or option; a patch fixes output without changing the contract. The template's workflow pins a release tag by its commit SHA, so every entry below names one tag.
 
+## Unreleased
+
+### Fixed
+
+- `doctor` reports disabled-Issues label checks, inapplicable social previews and archived community health as `n/a`, while preserving label coverage during approved archived polishing and unknown captured values on applicable surfaces. Social upload plans share the R10 applicability rule and include the personal-profile capstone.
+- R5 preserves upstream defaults on forks and accepts a captured user keep decision for other default branches without relaxing the merge or Issues checks.
+- Label job plans include a per-repository `labels:OWNER/REPO` group for writer reconciliation. Explicit orchestrator groups are preserved.
+- `adopt` withholds jobs and change records for an archived capture, with instructions to re-capture inside the approved unarchive/polish/re-archive cycle. Security jobs are emitted only for active eligible repositories.
+
 ## 1.0.0 — 2026-10-26
 
 First public release, for the CompleteTech GitHub estate standard `ct-std-v1`.

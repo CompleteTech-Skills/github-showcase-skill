@@ -2434,9 +2434,7 @@ def cmd_content(args, cli=None):
 
 def social_job(ctx, resolver: Resolver, out: str) -> dict | None:
     """Browser job for the repository social preview upload (STANDARD §12.4; public T1/T2 repos only)."""
-    if not ctx.public or ctx.meta.get("fork") or ctx.meta.get("archived") or ctx.repo == ".github" or \
-            ctx.repo.endswith(".github.io") or (ctx.owner, ctx.repo) == ("CompleteDotTech", "CompleteDotTech") or \
-            not str(ctx.tier).startswith(("T1", "T2")):
+    if not ctx.social_applicable():
         return None
     full = f"{current_login(resolver, ctx.owner)}/{ctx.repo}"
     steps = [f"Open https://github.com/{full}/settings (the General page).",

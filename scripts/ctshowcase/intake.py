@@ -132,7 +132,7 @@ def adopt(ctx, resolver=None, *, approval_id: str | None = None, fresh: bool = F
                              "creates; never --force, never a delete.", approval_id, kind="labels"))
         recs += [records.record(owner, repo, "label", o["name"], o["name"], o, o["rule"]) for o in writes]
     # security baseline on public non-fork T1/T2 repositories ----------------------------------------------------
-    if not private and not fork and str(ctx.tier).startswith(("T1", "T2")) and ctx.tier != "T2-R" and not watching:
+    if not private and not fork and not archived and str(ctx.tier).startswith(("T1", "T2")) and ctx.tier != "T2-R" and not watching:
         for name, path, note in (("pvr", "private-vulnerability-reporting", "Private vulnerability reporting (§10.1, SEC-04)."),
                                  ("vuln-alerts", "vulnerability-alerts", "Dependabot alerts (§10.1); alerts, not version "
                                                                          "updates.")):
@@ -158,6 +158,13 @@ def adopt(ctx, resolver=None, *, approval_id: str | None = None, fresh: bool = F
     if not meta.get("description"):
         logs.append("needs-input:description")
         checklist.append("description: write it from the §4.2 template, then `showcase.py describe --text ...`")
+    if archived:
+        # No partial plan can escape the approved unarchive/polish/re-archive cycle.
+        jobs.clear()
+        recs.clear()
+        pending.append({"why": "archived: mutations wait for an approved unarchive window (decision 6)",
+                        "next": "Use the approved polish-archived cycle: snapshot, unarchive through the writer, "
+                                "re-capture metadata, adopt again, then re-archive even if polishing fails."})
     return {"command": "adopt", "owner": full.split("/")[0], "repo": repo, "type": det["type"], "variant": det["variant"],
             "result": "ok", "records": recs, "jobs": jobs, "pending": pending, "checklist": checklist,
             "logs": sorted(set(logs))}
