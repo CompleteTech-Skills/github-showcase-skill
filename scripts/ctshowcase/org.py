@@ -256,6 +256,8 @@ def job(jid: str, phase: str, kind: str, argv: list[str] | None = None, *, org: 
         j["argv"] = argv
     j["note"] = note
     j.update(extra)
+    if kind == "labels" and repo:
+        j.setdefault("group", f"labels:{repo}")
     return j
 
 
