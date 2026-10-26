@@ -11,11 +11,12 @@ run"). Read-only toward GitHub: plans leave as change records and scripts/writer
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from pathlib import Path
 
 from . import STANDARD
-from .errors import NeedsInput, ShowcaseError
+from .errors import NeedsInput, Refused, ShowcaseError
 
 TEMPLATE_REPO = "CompleteTech-LLC/completetech-repo-template"
 # files the template owns: a repository born from it keeps them byte-identical until a bump PR updates them
@@ -50,6 +51,8 @@ def adopt(ctx, resolver=None, *, approval_id: str | None = None, fresh: bool = F
     from .org import label_ops_argv
     owner, repo = ctx.owner, ctx.repo
     status = ctx.brand.check_owner(owner)  # excluded, HOLD and T3 owners refuse (exit 2)
+    if ctx.style.get("hold") or (resolver.family_hold(owner) if resolver else False):  # as showcase.cmd_adopt refuses
+        raise Refused(f"{owner} family is on hold: adopt plans nothing for it", log="hold")
     full = f"{resolver.canonical(owner) if resolver else owner}/{repo}"
     meta, det = ctx.meta, ctx.det
     fork, archived, private = bool(meta.get("fork")), bool(meta.get("archived")), not ctx.public
@@ -97,17 +100,21 @@ def adopt(ctx, resolver=None, *, approval_id: str | None = None, fresh: bool = F
     # §6 labels --------------------------------------------------------------------------------------------------
     if fork or archived or ctx.tier in ("T2-R", "T3") or watching:
         logs.append("labels:n/a")
-    elif ctx.owner == "AI-Ascension":
+    elif (resolver.same(owner, "AI-Ascension") if resolver else owner.lower() == "ai-ascension"):  # any spelling, CQ-03
         logs.append("labels:ai-ascension (keeps its labels.yml; R6 is only `dependencies`)")
-    elif fresh or meta.get("labels") is None:
-        pending.append({"why": "labels: plan against the live labels once the repository exists (org default labels may "
+    elif fresh or not meta.get("labels"):
+        # unknown live labels: a missing key, or the [] that normalize and a failed labels GET leave, is never planned
+        # against (it would create every standard label beside GitHub's defaults and rename none)
+        pending.append({"why": "labels: plan against the live labels (none were captured; org default labels may "
                                "already seed them)", "next": f"showcase.py meta --from-gh {full}, then adopt again or "
                                "labels --plan --jobs FILE"})
+        if not fresh:
+            logs.append("needs-input:labels")
     else:
         ops, lg = labelsmod.plan(meta.get("labels") or [], ctx.repo_dir, files=meta.get("files"),
                                  complete=meta.get("files_complete") is True,
                                  defaults=labelsmod.defaults_for(owner, repo, repo_dir=ctx.repo_dir, meta=meta,
-                                                                 path=org_defaults))
+                                                                 path=org_defaults, resolver=resolver))
         logs += lg
         unchecked = [o for o in ops if o.get("log") == labelsmod.NEEDS_CHECKOUT]
         if unchecked:  # §6.4 rule 0 could not run: the rename stays out of the jobs until a checkout is read
@@ -117,8 +124,11 @@ def adopt(ctx, resolver=None, *, approval_id: str | None = None, fresh: bool = F
                             "next": f"showcase.py --repo-dir <checkout of {full}> adopt {full} --org-defaults "
                                     f"<checkout of {full.split('/')[0]}/.github> (or labels --plan)"})
         writes = [o for o in ops if o["op"] != "skip"]
-        for i, argv in enumerate(label_ops_argv(full, writes), 1):
-            jobs.append(_job(_jid("p3", "label", sid, f"{i:02d}"), argv, full, "§6.3 pass A renames before pass B "
+        for argv in label_ops_argv(full, writes):  # ids from the operation, never its position
+            new = f"-to-{argv[argv.index('--name') + 1]}" if "--name" in argv else ""
+            jid = _jid("p3", "label", sid, argv[2], argv[3] + new,
+                       hashlib.sha256(json.dumps(argv, ensure_ascii=False).encode()).hexdigest()[:8])
+            jobs.append(_job(jid, argv, full, "§6.3 pass A renames before pass B "
                              "creates; never --force, never a delete.", approval_id, kind="labels"))
         recs += [records.record(owner, repo, "label", o["name"], o["name"], o, o["rule"]) for o in writes]
     # security baseline on public non-fork T1/T2 repositories ----------------------------------------------------

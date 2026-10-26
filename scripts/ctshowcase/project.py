@@ -9,6 +9,7 @@ variables); only read queries load from a file (`-F query=@file`); Pick-Your-AI 
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from datetime import date
@@ -592,20 +593,32 @@ def workstream_options(have: list[dict], wanted: list[dict]) -> tuple[list[dict]
     return out, logs, renames
 
 
+_FILTER_TOKEN = re.compile(r'(?:[^\s"]+|"[^"]*")+')
+_WS_PREDICATE = re.compile(r"^(-?workstream:)(.+)$", re.I | re.S)
+
+
 def rename_filter_values(flt: str, renames: dict) -> str:
-    """Point a view filter at renamed options, quoted (`workstream:"Research"`) or bare (`workstream:Research`) alike,
-    in one pass so swapped names never chain. A quoted value stays quoted; a bare one is quoted when the new name
-    has a space."""
+    """Point a view filter's Workstream predicates (`workstream:` and `-workstream:`, comma lists, quoted
+    `workstream:"Research"` or bare `workstream:Research` values) at renamed options, in one pass so swapped names
+    never chain. Only Workstream values change: a label, another field or free text that happens to share the old
+    name is left as it is. A quoted value stays quoted; a bare one is quoted when the new name has a space or comma."""
     if not flt or not renames:
         return flt
-    olds = sorted((o for o in renames if o), key=len, reverse=True)
-    alt = "|".join(re.escape(o) for o in olds)
-    pat = re.compile(rf'"({alt})"(?![\w"])|(?<![\w"])({alt})(?![\w"])')
 
-    def sub(m):
-        new_name = renames[m.group(1) if m.group(1) is not None else m.group(2)]
-        return f'"{new_name}"' if m.group(1) is not None or re.search(r"[\s,]", new_name) else new_name
-    return pat.sub(sub, flt)
+    def value(v: str) -> str:
+        quoted = len(v) >= 2 and v[0] == v[-1] == '"'
+        old = v[1:-1] if quoted else v
+        if old not in renames:
+            return v
+        new_name = renames[old]
+        return f'"{new_name}"' if quoted or re.search(r"[\s,]", new_name) else new_name
+
+    def token(m):
+        pm = _WS_PREDICATE.match(m.group(0))
+        if not pm:
+            return m.group(0)
+        return pm.group(1) + ",".join(value(v) for v in re.findall(r'"[^"]*"|[^,]+', pm.group(2)))
+    return _FILTER_TOKEN.sub(token, flt)
 
 
 def view_body(want: dict, spec: dict) -> tuple[dict, list[str]]:
@@ -649,6 +662,19 @@ def brand_display_name(resolver: Resolver | None, owner: str | None) -> str | No
         return None
     row = resolver.brand_org(owner, strict=False)
     return row.get("display_name") if row.get("known") else None
+
+
+def _readme_repos(spec: dict, owner: str, role: str, resolver, repos) -> tuple[list, list]:
+    """The repositories a §13.7 board README may name (copy-plan and `project readme` alike). A board that is public
+    (as captured, approved or not: nothing here makes it private) or may go public (an org board with an approved
+    visibility item) names none: neither reads repository metadata, so neither can tell a private linked repository
+    from a public one."""
+    repos = list(repos or spec.get("repositories") or [])
+    may_go_public = bool(spec.get("public")) or (role == "org" and resolver is not None and owner != "@me"
+                                                 and resolver.project_visibility_approved(owner))
+    if may_go_public and repos:
+        return [], ["readme-links:repositories-omitted (the board may go public)"]
+    return repos, []
 
 
 def copy_plan(target: str, *, role: str = "org", source: str | None = None, title: str | None = None,
@@ -708,6 +734,7 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
     number, project_id = spec.get("number"), spec.get("id")
     if not number or not project_id:
         raise ShowcaseError("the --copied capture has no project number or id", log="usage")
+    _check_board_owner(spec, owner, target, resolver)
     num = str(number)
     own_flag = owner
     # 1. fields: create what is missing, fix standard options keeping ids
@@ -786,9 +813,11 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
     nums = view_numbers(spec)
     edit = ["gh", "project", "edit", num, "--owner", own_flag, "--description", short]
     text = readme_text
+    readme_repos, lg = _readme_repos(spec, owner, role, resolver, repositories)
+    logs += lg
     if text is None:
         try:
-            text, lg = readme(owner, name, number, nums, repositories=repositories or spec.get("repositories"),
+            text, lg = readme(owner, name, number, nums, repositories=readme_repos,
                               out_of_scope=out_of_scope, reviewed=reviewed, views=vlist, estate=role == "estate",
                               fields=doc_fields(spec, planned, estate=role == "estate"))
             logs += lg
@@ -796,16 +825,22 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
             pending.append({"why": "README needs every view number: re-capture after the view jobs run"})
     if text is not None:
         edit += ["--readme", text]
-    jobs.append(_job(f"{pid}-{num}-text", "project", edit, owner,
+    # ids carry a content hash: the README-bearing re-plan (after the view jobs ran) is a new job, never the earlier id
+    # with other content, which the writer refuses together with its whole batch
+    jobs.append(_job(f"{pid}-{num}-text-{_digest(edit)}", "project", edit, owner,
                      "§13.2 short description" + (" and §13.7 README" if text is not None else " (README after re-capture)")))
     # 5. repository links (org boards: same owner only), then R5 re-run
     if role == "org":
+        linked = set()
         for r in repositories or []:
             if "/" not in r or not resolver_same(resolver, r.split("/", 1)[0], owner):
                 logs.append(f"link-skipped:{r} (links need the same owner)")
                 continue
             r = f"{owner}/{r.split('/', 1)[1]}"  # a former login of the org links under its current one (CQ-03)
-            jobs.append(_job(f"{pid}-{num}-link-{_k(r.split('/', 1)[1])}", "project",
+            if r.lower() in linked:
+                continue  # listed twice: one link job
+            linked.add(r.lower())
+            jobs.append(_job(f"{pid}-{num}-link-{_repo_key(r.split('/', 1)[1])}", "project",
                              ["gh", "project", "link", num, "--owner", owner, "--repo", r], owner,
                              "Link before the §10.1 settings pass, or re-run R5 afterwards (§13.11)."))
         reads.append({"name": "org-projects-setting", "argv": ["gh", "api", f"orgs/{owner}", "--jq", ".has_organization_projects"]})
@@ -859,16 +894,23 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
                  f"Screenshot every view into state/screens/projects/{sid}/."]
         jobs.append(_browser(f"{pid}-{num}-settings", owner, f"{url}/settings", steps, "project-settings",
                              "§13.9 step 7: default repository, auto-add and view checks (UI only)."))
-        if status_update:
-            # the Shipped view may be one this plan creates: link it only once its number is known (no dead /views/ link)
-            shipped = (f"[Shipped view]({url}/views/{nums['Shipped']})" if nums.get("Shipped")
-                       else f"Nothing yet: see the [board]({url}).")
-            if not nums.get("Shipped"):
-                logs.append("status-update:shipped-view-pending")
+        if status_update and spec.get("status_updates"):
+            # createProjectV2StatusUpdate is not idempotent: a board that already has an update never gets another "first"
+            logs.append("status-update:exists")
+        elif status_update and not nums.get("Shipped"):
+            # the Shipped view is one this plan creates: plan the update from the re-capture (the README waits the same
+            # way), so it links the view and is planned once, never first with a placeholder body and then again
+            logs.append("status-update:shipped-view-pending")
+            pending.append({"why": "the first status update links the Shipped view, which this plan creates",
+                            "next": f"run the view jobs, re-capture board {num} and plan copy-plan --copied again"})
+        elif status_update:
             body = ("**Summary**\nBoard set up from the CompleteTech workstream template.\n\n**Shipped**\n"
-                    f"{shipped}\n\n**Next**\nAdd this cycle's work to the board."
+                    f"[Shipped view]({url}/views/{nums['Shipped']})\n\n**Next**\nAdd this cycle's work to the board."
                     "\n\n**Risks and blocks**\nNone recorded.\n\n**Asks and dependencies**\nNone recorded.")
-            jobs.append(_gql_job(f"{pid}-{num}-status-1", owner, m_status_update(date.today().isoformat(), _quarter_end()),
+            # the dates are the current quarter's (not today), so a re-plan within the quarter is byte-identical and
+            # the writer skips it as already queued; the id hashes the whole mutation, so one id never has two contents
+            mutation = m_status_update(_quarter_start(), _quarter_end())
+            jobs.append(_gql_job(f"{pid}-{num}-status-1-{_digest([mutation, project_id, body])}", owner, mutation,
                                  "§13.8 first status update, right after rollout.", {"p": project_id, "body": body}))
     if role != "org":  # §13.2: the template and the Estate always stay private, whatever is approved
         logs.append(f"visibility:private ({role} stays private)")
@@ -876,12 +918,17 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
         jobs.append(_browser(f"{pid}-{num}-visibility", owner, f"{url}/settings",
                              [f"Open {url}/settings.", "Under 'Visibility', choose Public and confirm.", "Screenshot it."],
                              "project-visibility", "Approved visibility item only (§13.2)."))
-    else:
-        logs.append("visibility:private (no approval)")
+    else:  # a board captured public without approval stays as it is here; lint's visibility cell fails
+        logs.append("visibility:public (no approval)" if spec.get("public") else "visibility:private (no approval)")
     for j in jobs:
         argv = j.get("argv") or []
         if "--drafts" in argv or any(re.search(r"\bdelete", a, re.I) for a in argv if a.startswith("query=")):
             raise ShowcaseError(f"refused to plan {j['id']}: drafts or a delete", log="usage")
+    seen_ids: set[str] = set()
+    for j in jobs:  # the writer refuses a whole batch that uses an id twice, losing every job of the plan
+        if j["id"] in seen_ids:
+            raise ShowcaseError(f"refused to plan: job id {j['id']} is used twice", log="usage")
+        seen_ids.add(j["id"])
     return {"command": "project", "action": "copy-plan", "owner": owner, "role": role, "stage": 2, "number": number,
             "title": title, "short_description": short, "result": "ok", "jobs": jobs, "reads": reads, "pending": pending,
             "files": files, "readme": text, "logs": sorted(set(logs))}
@@ -893,6 +940,45 @@ def resolver_same(resolver, a, b) -> bool:
 
 def _k(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", (s or "").lower()).strip("-")
+
+
+def _digest(obj) -> str:
+    """Eight hex characters of sha256 over `obj` (canonical JSON): a job-id suffix that changes with the content."""
+    return hashlib.sha256(json.dumps(obj, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:8]
+
+
+def _repo_key(name: str) -> str:
+    """A job-id segment for a repository name that keeps names apart: `_k` folds `.`, `_` and `-` together, so
+    `order_ledger` and `order.ledger` would share an id. Writer ids allow `.` and `+` but not `_` (scripts/writer.py
+    ID_RE), so `_` becomes `+`; a name of letters, digits and single hyphens keeps its earlier id."""
+    return re.sub(r"[^a-z0-9.+-]", "-", (name or "").lower().replace("_", "+"))
+
+
+def _board_owner(spec: dict) -> tuple[str, str] | None:
+    """("orgs" | "users", login) of a captured board, from its url (github.com/orgs/LOGIN/projects/N)."""
+    m = re.match(r"^https://github\.com/(orgs|users)/([A-Za-z0-9-]+)/projects/\d+", spec.get("url") or "")
+    return (m.group(1), m.group(2)) if m else None
+
+
+def _check_board_owner(spec: dict, owner: str, target: str, resolver) -> None:
+    """Stage 2 plans node-id mutations and `gh project edit|link NUMBER --owner TARGET` against the captured board, so
+    the capture must be a board of the target (any of its logins, CQ-03; the user's own board for @me). Another
+    owner's board (another org, the template, the Pick-Your-AI reference) is refused: its node ids would be changed
+    under the target's name, and the number-plus-owner jobs would overwrite an unrelated board of the target."""
+    board = _board_owner(spec)
+    if board is None:
+        raise ShowcaseError("the --copied capture does not say whose board it is (no project url): re-capture the "
+                            "board with `project capture-query`; nothing was planned", log="usage")
+    kind, login = board
+    mine = kind == "users" and is_user(login) if owner == "@me" else kind == "orgs" and resolver_same(resolver, login, owner)
+    if not mine:
+        raise ShowcaseError(f"the --copied capture is {login}'s board {spec.get('number')}, not a board of {target}: "
+                            "pass the capture of the board copied into the target; nothing was planned", log="usage")
+
+
+def _quarter_start(today: date | None = None) -> str:
+    t = today or date.today()
+    return date(t.year, (t.month - 1) // 3 * 3 + 1, 1).isoformat()
 
 
 def _quarter_end(today: date | None = None) -> str:
@@ -1138,10 +1224,14 @@ def cmd_project(args):
         name = args.display_name or ("CompleteTech Estate" if estate else brand_display_name(r, owner))
         if not name:
             raise NeedsInput("display-name", f"{owner} has no display_name in references/brand.yaml (pass --display-name)")
-        repos = [x for x in (args.repos or "").split(",") if x] or spec.get("repositories")
-        text, logs = readme(r.canonical(owner) if not estate else "@me", name, spec.get("number"), view_numbers(spec),
+        canon = r.canonical(owner) if not estate else "@me"
+        # the same privacy gate as copy-plan: a board that is public or may go public names no repository
+        repos, gate = _readme_repos(spec, canon, "estate" if estate else "org", r,
+                                    [x for x in (args.repos or "").split(",") if x])
+        text, logs = readme(canon, name, spec.get("number"), view_numbers(spec),
                             fields=doc_fields(spec, estate=estate), repositories=repos,
                             out_of_scope=args.out_of_scope, reviewed=args.reviewed, estate=estate)
+        logs = gate + logs
         if args.out:
             Path(args.out).write_text(text, encoding="utf-8")
         return {"command": "project", "action": act, "owner": owner, "result": "ok", "readme": text, "out": args.out,

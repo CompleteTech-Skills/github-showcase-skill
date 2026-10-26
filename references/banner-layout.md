@@ -111,11 +111,13 @@ Written by `banner` and `card` when their output is under `docs/images/`. Sorted
  "inputs": {"owner": "…", "repo": "…", "description": "…", "topics": ["…"], "visibility": "public",
             "license": "MIT", "language": "Python", "type": "cli", "icon_sha256": "…", "override_sha256": null},
  "fingerprint": "sha256 of the canonical inputs plus skill_version and config_sha256",
- "outputs": {"banner.png": {"sha256": "…", "px": [2560, 720], "bytes": 211234, "scale": 2},
-             "card.svg": {"sha256": "…", "bytes": 27110}}}
+ "outputs": {"banner.png": {"sha256": "…", "px": [2560, 720], "bytes": 211234, "scale": 2, "repository_id": 123},
+             "card.svg": {"sha256": "…", "bytes": 27110, "repository_id": 123}}}
 ```
 
-`fingerprint` compares the current inputs with `fingerprint` here; the composite Action regenerates only when they differ.
+`fingerprint` compares the current inputs with `fingerprint` here; the composite Action regenerates only when they differ. Each output record carries `repository_id`, the repository's immutable id from `meta --from-gh` (outside the fingerprint inputs), when the metadata has one.
+
+Before it writes anything, the Action decides whether the art came from another repository (`action_prepare.py foreign`). Only proof counts: the sidecar is a template's (its `inputs.type` is `template`, or it names `CompleteTech-LLC/completetech-repo-template`), or its records carry a repository id other than `$GITHUB_REPOSITORY_ID`. Then a copied `assets/icon.png` (the sha256 the sidecar recorded) is removed (decision 12), and an output that cannot be regenerated yet is dropped. A sidecar that only names another slug is the repository's own art after a rename, a transfer or an org rename: nothing is removed, a notice says so, and the changed fingerprint regenerates the art under the new name. A template repository is never foreign to itself.
 
 ## Repo card (`card`)
 

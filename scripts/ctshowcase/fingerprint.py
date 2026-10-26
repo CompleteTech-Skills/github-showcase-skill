@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 
 from . import STANDARD, __version__
@@ -21,6 +22,28 @@ def _sha(p: Path | None) -> str | None:
     return hashlib.sha256(p.read_bytes()).hexdigest() if p and p.is_file() else None
 
 
+def override_icon(text: str) -> str | None:
+    """The override's `icon:` path, read as the renderer reads it (YAML via config.load_repo_override). Without PyYAML
+    (the stdlib-only Action step) a top-level `icon:` line is read with its quotes and trailing `# comment` removed."""
+    try:
+        import yaml
+    except ImportError:  # pragma: no cover - the Action's fingerprint step runs before pip install
+        yaml = None
+    if yaml is not None:
+        try:
+            obj = yaml.safe_load(text)
+        except yaml.YAMLError:
+            return None
+        v = obj.get("icon") if isinstance(obj, dict) else None
+        return v.strip() if isinstance(v, str) and v.strip() else None
+    for line in text.splitlines():
+        m = re.match(r"""^(?:icon|"icon"|'icon')\s*:\s*(?:"([^"]*)"|'([^']*)'|([^#\s][^#]*?))?\s*(?:#.*)?$""", line)
+        if m:
+            v = next((g for g in m.groups() if g is not None), "").strip()
+            return v if v and v not in ("null", "~") else None
+    return None
+
+
 def inputs(meta: dict, repo_dir: str | Path | None) -> dict:
     rd = Path(repo_dir) if repo_dir else None
     override = None
@@ -32,11 +55,9 @@ def inputs(meta: dict, repo_dir: str | Path | None) -> dict:
                 break
         icon = rd / "assets" / "icon.png"
         if override is not None:
-            for line in override.read_text(encoding="utf-8").splitlines():
-                if line.startswith("icon:"):
-                    v = line.split(":", 1)[1].strip().strip("'\"")
-                    if v and v != "null":
-                        icon = rd / v
+            v = override_icon(override.read_text(encoding="utf-8"))
+            if v:
+                icon = rd / v
     try:  # the detected type picks the README variant and the eyebrow: a new type (code landed) regenerates
         from .detect import detect
         from .facts import RepoFacts

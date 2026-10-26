@@ -1,4 +1,6 @@
 # Existing star Lists before any create (COVERAGE SOC-01): ids, names and members, so updates keep the union.
+# items.totalCount is compared with the captured nodes: a List with more than 100 members is a partial page, and
+# `org pins` then plans no updateUserListsForItem job (needs-input:star-lists-items-paged).
 query StarLists {
   viewer { login lists(first: 32) { totalCount nodes { id name slug description isPrivate
     items(first: 100) { totalCount nodes { ... on Repository { id nameWithOwner } } } } } }

@@ -8,6 +8,7 @@ from __future__ import annotations
 import re
 from collections import Counter
 from pathlib import Path
+from urllib.parse import quote
 
 from . import footer as footermod
 from .context import RepoContext
@@ -16,6 +17,55 @@ from .detect import standard
 MARK = re.compile(r"<!-- showcase:([a-z-]+):start -->\n?(.*?)\n?<!-- showcase:\1:end -->", re.S)
 EMOJI = re.compile("[\U0001F000-\U0001FAFF☀-➿⬀-⯿️‍]")
 SHIELDS = "https://img.shields.io/badge/"
+BOM = "\ufeff"
+# CommonMark: a backtick fence's info string has no backtick, so "```npm test``` runs" is inline code, not a fence
+FENCE_OPEN = re.compile(r"^ {0,3}(`{3,}(?=[^`\n]*$)|~{3,})")
+INLINE_CODE = re.compile(r"(`+)(?!`).+?(?<!`)\1(?!`)")
+
+
+def normalize_text(text: str) -> str:
+    """README text as the tools read it: LF line endings, no leading UTF-8 byte order mark (a BOM would hide the H1
+    from every `^#` match)."""
+    text = text.replace("\r\n", "\n")
+    return text[1:] if text.startswith(BOM) else text
+
+
+def code_spans(text: str) -> list[tuple[int, int]]:
+    """(start, end) offsets of fenced code (``` and ~~~, an unclosed fence runs to the end) and inline code spans."""
+    spans, pos, fence, fstart = [], 0, None, 0
+    for line in text.splitlines(keepends=True):
+        if fence is None:
+            m = FENCE_OPEN.match(line)
+            if m:
+                fence, fstart = m.group(1), pos
+            else:
+                spans += [(pos + c.start(), pos + c.end()) for c in INLINE_CODE.finditer(line)]
+        else:
+            close = re.match(r"^ {0,3}(`{3,}|~{3,})[ \t]*$", line.rstrip("\n"))
+            if close and close.group(1)[0] == fence[0] and len(close.group(1)) >= len(fence):
+                spans.append((fstart, pos + len(line)))
+                fence = None
+        pos += len(line)
+    if fence is not None:
+        spans.append((fstart, len(text)))
+    return spans
+
+
+def masked(text: str) -> str:
+    """`text` with every code span blanked (same length, newlines kept), so marker searches skip documented examples
+    and their offsets still index the original."""
+    out = list(text)
+    for a, b in code_spans(text):
+        for i in range(a, b):
+            if out[i] != "\n":
+                out[i] = "\x00"
+    return "".join(out)
+
+
+def find_blocks(pattern: re.Pattern, text: str) -> list[re.Match]:
+    """Matches of `pattern` outside code, taken on the original text (group contents byte-identical)."""
+    found = (pattern.fullmatch(text, m.start(), m.end()) for m in pattern.finditer(masked(text)))
+    return [m for m in found if m]
 
 
 def start(b):
@@ -34,7 +84,9 @@ def wrap(b, body):
 # Small helpers
 # ------------------------------------------------------------------------------------------------
 def shield(s: str) -> str:
-    return s.replace("-", "--").replace("_", "__").replace(" ", "%20").replace("|", "%7C").replace("+", "%2B")
+    """A shields.io path segment: `-`/`_` doubled, then percent-encoded, so `#`, `?`, `/` and `%` (C#, F#) stay in
+    the segment instead of ending the path."""
+    return quote(s.replace("-", "--").replace("_", "__"), safe="()!*'.,;:@&=$~")
 
 
 def title_case(s: str) -> str:
@@ -107,8 +159,8 @@ def split_sections(text: str) -> tuple[str, list[tuple[str, str]]]:
 # Header pieces
 # ------------------------------------------------------------------------------------------------
 def nav_line(ctx: RepoContext) -> str:
-    org, owner = ctx.org, ctx.owner
-    if owner == "CompleteTech-Skills" and ctx.det["type"] == "agent-skills":
+    org, owner = ctx.org, ctx.brand.resolver().canonical(ctx.owner)  # links name the org's current login (CQ-03)
+    if ctx.same_owner("CompleteTech-Skills") and ctx.det["type"] == "agent-skills":
         line = ("**CompleteTech LLC Skills** · [Start here](ONBOARDING.md) · [Agent instructions](SKILL.md) · "
                 "[Skill library](https://github.com/CompleteTech-Skills/agentic-services-orchestrator-skill/blob/main/"
                 "references/skill-family.md) · [Contributing](CONTRIBUTING.md)")
@@ -176,7 +228,7 @@ def badges(ctx: RepoContext) -> list[tuple[str, str, str | None]]:
         pick = [x for x in wf if "test" in x.rsplit("/", 1)[-1]] or [x for x in wf if "ci" in x.rsplit("/", 1)[-1]]
         if pick:
             name = pick[0].rsplit("/", 1)[-1]
-            base = f"https://github.com/{ctx.owner}/{ctx.repo}/actions/workflows/{name}"
+            base = f"https://github.com/{ctx.brand.resolver().canonical(ctx.owner)}/{ctx.repo}/actions/workflows/{name}"
             out.append(("Tests" if "test" in name else "CI", f"{base}/badge.svg", base))
     return out[:4]
 
@@ -255,7 +307,7 @@ def license_section(ctx: RepoContext) -> tuple[str, str] | None:
     if ctx.public and (ctx.det["variant"] == "F" or (ctx.org.get("license_chip") and lic and lic.upper().startswith("AGPL"))):
         return "Licensing", rv["security"]
     if not ctx.public:
-        if ctx.owner == "TouchedByAnAgent":
+        if ctx.same_owner("TouchedByAnAgent"):
             return "License", rv["private_hold"]
         year = (ctx.meta.get("created_at") or "")[:4]
         if not year:
@@ -320,16 +372,18 @@ def section_facts(ctx: RepoContext, h2: str) -> str | None:
 
 
 def footer_wanted(ctx) -> bool:
-    fv = ctx.org.get("footer", True)
-    if fv is True:
+    """Decision 18 footer wanted (RepoContext.footer_status): the watching org's `footer: false` exempts only its
+    forks, so its `.github` gets the footer and its other non-fork repositories are held."""
+    why = ctx.footer_status()
+    if why is None:
         return True
-    ctx.log("hold" if fv == "hold" else "exempt:footer")
+    ctx.log("exempt:footer" if why.startswith("exempt") else why if why.startswith("hold:") else "hold")
     return False
 
 
 def callout(ctx) -> str | None:
     if ctx.det["variant"] == "I" or (not ctx.public and ctx.det["variant"] in "ABCDE"):
-        who = "Touched By An Agent" if ctx.owner == "TouchedByAnAgent" else ctx.company
+        who = "Touched By An Agent" if ctx.same_owner("TouchedByAnAgent") else ctx.company
         return f"> [!IMPORTANT]\n> Internal {who} repository. Not for distribution."
     return None
 
@@ -370,12 +424,13 @@ HEADER_LINE = re.compile(
 
 
 def _strip_markers(text: str) -> tuple[str, dict]:
-    blocks = {}
-
-    def sub(m):
+    """(text without its marker blocks, {block: body}); a marker example inside fenced or inline code stays."""
+    blocks, out, pos = {}, [], 0
+    for m in find_blocks(MARK, text):
         blocks[m.group(1)] = m.group(2)
-        return ""
-    return MARK.sub(sub, text), blocks
+        out.append(text[pos:m.start()])
+        pos = m.end()
+    return "".join(out) + text[pos:], blocks
 
 
 def _leading_banner(pre: str) -> bool:
@@ -459,18 +514,108 @@ def preserved(ctx: RepoContext, text: str) -> bool:
     return _leading_banner(pre)
 
 
+CENTRED_OPEN = re.compile(r'(?m)^[ \t]*<(p|div) align="center">')
+
+
+def is_footer_like(block: str) -> bool:
+    """A centred block that credits the company with a complete.tech link: the decision 18 footer, exact or drifted."""
+    return bool(re.match(r'\s*<(p|div) align="center">', block)) and "built by" in block.lower() \
+        and "complete.tech" in block.lower()
+
+
+FOOTER_TAG = re.compile(r"</?(p|div|a|picture|source|img|br|sub|sup|b|strong|em)\b([^>]*)>", re.I)
+
+
+FOOTER_ATTR = re.compile(r"""\b(src|srcset|alt)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""", re.I)
+
+
+def _footer_logo_url(url: str, brand) -> bool:
+    """`url` is one of the decision 18 footer's own logo files (brand footer `logo_light_url` or `logo_dark_url`),
+    as configured or drifted only in scheme, branch, query or the github.com blob/raw form of the same file."""
+    url = url.strip().split("#", 1)[0].split("?", 1)[0]
+    for key in ("logo_light_url", "logo_dark_url"):
+        want = brand.raw["footer"][key]
+        if url == want:
+            return True
+        m = re.match(r"^https://raw\.githubusercontent\.com/([^/]+)/([^/]+)/[^/]+/(.+)$", want)
+        if not m:
+            continue
+        own, repo, path = (re.escape(x) for x in m.groups())
+        if re.fullmatch(rf"(?i:https?://raw\.githubusercontent\.com/{own}/{repo}/[^/]+/){path}", url) or \
+                re.fullmatch(rf"(?i:https?://github\.com/{own}/{repo}/(?:blob|raw)/[^/]+/){path}", url):
+            return True
+    return False
+
+
+def is_footer_copy(block: str, brand) -> bool:
+    """Every line of `block` is a line of the decision 18 footer or a drifted copy of one: only centring, link, logo,
+    `<br>`/`<sub>` markup, with complete.tech links, the footer's own logo image (its src or srcset is the brand footer
+    logo URL or a drifted form of it, or its alt is exactly the company) and as text only the credit line ("Built by
+    <company>", optionally with the suffix). A sponsor or partner image (whatever its file name), a thanks line or
+    any other authored text makes it not a footer copy, so it is never removed."""
+    import html
+    f, company = brand.raw["footer"], brand.strings["company"]
+    credit = {f"{f['line_prefix']} {company}", f"{f['line_prefix']} {company} {f['line_suffix']}"}
+
+    def tag_ok(m: re.Match) -> bool:
+        name, attrs = m.group(1).lower(), m.group(2)
+        if m.group(0).startswith("</") or name not in ("a", "img", "source"):
+            return True
+        if name == "a":
+            return "complete.tech" in attrs.lower()
+        for a in FOOTER_ATTR.finditer(attrs):  # never a file name that merely contains "logo"
+            key = a.group(1).lower()
+            val = html.unescape(next(g for g in a.groups()[1:] if g is not None)).strip()
+            if key == "alt" and val in (company, f["alt"]):
+                return True
+            parts = [p.split()[0] for p in val.split(",") if p.split()]
+            if key in ("src", "srcset") and parts and all(_footer_logo_url(u, brand) for u in parts):
+                return True
+        return False
+
+    for line in block.splitlines():
+        if not line.strip():
+            continue
+        if not all(tag_ok(m) for m in FOOTER_TAG.finditer(line)):
+            return False
+        rest = " ".join(html.unescape(FOOTER_TAG.sub(" ", line)).split())
+        if rest and rest not in credit:
+            return False
+    return True
+
+
+def drop_old_footer(text: str, brand) -> tuple[str, list[str]]:
+    """(text, removed lines) with a trailing old footer (an unmarked or drifted decision 18 footer: every line a
+    footer line, `is_footer_copy`) taken off the end, so the marked footer replaces it instead of following it. Any
+    other block, a centred credits block with authored lines included, is left as it is (lint reports a second
+    footer-like block as `fail:duplicate`)."""
+    body = text.rstrip()
+    opens = [m for m in CENTRED_OPEN.finditer(masked(body))]
+    if not opens:
+        return text, []
+    m = opens[-1]
+    tail = body[m.start():]
+    if not tail.rstrip().endswith(f"</{m.group(1)}>") or not is_footer_like(tail) or not is_footer_copy(tail, brand):
+        return text, []
+    return body[:m.start()].rstrip() + "\n", [ln for ln in tail.splitlines() if ln.strip()]
+
+
 def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
     """Return (new text, header lines removed). Raises nothing; callers run the shrink checks."""
     variant = ctx.det["variant"]
     rv = standard("readme-variants")
     if variant in ("G", "H"):
-        return callout_only(ctx, text.replace("\r\n", "\n")), []
-    text = text.replace("\r\n", "\n")
+        return callout_only(ctx, normalize_text(text)), []
+    text = normalize_text(text)
     body, blocks = _strip_markers(text)
+    want_footer = footer_wanted(ctx)
+    removed: list[str] = []
+    if want_footer:  # an unmarked or drifted footer at the end is replaced by the marked one, never kept beside it
+        body, old_footer = drop_old_footer(body, ctx.brand)
+        removed += old_footer
     # preserve list / existing third-party banner
     preserve = ctx.repo in (ctx.org.get("readme_preserve") or []) or len(text.encode()) > 15000
     pre, sections = split_sections(body)
-    removed: list[str] = []
     keep_pre: list[str] = []
     lines = pre.splitlines()
     if _leading_banner(pre) and (ctx.tier == "T2" or preserve):
@@ -560,7 +705,7 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
             lic = license_section(ctx)
             if lic:
                 out.append(f"## {lic[0]}\n\n{lic[1]}")
-        if footer_wanted(ctx):
+        if want_footer:
             out.append(footermod.block(ctx.brand))
         return "\n\n".join(x for x in out if x) + "\n", removed
     else:
@@ -593,7 +738,7 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
         lic = license_section(ctx)
         if lic:
             out.append(f"## {lic[0]}\n\n{lic[1]}")
-    if footer_wanted(ctx):
+    if want_footer:
         out.append(footermod.block(ctx.brand))
     for b in ("template-body", "checklist"):  # inserted in reverse: the checklist stays above the body
         if b in blocks:
@@ -603,7 +748,7 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
 
 def header_only(ctx: RepoContext, text: str) -> str:
     """Replace only existing marker blocks (what the Action runs)."""
-    text = text.replace("\r\n", "\n")
+    text = normalize_text(text)
     desc = (ctx.meta.get("description") or "").strip()
     gen = {"nav": nav_line(ctx), "banner": banner_html(ctx), "footer": footermod.markup(ctx.brand)}
     if ctx.repo_dir is not None and not (ctx.repo_dir / "docs" / "images" / "banner.png").is_file():
@@ -642,9 +787,10 @@ def _seam(left: str, right: str) -> str:
 
 def _sub_blocks(text: str, sub) -> str:
     """MARK.sub(sub, text), except that authored text between blocks comes back byte-identical (fenced code
-    included); blank-line runs are tidied only at the seams around each block (a removed block leaves one blank line)."""
+    included, and a marker example inside code is never treated as a block); blank-line runs are tidied only at the
+    seams around each block (a removed block leaves one blank line)."""
     out, pos = "", 0
-    for m in MARK.finditer(text):
+    for m in find_blocks(MARK, text):
         out = text[:m.start()] if not pos else _seam(out, text[pos:m.start()])
         out = _seam(out, sub(m))
         pos = m.end()
@@ -671,15 +817,17 @@ def license_block(ctx: RepoContext, text: str) -> str:
     """Rewrite the paragraph after `<!-- showcase:license -->` (and its H2) from license_section(), with or without a
     LICENSE file: a private repository reads "Proprietary...", a Security repository gets "## Licensing". When the
     section cannot be derived (needs-input), the existing text stays."""
-    if LICENSE_MARK not in text:
+    i = masked(text).find(LICENSE_MARK)  # the first mark outside code (a documented example is left alone)
+    if i < 0:
         return text
     lic = license_section(ctx)
     if not lic:
         return text
-    out = re.sub(re.escape(LICENSE_MARK) + r"\n(.*?)(\n\n|\n?$)", lambda m: LICENSE_MARK + "\n" + lic[1] + m.group(2), text,
-                 count=1, flags=re.S)
-    return re.sub(r"(?m)^## (?:License|Licensing|Licence)[ \t]*\n(\n?" + re.escape(LICENSE_MARK) + ")",
-                  lambda m: f"## {lic[0]}\n" + m.group(1), out, count=1)
+    m = re.compile(re.escape(LICENSE_MARK) + r"\n(.*?)(\n\n|\n?$)", re.S).match(text, i)
+    if m:
+        text = text[:i] + LICENSE_MARK + "\n" + lic[1] + m.group(2) + text[m.end():]
+    h = re.search(r"(?m)^## (?:License|Licensing|Licence)[ \t]*\n(\n?)\Z", text[:i])
+    return text[:h.start()] + f"## {lic[0]}\n" + h.group(1) + text[i:] if h else text
 
 
 TEMPLATE_H1 = "CompleteTech Repo Template"
@@ -700,9 +848,10 @@ def pristine_block(body: str) -> str:
 def bootstrap_state(text: str) -> str:
     """'pristine' (the block is byte-for-byte what was generated), 'edited' (a marker without a matching hash: a person
     wrote in the block) or 'none' (no marker: the README is the repository's own)."""
-    m = TEMPLATE_BODY.search(text.replace("\r\n", "\n"))
-    if not m:
+    found = find_blocks(TEMPLATE_BODY, normalize_text(text))
+    if not found:
         return "none"
+    m = found[0]
     pm = PRISTINE.search(m.group(1))
     if not pm:
         return "none"
@@ -711,7 +860,13 @@ def bootstrap_state(text: str) -> str:
 
 
 def drop_pristine(text: str) -> str:
-    return PRISTINE.sub("", text, count=1)
+    """`text` without the pristine marker of the first template-body block outside code; a marker shown as an example
+    (inline or fenced code) stays byte-identical."""
+    found = find_blocks(TEMPLATE_BODY, text)
+    if not found:
+        return text
+    tb = found[0]
+    return text[:tb.start(1)] + PRISTINE.sub("", tb.group(1), count=1) + text[tb.end(1):]
 
 
 def _header_region(text: str) -> re.Match | None:
@@ -725,7 +880,7 @@ def bootstrap(ctx: RepoContext, text: str) -> str:
     regenerated on later runs too, so a repository typed `workspace` on its creation commit is re-bootstrapped once
     its code (or `type:` in .github/showcase.yml) gives the real type. Any human edit inside the block changes its
     hash, and from then on the block is the repository's own: never overwritten (callers drop the marker)."""
-    text = text.replace("\r\n", "\n")
+    text = normalize_text(text)
     if ctx.meta.get("is_template") or bootstrap_state(text) != "pristine":
         return text
     variant = ctx.det["variant"]
@@ -741,7 +896,8 @@ def bootstrap(ctx: RepoContext, text: str) -> str:
             secs.append(f"## {h2}\n\n<!-- needs-input: {variant}:{h2} -- write from repository facts only -->")
             ctx.log(f"needs-input:{variant}:{h2}")
     new = pristine_block("\n\n".join(secs))
-    text = TEMPLATE_BODY.sub(lambda m: new, text, count=1)
+    tb = find_blocks(TEMPLATE_BODY, text)[0]  # bootstrap_state found it outside code
+    text = text[:tb.start()] + new + text[tb.end():]
     # the header: rebuilt for this variant unless a person retitled the README
     hm = _header_region(text)
     if hm:
@@ -753,9 +909,19 @@ def bootstrap(ctx: RepoContext, text: str) -> str:
 
 
 def bootstrap_contributing(ctx: RepoContext, text: str) -> str:
-    return re.sub(r"(https://github\.com/)[A-Za-z0-9-]+(/\.github/blob/main/(CONTRIBUTING|SECURITY)\.md)",
-                  lambda m: m.group(1) + ctx.owner + m.group(2), text).replace("[CompleteTech-LLC contributing guide]",
-                                                                                f"[{ctx.owner} contributing guide]")
+    """Point the template's own `.github` guide links at this org. Only links to the template owner's `.github` (any
+    of its logins) change; a link to another org's or an upstream's guide or security policy stays as written."""
+    from .intake import TEMPLATE_REPO
+    tpl = TEMPLATE_REPO.split("/")[0]
+    try:
+        logins = {x.lower() for x in ctx.brand.resolver().aliases(tpl)}
+    except AttributeError:  # a context without a brand: the template login alone
+        logins = {tpl.lower()}
+
+    def sub(m):
+        return m.group(1) + ctx.owner + m.group(3) if m.group(2).lower() in logins else m.group(0)
+    return re.sub(r"(https://github\.com/)([A-Za-z0-9-]+)(/\.github/blob/main/(?:CONTRIBUTING|SECURITY)\.md)", sub,
+                  text).replace(f"[{tpl} contributing guide]", f"[{ctx.owner} contributing guide]")
 
 
 # ------------------------------------------------------------------------------------------------
@@ -786,4 +952,6 @@ def preservation(before: str, after: str, removed: list[str]) -> list[str]:
 
 
 def read_text(path: Path) -> str:
-    return path.read_text(encoding="utf-8") if path.is_file() else ""
+    """A README's text without a leading byte order mark ('' when missing)."""
+    text = path.read_text(encoding="utf-8") if path.is_file() else ""
+    return text[1:] if text.startswith(BOM) else text

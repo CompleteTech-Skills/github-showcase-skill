@@ -145,6 +145,12 @@
         "null"
       ]
     },
+    "id": {
+      "type": "integer"
+    },
+    "node_id": {
+      "type": "string"
+    },
     "health_percentage": {
       "type": [
         "integer",

@@ -220,25 +220,77 @@ def reference_files(files, complete: bool = False) -> tuple[list[str], bool]:
     return found, complete
 
 
-def defaults_source(repo: str, *, repo_dir: str | Path | None = None, meta: dict | None = None) -> dict:
-    """The owner's `.github` repository as rule 0 reads it: a checkout, else its captured metadata (None: unknown)."""
+def defaults_source(repo: str, *, repo_dir: str | Path | None = None, meta: dict | None = None,
+                    verified: bool = True) -> dict:
+    """The owner's `.github` repository as rule 0 reads it: a checkout, else its captured metadata (None: unknown).
+    `verified` False marks a checkout whose origin could not be read: a default form found in it still holds the
+    rename, but finding none proves nothing (it may be another org's `.github`), so the rename stays held."""
     m = meta or {}
     return {"repo": repo, "dir": Path(repo_dir) if repo_dir else None, "files": m.get("files"),
-            "complete": m.get("files_complete") is True}
+            "complete": m.get("files_complete") is True, "verified": verified}
 
 
-def defaults_for(owner: str, repo: str, *, repo_dir=None, meta: dict | None = None, path: str | Path | None = None) -> dict:
+def _owner_resolver(resolver):
+    """The org resolver for comparing logins (CQ-03): the caller's, else the default brand.yaml's, else None."""
+    if resolver is not None:
+        return resolver
+    from .errors import ShowcaseError
+    try:
+        from .config import load_brand
+        return load_brand().resolver()
+    except (ShowcaseError, OSError, ValueError):
+        return None
+
+
+def _same_owner(resolver, a: str, b: str) -> bool:
+    if resolver is not None:
+        return resolver.same(a, b)
+    return bool(a and b) and a.lower() == b.lower()
+
+
+def _json_owner(raw: dict) -> str | None:
+    """The owner login a `.github` metadata JSON names (`owner`, `owner.login` or `full_name`), else None."""
+    o = raw.get("owner")
+    if isinstance(o, dict):
+        o = o.get("login")
+    if isinstance(o, str) and o.strip():
+        return o.strip()
+    full = raw.get("full_name") or raw.get("nameWithOwner")
+    if isinstance(full, str) and "/" in full:
+        return full.split("/", 1)[0].strip() or None
+    return None
+
+
+def _checkout_origin(d: Path) -> tuple[str, str] | None:
+    """(owner, repo) of a checkout's GitHub `origin`, read only from the directory itself (never an enclosing
+    repository), else None."""
+    if not (d / ".git").exists():
+        return None
+    from .meta import from_repo_dir
+    m = from_repo_dir(d)
+    return (m["owner"], m["repo"]) if m.get("owner") and m.get("repo") else None
+
+
+def defaults_for(owner: str, repo: str, *, repo_dir=None, meta: dict | None = None, path: str | Path | None = None,
+                 resolver=None) -> dict:
     """The owner's `.github` repository for rule 0 in R = owner/repo: R itself when R is `.github`, else `path` (a
-    checkout of it, or its metadata JSON from `meta --from-gh OWNER/.github`), else unknown (renames then hold)."""
+    checkout of it, or its metadata JSON from `meta --from-gh OWNER/.github`), else unknown (renames then hold).
+    `path` must be the OWNER's `.github` (old and new logins resolve alike through `resolver`): one that names another
+    org or repository is refused (usage); one whose owner cannot be read holds the renames (`needs-input:label-references`)."""
     full = f"{owner}/.github"
     if repo == ".github":
         return defaults_source(full, repo_dir=repo_dir, meta=meta)
     if not path:
         return defaults_source(full)
+    from .errors import ShowcaseError
     p = Path(path)
     if p.is_dir():
+        origin = _checkout_origin(p)
+        if origin is None:
+            return defaults_source(full, repo_dir=p, verified=False)
+        if origin[1].lower() != ".github" or not _same_owner(_owner_resolver(resolver), origin[0], owner):
+            raise ShowcaseError(f"--org-defaults {p} is a checkout of {origin[0]}/{origin[1]}, not {full}", log="usage")
         return defaults_source(full, repo_dir=p)
-    from .errors import ShowcaseError
     try:
         raw = json.loads(p.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -246,7 +298,14 @@ def defaults_for(owner: str, repo: str, *, repo_dir=None, meta: dict | None = No
     name = (raw.get("repo") or raw.get("name") or str(raw.get("full_name") or "/").split("/")[-1]) if isinstance(raw, dict) else None
     if name and name != ".github":
         raise ShowcaseError(f"--org-defaults {p} describes {name}, not {full}", log="usage")
-    return defaults_source(full, meta=raw if isinstance(raw, dict) and not raw.get("error") else None)
+    if not isinstance(raw, dict) or raw.get("error"):
+        return defaults_source(full)
+    who = _json_owner(raw)
+    if who is None:
+        return defaults_source(full)  # whose .github it is cannot be told: the renames stay held
+    if not _same_owner(_owner_resolver(resolver), who, owner):
+        raise ShowcaseError(f"--org-defaults {p} describes {who}/.github, not {full}", log="usage")
+    return defaults_source(full, meta=raw)
 
 
 def _own_forms(rd: Path | None, files, complete: bool) -> bool | None:
@@ -282,6 +341,8 @@ def _default_forms(defaults: dict | None, name: str) -> tuple[str | None, list]:
                 if kind:
                     hits += _form_hits(p.relative_to(d).as_posix(), kind, p.read_text(encoding="utf-8", errors="ignore"),
                                        name, repo=repo)
+        if not hits and (defaults or {}).get("verified") is False:  # no origin: may be another org's .github
+            return "unchecked", [f"{repo}:{p} (checkout without a GitHub origin)" for p in DEFAULT_PATTERNS]
         return ("rewrite" if hits else None), hits
     cap, complete = _capture((defaults or {}).get("files"), bool((defaults or {}).get("complete")))
     found = sorted(p for p, v in cap.items() if v is not None and v is not False and default_form_file(p))

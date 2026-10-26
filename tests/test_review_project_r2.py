@@ -16,6 +16,14 @@ def cap(name):
     return json.loads((FIX / name).read_text(encoding="utf-8"))
 
 
+def cap_of(name, owner):
+    """The same capture as a board of another owner (copy-plan stage 2 refuses a board that is not the target's)."""
+    c = cap(name)
+    p = c["data"]["organization"]["projectV2"]
+    p["url"] = f"https://github.com/orgs/{owner}/projects/{p['number']}"
+    return c
+
+
 def resolver(brand, rows=()):
     return Resolver(brand, {}, {"rows": set(rows), "ids": set(), "answers": {}, "actions": [], "extra": []})
 
@@ -83,12 +91,13 @@ def test_renames_apply_in_one_pass_not_chained(brand):
 # ----------------------------------------------------------------------------------- 4373814820 template stays private
 def test_template_never_gets_a_public_visibility_job(brand):
     ok = resolver(brand, rows=[("project-visibility", "CompleteTech-LLC", "*", "")])
-    plan = PJ.copy_plan("CompleteTech-LLC", role="template", copied=cap("copy-capture.json"), resolver=ok)
+    plan = PJ.copy_plan("CompleteTech-LLC", role="template", copied=cap_of("copy-capture.json", "CompleteTech-LLC"), resolver=ok)
     assert not [j for j in plan["jobs"] if j["id"].endswith("-visibility")]
     assert not any("Public" in s for j in plan["jobs"] for s in j.get("steps") or [])
     assert "visibility:private (template stays private)" in plan["logs"]
     guard_form = resolver(brand, rows=[("graphql", "project-visibility", "*", "")])
-    plan = PJ.copy_plan("CompleteTech-LLC", role="template", copied=cap("copy-capture.json"), resolver=guard_form)
+    plan = PJ.copy_plan("CompleteTech-LLC", role="template", copied=cap_of("copy-capture.json", "CompleteTech-LLC"),
+                        resolver=guard_form)
     assert not [j for j in plan["jobs"] if j["id"].endswith("-visibility")]
 
 

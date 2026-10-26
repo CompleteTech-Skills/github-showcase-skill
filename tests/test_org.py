@@ -258,7 +258,7 @@ def test_star_list_reads_missing_repo_ids(make_estate):
     est = make_estate()
     lists = json.loads((FIX / "star-lists-existing.json").read_text())
     for n in lists["data"]["viewer"]["lists"]["nodes"]:
-        n["items"]["nodes"] = []
+        n["items"].update(nodes=[], totalCount=0)
     res = O.star_list_plan(est, N, lists_capture=lists)
     read = next(r for r in res["reads"] if r["name"] == "repo-id:pallets/flask")["argv"]
     assert "owner=pallets" in read and "name=flask" in read and read[-1].endswith("repo_id.graphql")

@@ -147,8 +147,9 @@ def test_capture_wins_for_a_disjoint_option_scale(brand):
 
 def test_status_update_never_links_an_unknown_view(brand):
     plan = PJ.copy_plan(N, copied=json.loads((PFIX / "copy-capture.json").read_text()), resolver=_resolver(brand))
-    body = [a for j in plan["jobs"] if j["id"].endswith("-status-1") for a in j["argv"] if a.startswith("body=")]
-    assert body and "/views/)" not in body[0]
+    body = [a for j in plan["jobs"] if "-status-1-" in j["id"] for a in j["argv"] if a.startswith("body=")]
+    # the Shipped view is not captured yet: no update at all (planned once from the re-capture), never a dead link
+    assert not body and "status-update:shipped-view-pending" in plan["logs"]
 
 
 def test_empty_short_description_is_one_clear_note():

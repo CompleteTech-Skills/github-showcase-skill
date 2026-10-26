@@ -35,7 +35,10 @@ def _bar(tok: dict, w: float, h: float) -> Rect:
     return Rect(0, h - bh, w, bh, Linear(((0, bar["from"], 1), (1, bar.get("to") or bar["from"], 1)), "h"))
 
 
-def social_layout(ctx: RepoContext, fonts: Fonts, title: str | None = None, icon: str | None = None) -> tuple[Scene, dict]:
+def social_layout(ctx: RepoContext, fonts: Fonts, title: str | None = None, icon: str | None = None,
+                  login: str | None = None) -> tuple[Scene, dict]:
+    """The preview scene. Its footer names the org's current login (`login`, else the brand resolver's), the slug
+    the preview is uploaded to, never a former login."""
     st = ctx.style
     tok, fk = st["tokens"], st["fonts"]
     desc = ctx.require_description()
@@ -83,19 +86,21 @@ def social_layout(ctx: RepoContext, fonts: Fonts, title: str | None = None, icon
     for ln in cap[1]:
         sc.add(Text(fk["subtitle"], ln, cap[0], S_X, yy, tok["subtitle"]))
         yy += 32
-    foot = f"github.com/{ctx.owner}/{ctx.repo}"
+    foot = f"github.com/{login or ctx.brand.resolver().canonical(ctx.owner)}/{ctx.repo}"
     fsize = 20 if fonts.width("mono-regular", foot, 20) <= SW - 128 else 16
     sc.add(Text("mono-regular", foot, fsize, S_X, 588, tok["muted"]))
     x, y0, w, h = S_CARD
     nodes, icon_info, _ = iconbox.plate(ctx, fonts, (x, y0, w, h), 32, 44, icon)
     sc.add(*nodes)
     sc.add(_bar(tok, SW, SH))
-    return sc, {"title_lines": t_lines, "title_size": t_size, "caption_lines": cap[1], "icon": icon_info, "eyebrow": eb}
+    return sc, {"title_lines": t_lines, "title_size": t_size, "caption_lines": cap[1], "icon": icon_info, "eyebrow": eb,
+                "footer": foot}
 
 
-def social_render(ctx: RepoContext, fonts: Fonts, title: str | None = None, icon: str | None = None) -> tuple[bytes, str, dict]:
+def social_render(ctx: RepoContext, fonts: Fonts, title: str | None = None, icon: str | None = None,
+                  login: str | None = None) -> tuple[bytes, str, dict]:
     """(bytes, format, info): PNG within 900 KB, else JPG q85 (STANDARD §9.2)."""
-    sc, info = social_layout(ctx, fonts, title, icon)
+    sc, info = social_layout(ctx, fonts, title, icon, login)
     img = to_png_image(sc, fonts, scale=1)
     data = png_bytes(img)
     if len(data) <= SOCIAL_BUDGET:

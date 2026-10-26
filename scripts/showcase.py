@@ -60,6 +60,21 @@ def _origin_slug(rd: Path) -> str | None:
     return f"{m['owner']}/{m['repo']}" if m.get("owner") and m.get("repo") else None
 
 
+def _same_slug(args, a: str, b: str) -> bool:
+    """Two OWNER/REPO slugs name the same repository: the owners through the shared org resolver (any case, any former
+    login, CQ-03), the names case-insensitively. A genuinely different repository never matches."""
+    ao, _, ar = a.partition("/")
+    bo, _, br = b.partition("/")
+    if ar.lower() != br.lower():
+        return False
+    if ao.lower() == bo.lower():
+        return True
+    try:
+        return brand(args, prefer_lock=True).resolver().same(ao, bo)
+    except ShowcaseError:  # no brand data: plain comparison
+        return False
+
+
 def repo_dir(args) -> Path | None:
     """The target checkout. A missing --repo-dir is a usage error (exit 2). With --meta, the checkout must be the
     repository the metadata describes: run from inside it, or pass --repo-dir DIR / --no-repo-dir explicitly; a checkout
@@ -77,7 +92,7 @@ def repo_dir(args) -> Path | None:
         m = load_file(args.meta)
         want = f"{m.get('owner')}/{m.get('repo')}"
         have = _origin_slug(rd)
-        if have and want.lower() != have.lower():
+        if have and not _same_slug(args, want, have):
             raise ShowcaseError(f"metadata describes {want} but {rd.resolve()} is a checkout of {have}; pass the right "
                                 "--repo-dir, or --no-repo-dir to use the metadata alone", log="usage")
         if not explicit and have is None:
@@ -128,10 +143,30 @@ def gate_owner(ctx, allow_hold=False) -> str | None:
     return status
 
 
+HOLD_REMEDY = "decide whether it is the user's own work, then pass --allow-hold"
+# `readme` has no `--allow-hold`: its hold message must not name an option the command rejects.
+README_HOLD_REMEDY = ("decide whether it is the user's own work; the README stays unchanged while the repository is "
+                      "in the watching org (no `readme` option releases this hold)")
+
+
+def gate_watching(ctx, allow_hold=False, remedy=HOLD_REMEDY) -> None:
+    """A watching-org repository that is not a fork and not its `.github` (a detached upstream copy, or own work) is
+    never changed by owner alone: refused (exit 2, `hold:watching-non-fork`) until decided, then `--allow-hold` (the
+    generators that have it; `readme` passes its own `remedy`)."""
+    why = ctx.watching_status()
+    if why and why.startswith("hold") and not allow_hold:
+        raise ShowcaseError(f"{ctx.owner}/{ctx.repo} is in the watching org but is not a fork: {remedy}", log=why)
+
+
 def maybe_sidecar(ctx, out: Path, record: dict) -> None:
     from ctshowcase import fingerprint as fp
     if out.parent.name == "images" and out.parent.parent.name == "docs":
         inp = fp.inputs(ctx.meta, ctx.repo_dir)
+        # the repository's immutable id (`meta --from-gh`): `action_prepare.py foreign` tells a rename or transfer
+        # (same id) from art copied out of another repository (a template copy gets a new id). Kept out of the
+        # fingerprint inputs, so the fingerprint is unchanged.
+        if isinstance(ctx.meta.get("id"), int) and not isinstance(ctx.meta.get("id"), bool):
+            record = dict(record, repository_id=ctx.meta["id"])
         fp.write_sidecar(out.parent, inp, ctx.brand.sha256, out.name, record)
 
 
@@ -148,11 +183,11 @@ def cmd_banner(args):
     from ctshowcase.fingerprint import file_record
     from ctshowcase.typeset import Fonts
     ctx = context(args)
-    if gate_owner(ctx, args.allow_hold) == "watching":
-        return base("banner", ctx, result="exempt", logs=["exempt"]), OK
+    gate_owner(ctx, args.allow_hold)
     why = ctx.art_status()["banner"]
     if why and why.startswith("exempt"):
         return base("banner", ctx, result="exempt", logs=[why]), OK
+    gate_watching(ctx, args.allow_hold)
     ctx.require_measured(args.allow_unmeasured)
     ctx.require_description()
     out = Path(args.out) if args.out else default_out(args, "docs/images/banner.png")
@@ -175,11 +210,11 @@ def cmd_card(args):
     from ctshowcase.scene import png_bytes
     from ctshowcase.typeset import Fonts
     ctx = context(args)
-    if gate_owner(ctx, args.allow_hold) == "watching":
-        return base("card", ctx, result="exempt", logs=["exempt"]), OK
+    gate_owner(ctx, args.allow_hold)
     why = ctx.art_status()["card"]
     if why and why.startswith("exempt"):
         return base("card", ctx, result="exempt", logs=[why]), OK
+    gate_watching(ctx, args.allow_hold)
     ctx.require_measured(args.allow_unmeasured)
     out = Path(args.out) if args.out else default_out(args, "docs/images/card.svg")
     fonts = Fonts(ctx.brand)
@@ -205,7 +240,9 @@ def cmd_social(args):
     if gate_owner(ctx, args.allow_hold) == "watching" or ctx.det["type"] in ("fork", "backup", "github-profile"):
         return base("social-preview", ctx, result="exempt", logs=["exempt:no-social-preview"]), OK
     ctx.require_measured(args.allow_unmeasured)
-    data, fmt, info = social.social_render(ctx, Fonts(ctx.brand), args.title, args.icon)
+    r = getattr(args, "_content_resolver", None)  # set by `content social` from its --registry/--approved* flags
+    data, fmt, info = social.social_render(ctx, Fonts(ctx.brand), args.title, args.icon,
+                                           login=r.canonical(ctx.owner) if r else None)
     out = Path(args.out) if args.out else default_out(args, "assets/social-preview.png")
     if fmt == "jpg":
         out = out.with_suffix(".jpg")
@@ -301,7 +338,9 @@ def cmd_intro(args):
 def cmd_footer(args):
     from ctshowcase import footer
     b = brand(args)
-    if args.org:
+    # the watching org's exemption covers only its forks, which `--org` cannot tell from its `.github` (which gets the
+    # footer): `--check` reads the README there instead of answering `exempt` (fail closed)
+    if args.org and not (args.check and b.owner_status(args.org) == "watching"):
         status = b.owner_status(args.org)
         if status in ("excluded", "hold", "t3"):
             b.check_owner(args.org)
@@ -342,8 +381,10 @@ def cmd_readme(args):
         raise ShowcaseError("readme needs the repository checkout (--repo-dir DIR, or run inside it)", log="usage")
     path = rd / "README.md"
     before = readme.read_text(path)
-    if ctx.brand.owner_status(ctx.owner) == "watching" and ctx.det["type"] == "fork":
+    if ctx.watching_status() == "exempt:watching-fork":
         return base("readme", ctx, result="exempt", logs=["exempt"]), OK
+    # a watching-org non-fork other than `.github`: held until decided (no README change, no --allow-hold)
+    gate_watching(ctx, remedy=README_HOLD_REMEDY)
     if args.variant and args.variant != "auto":
         ctx.det["variant"] = args.variant
     ctx.local_badges = args.badges == "local"
@@ -458,30 +499,52 @@ def cmd_labels(args):
     """§6 labels: emit labels.yml or plan passes A and B. Read-only toward GitHub: the plan leaves as `gh` argv and
     scripts/writer.py jobs (`--jobs FILE`); standalone users run the printed argv themselves after approving it."""
     from ctshowcase import labels, records
-    from ctshowcase.org import PHASE, append_jobs, job, label_ops_argv
+    from ctshowcase.org import PHASE, append_jobs, job, label_job_id, label_ops_argv
     if args.emit_yml:
         sys.stdout.write(labels.emit_yml())
         return None, OK
     ctx = context(args)
     ctx.brand.check_owner(ctx.owner)
-    if ctx.det["type"] == "fork" or ctx.tier in ("T2-R", "T3"):
+    # the gates `org labels` applies (labels.md Scope): a family on hold is refused like banner and card
+    if (ctx.style.get("hold") or ctx.brand.resolver().family_hold(ctx.owner)) and not args.allow_hold:
+        raise ShowcaseError(f"{ctx.owner} family is on hold: labels are not applied; pass --allow-hold", log="hold")
+    if ctx.det["type"] == "fork" or ctx.tier in ("T2-R", "T3") or ctx.style.get("name") == "romgenie":
         return base("labels", ctx, result="n/a", logs=["exempt"]), OK
+    if ctx.meta.get("archived"):  # as `org labels` (labels.md Scope: never archived repos)
+        return base("labels", ctx, result="n/a", logs=["archived"]), OK
+    if ctx.meta.get("has_issues") is False and ctx.repo != ".github":  # `.github` always gets the standard set
+        return base("labels", ctx, result="n/a", logs=["exempt", "has_issues:false"]), OK
+    ai_ascension = ctx.same_owner("AI-Ascension")  # keeps its labels.yml; R6 there is only `dependencies` (q64)
 
     def live_labels():
         from ctshowcase.meta import _gh
         got = _gh(f"repos/{ctx.owner}/{ctx.repo}/labels?per_page=100", paginate=True)
         if got is None:
-            raise ShowcaseError(f"cannot read the live labels of {ctx.owner}/{ctx.repo}", log="needs-input:gh")
+            raise ShowcaseError(f"cannot read the live labels of {ctx.owner}/{ctx.repo}", log="needs-input:gh",
+                               code=NEEDS_INPUT)
         return [{"name": x["name"], "color": x.get("color", ""), "description": x.get("description") or ""} for x in got]
 
     existing = ctx.meta.get("labels")
-    if not existing and args.plan:
+    # no captured labels ([] is also what a failed capture records): anything that leaves as argv, jobs, records or gh
+    # lines is planned against the live labels, never against [] (every standard label created beside GitHub's
+    # defaults, no rename)
+    if not existing and (args.plan or args.jobs or args.records or args.gh):
         existing = live_labels()  # read-only GET; the writer re-reads the live labels before it applies the jobs
-    # §6.4 rule 0 always runs: in the checkout, else against the captured file list (unproven renames are held)
-    ops, logs = labels.plan(existing or [], ctx.repo_dir, files=ctx.meta.get("files"),
-                            complete=ctx.meta.get("files_complete") is True,
-                            defaults=labels.defaults_for(ctx.owner, ctx.repo, repo_dir=ctx.repo_dir, meta=ctx.meta,
-                                                         path=getattr(args, "org_defaults", None)))
+    if ai_ascension:
+        dep = next(lb for lb in labels.standard_labels() if lb["name"] == "dependencies")
+        cur = next((lb for lb in existing or [] if lb["name"] == "dependencies"), None)
+        ops, logs = ([{"op": "skip", "name": "dependencies", "rule": "§6.1 AI-Ascension dependencies"}]
+                     if cur and cur.get("color") == dep["color"] else
+                     [{"op": "patch" if cur else "create", "name": "dependencies", "color": dep["color"],
+                       "description": dep["description"], "rule": "§6.1 AI-Ascension dependencies"}]), \
+            ["labels:ai-ascension"]
+    else:
+        # §6.4 rule 0 always runs: in the checkout, else against the captured file list (unproven renames are held)
+        ops, logs = labels.plan(existing or [], ctx.repo_dir, files=ctx.meta.get("files"),
+                                complete=ctx.meta.get("files_complete") is True,
+                                defaults=labels.defaults_for(ctx.owner, ctx.repo, repo_dir=ctx.repo_dir, meta=ctx.meta,
+                                                             path=getattr(args, "org_defaults", None),
+                                                             resolver=ctx.brand.resolver()))
     writes = [o for o in ops if o["op"] != "skip"]
     if args.records:
         records.append(args.records, [records.record(ctx.owner, ctx.repo, "label", o["name"], o["name"], o, o["rule"])
@@ -510,9 +573,9 @@ def cmd_labels(args):
     argvs = label_ops_argv(full, writes)
     if args.plan or args.jobs:
         out["argv"] = argvs
-        out["jobs"] = [job(f"p{PHASE['labels']}-{full.replace('/', '__')}-label-{i:02d}", PHASE["labels"], "labels", argv,
+        out["jobs"] = [job(label_job_id(PHASE["labels"], full, argv), PHASE["labels"], "labels", argv,
                            repo=full, note="§6.3 pass A renames before pass B creates; never --force, never a delete.")
-                       for i, argv in enumerate(argvs, 1)]
+                       for argv in argvs]
         if args.jobs and out["jobs"]:
             append_jobs(args.jobs, out["jobs"])
     if args.gh:
@@ -728,12 +791,16 @@ def cmd_adopt(args):
     b.check_owner(args.slug.split("/")[0])
     if args.meta:
         m = M.load_file(args.meta)
-        if f"{m.get('owner')}/{m.get('repo')}".lower() != args.slug.lower():
+        if not _same_slug(args, f"{m.get('owner')}/{m.get('repo')}", args.slug):
             raise ShowcaseError(f"--meta describes {m.get('owner')}/{m.get('repo')}, not {args.slug}", log="usage")
     else:
         m = M.from_gh(args.slug)
     rd = Path(args.repo_dir) if args.repo_dir and not args.no_repo_dir else None
     ctx = RepoContext(b, m, rd, type_override=getattr(args, "type_override", None))
+    if ctx.style.get("hold") or b.resolver().family_hold(ctx.owner):
+        # STANDARD §12.5 #4: a family on hold gets only the decision 18 footer (as `org labels` refuses it): no
+        # settings, topics, label, security or social-preview jobs
+        raise ShowcaseError(f"{ctx.owner} family is on hold: adopt plans nothing for it", log="hold")
     res = intake.adopt(ctx, _resolver_args(args), approval_id=args.approval_id, org_defaults=getattr(args, "org_defaults", None))
     _intake_jobs(args, res)
     return res, OK
@@ -990,6 +1057,7 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--records")
     s.add_argument("--gh", action="store_true", help="also print the plan as gh command lines")
     s.add_argument("--jobs", metavar="FILE", help="append the writer jobs (JSON lines) to FILE")
+    s.add_argument("--allow-hold", action="store_true", help="plan for a family on hold (refused otherwise, as `org labels`)")
     s.set_defaults(func=cmd_labels)
 
     s = sub.add_parser("meta", help="normalized metadata (read-only gh api GETs with --from-gh)")

@@ -23,6 +23,14 @@ def cap(name):
     return json.loads((FIX / name).read_text(encoding="utf-8"))
 
 
+def cap_of(name, owner):
+    """The same capture as a board of another owner (copy-plan stage 2 refuses a board that is not the target's)."""
+    c = cap(name)
+    p = c["data"]["organization"]["projectV2"]
+    p["url"] = f"https://github.com/orgs/{owner}/projects/{p['number']}"
+    return c
+
+
 def resolver(brand, rows=(), registry=None):
     return Resolver(brand, registry or {}, {"rows": set(rows), "ids": set(), "answers": {}, "actions": [], "extra": []})
 
@@ -159,7 +167,7 @@ def test_copy_plan_stage_two(brand):
     assert shipped == {"name": "Shipped", "layout": "table", "filter": "status:Done updated:>=@today-30d",
                        "group_by": [1009], "sort_by": [[1012, "desc"]]}
     # text: the README waits for the new view numbers; links only for the same owner
-    text = jobs[f"{pre}-text"]["argv"]
+    text = next(j for i, j in jobs.items() if re.fullmatch(f"{re.escape(pre)}-text-[0-9a-f]{{8}}", i))["argv"]
     assert text[:6] == ["gh", "project", "edit", "3", "--owner", N] and "--readme" not in text
     assert any("README needs every view number" in p["why"] for p in plan["pending"])
     assert jobs[f"{pre}-link-support-triage-agent"]["argv"] == ["gh", "project", "link", "3", "--owner", N, "--repo",
@@ -170,8 +178,9 @@ def test_copy_plan_stage_two(brand):
     assert wf["kind"] == "browser" and wf["url"].endswith("/projects/3/workflows")
     assert any("'Auto-archive items'" in s and "is:closed updated:<@today-1m" in s for s in wf["steps"])
     assert jobs[f"{pre}-settings"]["kind"] == "browser" and "visibility:private (no approval)" in plan["logs"]
-    su = jobs[f"{pre}-status-1"]["argv"]
-    assert "createProjectV2StatusUpdate" in su[4] and "p=PVT_copy3" in su and any(a.startswith("body=**Summary**") for a in su)
+    # the first status update waits for the Shipped view this plan creates (planned once, from the re-capture)
+    assert not any("-status-1" in i for i in jobs) and "status-update:shipped-view-pending" in plan["logs"]
+    assert any("first status update links the Shipped view" in p["why"] for p in plan["pending"])
     # never drafts, items or deletes
     joined = " ".join(all_argv(plan))
     assert "--drafts" not in joined and not re.search(r"\bdelete", joined, re.I) and "item-add" not in joined
@@ -186,10 +195,14 @@ def test_copy_plan_full_board_sets_the_readme(brand):
                                  filter="status:Done updated:>=@today-30d")]
     plan = PJ.copy_plan(N, source="CompleteTech-LLC/4", copied=c, resolver=resolver(brand), reviewed="2026-10-25",
                         status_update=False)
-    text = next(j for j in plan["jobs"] if j["id"].endswith("-text"))["argv"]
+    text = next(j for j in plan["jobs"] if re.search(r"-text-[0-9a-f]{8}$", j["id"]))["argv"]
     rd = text[text.index("--readme") + 1]
     assert "[Shipped](https://github.com/orgs/Northwind-Trading-Co/projects/3/views/7)" in rd
     assert "{" not in rd and "Last reviewed: 2026-10-25" in rd and "needs-input:workstreams" in plan["logs"]
+    full = PJ.copy_plan(N, source="CompleteTech-LLC/4", copied=c, resolver=resolver(brand), reviewed="2026-10-25")
+    su = next(j for j in full["jobs"] if re.search(r"-status-1-[0-9a-f]{8}$", j["id"]))["argv"]
+    assert "createProjectV2StatusUpdate" in su[4] and "p=PVT_copy3" in su and any(a.startswith("body=**Summary**") for a in su)
+    assert any(a.startswith("body=") and "projects/3/views/7)" in a for a in su)
 
 
 def test_board_readme_documents_the_boards_own_options(brand):
@@ -207,7 +220,7 @@ def test_board_readme_documents_the_boards_own_options(brand):
     want = [{"name": "Storefront", "kind": "Product", "description": "The shop"}]
     plan = PJ.copy_plan(N, source="CompleteTech-LLC/4", copied=c, resolver=resolver(brand), reviewed="2026-10-25",
                         status_update=False, workstreams=want)
-    argv = next(j for j in plan["jobs"] if j["id"].endswith("-text"))["argv"]
+    argv = next(j for j in plan["jobs"] if re.search(r"-text-[0-9a-f]{8}$", j["id"]))["argv"]
     rd = argv[argv.index("--readme") + 1]
     assert "capture-wins:Priority" in plan["logs"] and "| Priority | P0; P1; P2 |" in rd and "Urgent" not in rd
     assert "Storefront: [Product] The shop" in rd and "Community: [Growth] Launch posts" in rd and "\U0001F680" not in rd
@@ -232,7 +245,8 @@ def test_lint_names_a_workstream_without_a_kind():
 
 
 def test_template_role(brand):
-    plan = PJ.copy_plan("CompleteTech-LLC", role="template", copied=cap("copy-capture.json"), resolver=resolver(brand))
+    plan = PJ.copy_plan("CompleteTech-LLC", role="template", copied=cap_of("copy-capture.json", "CompleteTech-LLC"),
+                        resolver=resolver(brand))
     ids = [j["id"] for j in plan["jobs"]]
     assert plan["title"] == PJ.TEMPLATE_TITLE and plan["short_description"] == PJ.DESC["template"]
     mark = ids.index(next(i for i in ids if i.endswith("-mark-template")))
@@ -256,7 +270,8 @@ def test_printed_mutations_validate_against_the_schema(brand):
     schema._validation_errors = []
     ws = [{"name": "Storefront", "kind": "Product", "description": "x"}]
     plans = [PJ.copy_plan(N, copied=cap("copy-capture.json"), resolver=resolver(brand), workstreams=ws),
-             PJ.copy_plan("CompleteTech-LLC", role="template", copied=cap("copy-capture.json"), resolver=resolver(brand)),
+             PJ.copy_plan("CompleteTech-LLC", role="template", copied=cap_of("copy-capture.json", "CompleteTech-LLC"),
+                        resolver=resolver(brand)),
              PJ.estate_plan(resolver(brand, registry={"orgs": {N: {}}}), copied=cap("estate-copy-capture.json"), user_id=42)]
     n = 0
     for plan in plans:
@@ -341,7 +356,7 @@ def test_estate_plan_stage_two(estate_resolver):
     view = jobs[f"{pre}-view-estate-overview"]["argv"]
     assert view[:5] == ["gh", "api", "-X", "POST", "users/42/projectsV2/7/views"]
     assert any(x.startswith("estate-workstream:") for x in plan["logs"])
-    assert jobs[f"{pre}-private"]["kind"] == "browser" and f"{pre}-status-1" not in jobs
+    assert jobs[f"{pre}-private"]["kind"] == "browser" and not any(i.startswith(f"{pre}-status-1") for i in jobs)
     assert all(j["org"] == "@me" for j in plan["jobs"])
     nouser = PJ.estate_plan(estate_resolver, copied=cap("estate-copy-capture.json"))
     assert any("numeric user id" in p.get("why", "") for p in nouser["pending"])

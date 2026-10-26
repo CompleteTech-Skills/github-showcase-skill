@@ -64,7 +64,7 @@ def row(ctx: RepoContext) -> dict:
         cells["R6"] = "n/a"
     elif not ctx.meta.get("labels"):
         cells["R6"] = "unknown"
-    elif ctx.owner == "AI-Ascension":
+    elif ctx.same_owner("AI-Ascension"):  # any spelling or former login (CQ-03)
         cells["R6"] = "pass" if any(lb["name"] == "dependencies" and lb["color"] == "0366d6" for lb in ctx.meta["labels"]) else "fail"
     else:
         ops, lg = labelsmod.plan(ctx.meta["labels"], rd, files=ctx.meta.get("files"),
@@ -82,7 +82,7 @@ def row(ctx: RepoContext) -> dict:
         cells["R7"] = "hold"  # T3: no README change before co-owner sign-off (lint readme refuses)
     lic = ctx.meta.get("license")
     cells["R8"] = "pass" if lic or not ctx.public else "warn"
-    if ctx.owner == "CompleteTech-Skills" and ctx.det["type"] == "agent-skills":
+    if ctx.same_owner("CompleteTech-Skills") and ctx.det["type"] == "agent-skills":
         if rd:
             ok = all((rd / p).is_file() and hashlib.sha256((rd / p).read_bytes()).hexdigest() == h for p, h in LOGO_SHA.items())
             cells["R9"] = "pass" if ok else "fail"
@@ -97,10 +97,13 @@ def row(ctx: RepoContext) -> dict:
         cells["R11"] = "n/a"
     else:
         cells["R11"] = "unknown" if hpct is None else ("pass" if hpct == 100 else "fail")
-    watching = ctx.brand.owner_status(ctx.owner) == "watching"
+    # decisions 12, 13 and 18: only watching-org forks are metadata only; the watching org's `.github` is checked like
+    # any `.github`, and its other non-fork repositories are held until decided (RepoContext.watching_status)
+    watching = ctx.watching_status()
     status = ctx.art_status()
+    fstat = ctx.footer_status()
     if watching:
-        cells.update(banner="n/a", icon="n/a", card="n/a", footer="n/a")
+        cells.update(banner=_cell(watching), icon=_cell(watching), card=_cell(watching), footer=_cell(watching))
     elif not rd:
         cells.update(banner="unknown", icon="unknown", card="unknown", footer="unknown")
     else:
@@ -133,11 +136,8 @@ def row(ctx: RepoContext) -> dict:
             cells["card"] = _cell(status["card"])
         else:
             cells["card"] = "pass" if card.is_file() and svglint.lint_file("card", card)["result"] == "PASS" else "fail"
-        fv = ctx.org.get("footer", True)
-        if fv == "hold" or ctx.brand.owner_status(ctx.owner) == "t3":
-            cells["footer"] = "hold"
-        elif fv is not True:
-            cells["footer"] = "n/a"
+        if fstat:  # hold (`footer: hold`, T3) or n/a (`footer: false`); RepoContext.footer_status
+            cells["footer"] = _cell(fstat)
         elif readme and readme.is_file():
             st, _ = footermod.check(ctx.brand, readme.read_text(encoding="utf-8"))
             cells["footer"] = "pass" if st == "pass" else "fail"

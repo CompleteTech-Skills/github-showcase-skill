@@ -55,7 +55,7 @@ def checks(text: str, *, slug: str, type_: str, has_brand_assets: bool | None, p
     add("V1", ok_v1, first)
     # P1 product prefix only for games and T3 Pick-Your-AI
     m = re.match(r"^([A-Z][^:]{0,40}): ", s)
-    add("P1", not m or type_ == "game" or owner == "Pick-Your-AI" or type_ in ("fork", "backup", "website"), m.group(0) if m else "")
+    add("P1", not m or type_ == "game" or (owner or "").lower() == "pick-your-ai" or type_ in ("fork", "backup", "website"), m.group(0) if m else "")
     if has_brand_assets is None:
         out.append({"rule": "B1", "result": "unknown"})
     else:

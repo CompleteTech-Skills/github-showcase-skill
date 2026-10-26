@@ -51,7 +51,7 @@ def detect_type(meta: dict, facts: RepoFacts | None = None) -> tuple[str, int]:
         return "fork", 1
     if re.search(r"-backup-\d{8}$", slug):
         return "backup", 2
-    if slug == ".github" or (owner == "CompleteDotTech" and slug == "CompleteDotTech"):
+    if slug == ".github" or (_same_login(owner, "CompleteDotTech") and _same_login(slug, "CompleteDotTech")):
         return "github-profile", 3
     if meta.get("is_template"):
         return "template", 4
@@ -105,9 +105,16 @@ def detect_type(meta: dict, facts: RepoFacts | None = None) -> tuple[str, int]:
     return "workspace", 25
 
 
-def variant_for(type_: str, meta: dict) -> str:
+def _same_login(a, b) -> bool:
+    return bool(a and b) and str(a).lower() == str(b).lower()
+
+
+def variant_for(type_: str, meta: dict, same_owner=None) -> str:
+    """README variant for the type. `same_owner(a, b)` compares org logins (RepoContext passes the shared resolver's,
+    CQ-03); without it the compare is case-insensitive, as GitHub logins are."""
     row = standard("types")["types"][type_]
-    if type_ == "agent-skills" and meta.get("owner") != "CompleteTech-Skills":
+    same = same_owner or _same_login
+    if type_ == "agent-skills" and not same(meta.get("owner"), "CompleteTech-Skills"):
         return row.get("variant_elsewhere", "C")
     if meta.get("visibility") == "private" and row.get("variant_private"):
         return row["variant_private"]
@@ -118,7 +125,8 @@ def card_category(type_: str) -> str | None:
     return standard("types")["types"][type_]["category"]
 
 
-def detect(meta: dict, facts: RepoFacts | None = None, override: dict | None = None, type_override: str | None = None) -> dict:
+def detect(meta: dict, facts: RepoFacts | None = None, override: dict | None = None, type_override: str | None = None,
+           same_owner=None) -> dict:
     facts = facts or RepoFacts(meta)
     type_override = type_override or (override or {}).get("type")
     if type_override:
@@ -128,7 +136,7 @@ def detect(meta: dict, facts: RepoFacts | None = None, override: dict | None = N
         type_, rule = type_override, 0
     else:
         type_, rule = detect_type(meta, facts)
-    variant = (override or {}).get("variant") or variant_for(type_, meta)
+    variant = (override or {}).get("variant") or variant_for(type_, meta, same_owner)
     out = {"type": type_, "rule": rule, "variant": variant, "category": card_category(type_)}
     if not facts.known and not type_override:
         # rules 5, 8-11 and 13-24 need the file tree; without it the type is provisional

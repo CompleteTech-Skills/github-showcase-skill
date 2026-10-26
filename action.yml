@@ -121,6 +121,8 @@ runs:
         [ "$SHOWCASE_ALLOW_UNMEASURED" = "true" ] && extra+=(--allow-unmeasured)
         # Art generated for another repository (the template's own banner, card, sidecar and icon, copied into
         # a new repository) must never show under this repository's name. Decide once, before anything is written.
+        # Only proof counts (a template's sidecar, or another repository id than GITHUB_REPOSITORY_ID): after a
+        # rename or transfer the art and assets/icon.png are this repository's own and are kept.
         foreign="$("${P[@]}" foreign "$GITHUB_REPOSITORY")"
         # Exit 4 (needs-input: no description yet, a palette awaiting ct-std-v1.1), exit 2 (a family on hold) and
         # an "exempt" result are expected states, not failures: annotate, skip that output, keep the run green.
@@ -152,10 +154,29 @@ runs:
         if [[ ",$SHOWCASE_OUTPUTS," == *",card,"* ]]; then
           art card card.svg --png "$RUNNER_TEMP/card.png" "${extra[@]}"
         fi
+        # A held repository (exit 2: a watching-org repository that is neither a fork nor `.github`) keeps its
+        # README untouched until someone decides; like a held art family, that skips the output and keeps the run green.
+        # Only a hold or owner refusal is skipped: any other exit 2 (a `.github/showcase.yml` that fails its schema,
+        # a usage error) still fails the run.
+        readme_step() {
+          local rc=0 held
+          "${S[@]}" --format json readme "$@" > "$RUNNER_TEMP/readme.json" || rc=$?
+          cat "$RUNNER_TEMP/readme.json"
+          if [ "$rc" -eq 2 ]; then
+            held="$(python -c 'import json,sys;d=json.load(open(sys.argv[1]));print("yes" if d.get("result") == "refused" or any(str(x).startswith("hold") for x in d.get("logs") or []) else "")' "$RUNNER_TEMP/readme.json" 2>/dev/null || true)"
+            if [ "$held" = "yes" ]; then
+              echo "::warning title=CompleteTech Showcase::README skipped: this repository is on hold (see the log above)"
+              skipped=1
+              return 0
+            fi
+            echo "::error title=CompleteTech Showcase::readme failed (exit 2, see the log above)"
+          fi
+          return "$rc"
+        }
         bootstrapped=false
         case "$SHOWCASE_README" in
           header)
-            "${S[@]}" readme --mode header --write
+            readme_step --mode header --write
             ;;
           bootstrap)
             # The template repository keeps its own body. Elsewhere, a README whose template body is still the
@@ -163,10 +184,10 @@ runs:
             # a body a person has edited is never overwritten (the marker is dropped instead).
             if [ "$SHOWCASE_IS_TEMPLATE" != "true" ] && [ -f README.md ]; then
               before="$(sha256sum README.md)"
-              "${S[@]}" readme --bootstrap --write
+              readme_step --bootstrap --write
               [ "$before" != "$(sha256sum README.md)" ] && bootstrapped=true
             fi
-            "${S[@]}" readme --mode header --write
+            readme_step --mode header --write
             ;;
           none)
             ;;

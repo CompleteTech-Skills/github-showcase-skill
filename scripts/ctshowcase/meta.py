@@ -18,7 +18,8 @@ FIELDS = ("owner", "repo", "description", "homepage", "topics", "fork", "archive
 # pushed_at, so recency uses the newest default-branch commit whose message does not match this)
 NON_SUBSTANTIVE = re.compile(r"ct-std-v1|showcase banner and card|\[skip ci\]")
 MANIFEST_PATHS = ("pyproject.toml", "package.json", "requirements.txt", "setup.py", "setup.cfg", "manifest.json",
-                  "SKILL.md", "skill-package.json", "CLAW_HUB_PUBLISHING.md", ".github/showcase.yml")
+                  "SKILL.md", "skill-package.json", "CLAW_HUB_PUBLISHING.md", ".github/showcase.yml",
+                  ".github/showcase.yaml")  # both spellings config.REPO_CONFIG_NAMES honours
 
 
 def _license(v):
@@ -79,13 +80,19 @@ def normalize(raw: dict) -> dict:
     if isinstance(parent, dict):
         parent = {"full_name": parent.get("full_name"), "default_branch": parent.get("default_branch"),
                   "topics": parent.get("topics") or []}
+    elif isinstance(parent, str) and parent.strip():
+        # estate state snapshots record the parent as its "OWNER/REPO" string; every consumer reads a mapping
+        parent = {"full_name": parent.strip(), "default_branch": None, "topics": []}
+    elif parent is not None:
+        parent = None  # any other shape names no parent
     m["parent"] = parent
     for k in ("health_percentage", "has_issues", "has_wiki", "has_projects", "has_discussions",
               "delete_branch_on_merge", "homepage_status"):
         m[k] = raw.get(k)
     # has_pages and size come from the REST capture; releases/deployments/packages/environments are the About
     # sidebar counts (adopt, content sidebar); size == 0 is the estate doctor's empty-repository rule
-    for k in ("files", "files_complete", "manifests", "file_sizes", "pushed_at", "last_substantive_commit",
+    # id / node_id: the repository's immutable identity (a rename or transfer keeps it; a template copy gets a new one)
+    for k in ("id", "node_id", "files", "files_complete", "manifests", "file_sizes", "pushed_at", "last_substantive_commit",
               "last_substantive_sha", "has_pages", "size", "releases", "deployments", "packages", "environments"):
         if raw.get(k) is not None:
             m[k] = raw[k]

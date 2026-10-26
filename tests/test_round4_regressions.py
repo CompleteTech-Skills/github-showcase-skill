@@ -126,6 +126,7 @@ def test_metadata_captured_under_the_old_login_is_found_under_the_new_one(brand)
 
 def test_project_links_accept_a_former_login_and_name_the_current_one(brand):
     cap = json.loads((PFIX / "copy-capture.json").read_text())
+    cap["data"]["organization"]["projectV2"]["url"] = f"https://github.com/orgs/{OLD}/projects/3"  # captured before the rename
     plan = P.copy_plan(NEW, copied=cap, repositories=[f"{OLD}/tcg-stock-watch"], resolver=renamed(brand))
     links = [j["argv"] for j in plan["jobs"] if j.get("argv", [None, None])[:3] == ["gh", "project", "link"]]
     assert links and links[0][-1] == f"{NEW}/tcg-stock-watch"

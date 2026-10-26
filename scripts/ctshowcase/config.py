@@ -249,12 +249,27 @@ def load_repo_override(repo_dir: str | Path | None) -> tuple[dict, str | None]:
         p = Path(repo_dir) / name
         if p.is_file():
             data = p.read_bytes()
-            obj = load_yaml_text(data.decode("utf-8")) or {}
-            if not isinstance(obj, dict):
-                raise ConfigError(f"{name} must be a mapping")
-            schema = json.loads((REFERENCES / "repo-config.schema.json").read_text(encoding="utf-8"))
-            errs = validate(obj, schema)
-            if errs:
-                raise ConfigError(f"{name}: " + "; ".join(errs), log="config")
-            return obj, hashlib.sha256(data).hexdigest()
+            return parse_repo_override(name, data.decode("utf-8")), hashlib.sha256(data).hexdigest()
     return {}, None
+
+
+def parse_repo_override(name: str, text: str) -> dict:
+    """One repository override file's text, parsed and checked against repo-config.schema.json (colours and fonts are
+    rejected). Shared by the checkout and the metadata-only path (`manifests`), so both read the same override."""
+    obj = load_yaml_text(text) or {}
+    if not isinstance(obj, dict):
+        raise ConfigError(f"{name} must be a mapping")
+    schema = json.loads((REFERENCES / "repo-config.schema.json").read_text(encoding="utf-8"))
+    errs = validate(obj, schema)
+    if errs:
+        raise ConfigError(f"{name}: " + "; ".join(errs), log="config")
+    return obj
+
+
+def override_from_manifests(manifests: dict | None) -> dict:
+    """The repository override captured in metadata (`meta --from-gh` manifests), first of REPO_CONFIG_NAMES found."""
+    for name in REPO_CONFIG_NAMES:
+        text = (manifests or {}).get(name)
+        if isinstance(text, str) and text.strip():
+            return parse_repo_override(name, text)
+    return {}

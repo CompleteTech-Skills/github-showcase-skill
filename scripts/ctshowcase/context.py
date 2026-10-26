@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .config import Brand, load_repo_override, load_yaml_text
+from .config import Brand, load_repo_override, override_from_manifests
 from .detect import detect
 from .errors import ConfigError, NeedsInput
 from .facts import RepoFacts
@@ -15,11 +15,15 @@ class RepoContext:
         self.repo_dir = Path(repo_dir) if repo_dir else None
         self.facts = RepoFacts(meta, repo_dir)
         self.override, self.override_sha = load_repo_override(repo_dir) if repo_dir else ({}, None)
-        if not self.override and not repo_dir and (meta.get("manifests") or {}).get(".github/showcase.yml"):
-            self.override = load_yaml_text(meta["manifests"][".github/showcase.yml"]) or {}
-        self.owner, self.repo = meta.get("owner", "unknown"), meta.get("repo", "unknown")
+        if not self.override and not repo_dir:
+            # metadata only: the override `meta --from-gh` captured (either spelling), validated like a checkout's
+            self.override = override_from_manifests(meta.get("manifests"))
+        # GitHub logins are case-insensitive (an origin URL may be lower-cased): take the org's own spelling so every
+        # literal org rule (README variant, nav line, R6, R9) matches. Only the case is fixed; a former login is not
+        # rewritten here, since the rename may not have happened on GitHub yet (CQ-03).
+        self.owner, self.repo = self._spelled(meta.get("owner", "unknown")), meta.get("repo", "unknown")
         scoped = (self.override or {}).get("for")
-        if scoped and scoped.lower() != f"{self.owner}/{self.repo}".lower():
+        if scoped and not self.same_repo(scoped):
             # overrides written for another repository (a template's own chips and subtitle) do not apply here
             self.override = {}
             self._scoped_away = scoped
@@ -27,7 +31,8 @@ class RepoContext:
             self._scoped_away = None
         self.org = brand.org(self.owner)
         self.style = brand.style(self.owner)
-        self.det = detect(meta, self.facts, self.override, type_override)
+        self.det = detect(meta if self.owner == meta.get("owner") else dict(meta, owner=self.owner), self.facts,
+                          self.override, type_override, same_owner=self.same_owner)
         self.logs: list[str] = []
         if not self.org.get("known"):
             self.log("needs-input:org-row")
@@ -45,6 +50,41 @@ class RepoContext:
     def log(self, code: str):
         if code not in self.logs:
             self.logs.append(code)
+
+    def _resolver(self):
+        try:
+            return self.brand.resolver()
+        except Exception:  # noqa: BLE001 - no resolver data: plain, case-insensitive comparisons
+            return None
+
+    def _spelled(self, login: str) -> str:
+        res = self._resolver()
+        canon = res.canonical(login) if res and login else login
+        return canon if canon and canon.lower() == (login or "").lower() else login
+
+    def same_owner(self, a: str, b: str | None = None) -> bool:
+        """True when two logins name the same org (any case, any former login; the shared resolver, CQ-03)."""
+        b = self.owner if b is None else b
+        res = self._resolver()
+        return res.same(a, b) if res else bool(a and b) and a.lower() == b.lower()
+
+    def same_repo(self, full_name: str) -> bool:
+        """True when OWNER/REPO names this repository: the owner through the resolver, the name case-insensitively,
+        or the slug an approved repository rename or transfer gives it (`Resolver.repo_before`)."""
+        if not isinstance(full_name, str) or full_name.count("/") != 1:
+            return False
+        o, r = full_name.split("/")
+        if r.lower() == str(self.repo).lower() and self.same_owner(o):
+            return True
+        res = self._resolver()
+        for a, b in ((full_name, f"{self.owner}/{self.repo}"), (f"{self.owner}/{self.repo}", full_name)):
+            hit = res.repo_before(a) if res else None
+            if hit and res.repo_action_approved(hit[1]):
+                ho, hr = hit[0].split("/", 1)
+                bo, br = b.split("/", 1)
+                if hr.lower() == br.lower() and self.same_owner(ho, bo):
+                    return True
+        return False
 
     # -- identity --------------------------------------------------------------------------------------
     @property
@@ -85,8 +125,11 @@ class RepoContext:
         with the intro instead of a banner, and a placeholder org's `.github` holds only its profile."""
         status = self.brand.owner_status(self.owner)
         out: dict = {"banner": None, "card": None, "icon": None}
-        if status == "watching":
+        watching = self.watching_status()
+        if watching == "exempt:watching-fork":
             return {"banner": "exempt", "card": "exempt", "icon": "exempt:watching-fork"}
+        if watching:  # a watching-org repository that is not a fork and not its `.github`: decided explicitly
+            return {"banner": watching, "card": watching, "icon": watching}
         if status in ("t3", "hold", "excluded"):
             code = {"t3": "t3-signoff", "hold": "hold", "excluded": "exempt"}[status]
             return {"banner": code, "card": code, "icon": code}
@@ -102,6 +145,33 @@ class RepoContext:
             out = {k: v or "hold" for k, v in out.items()}
         return out
 
+    def watching_status(self) -> str | None:
+        """Decisions 12, 13 and 18 exempt only the watching org's forks (metadata only). Its `.github` gets the icon,
+        banner and footer like any `.github` (J). Any other repository there that is not a fork (a detached upstream
+        copy, or the user's own work) is held (`hold:watching-non-fork`) until decided explicitly: `--allow-hold` on a
+        generator; nothing is exempted by owner alone. None outside the watching org."""
+        if self.brand.owner_status(self.owner) != "watching":
+            return None
+        if self.meta.get("fork") or self.det["type"] == "fork":
+            return "exempt:watching-fork"
+        if self.repo == ".github":
+            return None
+        return "hold:watching-non-fork"
+
+    def footer_status(self) -> str | None:
+        """None when the decision 18 footer applies, else why not: `exempt:watching-fork`, `hold:watching-non-fork`,
+        `t3-signoff`, `hold` (org row `footer: hold`) or `exempt:footer` (org row `footer: false`). The watching org's
+        `footer: false` exempts only its forks (org.md), so its `.github` needs the footer."""
+        if self.brand.owner_status(self.owner) == "t3":
+            return "t3-signoff"
+        watching = self.watching_status()
+        if watching or self.brand.owner_status(self.owner) == "watching":
+            return watching
+        fv = self.org.get("footer", True)
+        if fv is True:
+            return None
+        return "hold" if fv == "hold" else "exempt:footer"
+
     def preserve_unchanged(self) -> bool:
         """Review q57 `pres` = "Leave them unchanged": preserve-list READMEs get no hero banner (banner n/a)."""
         return self.brand.readme_opts.get("preserve_banner") == "unchanged"
@@ -115,8 +185,10 @@ class RepoContext:
     def readme_text(self) -> str:
         if self.repo_dir is not None:
             p = self.repo_dir / "README.md"
-            return p.read_text(encoding="utf-8", errors="replace") if p.is_file() else ""
-        return self.meta.get("readme_head") or ""
+            text = p.read_text(encoding="utf-8", errors="replace") if p.is_file() else ""
+        else:
+            text = self.meta.get("readme_head") or ""
+        return text[1:] if text.startswith("\ufeff") else text  # a UTF-8 BOM is not part of the H1 (as readme.py)
 
     def own_banner(self) -> bool:
         """True when the README opens with its own banner image (not docs/images/banner.png, a logo or a badge)."""

@@ -22,7 +22,7 @@ def _template_copy(repo):
     (repo / "assets").mkdir()
     icon = repo / "assets" / "icon.png"
     icon.write_bytes(b"\x89PNG template icon")
-    sidecar = {"inputs": {"owner": "Northwind-Trading", "repo": "northwind-repo-template",
+    sidecar = {"inputs": {"owner": "Northwind-Trading", "repo": "northwind-repo-template", "type": "template",
                           "icon_sha256": hashlib.sha256(icon.read_bytes()).hexdigest()},
                "outputs": {"banner.png": {}}}
     (repo / "docs" / "images" / ".showcase.json").write_text(json.dumps(sidecar))

@@ -153,7 +153,7 @@ bash examples/render_examples.sh   # every committed example, contact sheets and
 |---|---|---|
 | Repository metadata | `--meta FILE`, or `meta --from-gh OWNER/REPO` (read-only GETs) | description, topics, license, language, visibility, labels |
 | Repository checkout | `--repo-dir DIR` | README, manifests, `assets/icon.png`, `.github/showcase.yml` |
-| Per-repository overrides | `.github/showcase.yml` (content only: type, icon, subtitle, chips, category, variant; `for: OWNER/REPO` scopes them) | banner and card text, README variant |
+| Per-repository overrides | `.github/showcase.yml` (content only: type, icon, subtitle, chips, category, variant; `for: OWNER/REPO` scopes them (any login of the org, the name in any case)) | banner and card text, README variant |
 | Brand data | `references/brand.yaml` | palettes, fonts, logo paths, eyebrows, footer strings |
 
 ## Assets

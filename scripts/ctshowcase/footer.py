@@ -34,7 +34,8 @@ def _blocks(text: str) -> list[str]:
 
 
 def check(brand, readme_text: str) -> tuple[str, list[str]]:
-    """pass | fail:missing | fail:not-last | fail:drift (any byte difference)."""
+    """pass | fail:missing | fail:not-last | fail:drift (any byte difference) | fail:duplicate (an old footer-like
+    block, centred with "Built by" and complete.tech, kept outside code before the decision 18 one)."""
     want = markup(brand)
     text = readme_text.replace("\r\n", "\n")
     stripped = text.replace(START + "\n", "").replace("\n" + END, "")
@@ -47,6 +48,9 @@ def check(brand, readme_text: str) -> tuple[str, list[str]]:
         lic = [m.start() for m in re.finditer(r"(?m)^## Licens(e|ing)\s*$", stripped)]
         if lic and stripped.rfind(want) < lic[-1]:
             return "fail:not-last", logs
+        from .readme import is_footer_like, masked  # lazy: readme imports this module
+        if any(is_footer_like(b) for b in _blocks(masked(stripped))[:-1]):
+            return "fail:duplicate", logs
         return "pass", logs
     if want in stripped:
         return "fail:not-last", []

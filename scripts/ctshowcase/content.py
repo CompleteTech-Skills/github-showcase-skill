@@ -243,7 +243,7 @@ def markdown_files(tree: Tree, readme: str | None) -> list[str]:
 # =====================================================================================================
 # Markdown scanning
 # =====================================================================================================
-FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+FENCE = re.compile(r"^ {0,3}(`{3,}(?=[^`\n]*$)|~{3,})")  # CommonMark: no backtick in a ``` info string
 INLINE_CODE = re.compile(r"(`+)(?:.+?)\1")
 ATX = re.compile(r"^ {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$")
 SETEXT = re.compile(r"^ {0,3}(=+|-+)[ \t]*$")
@@ -1451,6 +1451,9 @@ def _png_lossless(data: bytes) -> tuple[bytes | None, str]:
         im.load()
     except Exception as exc:  # unreadable images are reported, not fixed
         return None, f"unreadable: {str(exc)[:80]}"
+    frames = getattr(im, "n_frames", 1)
+    if getattr(im, "is_animated", False) or frames > 1:  # a re-save keeps one frame: no candidate (fail closed)
+        return None, f"animated: {frames} frames; no lossless candidate (a re-encode would keep only the first frame)"
     b = io.BytesIO()
     kw = {"optimize": True}
     if im.info.get("icc_profile"):
@@ -1650,8 +1653,12 @@ def _count(v) -> int | None:
     if isinstance(v, list):
         return len(v)
     if isinstance(v, dict):
-        if "total_count" in v:
-            return int(v["total_count"])
+        for k in ("total_count", "totalCount"):  # REST and GraphQL counts win over a (possibly paged) list
+            n = v.get(k)
+            if isinstance(n, int) and not isinstance(n, bool):
+                return n
+            if isinstance(n, str) and n.isdigit():
+                return int(n)
         for k in ("environments", "releases", "deployments", "packages", "items", "nodes"):
             if isinstance(v.get(k), list):
                 return len(v[k])
@@ -1783,8 +1790,11 @@ def palette_rows(text: str) -> list[dict]:
     return rows
 
 
-def family_colours(text: str, owner: str, family: str) -> dict:
-    fam, prefix = ART_OWNER.get(owner, (ART_FAMILY.get(family), None))
+def family_colours(text: str, owner: str, family: str, aliases=()) -> dict:
+    """The family palette for the org: its ART_OWNER row under any of its logins (`aliases`, CQ-03), else the family's."""
+    owners = {k.lower(): v for k, v in ART_OWNER.items()}
+    fam, prefix = next((owners[a.lower()] for a in (owner, *aliases) if a and a.lower() in owners),
+                       (ART_FAMILY.get(family), None))
     rows = [r for r in palette_rows(text) if fam and r["family"].lower().startswith(fam.lower())]
     if prefix:
         own = [r for r in rows if r["role"].lower().startswith(prefix.lower())]
@@ -1846,8 +1856,8 @@ def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = Non
     org = org_row(resolver, ctx.brand, owner, require=True)
     org["canonical"], org["current"] = org["brand_key"], current_login(resolver, owner)
     family = org_style(resolver, ctx.brand, owner)["name"]
-    colours = family_colours(art_text, org["canonical"], family)
     logins = [org["canonical"], *resolver.aliases(owner)]  # ART_DIRECTION may name the org by any of its logins (CQ-03)
+    colours = family_colours(art_text, org["canonical"], family, logins)
     org_mark = next((g for g in (org_glyph(art_text, x) for x in logins) if g), None)
     facts = {"repository": f"{org['current']}/{repo}", "description": ctx.meta.get("description") or "",
              "type": ctx.det.get("type"), "category": ctx.det.get("category"), "topics": ctx.meta.get("topics") or [],
@@ -1866,9 +1876,19 @@ def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = Non
                 lock = cells[1]
         adds = dict(re.findall(r"(Security|TCG|Discord orgs|jevplay-games|TouchedByAnAgent) `([^`]*)`",
                                (re.search(r"Family additions:(.*)", skill_art or "") or re.match("", "")).group(0)))
-        add_key = {"completetech-security": "Security", "completetech-pokemon": "TCG", "completetech-discordapps":
-                   "Discord orgs", "completetechdiscord-games": "Discord orgs", "jevplay-games": "jevplay-games",
-                   "touchedbyanagent": "TouchedByAnAgent"}.get(org["canonical"].lower())
+        add_map = {"completetech-security": "Security", "completetech-pokemon": "TCG", "completetech-tcg": "TCG",
+                   "completetech-discordapps": "Discord orgs", "completetechdiscord-games": "Discord orgs",
+                   "jevplay-games": "jevplay-games", "touchedbyanagent": "TouchedByAnAgent"}
+        add_names = {"completetech security": "Security", "completetech tcg": "TCG",
+                     "completetech discord apps": "Discord orgs", "completetech discord games": "Discord orgs",
+                     "jevplay.games": "jevplay-games", "touched by an agent": "TouchedByAnAgent"}
+        # any login of the org (CQ-03), else its display name, so a re-keyed brand.yaml row keeps its negatives
+        add_key = next((add_map[a.lower()] for a in logins if a and a.lower() in add_map), None) or \
+            add_names.get(str(org.get("display_name") or "").lower())
+        if add_key and not adds.get(add_key):
+            # a trademark family whose negatives cannot be found: never a prompt without them (fail closed)
+            raise NeedsInput("family-additions", f"{org['current']}: references/art-direction.md has no {add_key} "
+                                                 "family addition (trademark negatives)")
         pal = re.search(r"CompleteTech palette: `([^`]*)`; highlight line `([^`]*)`", skill_art or "")
         card = ctx.style["tokens"]["card_fill"]
         prompt = tpl.replace("FAMILY STYLE LOCK, VERBATIM", lock or "{STYLE_LOCK}")
@@ -2331,7 +2351,14 @@ def cmd_content(args, cli=None):
         obj = dict(head, **{k: v for k, v in obj.items() if k != "command"}, alias_of="social-preview")
         if args.job and obj.get("result") == "ok":
             ctx = _ctx(args, cli, resolver)
-            obj["job"] = social_job(ctx, resolver, obj["out"])
+            job = social_job(ctx, resolver, obj["out"])
+            if job and obj.get("footer") != f"github.com/{job['repo']}":
+                # the image names another login than the repository it would be uploaded to (an approved rename the
+                # render did not see): never upload it; re-render once the image names the current login
+                obj["result"], code = "needs-input", CHECK_FAILED
+                obj["logs"] = list(obj.get("logs") or []) + ["needs-input:social-login"]
+                job = None
+            obj["job"] = job
         return _finish(args, obj, code)
     if act in ("links", "images"):
         rd = cli.repo_dir(args)
@@ -2473,16 +2500,18 @@ def _cmd_icon(args, cli, resolver, head):
     # watching-org forks and a placeholder org's `.github` are exempt. Forks outside the watching org, backups and
     # `.github` repositories need their own icon. The resolver also sees the renames and placeholders passed here.
     why = ctx.art_status()["icon"]
-    if resolver.owner_status(ctx.owner) == "watching":
-        why = "exempt:watching-fork"
+    if resolver.owner_status(ctx.owner) == "watching":  # only its forks are exempt; its `.github` needs an icon
+        why = "exempt:watching-fork" if (ctx.meta.get("fork") or ctx.det["type"] == "fork") else \
+            why if ctx.repo == ".github" else "hold:watching-non-fork"
     elif ctx.repo == ".github" and resolver.is_placeholder(ctx.owner):
         why = "exempt:placeholder-org"
     if why and why.startswith("exempt"):
         return dict(head, owner=ctx.owner, repo=ctx.repo, result="exempt", logs=[why]), OK
     if why == "t3-signoff":
         raise Refused(f"{ctx.owner} is T3; needs co-owner sign-off", log="t3-signoff")
-    if why == "hold" and not getattr(args, "allow_hold", False):  # a family on hold (brand.yaml style `hold`), as banner and card refuse
-        raise ShowcaseError(f"{ctx.owner} family is on hold; pass --allow-hold", log="hold")
+    if why and why.startswith("hold") and not getattr(args, "allow_hold", False):  # a family on hold (brand.yaml style
+        # `hold`) or a watching-org non-fork (`hold:watching-non-fork`), as banner and card refuse
+        raise ShowcaseError(f"{ctx.owner}/{ctx.repo} is held ({why}); pass --allow-hold", log=why)
     head.update(owner=ctx.owner, repo=ctx.repo, icon_action=args.icon_action)
     card = ctx.style["tokens"]["card_fill"]
     org = org_row(resolver, ctx.brand, ctx.owner)
@@ -2520,7 +2549,8 @@ def _cmd_icon(args, cli, resolver, head):
     ink = []
     try:
         art = load_art_direction(args.art_direction)
-        ink = family_colours(art, org["brand_key"], org_style(resolver, ctx.brand, ctx.owner)["name"]).get("INK") or []
+        ink = family_colours(art, org["brand_key"], org_style(resolver, ctx.brand, ctx.owner)["name"],
+                             resolver.aliases(ctx.owner)).get("INK") or []
     except NeedsInput:
         ctx.log("needs-input:art-direction")
     rd = ctx.repo_dir

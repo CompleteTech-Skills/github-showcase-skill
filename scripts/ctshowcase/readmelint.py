@@ -3,11 +3,12 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from urllib.parse import unquote
 
 from . import footer as footermod
 from .context import RepoContext
 from .detect import standard
-from .readme import BANNER_BLOCK, EMOJI, MARK, nav_first, preserved, split_sections
+from .readme import BANNER_BLOCK, EMOJI, MARK, is_footer_like, masked, normalize_text, nav_first, preserved, split_sections
 
 IMG_MD = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)[^)]*\)")
 IMG_HTML = re.compile(r"<img\b([^>]*)>", re.I)
@@ -15,6 +16,8 @@ PALETTE = {"1E3A8A", "005ADD", "067647", "64748B", "E551BA", "F386A1", "1E1E1E"}
 
 
 def _outside_code(text: str) -> str:
+    """The text without fenced code (``` and ~~~), inline code and HTML comments."""
+    text = re.sub(r"(?ms)^ {0,3}(`{3,}(?=[^`\n]*$)|~{3,}).*?^ {0,3}\1", "", text)  # no backtick in a ``` info string
     text = re.sub(r"```.*?```", "", text, flags=re.S)
     text = re.sub(r"`[^`\n]*`", "", text)
     return re.sub(r"<!--.*?-->", "", text, flags=re.S)
@@ -26,7 +29,7 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
     if not path.is_file():
         return {"file": str(path), "result": "fail", "fails": ["missing README"], "warns": []}
     raw = path.read_bytes()
-    text = raw.decode("utf-8", errors="replace").replace("\r\n", "\n")
+    text = normalize_text(raw.decode("utf-8", errors="replace"))  # a leading BOM never hides the H1
     variant = variant if variant and variant != "auto" else ctx.det["variant"]
     rv = standard("readme-variants")
     if len(raw) >= 512_000:
@@ -42,7 +45,7 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
         first = rest.splitlines()[0] if rest.strip() else ""
         if not first.startswith(">"):
             fails.append(f"R7 variant {variant} callout must follow the banner")
-        if ctx.org.get("footer", True) is True and ctx.brand.owner_status(ctx.owner) != "watching":
+        if ctx.footer_status() is None:
             st, _ = footermod.check(ctx.brand, text)
             if st != "pass":
                 fails.append(f"D18 footer {st}")
@@ -144,11 +147,12 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
         if not re.sub(r"<!--.*?-->", "", b, flags=re.S).strip() and h not in ("Notes",):
             incomplete.append(f"needs-input:{variant}:{h}")
     # footer last and exact
-    fv = ctx.org.get("footer", True)
-    if fv is True:
+    if ctx.footer_status() is None:  # the watching org's `footer: false` exempts only its forks
         st, _ = footermod.check(ctx.brand, text)
         if st != "pass":
             fails.append(f"D18 footer {st}")
+        elif _extra_footer(text):
+            fails.append("D18 footer fail:duplicate")
     # alt text, local images
     for m in IMG_MD.finditer(plain):
         if not m.group(1).strip():
@@ -194,10 +198,18 @@ def _first_is_foreign(imgs) -> bool:
     return bool(imgs) and "docs/images/banner.png" not in imgs[0][1]
 
 
+def _extra_footer(text: str) -> bool:
+    """True when a footer-like block (centred, "Built by", complete.tech) sits anywhere but last: an old footer kept
+    beside the decision 18 one."""
+    t = masked(text.replace(footermod.START + "\n", "").replace("\n" + footermod.END, ""))
+    blocks = [b for b in re.split(r"\n\s*\n", t.strip()) if b.strip()]
+    return any(is_footer_like(b) for b in blocks[:-1])
+
+
 def _local(readme: Path, src: str, fails: list, example: bool = False):
     if re.match(r"^(https?:|data:|#)", src):
         return
-    p = (readme.parent / src.split("#")[0]).resolve()
+    p = (readme.parent / unquote(src.split("#")[0].split("?")[0])).resolve()  # docs/My%20Shot.png names "My Shot.png"
     if not p.is_file():
         fails.append(f"R7 local image does not resolve: {src}")
         return
