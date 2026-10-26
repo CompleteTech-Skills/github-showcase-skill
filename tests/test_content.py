@@ -188,7 +188,11 @@ def test_links_flag_this_repository_under_a_former_owner(brand, tmp_path):
         "[Other](https://github.com/CompleteTech-LLC/support-triage-agent-docs) "
         "[Sibling](https://github.com/CompleteTech-LLC/stt-app)\n")})
     tree = C.Tree(root)
-    res = C.links_report(tree, ["README.md"], resolver=resolver(brand), self_slug=(NW, "support-triage-agent"))
+    move = {"id": "repo-nw-001", "owner": "CompleteTech-LLC", "repo": "support-triage-agent", "action": "transfer",
+            "target_owner": NW, "new_name": ""}  # the recorded, approved transfer (a same name alone is not a move)
+    moved_by = R.Resolver(brand, {}, {"rows": set(), "ids": {"repo-nw-001"}, "answers": {}, "actions": ACTIONS + [move],
+                                      "extra": []})
+    res = C.links_report(tree, ["README.md"], resolver=moved_by, self_slug=(NW, "support-triage-agent"))
     moved = [x for x in res["findings"] if x["status"] == "moved"]
     assert len(moved) == 3 and all(x["proposal"]["new"].count(f"{NW}/support-triage-agent") == 1 for x in moved)
     assert res["result"] == "pass" and "link-rewrite" in res["logs"]
@@ -197,7 +201,7 @@ def test_links_flag_this_repository_under_a_former_owner(brand, tmp_path):
            f"(https://github.com/{NW}/support-triage-agent/actions/workflows/ci.yml)" in diff
     assert "release/Northwind-Trading-Co/support-triage-agent?color" in diff
     assert "CompleteTech-LLC/support-triage-agent-docs" in diff and "CompleteTech-LLC/stt-app" in diff  # untouched
-    assert C.links_report(tree, ["README.md"], resolver=resolver(brand))["counts"].get("moved") is None  # needs the slug
+    assert C.links_report(tree, ["README.md"], resolver=moved_by)["counts"].get("moved") is None  # needs the slug
 
 
 def test_links_strict_fails(checkout):

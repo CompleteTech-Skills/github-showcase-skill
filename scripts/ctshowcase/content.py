@@ -671,20 +671,44 @@ def _anchor(row: dict, f: str, frag: str, fi: _FileInfo, base: set[str] | None, 
     return row
 
 
+def _fixed_urls(resolver: Resolver | None) -> set[str]:
+    """Every URL `references/brand.yaml` holds (the decision 18 footer's href and logo URLs, the brand site, the hub
+    sites): fixed brand content, identical in every repository, so a link check never proposes rewriting one."""
+    out: set[str] = set()
+
+    def walk(v):
+        if isinstance(v, dict):
+            for x in v.values():
+                walk(x)
+        elif isinstance(v, (list, tuple)):
+            for x in v:
+                walk(x)
+        elif isinstance(v, str) and re.match(r"^https?://", v.strip(), re.I):
+            out.add(v.strip().rstrip("/").lower())
+    walk((resolver.brand.raw if resolver is not None and resolver.brand is not None else None) or {})
+    return out
+
+
 def _self_moved(url: str, host: str, resolver: Resolver | None, self_slug) -> tuple[str, str] | None:
-    """A link to this repository under a former estate owner (a transfer left its own README pointing at the old org:
+    """A link to this repository under its former slug (a transfer left its own README pointing at the old org:
     php2shell-check's badges still name CompleteTech-LLC). GitHub redirects it today, but the redirect breaks the day
-    the old owner reuses the name, and the badge, release and clone URLs read wrong. Offline: (old, new) slug."""
+    the old owner reuses the name, and the badge, release and clone URLs read wrong. Only an approved repository
+    rename or transfer in the estate actions (`Resolver.repo_before`) that produces exactly this repository counts: a
+    repository of the same name under another org is a different one (every org has its own `.github`). (old, new)."""
     if not self_slug or not resolver or not (host in ("github.com", "www.github.com", "raw.githubusercontent.com")
                                              or host.endswith("shields.io")):
         return None
     cur_owner, repo = current_login(resolver, self_slug[0]), self_slug[1]
-    for m in re.finditer(r"/([A-Za-z0-9][A-Za-z0-9-]{0,38})/" + re.escape(repo) + r"(?=$|[/?#.])",
-                         urllib.parse.urlsplit(url).path, re.I):
-        owner = m.group(1)
-        if owner.lower() != cur_owner.lower() and in_estate(resolver, owner) and not resolver.same(owner, cur_owner):
-            return f"{owner}/{m.group(0).rsplit('/', 1)[1]}", f"{cur_owner}/{repo}"
-    return None
+    hit = resolver.repo_before(f"{cur_owner}/{repo}")
+    if not hit or "/" not in hit[0] or not resolver.repo_action_approved(hit[1]):
+        return None
+    old_owner, old_repo = hit[0].split("/", 1)
+    if resolver.same(old_owner, cur_owner) and old_repo.lower() == repo.lower():
+        return None
+    owners = "|".join(re.escape(a) for a in resolver.aliases(old_owner))
+    m = re.search(r"/(" + owners + r")/(" + re.escape(old_repo) + r")(?=$|[/?#.])", urllib.parse.urlsplit(url).path,
+                  re.I)
+    return (f"{m.group(1)}/{m.group(2)}", f"{cur_owner}/{repo}") if m else None
 
 
 def _remote(row: dict, url: str, resolver: Resolver | None, fetcher: Fetcher | None, self_slug=None) -> dict:
@@ -694,7 +718,10 @@ def _remote(row: dict, url: str, resolver: Resolver | None, fetcher: Fetcher | N
     row["kind"] = "image" if row["image"] else "remote"
     if host in LINK_ALLOW_HOSTS or host.endswith(LINK_ALLOW_SUFFIX) or _private_host(host):
         return dict(row, status="allowlisted", reason="local or example host (§10.2 allowlist)")
-    moved = _self_moved(full, host, resolver, self_slug)
+    fixed = full.strip().rstrip("/").lower() in _fixed_urls(resolver)  # decision 18 footer and brand URLs: never rewritten
+    if fixed:
+        row["fixed"] = True
+    moved = None if fixed else _self_moved(full, host, resolver, self_slug)
     if moved:
         if _github_ref(full):
             row["kind"] = "github"
@@ -705,7 +732,7 @@ def _remote(row: dict, url: str, resolver: Resolver | None, fetcher: Fetcher | N
     if gh:
         row["kind"] = "github"
         owner, repo = gh
-        if resolver is not None:
+        if resolver is not None and not fixed:
             cur = resolver.canonical(owner)
             if cur != owner:
                 renamed = cur.lower() != owner.lower()
@@ -714,7 +741,7 @@ def _remote(row: dict, url: str, resolver: Resolver | None, fetcher: Fetcher | N
                            f"owner spelled {cur} on GitHub", proposal=_prop(row["file"], row["line"], url, new,
                                                                              "§7.1 links: rewrite to the current owner"))
                 return row
-        if fetcher is not None and in_estate(resolver, owner):
+        if fetcher is not None and not fixed and in_estate(resolver, owner):
             res = fetcher.full_name(owner, repo)
             name = res.get("full_name")
             if name and name != f"{owner}/{repo}":

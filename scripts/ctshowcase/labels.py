@@ -4,6 +4,7 @@ Never `--force`, never a delete, and never a GitHub write: plans leave as `gh` a
 """
 from __future__ import annotations
 
+import json
 import re
 import shlex
 from pathlib import Path
@@ -12,7 +13,14 @@ from . import REFERENCES
 
 LABELS_YML = REFERENCES / "standard" / "labels.yml"
 NAMESPACE_COLORS = {"area": "5319e7", "scope": "bfdadc"}
-REF_FILES_BLOCK = (".github/workflows/", "release.yml", "labeler.yml", "renovate.json")
+REF_FILES_BLOCK = (".github/workflows/", "release.yml", "labeler.yml", "renovate.json", "renovate.json5")
+# Renovate's repository config files, in the order Renovate reads them (its documented `configFileNames`, less the
+# `renovate` key of the root package.json, which `_referenced` reads on a checkout): a label named in any of them blocks
+RENOVATE_FILES = ("renovate.json", "renovate.json5", ".github/renovate.json", ".github/renovate.json5",
+                  ".gitlab/renovate.json", ".gitlab/renovate.json5", ".gitea/renovate.json", ".gitea/renovate.json5",
+                  ".forgejo/renovate.json", ".forgejo/renovate.json5", ".renovaterc", ".renovaterc.json",
+                  ".renovaterc.json5")
+_RENOVATE_LOW = frozenset(f.lower() for f in RENOVATE_FILES)
 NEEDS_CHECKOUT = "needs-input:label-references"
 
 
@@ -165,7 +173,7 @@ def _form_hits(rel: str, kind: str, text: str, name: str, repo: str | None = Non
 # the paths rule 0 can act on, as glob patterns: a capture with none of them proves no rename needs a checkout
 REFERENCE_PATTERNS = (".github/ISSUE_TEMPLATE/*", ".github/dependabot.yml", ".github/dependabot.yaml",
                       ".github/workflows/*", ".github/**/release.yml", ".github/**/labeler.yml", ".github/**/renovate.json",
-                      "renovate.json")
+                      ".github/**/renovate.json5", *(f for f in RENOVATE_FILES if not f.startswith(".github/")))
 # where the owner's `.github` repository keeps the default issue forms GitHub applies to every repository without a
 # `.github/ISSUE_TEMPLATE/` of its own (read case-insensitively, so a capture errs toward a hold)
 DEFAULT_FORM_DIRS = (".github/ISSUE_TEMPLATE", "ISSUE_TEMPLATE", "docs/ISSUE_TEMPLATE")
@@ -174,10 +182,12 @@ DEFAULT_PATTERNS = tuple(f"{d}/*" for d in DEFAULT_FORM_DIRS)
 
 def reference_file(rel: str) -> bool:
     """True for a path `_referenced` acts on (a block or a rewrite), case-insensitively so a capture errs toward a hold:
-    `.github/workflows/*`, any `.github/**` file ending in release.yml, labeler.yml or renovate.json, the root
-    renovate.json, an issue form or Markdown template directly in `.github/ISSUE_TEMPLATE/`, and dependabot.yml."""
+    `.github/workflows/*`, any `.github/**` file ending in release.yml, labeler.yml, renovate.json or renovate.json5,
+    every other Renovate config file (RENOVATE_FILES), an issue form or Markdown template directly in
+    `.github/ISSUE_TEMPLATE/`, and dependabot.yml. The root package.json is not one: a file list cannot show whether it
+    holds a `renovate` key (see references/labels.md, rule 0)."""
     low = rel.lower().lstrip("/")
-    if low == "renovate.json":
+    if low in _RENOVATE_LOW:
         return True
     if not low.startswith(".github/"):
         return False
@@ -228,7 +238,6 @@ def defaults_for(owner: str, repo: str, *, repo_dir=None, meta: dict | None = No
     p = Path(path)
     if p.is_dir():
         return defaults_source(full, repo_dir=p)
-    import json
     from .errors import ShowcaseError
     try:
         raw = json.loads(p.read_text(encoding="utf-8"))
@@ -281,8 +290,43 @@ def _default_forms(defaults: dict | None, name: str) -> tuple[str | None, list]:
     return None, []
 
 
+def _strings(v) -> list[str]:
+    """Every string (keys included) in a parsed JSON value."""
+    if isinstance(v, str):
+        return [v]
+    if isinstance(v, dict):
+        return [s for k, x in v.items() for s in [str(k), *_strings(x)]]
+    if isinstance(v, list):
+        return [s for x in v for s in _strings(x)]
+    return []
+
+
+def _package_renovate(text: str, pat: re.Pattern) -> bool:
+    """True when the root package.json's `renovate` key (Renovate's package.json config) names the label. A file that
+    does not parse fails closed: it blocks when it mentions "renovate" and the label as a token anywhere."""
+    try:
+        data = json.loads(text.lstrip(BOM))
+    except (ValueError, RecursionError):
+        return '"renovate"' in text and bool(pat.search(text))
+    return isinstance(data, dict) and "renovate" in data and any(pat.search(s) for s in _strings(data["renovate"]))
+
+
+def _renovate_paths(repo_dir: Path) -> list[Path]:
+    """The checkout's Renovate config files outside `.github/` and its root package.json, matched case-insensitively
+    so an unusual casing errs toward a block."""
+    out: list[Path] = []
+    for c in sorted(repo_dir.iterdir()):
+        low = c.name.lower()
+        if c.is_file() and (low in _RENOVATE_LOW or low == "package.json"):
+            out.append(c)
+        elif c.is_dir() and low in (".gitlab", ".gitea", ".forgejo"):
+            out += [f for f in sorted(c.iterdir()) if f.is_file() and f"{low}/{f.name.lower()}" in _RENOVATE_LOW]
+    return out
+
+
 def _referenced(repo_dir: Path | None, name: str) -> tuple[str | None, list[dict]]:
-    """§6.4 rule 0: ('block', hits) when referenced in workflows/release/labeler/renovate; ('rewrite', hits) when an
+    """§6.4 rule 0: ('block', hits) when referenced in workflows/release/labeler or any Renovate config file (the
+    `renovate` key of the root package.json included); ('rewrite', hits) when an
     issue form's or template's `labels:` key or a dependabot.yml `labels:` entry assigns it, where hits are the
     {path, line, text} the estate/polish PR rewrites before the rename. A mention in prose is not a reference."""
     if repo_dir is None:
@@ -290,8 +334,7 @@ def _referenced(repo_dir: Path | None, name: str) -> tuple[str | None, list[dict
     pat = re.compile(rf"(?<![\w:-]){re.escape(name)}(?![\w:-])")
     hits: list[dict] = []
     cands = sorted((repo_dir / ".github").rglob("*")) if (repo_dir / ".github").is_dir() else []
-    if (repo_dir / "renovate.json").is_file():
-        cands.append(repo_dir / "renovate.json")
+    cands += _renovate_paths(repo_dir)
     for p in cands:
         if not p.is_file():
             continue
@@ -300,7 +343,12 @@ def _referenced(repo_dir: Path | None, name: str) -> tuple[str | None, list[dict
         except OSError:
             continue
         rel = p.relative_to(repo_dir).as_posix()
-        if (rel.startswith(".github/workflows/") or rel.endswith(REF_FILES_BLOCK[1:])) and pat.search(text):
+        if rel.lower() == "package.json":
+            if _package_renovate(text, pat):
+                return "block", [{"path": rel}]
+            continue
+        if (rel.startswith(".github/workflows/") or rel.endswith(REF_FILES_BLOCK[1:]) or rel.lower() in _RENOVATE_LOW) \
+                and pat.search(text):
             return "block", [{"path": rel}]
         kind = _form_kind(rel)
         if kind:

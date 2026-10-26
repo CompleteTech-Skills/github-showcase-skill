@@ -27,6 +27,13 @@ def _license(v):
     return v or None
 
 
+def _og_flag(raw: dict) -> bool | None:
+    """The social-preview flag (R10) from the snake-case key or the captured GraphQL `usesCustomOpenGraphImage`.
+    Only a real boolean counts; two spellings that disagree prove nothing, so the flag is then unknown."""
+    seen = {raw[k] for k in ("uses_custom_og_image", "usesCustomOpenGraphImage") if isinstance(raw.get(k), bool)}
+    return seen.pop() if len(seen) == 1 else None
+
+
 def normalize(raw: dict) -> dict:
     """Accept the scratch-data format, raw `gh api repos/{o}/{r}` output, or showcase.py meta output."""
     if not isinstance(raw, dict):
@@ -76,10 +83,15 @@ def normalize(raw: dict) -> dict:
     for k in ("health_percentage", "has_issues", "has_wiki", "has_projects", "has_discussions",
               "delete_branch_on_merge", "homepage_status"):
         m[k] = raw.get(k)
+    # has_pages and size come from the REST capture; releases/deployments/packages/environments are the About
+    # sidebar counts (adopt, content sidebar); size == 0 is the estate doctor's empty-repository rule
     for k in ("files", "files_complete", "manifests", "file_sizes", "pushed_at", "last_substantive_commit",
-              "last_substantive_sha"):
+              "last_substantive_sha", "has_pages", "size", "releases", "deployments", "packages", "environments"):
         if raw.get(k) is not None:
             m[k] = raw[k]
+    og = _og_flag(raw)
+    if og is not None:  # R10 evidence: absent, non-boolean or contradictory input stays unknown (fail closed)
+        m["uses_custom_og_image"] = og
     if raw.get("also_in") is not None:  # registry cross-listing (§5.3a org membership topics)
         m["also_in"] = [str(x) for x in raw["also_in"] or []]
     if raw.get("ahead_by") is not None:  # forks: commits ahead of the parent (§7.4 G short form when 0)
