@@ -13,14 +13,13 @@
 # GitHub Showcase Skill
 
 <!-- showcase:badges:start -->
-![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-1E3A8A?logo=python&logoColor=white)
+![Language Python](https://img.shields.io/badge/language-Python-1E3A8A)
 ![Agent skill](https://img.shields.io/badge/agent%20skill-Claude%20%7C%20Codex-005ADD)
-![Output PNG and SVG](https://img.shields.io/badge/output-PNG%20%7C%20SVG-005ADD)
 ![License MIT](https://img.shields.io/badge/license-MIT-64748B)
 <!-- showcase:badges:end -->
 
 <!-- showcase:tagline:start -->
-**Generate CompleteTech LLC README banners, repo cards and profile art, and check repositories against the standard.**
+
 <!-- showcase:tagline:end -->
 
 </div>
