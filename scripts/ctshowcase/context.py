@@ -147,7 +147,7 @@ class RepoContext:
         if status in ("t3", "hold", "excluded"):
             code = {"t3": "t3-signoff", "hold": "hold", "excluded": "exempt"}[status]
             return {"banner": code, "card": code, "icon": code}
-        if self.det["type"] in ("fork", "backup", "github-profile"):
+        if self.is_fork or self.det["type"] in ("backup", "github-profile"):
             out["card"] = "exempt:no-card"
         if self.det["type"] == "github-profile" and self.repo.lower() == self.owner.lower():
             out["banner"] = "exempt:profile-readme"  # the personal profile README opens with the intro (decision 15)

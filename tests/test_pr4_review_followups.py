@@ -54,6 +54,11 @@ def test_doctor_and_adopt_share_the_fork_rule_for_labels(make_ctx, how):
 
 
 @pytest.mark.parametrize("how", FORKS)
+def test_forks_get_no_card_under_any_type(make_ctx, how):
+    assert fork_ctx(make_ctx, how).art_status()["card"] == "exempt:no-card"  # card, lint all and doctor's card cell
+
+
+@pytest.mark.parametrize("how", FORKS)
 def test_slug_forks_keep_the_fork_rule_under_a_type_override(make_ctx, how):
     ctx = fork_ctx(make_ctx, how, default_branch="develop", has_issues=True, delete_branch_on_merge=True)
     r = adopt(ctx, ctx.brand.resolver())
