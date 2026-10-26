@@ -98,6 +98,9 @@ def normalize(raw: dict) -> dict:
     elif parent is not None:
         parent = None  # any other shape names no parent
     m["parent"] = parent
+    # Offline decision evidence, never inferred from a branch name or GitHub response.
+    if raw.get("default_branch_policy") == "keep":
+        m["default_branch_policy"] = "keep"
     for k in ("health_percentage", "has_issues", "has_wiki", "has_projects", "has_discussions",
               "delete_branch_on_merge", "homepage_status"):
         m[k] = raw.get(k)

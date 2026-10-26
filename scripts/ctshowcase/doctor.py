@@ -53,14 +53,20 @@ def row(ctx: RepoContext) -> dict:
     hp = ctx.meta.get("homepage") or ""
     cells["R4"] = "pass" if not hp or ctx.meta.get("homepage_status") == 200 else (
         "unknown" if ctx.meta.get("homepage_status") is None else "warn")
-    if ctx.meta.get("delete_branch_on_merge") is None:
+    kept_default = ctx.meta.get("default_branch_policy") == "keep" and ctx.meta.get("default_branch") != "main"
+    if kept_default and ctx.det["type"] != "fork":
+        logs.append("default-branch kept (user)")
+    if ctx.det["type"] == "fork":
+        cells["R5"] = "pass"  # upstream default and merge settings are preserved (§10.1)
+    elif ctx.meta.get("delete_branch_on_merge") is None:
         cells["R5"] = "unknown"
     else:
-        ok = ctx.meta.get("default_branch") == "main" and ctx.meta.get("delete_branch_on_merge") is True and \
-            (ctx.det["type"] == "fork" or ctx.meta.get("has_issues") is True)
+        ok = (ctx.meta.get("default_branch") == "main" or kept_default) and \
+            ctx.meta.get("delete_branch_on_merge") is True and (ctx.repo == ".github" or ctx.meta.get("has_issues") is True)
         cells["R5"] = "pass" if ok else "fail"
     # archived repositories are in scope (decision 6: unarchive, polish, re-archive), so R6 applies to them
-    if ctx.tier in ("T2-R", "T3") or ctx.det["type"] == "fork":
+    if ctx.tier in ("T2-R", "T3") or ctx.det["type"] == "fork" or \
+            (ctx.meta.get("has_issues") is False and ctx.repo != ".github"):
         cells["R6"] = "n/a"
     elif not ctx.meta.get("labels"):
         cells["R6"] = "unknown"
@@ -91,9 +97,10 @@ def row(ctx: RepoContext) -> dict:
     else:
         cells["R9"] = "n/a"
     og = ctx.meta.get("uses_custom_og_image")
-    cells["R10"] = "unknown" if og is None else ("pass" if og else "fail")
+    cells["R10"] = ("unknown" if og is None else ("pass" if og else "fail")) if ctx.social_applicable() else "n/a"
     hpct = ctx.meta.get("health_percentage")
-    if not ctx.public or ctx.det["type"] in ("fork", "github-profile") or ctx.tier == "T2-R":
+    if not ctx.public or ctx.meta.get("archived") or ctx.det["type"] in ("fork", "github-profile") or \
+            ctx.tier not in ("T1", "T2"):
         cells["R11"] = "n/a"
     else:
         cells["R11"] = "unknown" if hpct is None else ("pass" if hpct == 100 else "fail")

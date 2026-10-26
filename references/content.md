@@ -4,6 +4,8 @@ Repository content checks that the estate audit assigned to the skill: links (CQ
 
 ## Commands
 
+R10 includes the personal-profile capstone (decision 20). Social upload jobs and `doctor` use the same applicability rule. For archived polishing, re-capture metadata inside the approved unarchive window before planning the social job; an archived capture does not authorize an upload.
+
 Run from inside the target checkout, or pass the global `--repo-dir DIR` and `--meta FILE` like the repository commands.
 
 ```bash
