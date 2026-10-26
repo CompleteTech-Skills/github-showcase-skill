@@ -5,9 +5,11 @@ the block holds exactly a tagline of the template the repository was generated f
 only when those are unknown, the template body is still pristine. With a description, the tagline is regenerated.
 bootstrap (the template workflow's step before header mode) and upgrade (its rebuilt header and its additive preserve
 mode) decide the tagline block by the same rule (readme.tagline_body). With no description, when upgrade rebuilds the
-header (not in preserve mode), a single bare **...** line directly under the H1 moves into the block by that rule
-instead of being erased; a bold line inside a centred <div>/<p> block, in preserve mode, or in an untouched template
-copy whose template taglines are unknown (the rule would empty it there on the next run) stays as authored text."""
+header (not in preserve mode), a single bare **...** line opening the README after its header lines (H1, badges,
+banner, ---) moves into the block by that rule instead of being erased; a second bold line, one beside a tagline
+block that already holds a line, a bold line inside a centred <div>/<p> block, one in preserve mode, or one in an
+untouched template copy whose template taglines are unknown (the rule would empty it there on the next run) stays
+as authored text."""
 from pathlib import Path
 
 from ctshowcase import readme as R
