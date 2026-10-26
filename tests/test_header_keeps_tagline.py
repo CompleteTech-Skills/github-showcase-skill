@@ -6,7 +6,8 @@ only when those are unknown, the template body is still pristine. With a descrip
 bootstrap (the template workflow's step before header mode) and upgrade (its rebuilt header and its additive preserve
 mode) decide the tagline block by the same rule (readme.tagline_body). With no description, when upgrade rebuilds the
 header (not in preserve mode), a single bare **...** line directly under the H1 moves into the block by that rule
-instead of being erased; a bold line inside a centred <div>/<p> block, or in preserve mode, stays as authored text."""
+instead of being erased; a bold line inside a centred <div>/<p> block, in preserve mode, or in an untouched template
+copy whose template taglines are unknown (the rule would empty it there on the next run) stays as authored text."""
 from pathlib import Path
 
 from ctshowcase import readme as R
@@ -379,6 +380,12 @@ def test_upgrade_keeps_an_owner_bold_line_in_a_pristine_copy(make_ctx, tmp_path)
     assert R.bootstrap_state(once) == "pristine"
     own = "**My tool routes tickets.**"
     text = once.replace("---\n", "---\n\n" + own + "\n", 1)
-    out, removed = R.upgrade(make_ctx(tmp_path, repo="new-thing", description=""), text)
+    ctx = make_ctx(tmp_path, repo="new-thing", description="")
+    out, removed = R.upgrade(ctx, text)
     assert own in out
     assert R.preservation(text, out, removed) == []
+    # and it survives what runs after: the Action (bootstrap, then header) and a second upgrade
+    again, removed2 = R.upgrade(ctx, out)
+    for later in (R.bootstrap(ctx, out), R.header_only(ctx, out), R.header_only(ctx, R.bootstrap(ctx, out)), again):
+        assert own in later
+    assert R.preservation(out, again, removed2) == []
