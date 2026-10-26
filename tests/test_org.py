@@ -126,15 +126,22 @@ def test_profile_writes_and_renders(make_estate, tmp_path):
     assert (tmp_path / "profile" / "assets" / "banner.jpg").stat().st_size > 1000
 
 
+@pytest.mark.parametrize("owners", [None, "t3", "watching"])
 @pytest.mark.parametrize("cfg", [None, "type: cli\n"])
-def test_profile_lists_a_pinned_slug_fork_without_a_card(labs_brand, cfg):
-    """A `-fork` copy (type rule 1) has no card in `card`, `lint all` or doctor, so the profile shows it as a line."""
+def test_profile_lists_a_pinned_slug_fork_without_a_card(labs_brand, cfg, owners):
+    """A `-fork` copy (type rule 1) has no card in `card`, `lint all` or doctor, so the profile shows it as a line,
+    also in a co-owned org after sign-off (`--allow-t3`) and in the watching org."""
+    brand = labs_brand
+    if owners:
+        raw = copy.deepcopy(labs_brand.raw)
+        raw["owners"][owners] = list(raw["owners"].get(owners) or []) + [N]
+        brand = Brand(raw, labs_brand.path)
     reg = load_yaml_text((FIX / "registry.yaml").read_text(encoding="utf-8"))
     reg["orgs"][N]["pins_public"].insert(0, {"repo": "upstream-fork"})
-    est = O.Estate(labs_brand, Resolver(labs_brand, reg, approvals(rows=[("profile-retemplate", N, "*", "")])))
+    est = O.Estate(brand, Resolver(brand, reg, approvals(rows=[("profile-retemplate", N, "*", "")])))
     O.load_metas(FIX / "meta", est)
     est.meta(f"{N}/upstream-fork").update(fork=False, **({"manifests": {".github/showcase.yml": cfg}} if cfg else {}))
-    res, _ = O.profile(est, N)
+    res, _ = O.profile(est, N, allow_t3=owners == "t3")
     assert f"card-fallback:{N}/upstream-fork:exempt:no-card" in res["logs"]
     assert f"{N}/upstream-fork" not in [a.get("repo") for a in res["assets"] if a["kind"] == "card"]
     assert f"cards/{N}__upstream-fork.svg" not in res["readme"] and "upstream-fork" in res["readme"]

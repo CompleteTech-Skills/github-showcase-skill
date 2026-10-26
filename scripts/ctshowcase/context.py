@@ -123,6 +123,11 @@ class RepoContext:
         from .detect import is_fork
         return is_fork(dict(self.meta, repo=self.repo)) or self.det["type"] == "fork"
 
+    def card_exempt(self) -> bool:
+        """§5.4: forks (any `is_fork`), backups and profile repositories never get a card, whoever owns them. The owner
+        codes art_status reports first (watching, t3-signoff, hold) never hide this from the profile pages."""
+        return self.is_fork or self.det["type"] in ("backup", "github-profile")
+
     def social_applicable(self) -> bool:
         """R10: public product repositories, including the personal-profile capstone."""
         return (self.public and not self.meta.get("archived") and not self.is_fork and self.repo != ".github"
@@ -147,7 +152,7 @@ class RepoContext:
         if status in ("t3", "hold", "excluded"):
             code = {"t3": "t3-signoff", "hold": "hold", "excluded": "exempt"}[status]
             return {"banner": code, "card": code, "icon": code}
-        if self.is_fork or self.det["type"] in ("backup", "github-profile"):
+        if self.card_exempt():
             out["card"] = "exempt:no-card"
         if self.det["type"] == "github-profile" and self.repo.lower() == self.owner.lower():
             out["banner"] = "exempt:profile-readme"  # the personal profile README opens with the intro (decision 15)

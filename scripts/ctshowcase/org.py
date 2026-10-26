@@ -733,7 +733,7 @@ def _render_cards(estate: Estate, entries: list[dict], allow_unmeasured: bool) -
         try:
             fonts = fonts or Fonts(estate.brand)
             ctx = RepoContext(estate.brand, normalize(raw), None)
-            exempt = ctx.art_status()["card"] or ""
+            exempt = "exempt:no-card" if ctx.card_exempt() else ctx.art_status()["card"] or ""
             if exempt.startswith("exempt"):  # forks, backups, the profile repository: no card, as `card` and doctor
                 failed[full] = exempt
                 continue
