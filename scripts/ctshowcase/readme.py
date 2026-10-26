@@ -13,14 +13,12 @@ from urllib.parse import quote
 from . import footer as footermod
 from .context import RepoContext
 from .detect import standard
+from .mdcode import code_spans, find_blocks, masked  # noqa: F401  (code_spans: re-exported for callers)
 
 MARK = re.compile(r"<!-- showcase:([a-z-]+):start -->\n?(.*?)\n?<!-- showcase:\1:end -->", re.S)
 EMOJI = re.compile("[\U0001F000-\U0001FAFF☀-➿⬀-⯿️‍]")
 SHIELDS = "https://img.shields.io/badge/"
 BOM = "\ufeff"
-# CommonMark: a backtick fence's info string has no backtick, so "```npm test``` runs" is inline code, not a fence
-FENCE_OPEN = re.compile(r"^ {0,3}(`{3,}(?=[^`\n]*$)|~{3,})")
-INLINE_CODE = re.compile(r"(`+)(?!`).+?(?<!`)\1(?!`)")
 
 
 def normalize_text(text: str) -> str:
@@ -28,44 +26,6 @@ def normalize_text(text: str) -> str:
     from every `^#` match)."""
     text = text.replace("\r\n", "\n")
     return text[1:] if text.startswith(BOM) else text
-
-
-def code_spans(text: str) -> list[tuple[int, int]]:
-    """(start, end) offsets of fenced code (``` and ~~~, an unclosed fence runs to the end) and inline code spans."""
-    spans, pos, fence, fstart = [], 0, None, 0
-    for line in text.splitlines(keepends=True):
-        if fence is None:
-            m = FENCE_OPEN.match(line)
-            if m:
-                fence, fstart = m.group(1), pos
-            else:
-                spans += [(pos + c.start(), pos + c.end()) for c in INLINE_CODE.finditer(line)]
-        else:
-            close = re.match(r"^ {0,3}(`{3,}|~{3,})[ \t]*$", line.rstrip("\n"))
-            if close and close.group(1)[0] == fence[0] and len(close.group(1)) >= len(fence):
-                spans.append((fstart, pos + len(line)))
-                fence = None
-        pos += len(line)
-    if fence is not None:
-        spans.append((fstart, len(text)))
-    return spans
-
-
-def masked(text: str) -> str:
-    """`text` with every code span blanked (same length, newlines kept), so marker searches skip documented examples
-    and their offsets still index the original."""
-    out = list(text)
-    for a, b in code_spans(text):
-        for i in range(a, b):
-            if out[i] != "\n":
-                out[i] = "\x00"
-    return "".join(out)
-
-
-def find_blocks(pattern: re.Pattern, text: str) -> list[re.Match]:
-    """Matches of `pattern` outside code, taken on the original text (group contents byte-identical)."""
-    found = (pattern.fullmatch(text, m.start(), m.end()) for m in pattern.finditer(masked(text)))
-    return [m for m in found if m]
 
 
 def start(b):
@@ -277,19 +237,42 @@ def lead(ctx: RepoContext, banner: str, nav: str) -> list[str]:
     return [nav, banner] if nav_first(ctx) else [banner, nav]
 
 
-def header(ctx: RepoContext, keep_banner: str | None = None, title: str | None = None) -> str:
+def inherited_tagline(ctx: RepoContext, body: str, text: str) -> bool:
+    """True when the tagline block `body` of README `text` came from the template this repository was generated from
+    (never another repository's line is kept): it is one of meta template_taglines (the template's tagline when this
+    repository was generated, and today); only when those are unknown, an untouched (pristine) template body stands in
+    as the proof. The template repository's own tagline is never inherited."""
+    if ctx.meta.get("is_template"):
+        return False
+    known = [x.strip() for x in ctx.meta.get("template_taglines") or [] if isinstance(x, str) and x.strip()]
+    return body.strip() in known if known else bootstrap_state(text) == "pristine"
+
+
+def tagline_body(ctx: RepoContext, existing: str | None = None, text: str = "") -> str:
+    """The tagline block body, decided in this one place for header(), bootstrap(), upgrade() and header_only().
+    R2: the tagline is the description. Without one (logged needs-input:description) the block keeps `existing`, the
+    body it holds now in README `text`, unless that is inherited (guardrail 6: improve, never erase); nothing to keep
+    gives an empty block, never "****"."""
     desc = (ctx.meta.get("description") or "").strip()
+    if desc:
+        return f'<p align="center"><b>{desc}</b></p>' if ctx.det["variant"] == "F" else f"**{desc}**"
+    ctx.log("needs-input:description")
+    if existing is None or not existing.strip() or inherited_tagline(ctx, existing, text):
+        return ""
+    return existing
+
+
+def header(ctx: RepoContext, keep_banner: str | None = None, title: str | None = None,
+           tagline: str | None = None) -> str:
+    """The §7.2 header. `tagline` is the tagline block body a caller already decided with tagline_body() (the body it
+    carries over from the header it replaces); None writes the description's tagline, or an empty block."""
+    tag = wrap("tagline", tagline_body(ctx) if tagline is None else tagline)
     banner = keep_banner if keep_banner is not None else wrap("banner", banner_html(ctx))
     if ctx.det["variant"] == "F":
-        parts = [*lead(ctx, banner, wrap("nav", nav_line(ctx))), wrap("badges", badges_html(ctx)),
-                 wrap("tagline", f'<p align="center"><b>{desc}</b></p>' if desc else ""), "---"]
-        if not desc:
-            ctx.log("needs-input:description")
+        parts = [*lead(ctx, banner, wrap("nav", nav_line(ctx))), wrap("badges", badges_html(ctx)), tag, "---"]
         return "\n\n".join(p for p in parts if p)
     parts = [*lead(ctx, banner, wrap("nav", nav_line(ctx))), '<div align="center">', f"# {title or product_name(ctx)}",
-             wrap("badges", badges_md(ctx)), wrap("tagline", f"**{desc}**" if desc else ""), "</div>", "---"]
-    if not desc:
-        ctx.log("needs-input:description")  # empty marker block, never "****"; header mode fills it
+             wrap("badges", badges_md(ctx)), tag, "</div>", "---"]
     return "\n\n".join(p for p in parts if p)
 
 
@@ -423,12 +406,15 @@ HEADER_LINE = re.compile(
     r"|</?picture>|<source [^>]*>|<img [^>]*alt=\"[^\"]*logo[^\"]*\"[^>]*>|<p align=\"center\">|</p>|<div align=\"center\">|</div>|---)$")
 
 
-def _strip_markers(text: str) -> tuple[str, dict]:
-    """(text without its marker blocks, {block: body}); a marker example inside fenced or inline code stays."""
+def _strip_markers(text: str, keep: dict[str, str] | None = None) -> tuple[str, dict]:
+    """(text without its marker blocks, {block: body}); a marker example inside fenced or inline code stays. A block
+    named in `keep` stays where it is, rewrapped around the body `keep` gives it."""
     blocks, out, pos = {}, [], 0
     for m in find_blocks(MARK, text):
         blocks[m.group(1)] = m.group(2)
         out.append(text[pos:m.start()])
+        if keep and m.group(1) in keep:
+            out.append(wrap(m.group(1), keep[m.group(1)]))
         pos = m.end()
     return "".join(out) + text[pos:], blocks
 
@@ -623,6 +609,20 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
         # q57 `pres`: the hero goes above the README's own banner (kept directly under it), or nothing is added
         ctx.log("exempt:preserve-banner" if ctx.preserve_unchanged() else "preserve-banner:kept-below-hero")
     desc = (ctx.meta.get("description") or "").strip()
+    old_tag = blocks.get("tagline")
+    if preserve and old_tag is not None:
+        # additive only, so the tagline block stays where it is, its body decided by the header rule (tagline_body)
+        tag = tagline_body(ctx, old_tag, text)
+        if old_tag.strip() and not tag:  # an inherited tagline, emptied on purpose (not a lost line)
+            removed += [ln for ln in old_tag.splitlines() if ln.strip()]
+        body, _ = _strip_markers(text, keep={"tagline": tag})
+        if want_footer:
+            body, _ = drop_old_footer(body, ctx.brand)  # its lines are already in `removed`
+        pre, sections = split_sections(body)
+        lines = pre.splitlines()
+    # an unmarked bold line opening the preamble is an old tagline. With a description it is replaced; without one it
+    # is carried into an empty tagline block (header rule), and a second one stays as authored text: never erased
+    carry: list[str] = []
     def is_header_line(ln: str) -> bool:
         s_ = ln.strip()
         if HEADER_LINE.match(ln) or "docs/images/banner.png" in ln:
@@ -648,9 +648,15 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
         if len(unit) == 1:
             ln = unit[0]
             s_ = ln.strip()
-            is_hdr = is_header_line(ln) or (re.fullmatch(r"\*\*[^*]+\*\*", s_) is not None and not "".join(keep_pre).strip())
+            bold = re.fullmatch(r"\*\*[^*]+\*\*", s_) is not None and not "".join(keep_pre).strip()
+            is_hdr = is_header_line(ln) or bold
             if preserve:  # additive only: just an old nav line is replaced
                 is_hdr = s_.startswith("**") and " · " in s_ and not "".join(keep_pre).strip()
+            elif bold and not is_header_line(ln) and not desc:
+                if carry or (old_tag or "").strip():
+                    keep_pre.append(ln)  # the tagline block already has a line: this one is authored text
+                    continue
+                carry.append(ln)
             (removed if is_hdr else keep_pre).append(ln)
             continue
         inner = unit[1:-1]
@@ -709,7 +715,15 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
             out.append(footermod.block(ctx.brand))
         return "\n\n".join(x for x in out if x) + "\n", removed
     else:
-        out.append(header(ctx))
+        if carry:  # an unmarked tagline with no description: it moves into the block (the move is not a lost line)
+            old_tag = carry[0].strip()
+            removed.remove(carry[0])
+        new_tag = tagline_body(ctx, old_tag, text)
+        if old_tag and old_tag.strip() and not new_tag:
+            # an inherited tagline is emptied (header mode does the same): its lines are dropped on purpose, so the
+            # never-delete check must not report them as lost
+            removed += [ln for ln in old_tag.splitlines() if ln.strip()]
+        out.append(header(ctx, tagline=new_tag))
         co = callout(ctx)
         if co and co not in intro:
             out.append(co)
@@ -750,22 +764,11 @@ def header_only(ctx: RepoContext, text: str) -> str:
     """Replace only existing marker blocks (what the Action runs)."""
     text = normalize_text(text)
     desc = (ctx.meta.get("description") or "").strip()
-    # an inherited tagline: the block holds a tagline of the template this repository was generated from (meta
-    # template_taglines, as generated and as today); only when those are unknown, an untouched template body stands
-    # in as the proof. The template repository keeps its own tagline.
-    is_tmpl = bool(ctx.meta.get("is_template"))
-    inherited = [] if is_tmpl else [x.strip() for x in ctx.meta.get("template_taglines") or [] if x and x.strip()]
-    pristine_copy = not is_tmpl and not inherited and bootstrap_state(text) == "pristine"
     gen = {"nav": nav_line(ctx), "banner": banner_html(ctx), "footer": footermod.markup(ctx.brand)}
     if ctx.repo_dir is not None and not (ctx.repo_dir / "docs" / "images" / "banner.png").is_file():
         gen["banner"] = ""  # no image yet (for example no description): an empty block, never a broken image
         ctx.log("needs-input:banner")
-    if ctx.det["variant"] == "F":
-        gen["badges"] = badges_html(ctx)
-        gen["tagline"] = f'<p align="center"><b>{desc}</b></p>'
-    else:
-        gen["badges"] = badges_md(ctx)
-        gen["tagline"] = f"**{desc}**"
+    gen["badges"] = badges_html(ctx) if ctx.det["variant"] == "F" else badges_md(ctx)
 
     def sub(m):
         b, body = m.group(1), m.group(2)
@@ -773,13 +776,9 @@ def header_only(ctx: RepoContext, text: str) -> str:
             if re.search(r"- \[ \]", body):
                 return m.group(0)
             return ""
-        if b == "tagline" and not desc:
-            # R2: the tagline is the description. Without one, an inherited tagline (never another repository's
-            # line) is emptied; a tagline written for this repository stays as it is (guardrail 6: improve, never erase)
-            ctx.log("needs-input:description")
-            if body.strip() in inherited or pristine_copy:
-                return wrap(b, "")
-            return m.group(0)
+        if b == "tagline":  # tagline_body: the description's line, else the block as written unless inherited
+            new = tagline_body(ctx, body, text)
+            return m.group(0) if not desc and new == body else wrap(b, re.sub(r"\n{3,}", "\n\n", new))
         if b in gen:
             return wrap(b, re.sub(r"\n{3,}", "\n\n", gen[b]))
         return m.group(0)
@@ -913,7 +912,11 @@ def bootstrap(ctx: RepoContext, text: str) -> str:
         h1 = re.search(r"(?m)^# (.+)$", hm.group(0))
         auto = cased_title(ctx.repo, ctx.meta.get("description") or "")
         if not h1 or h1.group(1).strip() in (TEMPLATE_H1, auto, slug_title(ctx.repo)):
-            text = header(ctx, title=auto) + "\n\n" + text[hm.end():].lstrip("\n")
+            # the tagline block carries over (tagline_body), so a line the owner wrote survives the rebuild and only an
+            # inherited one is emptied, exactly as header_only decides it
+            old = next((m.group(2) for m in find_blocks(MARK, hm.group(0)) if m.group(1) == "tagline"), None)
+            new_header = header(ctx, title=auto, tagline=tagline_body(ctx, old, text))
+            text = new_header + "\n\n" + text[hm.end():].lstrip("\n")
     return header_only(ctx, text)
 
 
