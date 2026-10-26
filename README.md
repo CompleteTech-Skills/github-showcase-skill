@@ -19,7 +19,7 @@
 <!-- showcase:badges:end -->
 
 <!-- showcase:tagline:start -->
-
+**Generate CompleteTech LLC README banners, repo cards and profile art, and check repositories against the standard.**
 <!-- showcase:tagline:end -->
 
 </div>

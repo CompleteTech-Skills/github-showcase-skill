@@ -13,7 +13,7 @@ from .errors import NeedsInput, ShowcaseError, USAGE
 FIELDS = ("owner", "repo", "description", "homepage", "topics", "fork", "archived", "visibility", "is_template",
           "default_branch", "language", "languages", "license", "stargazers_count", "created_at", "labels",
           "readme_head", "parent", "health_percentage", "has_issues", "has_wiki", "has_projects", "has_discussions",
-          "delete_branch_on_merge", "files", "manifests", "homepage_status", "file_sizes")
+          "delete_branch_on_merge", "files", "manifests", "homepage_status", "file_sizes", "template_repository")
 # STANDARD §0 / CQ-16: estate commits never count as substantive (the bulk transfer and the run's own commits move
 # pushed_at, so recency uses the newest default-branch commit whose message does not match this)
 NON_SUBSTANTIVE = re.compile(r"ct-std-v1|showcase banner and card|\[skip ci\]")
@@ -59,6 +59,9 @@ def normalize(raw: dict) -> dict:
     vis = raw.get("visibility") or ("private" if raw.get("private") else ("public" if "private" in raw else "unknown"))
     m["visibility"] = vis
     m["is_template"] = bool(raw.get("is_template", False))
+    # GitHub's template_repository (the repository this one was generated from): its full_name, or None
+    tr = raw.get("template_repository")
+    m["template_repository"] = (tr.get("full_name") if isinstance(tr, dict) else tr if isinstance(tr, str) else None) or None
     m["default_branch"] = raw.get("default_branch") or "main"
     m["language"] = raw.get("language")
     m["languages"] = dict(raw.get("languages") or {})

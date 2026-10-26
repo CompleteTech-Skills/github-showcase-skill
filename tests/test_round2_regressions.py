@@ -86,7 +86,10 @@ def test_type_key_rebootstraps_and_for_scopes_overrides(tmp_path):
 
 
 def test_empty_description_empties_tagline(brand, tmp_path):
-    ctx = RepoContext(brand, normalize({"owner": "CompleteTech-LLC", "repo": "x", "description": "", "visibility": "public"}),
+    # a repository generated from the template still carries the template's tagline: with no description of its own,
+    # never another repository's line (GitHub's template_repository says where it came from)
+    ctx = RepoContext(brand, normalize({"owner": "CompleteTech-LLC", "repo": "x", "description": "", "visibility": "public",
+                                        "template_repository": {"full_name": "CompleteTech-LLC/completetech-repo-template"}}),
                       tmp_path)
     text = "<!-- showcase:tagline:start -->\n**Create new CompleteTech repositories.**\n<!-- showcase:tagline:end -->\n"
     out = R.header_only(ctx, text)
