@@ -750,10 +750,10 @@ def header_only(ctx: RepoContext, text: str) -> str:
     """Replace only existing marker blocks (what the Action runs)."""
     text = normalize_text(text)
     desc = (ctx.meta.get("description") or "").strip()
-    # a copy of the template still carrying the template's header: generated from it (GitHub's template_repository) or
-    # with its template body untouched; the template repository itself keeps its own tagline
-    template_copy = not ctx.meta.get("is_template") and (bool(ctx.meta.get("template_repository"))
-                                                         or bootstrap_state(text) == "pristine")
+    # an inherited tagline: the README's template body is untouched, or the block still holds the tagline of the
+    # template this repository was generated from (meta template_tagline); the template repository keeps its own
+    pristine_copy = not ctx.meta.get("is_template") and bootstrap_state(text) == "pristine"
+    inherited = "" if ctx.meta.get("is_template") else (ctx.meta.get("template_tagline") or "").strip()
     gen = {"nav": nav_line(ctx), "banner": banner_html(ctx), "footer": footermod.markup(ctx.brand)}
     if ctx.repo_dir is not None and not (ctx.repo_dir / "docs" / "images" / "banner.png").is_file():
         gen["banner"] = ""  # no image yet (for example no description): an empty block, never a broken image
@@ -772,11 +772,10 @@ def header_only(ctx: RepoContext, text: str) -> str:
                 return m.group(0)
             return ""
         if b == "tagline" and not desc:
-            # R2: the tagline is the description. Without one, an untouched template copy (pristine template body)
-            # drops the template's line (never another repository's tagline); a tagline written for this repository
-            # stays as it is (guardrail 6: improve, never erase)
+            # R2: the tagline is the description. Without one, an inherited tagline (never another repository's
+            # line) is emptied; a tagline written for this repository stays as it is (guardrail 6: improve, never erase)
             ctx.log("needs-input:description")
-            if template_copy:
+            if pristine_copy or (inherited and body.strip() == inherited):
                 return wrap(b, "")
             return m.group(0)
         if b in gen:
