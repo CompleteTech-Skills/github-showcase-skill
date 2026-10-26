@@ -750,10 +750,12 @@ def header_only(ctx: RepoContext, text: str) -> str:
     """Replace only existing marker blocks (what the Action runs)."""
     text = normalize_text(text)
     desc = (ctx.meta.get("description") or "").strip()
-    # an inherited tagline: the README's template body is untouched, or the block still holds the tagline of the
-    # template this repository was generated from (meta template_tagline); the template repository keeps its own
-    pristine_copy = not ctx.meta.get("is_template") and bootstrap_state(text) == "pristine"
-    inherited = "" if ctx.meta.get("is_template") else (ctx.meta.get("template_tagline") or "").strip()
+    # an inherited tagline: the block holds a tagline of the template this repository was generated from (meta
+    # template_taglines, as generated and as today); only when those are unknown, an untouched template body stands
+    # in as the proof. The template repository keeps its own tagline.
+    is_tmpl = bool(ctx.meta.get("is_template"))
+    inherited = [] if is_tmpl else [x.strip() for x in ctx.meta.get("template_taglines") or [] if x and x.strip()]
+    pristine_copy = not is_tmpl and not inherited and bootstrap_state(text) == "pristine"
     gen = {"nav": nav_line(ctx), "banner": banner_html(ctx), "footer": footermod.markup(ctx.brand)}
     if ctx.repo_dir is not None and not (ctx.repo_dir / "docs" / "images" / "banner.png").is_file():
         gen["banner"] = ""  # no image yet (for example no description): an empty block, never a broken image
@@ -775,7 +777,7 @@ def header_only(ctx: RepoContext, text: str) -> str:
             # R2: the tagline is the description. Without one, an inherited tagline (never another repository's
             # line) is emptied; a tagline written for this repository stays as it is (guardrail 6: improve, never erase)
             ctx.log("needs-input:description")
-            if pristine_copy or (inherited and body.strip() == inherited):
+            if body.strip() in inherited or pristine_copy:
                 return wrap(b, "")
             return m.group(0)
         if b in gen:

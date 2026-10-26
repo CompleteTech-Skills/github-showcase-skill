@@ -90,7 +90,7 @@ def test_empty_description_empties_tagline(brand, tmp_path):
     # never another repository's line (GitHub's template_repository says where it came from)
     ctx = RepoContext(brand, normalize({"owner": "CompleteTech-LLC", "repo": "x", "description": "", "visibility": "public",
                                         "template_repository": {"full_name": "CompleteTech-LLC/completetech-repo-template"},
-                                        "template_tagline": "**Create new CompleteTech repositories.**"}),
+                                        "template_taglines": ["**Create new CompleteTech repositories.**"]}),
                       tmp_path)
     text = "<!-- showcase:tagline:start -->\n**Create new CompleteTech repositories.**\n<!-- showcase:tagline:end -->\n"
     out = R.header_only(ctx, text)
