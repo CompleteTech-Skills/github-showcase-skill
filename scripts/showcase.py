@@ -238,7 +238,7 @@ def cmd_social(args):
     from ctshowcase.typeset import Fonts
     ctx = context(args)
     # R10 (ctx.social_applicable) includes backups and the personal-profile capstone: render whatever adopt uploads
-    if gate_owner(ctx, args.allow_hold) == "watching" or ctx.det["type"] == "fork" or \
+    if gate_owner(ctx, args.allow_hold) == "watching" or ctx.is_fork or \
             (ctx.det["type"] == "github-profile" and ctx.repo == ".github"):
         return base("social-preview", ctx, result="exempt", logs=["exempt:no-social-preview"]), OK
     ctx.require_measured(args.allow_unmeasured)
@@ -510,7 +510,7 @@ def cmd_labels(args):
     # the gates `org labels` applies (labels.md Scope): a family on hold is refused like banner and card
     if (ctx.style.get("hold") or ctx.brand.resolver().family_hold(ctx.owner)) and not args.allow_hold:
         raise ShowcaseError(f"{ctx.owner} family is on hold: labels are not applied; pass --allow-hold", log="hold")
-    if ctx.det["type"] == "fork" or ctx.tier in ("T2-R", "T3") or ctx.style.get("name") == "romgenie":
+    if ctx.is_fork or ctx.tier in ("T2-R", "T3") or ctx.style.get("name") == "romgenie":
         return base("labels", ctx, result="n/a", logs=["exempt"]), OK
     if ctx.meta.get("archived"):  # as `org labels` (labels.md Scope: never archived repos)
         return base("labels", ctx, result="n/a", logs=["archived"]), OK

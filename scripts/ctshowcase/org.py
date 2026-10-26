@@ -1632,6 +1632,7 @@ def _labels_known(m: dict) -> bool:
 
 def labels_plan(estate: Estate, org: str, *, allow_t3: bool = False) -> tuple[dict, int]:
     from . import labels as labelsmod
+    from .detect import is_fork
     login, row, reg = _gate(estate, org, allow_t3=allow_t3)
     tier, fam = _tier(row), row.get("family")
     repos, jobs, logs = [], [], []
@@ -1650,7 +1651,7 @@ def labels_plan(estate: Estate, org: str, *, allow_t3: bool = False) -> tuple[di
         if m is None or m.get("error") and "labels" not in m:
             repos.append({"repo": full, "result": "unknown", "log": "needs-input:metadata"})
             continue
-        if m.get("fork"):
+        if is_fork(dict(m, repo=n)):  # type rule 1, as adopt and doctor R6 (a `-fork` slug too)
             repos.append({"repo": full, "result": "skip", "log": "fork"})
             continue
         if m.get("archived"):

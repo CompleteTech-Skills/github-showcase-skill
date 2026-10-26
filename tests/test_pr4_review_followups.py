@@ -6,16 +6,29 @@ import pytest
 
 from conftest import ROOT, meta_dict, run_cli
 from ctshowcase import doctor
-from ctshowcase.intake import adopt
+from ctshowcase.intake import adopt, classify
 
 
+FORKS = {"github": {"fork": True}, "slug": {"repo": "widget-fork", "fork": False}, "override": {"fork": True}}
+
+
+def fork_ctx(make_ctx, how, **kw):
+    """A fork three ways: GitHub's flag, the `-fork` slug rule, and a GitHub fork whose type was overridden."""
+    ctx = make_ctx(**FORKS[how], **kw)
+    if how == "override":
+        ctx.det = dict(ctx.det, type="cli")
+    return ctx
+
+
+@pytest.mark.parametrize("how", FORKS)
 @pytest.mark.parametrize("tier,issues,expected", [
     ("T2-R", True, "fail"), ("T2-R", False, "pass"), ("T2-R", None, "unknown"),
     ("T1", True, "pass"), ("T1", None, "pass"),
 ])
-def test_r5_forks_in_utility_orgs_need_issues_off(make_ctx, tier, issues, expected):
-    ctx = make_ctx(fork=True, default_branch="develop", has_issues=issues, delete_branch_on_merge=False)
+def test_r5_forks_in_utility_orgs_need_issues_off(make_ctx, how, tier, issues, expected):
+    ctx = fork_ctx(make_ctx, how, default_branch="develop", has_issues=issues, delete_branch_on_merge=False)
     ctx.org = dict(ctx.org, tier=tier)
+    assert ctx.is_fork
     assert doctor.row(ctx)["cells"]["R5"] == expected
     planned = any(j["kind"] == "repo-settings" for j in adopt(ctx, ctx.brand.resolver())["jobs"])
     assert planned == (expected != "pass")  # doctor passes only what adopt has nothing left to change
@@ -28,6 +41,25 @@ def test_adopt_honours_the_keep_decision(make_ctx, policy):
     asks_rename = any("rename-default-branch" in c for c in r["checklist"])
     assert asks_rename == (policy is None)
     assert ("default-branch kept (user)" in r["logs"]) == (policy == "keep")
+
+
+@pytest.mark.parametrize("how", FORKS)
+def test_doctor_and_adopt_share_the_fork_rule_for_labels(make_ctx, how):
+    ctx = fork_ctx(make_ctx, how, has_issues=True, labels=[{"name": "bug", "color": "d73a4a", "description": ""}])
+    assert doctor.row(ctx)["cells"]["R6"] == "n/a"
+    r = adopt(ctx, ctx.brand.resolver())
+    assert "labels:n/a" in r["logs"] and not any(j["kind"] in ("labels", "security") for j in r["jobs"])
+
+
+@pytest.mark.parametrize("meta,proposed", [
+    ({"default_branch": "master"}, True),
+    ({"default_branch": "master", "default_branch_policy": "keep"}, False),
+    ({"default_branch": "develop", "repo": "widget-fork"}, False),
+    ({"default_branch": "develop", "fork": True, "ahead_by": 0}, False),
+])
+def test_estate_proposals_honour_forks_and_the_keep_decision(brand, meta, proposed):
+    kinds = [p["kind"] for p in classify(meta_dict(**meta), brand, None)]
+    assert ("rename-default-branch" in kinds) == proposed
 
 
 @pytest.mark.parametrize("owner,repo", [("CompleteDotTech", "CompleteDotTech"),

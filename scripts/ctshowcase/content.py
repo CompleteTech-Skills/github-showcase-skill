@@ -2499,7 +2499,7 @@ def _cmd_icon(args, cli, resolver, head):
     # `.github` repositories need their own icon. The resolver also sees the renames and placeholders passed here.
     why = ctx.art_status()["icon"]
     if resolver.owner_status(ctx.owner) == "watching":  # only its forks are exempt; its `.github` needs an icon
-        why = "exempt:watching-fork" if (ctx.meta.get("fork") or ctx.det["type"] == "fork") else \
+        why = "exempt:watching-fork" if ctx.is_fork else \
             why if ctx.repo == ".github" else "hold:watching-non-fork"
     elif ctx.repo == ".github" and resolver.is_placeholder(ctx.owner):
         why = "exempt:placeholder-org"

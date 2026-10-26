@@ -115,10 +115,15 @@ class RepoContext:
         return d
 
     # -- which generated surfaces apply ------------------------------------------------------------------
+    @property
+    def is_fork(self) -> bool:
+        """GitHub's fork flag or the detected `fork` type (a `-fork` slug or an override): doctor, adopt, the social
+        preview and the watching-org rules all use this one test, so a fork is never a fork to only some of them."""
+        return bool(self.meta.get("fork")) or self.det["type"] == "fork"
+
     def social_applicable(self) -> bool:
         """R10: public product repositories, including the personal-profile capstone."""
-        return (self.public and not self.meta.get("archived") and not self.meta.get("fork")
-                and self.det["type"] != "fork" and self.repo != ".github"
+        return (self.public and not self.meta.get("archived") and not self.is_fork and self.repo != ".github"
                 and not self.repo.lower().endswith(".github.io")
                 and self.tier in ("T1", "T1-user", "T2"))
 
@@ -159,7 +164,7 @@ class RepoContext:
         generator; nothing is exempted by owner alone. None outside the watching org."""
         if self.brand.owner_status(self.owner) != "watching":
             return None
-        if self.meta.get("fork") or self.det["type"] == "fork":
+        if self.is_fork:
             return "exempt:watching-fork"
         if self.repo == ".github":
             return None

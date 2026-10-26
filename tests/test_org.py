@@ -296,6 +296,14 @@ def test_labels_plan_per_repository(make_estate):
     assert res["jobs"][-1]["kind"] == "browser" and res["jobs"][-1]["url"].endswith("/settings/repository-defaults")
 
 
+def test_labels_plan_skips_slug_forks_like_adopt(make_estate):
+    est = make_estate()
+    est.meta(f"{N}/upstream-fork").update(fork=False, has_issues=True)  # type rule 1: the `-fork` slug alone
+    res, _ = O.labels_plan(est, N)
+    by = {r["repo"].split("/")[1]: r for r in res["repos"]}
+    assert by["upstream-fork"]["log"] == "fork" and not any((j.get("repo") or "").endswith("/upstream-fork") for j in res["jobs"])
+
+
 def test_labels_na_for_romgenie(brand):
     reg = {"orgs": {"romgenie-archive-repostiory": {"final_repos": []}}}
     est = O.Estate(brand, Resolver(brand, reg, approvals()))

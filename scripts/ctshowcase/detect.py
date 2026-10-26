@@ -32,6 +32,11 @@ def standard_lock_text() -> str:
     return json.dumps(data, sort_keys=True, indent=1, ensure_ascii=False) + "\n"
 
 
+def is_fork(meta: dict) -> bool:
+    """Type rule 1: GitHub's fork flag or a `-fork` slug. RepoContext.is_fork adds a `type: fork` override."""
+    return bool(meta.get("fork")) or (meta.get("repo") or "").endswith("-fork")
+
+
 def detect_type(meta: dict, facts: RepoFacts | None = None) -> tuple[str, int]:
     """Return (type, rule number). Rules that need files are skipped when the tree is unknown."""
     t = standard("types")
@@ -47,7 +52,7 @@ def detect_type(meta: dict, facts: RepoFacts | None = None) -> tuple[str, int]:
     def dep(kind):
         return any(d.lower() in deps for d in t["deps"][kind])
 
-    if meta.get("fork") or slug.endswith("-fork"):
+    if is_fork(meta):
         return "fork", 1
     if re.search(r"-backup-\d{8}$", slug):
         return "backup", 2
