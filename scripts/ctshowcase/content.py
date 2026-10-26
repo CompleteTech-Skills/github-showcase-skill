@@ -2441,9 +2441,16 @@ def _cmd_icon(args, cli, resolver, head):
     from PIL import Image
     ctx = _ctx(args, cli, resolver)
     resolver.check_owner(ctx.owner)
-    status = resolver.owner_status(ctx.owner)
-    if status == "watching" or ctx.det.get("type") in ("fork",):
-        return dict(head, owner=ctx.owner, repo=ctx.repo, result="exempt", logs=["exempt:no-icon"]), OK
+    # decision 12: the same applicability as banner, card, lint all and doctor (RepoContext.art_status); only
+    # watching-org forks and a placeholder org's `.github` are exempt. Forks outside the watching org, backups and
+    # `.github` repositories need their own icon. The resolver also sees the renames and placeholders passed here.
+    why = ctx.art_status()["icon"]
+    if resolver.owner_status(ctx.owner) == "watching":
+        why = "exempt:watching-fork"
+    elif ctx.repo == ".github" and resolver.is_placeholder(ctx.owner):
+        why = "exempt:placeholder-org"
+    if why and why.startswith("exempt"):
+        return dict(head, owner=ctx.owner, repo=ctx.repo, result="exempt", logs=[why]), OK
     head.update(owner=ctx.owner, repo=ctx.repo, icon_action=args.icon_action)
     card = ctx.style["tokens"]["card_fill"]
     org = org_row(resolver, ctx.brand, ctx.owner)

@@ -24,7 +24,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from ctshowcase import STANDARD, __version__  # noqa: E402
-from ctshowcase.errors import CHECK_FAILED, OK, USAGE, ShowcaseError  # noqa: E402
+from ctshowcase.errors import CHECK_FAILED, NEEDS_INPUT, OK, USAGE, ShowcaseError  # noqa: E402
 
 GENERATORS = {"banner", "card", "org-tile", "intro", "contact-sheet", "social-preview", "org-banner"}
 # `enterprise` contract names (org/project/enterprise/content groups) that map onto the original action names
@@ -477,12 +477,30 @@ def cmd_labels(args):
     existing = ctx.meta.get("labels")
     if not existing and args.plan:
         existing = live_labels()  # read-only GET; the writer re-reads the live labels before it applies the jobs
-    ops, logs = labels.plan(existing or [], ctx.repo_dir, references=args.references or ctx.repo_dir is not None)
+    # §6.4 rule 0 always runs: in the checkout, else against the captured file list (unproven renames are held)
+    ops, logs = labels.plan(existing or [], ctx.repo_dir, files=ctx.meta.get("files"))
     writes = [o for o in ops if o["op"] != "skip"]
     if args.records:
         records.append(args.records, [records.record(ctx.owner, ctx.repo, "label", o["name"], o["name"], o, o["rule"])
                                       for o in writes])
-    out = base("labels", ctx, result="pass" if not writes else "fail", ops=ops, logs=ctx.logs + logs)
+    # §6.4 rule 0: a rename a form or dependabot.yml still names is held out of the jobs; its lines are rewritten in
+    # the estate/polish PR first, and a re-plan of the merged checkout then emits the rename
+    held = [{"label": o["name"], "new_name": o["new_name"], **h} for o in ops for h in o.get("rewrite_references") or []]
+    # a rename rule 0 could not check (no checkout, and no captured file list proving no reference file exists)
+    unchecked = [{"label": o["name"], "new_name": o["new_name"], "check_files": o["check_files"]} for o in ops
+                 if o.get("log") == labels.NEEDS_CHECKOUT]
+    result = "fail" if writes or held else "needs-input" if unchecked else "pass"
+    out = base("labels", ctx, result=result, ops=ops, logs=ctx.logs + logs)
+    if unchecked:
+        out["needs_checkout"] = unchecked
+        for u in unchecked if not args.quiet else ():
+            print(f"labels: rename {u['label']} -> {u['new_name']} held: rule 0 needs a checkout to read "
+                  f"{', '.join(u['check_files'])}; re-plan with --repo-dir", file=sys.stderr)
+    if held:
+        out["rewrite_first"] = held
+        for h in held if not args.quiet else ():
+            print(f"labels: rewrite {h['path']}:{h['line']} ({h['text']}) from {h['label']} to {h['new_name']} in the "
+                  f"estate/polish PR; the rename job is withheld until then", file=sys.stderr)
     full = f"{ctx.owner}/{ctx.repo}"
     argvs = label_ops_argv(full, writes)
     if args.plan or args.jobs:
@@ -494,7 +512,7 @@ def cmd_labels(args):
             append_jobs(args.jobs, out["jobs"])
     if args.gh:
         out["gh"] = labels.gh_lines(ctx.owner, ctx.repo, writes)
-    return out, OK if not writes else CHECK_FAILED
+    return out, CHECK_FAILED if writes or held else NEEDS_INPUT if unchecked else OK
 
 
 def cmd_meta(args):
@@ -957,7 +975,9 @@ def parser() -> argparse.ArgumentParser:
     s = sub.add_parser("labels", help="§6 label standard: --emit-yml, or --plan (gh argv and writer jobs; never writes)")
     s.add_argument("--emit-yml", action="store_true")
     s.add_argument("--plan", action="store_true", help="plan passes A and B; prints the gh argv and scripts/writer.py jobs")
-    s.add_argument("--references", action="store_true")
+    s.add_argument("--references", action="store_true",
+                   help="kept for compatibility: the §6.4 rule 0 reference check always runs (a rename it cannot check "
+                        "without --repo-dir is held as needs-input:label-references)")
     s.add_argument("--records")
     s.add_argument("--gh", action="store_true", help="also print the plan as gh command lines")
     s.add_argument("--jobs", metavar="FILE", help="append the writer jobs (JSON lines) to FILE")

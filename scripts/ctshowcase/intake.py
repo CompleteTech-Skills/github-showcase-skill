@@ -103,8 +103,14 @@ def adopt(ctx, resolver=None, *, approval_id: str | None = None, fresh: bool = F
                                "already seed them)", "next": f"showcase.py meta --from-gh {full}, then adopt again or "
                                "labels --plan --jobs FILE"})
     else:
-        ops, lg = labelsmod.plan(meta.get("labels") or [], ctx.repo_dir, references=ctx.repo_dir is not None)
+        ops, lg = labelsmod.plan(meta.get("labels") or [], ctx.repo_dir, files=meta.get("files"))
         logs += lg
+        unchecked = [o for o in ops if o.get("log") == labelsmod.NEEDS_CHECKOUT]
+        if unchecked:  # §6.4 rule 0 could not run: the rename stays out of the jobs until a checkout is read
+            pending.append({"why": "labels: renames held until §6.4 rule 0 reads " +
+                                   ", ".join(sorted({f for o in unchecked for f in o["check_files"]})) + " (" +
+                                   ", ".join(f"{o['name']} -> {o['new_name']}" for o in unchecked) + ")",
+                            "next": f"showcase.py --repo-dir <checkout of {full}> adopt {full} (or labels --plan)"})
         writes = [o for o in ops if o["op"] != "skip"]
         for i, argv in enumerate(label_ops_argv(full, writes), 1):
             jobs.append(_job(_jid("p3", "label", sid, f"{i:02d}"), argv, full, "§6.3 pass A renames before pass B "

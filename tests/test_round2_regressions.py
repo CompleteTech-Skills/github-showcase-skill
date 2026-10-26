@@ -149,7 +149,8 @@ def test_labels_plan_reads_live_labels_and_emits_jobs(tmp_path, monkeypatch):
     monkeypatch.setattr(M, "_gh", lambda path, paginate=False, raw=False: live)
     calls = []
     monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: calls.append(cmd))
-    m = _meta(tmp_path, labels=[])
+    # a captured tree with no file §6.4 rule 0 reads proves the renames need no checkout
+    m = _meta(tmp_path, labels=[], files=["README.md", "src/invoice_parser/cli.py"])
     with pytest.raises(SystemExit):  # the write flags no longer exist
         cli.parser().parse_args(["--meta", str(m), "--no-repo-dir", "labels", "--apply", "--yes"])
     jobs = tmp_path / "jobs.jsonl"

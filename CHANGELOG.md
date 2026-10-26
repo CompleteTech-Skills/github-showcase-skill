@@ -17,3 +17,7 @@ First public release, for the CompleteTech GitHub estate standard `ct-std-v1`.
 ### Security
 
 - Read-only toward GitHub: every write is printed as a `gh` argv or a writer job for the estate's writer to run.
+- `org profile` lists an estate-owned favorite only when it passes the public-slice test, and its leak check covers every estate repository whose captured metadata is not public.
+- `labels --plan` and `adopt` hold a rename (`label-rewrite-first`) while an issue form's or `dependabot.yml`'s `labels:` entry still assigns the old label, so no rename leaves a form naming a missing label.
+- A label rename is never planned without its reference check: with no checkout (`labels --plan` without `--repo-dir`, `adopt`, `org labels`), it is planned only when the captured file tree proves no issue form, `dependabot.yml`, workflow, `release.yml`, `labeler.yml` or `renovate.json` exists; otherwise it is held as `needs-input:label-references` with the files to check.
+- `org pins` adds to the public star List only the favorites the public slice may name: private, HOLD and exposure estate favorites are dropped (`favorite-dropped:private-or-unknown`, unnamed) and unknown visibility leaves the plan `incomplete`.

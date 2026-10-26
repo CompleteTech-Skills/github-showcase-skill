@@ -131,6 +131,13 @@ class Estate:
         flags = self.flags.get(self.resolver.slug(full).lower(), []) + self.flags.get(self.current(full).lower(), [])
         return any(EXPOSURE.match(str(f)) and "false-positive" not in str(f) for f in flags)
 
+    def owns(self, owner: str) -> bool:
+        """An estate owner under any of its logins (registry or brand row, the steward account, or a HOLD, T3 or
+        watching owner): its repositories are subject to the public-slice rules wherever they are named."""
+        r = self.resolver
+        return bool(owner) and (r.registry_key(owner) is not None or r.brand_key(owner) is not None
+                                or r.same(owner, USER_LOGIN) or r.owner_status(owner) in ("hold", "t3", "watching"))
+
     def is_public(self, full: str) -> bool:
         """The public slice (OPS-03): public, not on HOLD, not an exposure repo. Unknown visibility fails closed."""
         owner = full.split("/")[0]
@@ -294,6 +301,28 @@ def _family_group(estate: Estate, org: str, fam: str | None) -> list[str]:
             if (v or {}).get("family") == fam and k in (r.registry.get("orgs") or {})]
 
 
+def public_favorites(estate: Estate, reg: dict) -> tuple[list[str], list[str]]:
+    """The registry favorites that may be named in public (the profile's Favorites and the org's public star List):
+    someone else's project as written; an estate favorite only when it is in the public slice (public, not HOLD, not an
+    exposure repo), under today's slug. A private, HOLD or exposure one is dropped and logged without its name (q24);
+    one with unknown visibility fails closed and is logged needs-input:favorite-visibility until it is captured."""
+    r = estate.resolver
+    favorites, logs = [], []
+    for f in reg.get("favorites") or []:
+        full = f.get("full_name") if isinstance(f, dict) else None
+        if not full:
+            continue
+        if "/" not in full or not estate.owns(full.split("/")[0]):
+            favorites.append(full)  # someone else's project: public on GitHub, outside the estate's slice
+        elif estate.is_public(r.slug(full)):
+            favorites.append(estate.current(r.slug(full)))
+        elif estate.visibility(r.slug(full)) == "unknown":
+            logs.append(f"needs-input:favorite-visibility:{full}")  # fails closed until its metadata is captured
+        else:
+            logs.append("favorite-dropped:private-or-unknown")  # private, HOLD or exposure: never named (q24)
+    return favorites, logs
+
+
 def public_slice(estate: Estate, org: str, lists_capture: dict | None = None) -> tuple[dict, list[str]]:
     """The sanitized data the profile is rendered from (and committed as profile/data.json): no private repo, no
     members-only pin, no why/notes text."""
@@ -383,7 +412,8 @@ def public_slice(estate: Estate, org: str, lists_capture: dict | None = None) ->
         if _tier(srow) in ("T1", "T2") and not _star_held(estate, key):
             siblings.append({"login": r.canonical(key), "name": srow.get("display_name") or key})
     siblings.sort(key=lambda s: s["name"].lower())
-    favorites = [f["full_name"] for f in reg.get("favorites") or [] if isinstance(f, dict) and f.get("full_name")]
+    favorites, fav_logs = public_favorites(estate, reg)
+    logs += fav_logs
     star = None
     entry_sl = _star_entry(estate, org, reg)
     if entry_sl and not _star_held(estate, org):
@@ -401,7 +431,8 @@ def public_slice(estate: Estate, org: str, lists_capture: dict | None = None) ->
 
 
 def _private_names(estate: Estate, org: str, data: dict) -> set[str]:
-    """Names that must never appear in public files: non-public repos of this org and every members-only pin."""
+    """Names that must never appear in public files: non-public repos of this org, every members-only pin, private
+    cross-listings and estate favorites, and every estate repository of any org whose metadata says it is not public."""
     r = estate.resolver
     login = r.canonical(org)
     reg = r.registry_org(org)
@@ -420,6 +451,15 @@ def _private_names(estate: Estate, org: str, data: dict) -> set[str]:
     for x in reg.get("also_in_incoming") or []:
         full = r.slug(x.get("repo") or "") if isinstance(x, dict) else ""
         if "/" in full and not estate.is_public(full):
+            out.add(full)
+    for f in reg.get("favorites") or []:  # an estate favorite left out of the slice (private, HOLD, exposure, unknown)
+        full = r.slug(f.get("full_name") or "") if isinstance(f, dict) else ""
+        if "/" in full and estate.owns(full.split("/")[0]) and not estate.is_public(full):
+            out.add(full)
+    for m in estate.metas.values():  # every other estate repository captured as not public, in any org
+        full = m["_full"]
+        if m["_repo"] != ".github" and full.lower() not in shown and estate.owns(m["_owner"]) and estate.visibility(full) != "unknown" \
+                and not estate.is_public(full):
             out.add(full)
     return out | {estate.current(f) for f in out}  # a pending rename's private repository is guarded under both slugs
 
@@ -571,11 +611,23 @@ def _md_text(s: str) -> str:
     return (s or "").replace("<", "&lt;").replace(">", "&gt;").replace("\n", " ").strip()
 
 
+def _captured_files(meta: dict | None) -> tuple[dict, bool]:
+    """The captured `files` of a repository as ({path: value}, complete). Two shapes are supported: the fixtures'
+    richer map {path: {bytes, head} | true | null | false}, and `meta --from-gh`'s sorted list of every blob path in
+    the default branch's recursive tree (every listed path present; complete, so an unlisted path is absent)."""
+    cap = (meta or {}).get("files")
+    if isinstance(cap, dict):
+        return cap, False
+    if isinstance(cap, (list, tuple)):
+        return {str(p): True for p in cap if p}, True
+    return {}, False
+
+
 def _kept_banner(estate: Estate, login: str) -> str | None:
     """The dark banner an existing hand-made profile already uses (`banner: keep-existing`, review q60), as a path
     relative to profile/, read from the captured `.github` profile README. A `-dark` file wins (decision 21: the dark
     one is kept); no capture or no image under profile/assets returns None."""
-    f = ((estate.meta(f"{login}/.github") or {}).get("files") or {}).get("profile/README.md")
+    f = _captured_files(estate.meta(f"{login}/.github"))[0].get("profile/README.md")  # a path list carries no text
     head = f.get("head") if isinstance(f, dict) else f if isinstance(f, str) else ""
     pat = rf"(?:raw\.githubusercontent\.com/{re.escape(login)}/\.github/[^/\s\"']+/profile/|(?<![\w/.])(?:\./)?)" \
           r"(assets/[^\s\"'()<>]+\.(?:svg|png|jpe?g|gif|webp))"
@@ -720,7 +772,8 @@ def profile(estate: Estate, org: str, *, out_dir: str | Path | None = None, rend
     # a repository with no metadata is left out (it may be private), so the profile is incomplete; with none known to
     # be public the "Work in this organization is private" variant would be a false public statement
     unknown = [x.rsplit(":", 1)[1] for x in logs if x.startswith("needs-input:visibility:")]
-    incomplete = bool(unknown)
+    # an estate favorite with no metadata is left out the same way (it may be private), so the profile is incomplete
+    incomplete = bool(unknown) or any(x.startswith("needs-input:favorite-visibility:") for x in logs)
     if keep and not banner:
         banner = _kept_banner(estate, login) or ""
         if banner:
@@ -765,7 +818,7 @@ def profile(estate: Estate, org: str, *, out_dir: str | Path | None = None, rend
     assets.append({"kind": "data", "path": "profile/data.json"})
     # STANDARD §8.2: an existing hand-made profile is re-templated only with a `profile-retemplate` approval. A README
     # this generator wrote (its first line is the generated marker) is ours to refresh.
-    existing = (estate.meta(f"{login}/.github") or {}).get("files", {}) or {}
+    existing = _captured_files(estate.meta(f"{login}/.github"))[0]
     on_disk = Path(out_dir) / "profile" / "README.md" if out_dir else None
     prior = on_disk.read_text(encoding="utf-8", errors="replace") if on_disk and on_disk.is_file() else None
     ours = prior is not None and prior.startswith(GENERATED_MARK)
@@ -1349,14 +1402,16 @@ def star_list_plan(estate: Estate, org: str, *, lists_capture: dict | None = Non
         errs.append(f"name is {len(name)} characters (max {LIST_NAME_MAX})")
     if len(desc) > LIST_DESC_MAX:
         errs.append(f"description is {len(desc)} characters (max {LIST_DESC_MAX})")
-    favs = [f["full_name"] for f in reg.get("favorites") or [] if isinstance(f, dict) and f.get("full_name")]
-    out = dict(base, list=name, description=desc, items=favs, errors=errs)
+    # a star List is public on the account: only the favorites the public slice may name go on it (same rule)
+    favs, fav_logs = public_favorites(estate, reg)
+    incomplete = any(x.startswith("needs-input:favorite-visibility:") for x in fav_logs)
+    out = dict(base, list=name, description=desc, items=favs, errors=errs, logs=sorted(set(fav_logs)))
     if errs:
         return dict(out, result="fail")
     nodes = _lists_nodes(lists_capture)
     if lists_capture is None:
         out["pending"] = [{"why": "read the existing lists first (SOC-01)", "needs": "--lists <star_lists capture>"}]
-        return dict(out, result="needs-input", logs=["needs-input:star-lists-capture"])
+        return dict(out, result="needs-input", logs=sorted(set(fav_logs) | {"needs-input:star-lists-capture"}))
     total = (lists_capture.get("data", lists_capture).get("viewer") or {}).get("lists", {}).get("totalCount", len(nodes))
     existing = {n["name"].lower(): n for n in nodes if n.get("name")}
     phase = PHASE["lists"]
@@ -1370,7 +1425,7 @@ def star_list_plan(estate: Estate, org: str, *, lists_capture: dict | None = Non
                                "-f", f"name={name}", "-f", f"description={desc}"], org=USER_LOGIN,
                                note=f"Create the '{name}' star List for {login} (public). Then re-capture lists and re-plan."))
         out["pending"] += [{"item": f, "why": "list id known after the create job and a re-capture"} for f in favs]
-        return dict(out, result="ok", logs=["star-list:create"])
+        return dict(out, result="incomplete" if incomplete else "ok", logs=sorted(set(fav_logs) | {"star-list:create"}))
     list_id = cur["id"]
     if (cur.get("description") or "") != desc:
         q = (f"mutation {{ updateUserList(input: {{listId: {_gql(list_id)}, description: {_gql(desc)}}}) "
@@ -1401,7 +1456,7 @@ def star_list_plan(estate: Estate, org: str, *, lists_capture: dict | None = Non
         out["jobs"].append(job(f"p{phase}-{login}-list-item-{f.replace('/', '__')}", phase, "star-list",
                                ["gh", "api", "graphql", "-f", f"query={q}"], org=USER_LOGIN,
                                note=f"Add {f} to '{name}', keeping its {len(have)} other list(s) (union; never unstar)."))
-    return dict(out, result="ok", list_id=list_id)
+    return dict(out, result="incomplete" if incomplete else "ok", list_id=list_id)
 
 
 # =====================================================================================================
@@ -1459,10 +1514,14 @@ def labels_plan(estate: Estate, org: str, *, allow_t3: bool = False) -> tuple[di
                  "description": dep["description"], "rule": "§6.1 AI-Ascension dependencies"}]
             lg: list[str] = []
         else:
-            ops, lg = labelsmod.plan(existing, None, references=False)
+            # no checkout here: §6.4 rule 0 runs against the captured file list, and an unproven rename is held
+            ops, lg = labelsmod.plan(existing, None, files=m.get("files"))
         writes = [o for o in ops if o["op"] != "skip"]
         logs += lg
-        repos.append({"repo": full, "result": "plan" if writes else "pass", "ops": writes, "logs": lg})
+        unchecked = [{"label": o["name"], "new_name": o["new_name"], "check_files": o["check_files"]} for o in ops
+                     if o.get("log") == labelsmod.NEEDS_CHECKOUT]
+        repos.append({"repo": full, "result": "plan" if writes else "needs-input" if unchecked else "pass", "ops": writes,
+                      "logs": lg, **({"needs_checkout": unchecked} if unchecked else {})})
         for i, argv in enumerate(label_ops_argv(full, writes), 1):
             jobs.append(job(f"p{PHASE['labels']}-{full.replace('/', '__')}-label-{i:02d}", PHASE["labels"], "labels", argv,
                             repo=full, note="§6.3 pass A renames before pass B creates; never --force, never a delete."))
@@ -1484,8 +1543,9 @@ def labels_plan(estate: Estate, org: str, *, allow_t3: bool = False) -> tuple[di
                 "logs": sorted(set(logs) | {"needs-input:metadata"})}, NEEDS_INPUT
     if unknown:
         logs.append(f"needs-input:metadata:{len(unknown)}")
-    return {"command": "org", "action": "labels", "owner": login, "result": "plan" if jobs else "pass", "repos": repos,
-            "jobs": jobs, "logs": sorted(set(logs))}, OK
+    held = any(x.get("needs_checkout") for x in repos)  # a rename rule 0 could not check is never a pass
+    return {"command": "org", "action": "labels", "owner": login, "result": "plan" if jobs else "needs-input" if held else "pass",
+            "repos": repos, "jobs": jobs, "logs": sorted(set(logs))}, OK
 
 
 # =====================================================================================================
@@ -1504,10 +1564,10 @@ ALT_PLACES = {"CONTRIBUTING.md": (".github/CONTRIBUTING.md", "docs/CONTRIBUTING.
 
 
 def _dot_github_files(estate: Estate, login: str, repo_dir: str | Path | None) -> tuple[dict, str]:
-    """{path: True|False|None} for the org's .github repo, from a checkout or the captured `files` map."""
+    """{path: True|False|None} for the org's .github repo, from a checkout or the captured `files` (map or path list)."""
+    paths = T1_FILES + FORMS + tuple(x for v in ALT_PLACES.values() for x in v) + ("profile/assets/banner.jpg",)
     if repo_dir:
         d = Path(repo_dir)
-        paths = T1_FILES + FORMS + tuple(x for v in ALT_PLACES.values() for x in v) + ("profile/assets/banner.jpg",)
         files = {p: (d / p).is_file() for p in paths}
         forms = d / ".github" / "ISSUE_TEMPLATE"
         files["_forms"] = forms.is_dir() and any(forms.glob("*.yml"))
@@ -1515,8 +1575,10 @@ def _dot_github_files(estate: Estate, login: str, repo_dir: str | Path | None) -
     m = estate.meta(f"{login}/.github")
     if not m:
         return {}, "missing"
-    cap = m.get("files") or {}
+    cap, complete = _captured_files(m)
     files = {k: (v is not None and v is not False) for k, v in cap.items()}
+    if complete:  # a recursive tree lists every file, so an unlisted path is known to be absent (as in a checkout)
+        files.update({p: False for p in paths if p not in files})
     files["_forms"] = any(k.startswith((".github/ISSUE_TEMPLATE/", "ISSUE_TEMPLATE/")) and v for k, v in files.items())
     return files, "capture"
 

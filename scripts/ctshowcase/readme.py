@@ -627,11 +627,28 @@ def header_only(ctx: RepoContext, text: str) -> str:
             ctx.log("needs-input:description")
             return wrap(b, "")
         if b in gen:
-            return wrap(b, gen[b])
+            return wrap(b, re.sub(r"\n{3,}", "\n\n", gen[b]))
         return m.group(0)
-    out = MARK.sub(sub, text)
-    out = re.sub(r"\n{3,}", "\n\n", out)
-    return license_block(ctx, reorder_lead(ctx, out))
+    return license_block(ctx, reorder_lead(ctx, _sub_blocks(text, sub)))
+
+
+def _seam(left: str, right: str) -> str:
+    """Join two pieces where a marker block meets authored text: the blank lines on both sides of the join count
+    together and collapse to at most one blank line. Nothing else in either piece changes."""
+    a, b = left.rstrip("\n"), right.lstrip("\n")
+    n = min(len(left) - len(a) + len(right) - len(b), 2)
+    return a + "\n" * n + b
+
+
+def _sub_blocks(text: str, sub) -> str:
+    """MARK.sub(sub, text), except that authored text between blocks comes back byte-identical (fenced code
+    included); blank-line runs are tidied only at the seams around each block (a removed block leaves one blank line)."""
+    out, pos = "", 0
+    for m in MARK.finditer(text):
+        out = text[:m.start()] if not pos else _seam(out, text[pos:m.start()])
+        out = _seam(out, sub(m))
+        pos = m.end()
+    return _seam(out, text[pos:]) if pos else text
 
 
 LEAD_PAIR = re.compile(r"\A(\s*)(" + re.escape(start("nav")) + r".*?" + re.escape(end("nav")) + r")(\s*)(" +

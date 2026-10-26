@@ -279,7 +279,9 @@ def test_star_list_cap_and_holds(make_estate):
 
 # ----------------------------------------------------------------------------------------------- labels
 def test_labels_plan_per_repository(make_estate):
-    res, code = O.labels_plan(make_estate(), N)
+    est = make_estate()
+    est.meta(f"{N}/support-triage-agent")["files"] = ["README.md"]  # a complete tree: rule 0 has nothing to read
+    res, code = O.labels_plan(est, N)
     assert code == OK
     by = {r["repo"].split("/")[1]: r for r in res["repos"]}
     assert by["upstream-fork"]["log"] == "fork" and by["inventory-sync"]["log"] == "archived"

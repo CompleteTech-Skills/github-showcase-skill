@@ -94,8 +94,11 @@ class PackageContractTests(unittest.TestCase):
                 self.assertTrue(package.validate(self.root))
                 path.write_bytes(data)
 
-    def test_config_generator_requires_base(self):
+    def test_declared_generator_base_is_required(self):
         self.manifest["kind"] = "config-generator"
+        self.save()
+        self.assertEqual(package.validate(self.root), [])
+        self.manifest["example_inputs"] = ["config.ini", "example.md"]
         self.save()
         self.assertTrue(package.validate(self.root))
         (self.root / "config.ini").write_text("[demo]\n", encoding="utf-8")
@@ -109,12 +112,60 @@ class PackageContractTests(unittest.TestCase):
         (self.root / "README.md").write_text("no navigation", encoding="utf-8")
         self.assertTrue(package.validate(self.root))
 
+    def test_current_and_former_owner_accepted(self):
+        for repository in ("CompleteTech-Skills/demo-skill", "CompleteTech-LLC/demo-skill"):
+            with self.subTest(repository=repository):
+                self.manifest["repository"] = repository
+                self.save()
+                self.assertEqual(package.validate(self.root), [])
+
     def test_ledger_install_name_and_links(self):
-        self.manifest.update(skill_name="ai-usage-ledger", repository="CompleteTech-LLC/ai-usage-ledger-skill", kind="usage-ledger", network_mode="operator-selected-hosts")
+        self.manifest.update(skill_name="ai-usage-ledger", repository="CompleteTech-Skills/ai-usage-ledger-skill", kind="usage-ledger", network_mode="operator-selected-hosts")
         self.save()
         (self.root / "SKILL.md").write_text("---\nname: ai-usage-ledger\n---\n", encoding="utf-8")
         (self.root / "ONBOARDING.md").write_text("[Read](README.md#demo) [Web](https://example.com) [Here](#here)", encoding="utf-8")
         self.assertEqual(package.validate(self.root), [])
+
+
+    def test_duplicate_name_with_comment_or_invalid_value(self):
+        for second in ("name: other # duplicate", "name: >", "'name': other", '"name": other', "name: [other]"):
+            with self.subTest(second=second):
+                (self.root / "SKILL.md").write_text("---\nname: demo-skill\n" + second + "\n---\n", encoding="utf-8")
+                self.assertTrue(package.validate(self.root))
+
+    def test_name_quotes_and_inline_comments(self):
+        for scalar in ("demo-skill # activation", '\"demo-skill\" # activation', "'demo-skill'"):
+            (self.root / "SKILL.md").write_text("---\nname: " + scalar + "\n---\n", encoding="utf-8")
+            self.assertEqual(package.validate(self.root), [])
+        for scalar in ('\"demo-skill\'', "'demo-skill\"", '\"demo-skill', "demo-skill'", "demo-skill#not-a-comment"):
+            (self.root / "SKILL.md").write_text("---\nname: " + scalar + "\n---\n", encoding="utf-8")
+            self.assertTrue(package.validate(self.root))
+
+    def test_markdown_titles_and_angle_paths(self):
+        (self.root / "file name.md").write_text("example", encoding="utf-8")
+        for link in ('[Read](README.md "Overview")', "[Read](README.md 'Overview')", "[Read](README.md (Overview))", '[Read](<file name.md> "Overview")'):
+            (self.root / "ONBOARDING.md").write_text(link, encoding="utf-8")
+            self.assertEqual(package.validate(self.root), [])
+        (self.root / "ONBOARDING.md").write_text('[Missing](missing.md "Overview")', encoding="utf-8")
+        self.assertTrue(package.validate(self.root))
+
+    def test_documented_code_links_are_not_real_links(self):
+        (self.root / "ONBOARDING.md").write_text('`[Example](not-a-file.md)`\n\n```markdown\n[Example](not-a-file.md)\n```\n', encoding="utf-8")
+        self.assertEqual(package.validate(self.root), [])
+
+    def test_doubled_skill_suffix_rejected(self):
+        self.manifest["repository"] = "CompleteTech-LLC/demo-skill-skill"
+        self.save()
+        self.assertTrue(package.validate(self.root))
+
+    def test_cyclic_symlink_is_reported(self):
+        path = self.root / "example.md"
+        path.unlink()
+        try:
+            path.symlink_to("example.md")
+        except OSError as exc:
+            self.skipTest(str(exc))
+        self.assertTrue(package.validate(self.root))
 
 
 if __name__ == "__main__":

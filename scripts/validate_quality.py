@@ -254,6 +254,20 @@ def gate_package_extras() -> None:
     print("package extras ok (logo pair, hero banner, Action files)")
 
 
+def gate_changelog(root: Path = ROOT) -> None:
+    """CHANGELOG.md exists and has a '## <version>' (or '## [<version>]') entry for the SKILL.md version."""
+    header = re.match(r"\A---\n(.*?)\n---(?:\n|\Z)", (root / "SKILL.md").read_text(encoding="utf-8"), re.S)
+    versions = re.findall(r"""(?m)^version:\s*['"]?([0-9]+\.[0-9]+\.[0-9]+)['"]?\s*$""", header.group(1)) if header else []
+    if len(versions) != 1:
+        raise RuntimeError("SKILL.md frontmatter needs exactly one semver version for the CHANGELOG.md check")
+    changelog = root / "CHANGELOG.md"
+    if not changelog.is_file():
+        raise RuntimeError("missing CHANGELOG.md")
+    if not re.search(rf"(?m)^## \[?{re.escape(versions[0])}\]?(?:\s|$)", changelog.read_text(encoding="utf-8")):
+        raise RuntimeError(f"CHANGELOG.md has no '## {versions[0]}' entry for the SKILL.md version")
+    print(f"changelog ok ({versions[0]})")
+
+
 def gate_labels() -> None:
     import hashlib
     out = showcase("labels", "--emit-yml").stdout
@@ -458,6 +472,7 @@ def main() -> int:
     gate_no_hex_in_scripts()
     gate_fonts()
     gate_package_extras()
+    gate_changelog()
     gate_labels()
     gate_action()
     gate_privacy()

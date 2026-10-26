@@ -24,11 +24,11 @@ def test_emit_yml_matches_standard():
 
 
 def test_github_defaults_plan():
-    ops, logs = labels.plan(existing())
+    ops, logs = labels.plan(existing(), files=["README.md"])  # a complete tree with no file rule 0 reads
     kinds = [o["op"] for o in ops]
     assert kinds.count("rename") == 7 and kinds.count("create") == 14 and kinds.count("patch") == 2
     with_acc = existing(DEFAULTS + [("accessibility", "f143ab", "x")])
-    kinds = [o["op"] for o in labels.plan(with_acc)[0]]
+    kinds = [o["op"] for o in labels.plan(with_acc, files=["README.md"])[0]]
     assert kinds.count("rename") == 8 and kinds.count("create") == 13
 
 
@@ -42,6 +42,6 @@ def test_conflict_and_referenced(tmp_path):
 
 
 def test_no_force_no_delete():
-    ops, _ = labels.plan(existing())
+    ops, _ = labels.plan(existing(), files=[])
     lines = labels.gh_lines("Northwind-Trading-Co", "x", ops)
     assert lines and all("--force" not in ln and " delete " not in ln for ln in lines)

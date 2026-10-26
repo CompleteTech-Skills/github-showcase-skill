@@ -25,6 +25,7 @@ This skill adds these gates to the family validator. Each one fails the run:
 | 7 | `action.yml` parses and declares the documented inputs | The template's Action contract holds. |
 | 8 | Privacy: fixtures (including `examples/estate/meta`) are public or owned by `Northwind-Trading-Co`; no private owner/repo pair appears (hashed deny-list, when supplied) | No private-repo metadata ships in the package, and the real estate registry is never copied into it. |
 | 9 | `lint readme README.md` and `footer --check README.md` on this repository's README | The skill passes its own standard. |
+| 10 | `CHANGELOG.md` exists and has a `## <version>` (or `## [<version>]`) entry for the `SKILL.md` frontmatter `version` | Every released version is described. This check lives here, not in the shared `scripts/validate_package.py`, which stays byte-identical to the siblings'. |
 
 Run the test suite as well:
 

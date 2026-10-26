@@ -26,7 +26,7 @@ Condensed from `ct-std-v1` §10 and §12. The skill proposes; a single serialize
 1. **One serialized writer queue** for every REST call, git push and UI write. Planners and this skill emit change records.
 2. **Change record:** `{std, owner, repo, kind: api|file|ui, target, before_sha256, after, rule}`. The writer rejects a record whose `before` no longer matches the live state. Commands that propose writes take `--records FILE`.
 3. **Diff first.** GET, compute the delta, write only the delta, GET again to verify. Never write a value that is already equal.
-4. **Log every write with its rule** and every skip with a code: `needs-input[:DETAIL]`, `license-review`, `label-conflict`, `label-referenced`, `hold`, `t3-signoff`, `archived`, `topics-short`, `dead-link`, `fork-parent-missing`, `pages-mismatch`, `pages-readme-index`, `homepage-review`, `readme-shrink`, `apache-notice-review`, `art-fail`, `exempt`, `deploy-relink`, `dns-update`, `ui-danger-dialog`.
+4. **Log every write with its rule** and every skip with a code: `needs-input[:DETAIL]`, `license-review`, `label-conflict`, `label-referenced`, `label-rewrite-first`, `needs-input:label-references`, `hold`, `t3-signoff`, `archived`, `topics-short`, `dead-link`, `fork-parent-missing`, `pages-mismatch`, `pages-readme-index`, `homepage-review`, `readme-shrink`, `apache-notice-review`, `art-fail`, `exempt`, `deploy-relink`, `dns-update`, `ui-danger-dialog`.
 5. **Never commit logs** or the moves list to a public repository: they name private repositories.
 
 ## Content commits

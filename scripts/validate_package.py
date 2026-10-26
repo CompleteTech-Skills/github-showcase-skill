@@ -10,10 +10,8 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 FAMILY = "completetech-skills"
-# the family's packages are published from CompleteTech-Skills; CompleteTech-LLC stays valid for older manifests
-REPO_OWNERS = ("CompleteTech-Skills", "CompleteTech-LLC")
 FIELDS = set("schema_version family repository skill_name kind entrypoints example_inputs network_mode private".split())
-FILES = ("README.md", "SKILL.md", "CHANGELOG.md", "LICENSE", "BRAND_ASSETS.md", "ONBOARDING.md", "CONTRIBUTING.md", "BRANDING.md", "AGENTS.md", "requirements.txt", "agents/openai.yaml")
+FILES = ("README.md", "SKILL.md", "LICENSE", "BRAND_ASSETS.md", "ONBOARDING.md", "CONTRIBUTING.md", "BRANDING.md", "AGENTS.md", "requirements.txt", "agents/openai.yaml")
 NAVIGATION = ("CompleteTech LLC Skills", "[Start here](ONBOARDING.md)", "[Contributing](CONTRIBUTING.md)", "assets/logo.png")
 KINDS = ("catalog-renderer", "config-generator", "orchestrator", "usage-ledger")
 NETWORK_MODES = ("local", "operator-selected-hosts", "optional-receipts")
@@ -75,6 +73,40 @@ def validate_png(path: Path) -> None:
     raise ValueError("incomplete PNG")
 
 
+def allowed_repositories(name: object) -> tuple[str, ...]:
+    if not isinstance(name, str):
+        return ()
+    names = (name,) if name.endswith("-skill") else (name, name + "-skill")
+    # Skills moved to CompleteTech-Skills; the old CompleteTech-LLC paths still redirect.
+    return tuple(f"{owner}/{repo}" for owner in ("CompleteTech-Skills", "CompleteTech-LLC") for repo in names)
+
+
+def activation_name(skill: str) -> str | None:
+    """Read one simple top-level name scalar; reject duplicate keys first."""
+    header = re.match(r"\A---\n(.*?)\n---(?:\n|\Z)", skill, re.S)
+    if not header:
+        return None
+    # Count keys independently of their values, including comments/block scalars.
+    keys = re.findall(r'''(?m)^(['"]?)name\1[ \t]*:(.*)$''', header.group(1))
+    if len(keys) != 1:
+        return None
+    value = re.fullmatch(r'''[ \t]*(['"]?)([a-z0-9-]+)\1(?:[ \t]+\#.*|[ \t]*)''', keys[0][1])
+    return value.group(2) if value else None
+
+
+def markdown_targets(text: str) -> list[str]:
+    """Extract ordinary inline-link destinations, excluding code and titles.
+
+    This is not a complete Markdown linter: reference links, HTML and anchors
+    remain outside this checkout contract. Quoted titles and angle destinations
+    are supported, including spaces in angle-delimited local filenames.
+    """
+    text = re.sub(r"(?ms)^([`~]{3,})[^\n]*\n.*?^\1[^\n]*(?:\n|$)", "", text)
+    text = re.sub(r"(`+).*?\1", "", text)
+    pattern = r'''\[[^\]\n]*\]\([ \t]*(?:<([^>\n]+)>|([^\s()]+))(?:[ \t]+(?:"[^"\n]*"|'[^'\n]*'|\([^\n)]*\)))?[ \t]*\)'''
+    return [match.group(1) or match.group(2) for match in re.finditer(pattern, text)]
+
+
 def validate(root: Path) -> list[str]:
     errors: list[str] = []
     try:
@@ -86,13 +118,11 @@ def validate(root: Path) -> list[str]:
             errors.append("invalid schema_version or family")
         if not isinstance(name, str) or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name) or len(name) > 64:
             errors.append("invalid skill_name")
-        if not isinstance(repo, str) or repo not in {f"{o}/{n}" for o in REPO_OWNERS for n in (name, f"{name}-skill")}:
+        if not isinstance(repo, str) or repo not in allowed_repositories(name):
             errors.append("repository does not match skill_name")
         if manifest["kind"] not in KINDS or manifest["network_mode"] not in NETWORK_MODES or type(manifest["private"]) is not bool:
             errors.append("invalid kind, network_mode or private")
         paths: list[object] = [*FILES, "assets/logo.png"]
-        if manifest["kind"] == "config-generator":
-            paths.append("config.ini")
         for field in ("entrypoints", "example_inputs"):
             values = manifest[field]
             if not isinstance(values, list) or not values or not all(isinstance(v, str) for v in values):
@@ -107,20 +137,14 @@ def validate(root: Path) -> list[str]:
             except (OSError, ValueError, RuntimeError) as exc:
                 errors.append(str(exc))
         skill = local_file(root, "SKILL.md").read_text(encoding="utf-8")
-        header = re.match(r"\A---\n(.*?)\n---(?:\n|\Z)", skill, re.S)
-        names = re.findall(r'''(?m)^name:\s*['"]?([a-z0-9-]+)['"]?\s*$''', header.group(1)) if header else []
-        if names != [name]:
+        if activation_name(skill) != name:
             errors.append("SKILL.md name must match manifest")
-        version = re.findall(r"""(?m)^version:\s*['"]?([0-9]+\.[0-9]+\.[0-9]+)['"]?\s*$""", header.group(1)) if header else []
-        changelog = local_file(root, "CHANGELOG.md").read_text(encoding="utf-8")
-        if version and not re.search(rf"(?m)^## \[?{re.escape(version[0])}\]?(?:\s|$)", changelog):
-            errors.append(f"CHANGELOG.md has no '## {version[0]}' entry for the SKILL.md version")
         readme = local_file(root, "README.md").read_text(encoding="utf-8")
         errors.extend(f"missing README navigation: {item}" for item in NAVIGATION if item not in readme)
         validate_png(local_file(root, "assets/logo.png"))
         for document in ("ONBOARDING.md", "CONTRIBUTING.md", "BRANDING.md", "AGENTS.md"):
             text = local_file(root, document).read_text(encoding="utf-8")
-            for target in re.findall(r"\[[^\]]+\]\(([^)]+)\)", text):
+            for target in markdown_targets(text):
                 parsed = urlsplit(target)
                 if target.startswith("#") or parsed.scheme in ("https", "http", "mailto"):
                     continue

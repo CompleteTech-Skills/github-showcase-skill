@@ -65,15 +65,26 @@ if __name__ == "__main__":
     unittest.main()
 
 
-def test_validator_requires_changelog_entry_for_version(tmp_path):
+def test_quality_gate_requires_changelog_entry_for_version(tmp_path):
+    # the shared family validator stays byte-identical to the siblings', so the CHANGELOG check lives in
+    # validate_quality.py (AGENTS.md); the package contract still passes on a full copy of this checkout
+    import importlib.util
     import shutil
     import sys
+
+    import pytest
     sys.path.insert(0, str(ROOT / "scripts"))
     import validate_package as V
+    spec = importlib.util.spec_from_file_location("validate_quality_changelog", ROOT / "scripts" / "validate_quality.py")
+    Q = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(Q)
     dst = tmp_path / "pkg"
     shutil.copytree(ROOT, dst, ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache", "tests", "output", "preview"))
     assert V.validate(dst) == []
+    Q.gate_changelog(dst)
     (dst / "CHANGELOG.md").write_text("# Changelog\n\n## 0.9.0\n", encoding="utf-8")
-    assert any("CHANGELOG.md" in e for e in V.validate(dst))
+    with pytest.raises(RuntimeError, match="CHANGELOG.md"):
+        Q.gate_changelog(dst)
     (dst / "CHANGELOG.md").unlink()
-    assert V.validate(dst)
+    with pytest.raises(RuntimeError, match="CHANGELOG.md"):
+        Q.gate_changelog(dst)

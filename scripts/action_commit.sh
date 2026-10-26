@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Commit and push regenerated showcase files. Used only by action.yml (spec A7).
 # Usage: action_commit.sh "<commit message>" <pr|fail>
-# Stages only docs/images/, README.md and CONTRIBUTING.md; does nothing when the index is clean.
+# Stages only docs/images/, README.md and CONTRIBUTING.md, plus the removal of assets/icon.png when the prepare step
+# deleted a copied template icon (decision 12); does nothing when the index is clean.
 # SHOWCASE_DRY_RUN=1 commits locally and prints what would be pushed, without any network call.
 set -euo pipefail
 msg="${1:?commit message required}"
@@ -12,8 +13,16 @@ paths=()
 for p in docs/images README.md CONTRIBUTING.md; do
   [ -e "$p" ] && paths+=("$p")
 done
-[ "${#paths[@]}" -eq 0 ] && { echo "showcase: nothing to stage"; exit 0; }
-git add -- "${paths[@]}"
+# `action_prepare.py foreign` deletes a copied template icon. The existence filter above would skip that path, so
+# stage the deletion on its own: only when the tracked icon is missing from the checkout, and never an edit to it.
+icon_removed="$(git ls-files --deleted -- assets/icon.png)"
+[ "${#paths[@]}" -eq 0 ] && [ -z "$icon_removed" ] && { echo "showcase: nothing to stage"; exit 0; }
+if [ "${#paths[@]}" -gt 0 ]; then
+  git add -- "${paths[@]}"
+fi
+if [ -n "$icon_removed" ]; then
+  git rm -q --cached -- assets/icon.png
+fi
 if git diff --cached --quiet; then
   echo "showcase: no changes"
   exit 0
