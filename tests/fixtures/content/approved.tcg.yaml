@@ -1,0 +1,4 @@
+# Synthetic APPROVED_ACTIONS.yaml: only the org-005 rename (CompleteTech-Pokemon -> CompleteTech-TCG) is approved
+items:
+  - id: org-005
+    approved: true

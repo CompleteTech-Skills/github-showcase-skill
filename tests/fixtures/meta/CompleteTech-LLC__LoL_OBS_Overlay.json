@@ -1,0 +1,78 @@
+{
+ "archived": false,
+ "created_at": "2025-07-26T20:28:07Z",
+ "default_branch": "main",
+ "description": "Real-time League of Legends account monitor that generates auto-updating OBS overlays for streamers.",
+ "fork": false,
+ "has_discussions": false,
+ "has_issues": true,
+ "has_projects": true,
+ "has_wiki": false,
+ "health_percentage": 100,
+ "homepage": null,
+ "is_template": false,
+ "labels": [
+  {
+   "color": "d73a4a",
+   "description": "Something isn't working",
+   "name": "bug"
+  },
+  {
+   "color": "0075ca",
+   "description": "Improvements or additions to documentation",
+   "name": "documentation"
+  },
+  {
+   "color": "cfd3d7",
+   "description": "This issue or pull request already exists",
+   "name": "duplicate"
+  },
+  {
+   "color": "a2eeef",
+   "description": "New feature or request",
+   "name": "enhancement"
+  },
+  {
+   "color": "7057ff",
+   "description": "Good for newcomers",
+   "name": "good first issue"
+  },
+  {
+   "color": "008672",
+   "description": "Extra attention is needed",
+   "name": "help wanted"
+  },
+  {
+   "color": "e4e669",
+   "description": "This doesn't seem right",
+   "name": "invalid"
+  },
+  {
+   "color": "d876e3",
+   "description": "Further information is requested",
+   "name": "question"
+  },
+  {
+   "color": "ffffff",
+   "description": "This will not be worked on",
+   "name": "wontfix"
+  }
+ ],
+ "language": "Python",
+ "languages": {
+  "Python": 135543
+ },
+ "license": "MIT",
+ "owner": "CompleteTech-LLC",
+ "repo": "LoL_OBS_Overlay",
+ "stargazers_count": 0,
+ "topics": [
+  "complete-tech",
+  "league-of-legends",
+  "obs",
+  "overlay",
+  "python",
+  "streaming"
+ ],
+ "visibility": "public"
+}

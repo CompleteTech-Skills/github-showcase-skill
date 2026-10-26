@@ -1,0 +1,7 @@
+# Synthetic registry for tests (same top-level shape as registry/estate.yaml; no private data)
+version: test
+orgs:
+  Northwind-Trading-Co:
+    tier: T1
+    family: completetech
+    final_repos: [support-triage-agent, ledger-sync]

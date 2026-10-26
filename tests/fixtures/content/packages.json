@@ -1,0 +1,5 @@
+[
+ {"id": 1, "name": "ledger-sync", "package_type": "container", "repository": {"full_name": "Northwind-Trading-Co/ledger-sync"}},
+ {"id": 2, "name": "ledger-sync-cli", "package_type": "npm", "repository": {"full_name": "Northwind-Trading-Co/ledger-sync"}},
+ {"id": 3, "name": "orphan", "package_type": "npm"}
+]

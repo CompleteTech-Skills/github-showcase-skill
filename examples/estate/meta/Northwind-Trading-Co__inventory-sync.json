@@ -1,0 +1,23 @@
+{
+ "owner": "Northwind-Trading-Co",
+ "repo": "inventory-sync",
+ "description": "Sync Northwind inventory counts between stores.",
+ "homepage": "",
+ "topics": [],
+ "fork": false,
+ "archived": true,
+ "visibility": "public",
+ "default_branch": "main",
+ "stargazers_count": 0,
+ "pushed_at": "2026-10-01T00:00:00Z",
+ "language": "Python",
+ "license": "MIT",
+ "has_issues": true,
+ "labels": [
+  {
+   "name": "bug",
+   "color": "d73a4a",
+   "description": "Something isn't working"
+  }
+ ]
+}

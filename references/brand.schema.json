@@ -1,0 +1,439 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "https://github.com/CompleteTech-Skills/github-showcase-skill/references/brand.schema.json",
+ "title": "CompleteTech showcase brand config (references/brand.yaml)",
+ "type": "object",
+ "required": [
+  "schema_version",
+  "standard",
+  "brand_strings",
+  "brand_assets",
+  "footer",
+  "fonts",
+  "review",
+  "badges",
+  "contrast_candidates",
+  "languages",
+  "defaults",
+  "families",
+  "orgs",
+  "owners"
+ ],
+ "additionalProperties": false,
+ "$defs": {
+  "hex": {
+   "type": "string",
+   "pattern": "^#[0-9A-Fa-f]{6}$"
+  },
+  "chip": {
+   "type": "object",
+   "required": [
+    "bg"
+   ],
+   "additionalProperties": false,
+   "properties": {
+    "bg": {
+     "$ref": "#/$defs/hex"
+    },
+    "fg": {
+     "$ref": "#/$defs/hex"
+    }
+   }
+  },
+  "bar": {
+   "type": "object",
+   "additionalProperties": false,
+   "properties": {
+    "from": {
+     "$ref": "#/$defs/hex"
+    },
+    "to": {
+     "$ref": "#/$defs/hex"
+    },
+    "height": {
+     "type": "integer"
+    }
+   }
+  },
+  "canvas": {
+   "type": "object",
+   "required": [
+    "kind"
+   ],
+   "additionalProperties": false,
+   "properties": {
+    "kind": {
+     "enum": [
+      "gradient-grid",
+      "flat",
+      "flat-grid",
+      "halftone"
+     ]
+    },
+    "from": {
+     "$ref": "#/$defs/hex"
+    },
+    "to": {
+     "$ref": "#/$defs/hex"
+    },
+    "color": {
+     "$ref": "#/$defs/hex"
+    },
+    "grid": {
+     "$ref": "#/$defs/hex"
+    },
+    "grid_opacity": {
+     "type": "number"
+    },
+    "grid_pitch": {
+     "type": "integer"
+    },
+    "dot": {
+     "$ref": "#/$defs/hex"
+    },
+    "dot_opacity": {
+     "type": "number"
+    },
+    "pitch": {
+     "type": "integer"
+    },
+    "radius": {
+     "type": "number"
+    },
+    "angle": {
+     "type": "number"
+    },
+    "overlay": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "color"
+     ],
+     "properties": {
+      "color": {
+       "$ref": "#/$defs/hex"
+      },
+      "from": {
+       "type": "number",
+       "minimum": 0,
+       "maximum": 1
+      },
+      "to": {
+       "type": "number",
+       "minimum": 0,
+       "maximum": 1
+      }
+     }
+    }
+   }
+  },
+  "tokens": {
+   "type": "object",
+   "additionalProperties": false,
+   "patternProperties": {
+    "^(eyebrow|title|subtitle|body|muted|ink|plate_low|card_fill|card_ink|card_edge|gold_trace|accent|accent_mid|accent_deep|signal_core)$": {
+     "$ref": "#/$defs/hex"
+    }
+   },
+   "properties": {
+    "chip_key": {
+     "$ref": "#/$defs/chip"
+    },
+    "chip_attr": {
+     "$ref": "#/$defs/chip"
+    },
+    "bar": {
+     "$ref": "#/$defs/bar"
+    },
+    "edge": {
+     "type": "object",
+     "properties": {
+      "color": {
+       "$ref": "#/$defs/hex"
+      },
+      "opacity": {
+       "type": "number"
+      }
+     }
+    },
+    "card_shadow": {
+     "type": "object",
+     "properties": {
+      "dx": {
+       "type": "number"
+      },
+      "dy": {
+       "type": "number"
+      },
+      "blur": {
+       "type": "number"
+      },
+      "color": {
+       "$ref": "#/$defs/hex"
+      },
+      "opacity": {
+       "type": "number"
+      }
+     }
+    }
+   }
+  },
+  "family": {
+   "type": "object",
+   "additionalProperties": false,
+   "properties": {
+    "measured": {
+     "type": "boolean"
+    },
+    "hold": {
+     "type": "boolean"
+    },
+    "banner": {
+     "enum": [
+      "generate",
+      "keep-existing"
+     ]
+    },
+    "company_label": {
+     "type": "string"
+    },
+    "eyebrow_case": {
+     "enum": [
+      "upper",
+      "asis"
+     ]
+    },
+    "canvas": {
+     "$ref": "#/$defs/canvas"
+    },
+    "tokens": {
+     "$ref": "#/$defs/tokens"
+    },
+    "fonts": {
+     "type": "object",
+     "additionalProperties": {
+      "type": "string"
+     }
+    },
+    "icon_pixel_art": {
+     "type": "boolean"
+    }
+   }
+  },
+  "org": {
+   "type": "object",
+   "required": [
+    "family",
+    "tier",
+    "display_name"
+   ],
+   "properties": {
+    "family": {
+     "type": "string"
+    },
+    "tier": {
+     "enum": [
+      "T1",
+      "T1-user",
+      "T2",
+      "T2-R",
+      "T3"
+     ]
+    },
+    "display_name": {
+     "type": "string"
+    },
+    "nav_name": {
+     "type": "string"
+    },
+    "description": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "eyebrow": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "banner_category": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "brand_topic": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "family_topics": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "footer": {
+     "enum": [
+      true,
+      false,
+      "hold"
+     ]
+    },
+    "flagship": {
+     "type": "boolean"
+    },
+    "mark": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "hub_url": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "former_slugs": {
+     "type": "array",
+     "items": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9-]*$"
+     },
+     "uniqueItems": true
+    }
+   }
+  }
+ },
+ "properties": {
+  "schema_version": {
+   "const": 1
+  },
+  "standard": {
+   "type": "string",
+   "pattern": "^ct-std-v1(\\.\\d+)?$"
+  },
+  "brand_strings": {
+   "type": "object",
+   "required": [
+    "company",
+    "short",
+    "tagline",
+    "website",
+    "demo_client"
+   ]
+  },
+  "brand_assets": {
+   "type": "object",
+   "required": [
+    "logo_light",
+    "logo_dark",
+    "logo_dark_candidate",
+    "dark_master"
+   ],
+   "properties": {
+    "dark_master": {
+     "enum": [
+      "current",
+      "candidate"
+     ]
+    }
+   }
+  },
+  "footer": {
+   "type": "object",
+   "required": [
+    "href",
+    "logo_light_url",
+    "logo_dark_url",
+    "alt",
+    "width",
+    "line_prefix",
+    "line_suffix"
+   ]
+  },
+  "fonts": {
+   "type": "object",
+   "additionalProperties": {
+    "type": "string",
+    "pattern": "\\.ttf$"
+   }
+  },
+  "review": {
+   "type": "object",
+   "additionalProperties": {
+    "$ref": "#/$defs/hex"
+   }
+  },
+  "badges": {
+   "type": "object"
+  },
+  "contrast_candidates": {
+   "type": "array",
+   "items": {
+    "$ref": "#/$defs/hex"
+   }
+  },
+  "languages": {
+   "type": "object",
+   "additionalProperties": {
+    "$ref": "#/$defs/hex"
+   }
+  },
+  "defaults": {
+   "$ref": "#/$defs/family"
+  },
+  "families": {
+   "type": "object",
+   "additionalProperties": {
+    "$ref": "#/$defs/family"
+   }
+  },
+  "orgs": {
+   "type": "object",
+   "additionalProperties": {
+    "$ref": "#/$defs/org"
+   }
+  },
+  "owners": {
+   "type": "object",
+   "required": [
+    "excluded",
+    "hold",
+    "t3",
+    "watching"
+   ],
+   "additionalProperties": {
+    "type": "array",
+    "items": {
+     "type": "string"
+    }
+   }
+  },
+  "readme": {
+   "type": "object",
+   "additionalProperties": false,
+   "properties": {
+    "nav_first": {
+     "type": "boolean"
+    },
+    "preserve_banner": {
+     "enum": [
+      "above",
+      "unchanged"
+     ]
+    },
+    "fork_readme": {
+     "enum": [
+      "note",
+      "full"
+     ]
+    }
+   }
+  }
+ }
+}

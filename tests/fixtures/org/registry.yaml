@@ -1,0 +1,79 @@
+# Synthetic estate registry for tests (Northwind demo owners only; never real private data).
+version: test
+profile:
+  name: Test Steward
+  org_directory:
+    - group: Northwind
+      orgs: [Northwind-Trading-Co, Northwind-Labs]
+  star_lists:
+    - name: 'Northwind: built on'
+      description: Outside projects Northwind Trading Co. builds on.
+      source_org: Northwind-Trading-Co
+orgs:
+  Northwind-Trading-Co:
+    tier: T1
+    profile:
+      name: Northwind Trading Co.
+      description: Trading tools and support agents for the Northwind demo. A CompleteTech LLC organization.
+      blog: https://www.complete.tech
+      location: Cincinnati, OH
+    final_repos: [.github, support-triage-agent, order-ledger, inventory-sync, private-pricing-engine, legacy-importer, upstream-fork]
+    pins_public:
+      - repo: support-triage-agent
+        why: Internal note that must never reach a public profile because it explains the private pricing plan in detail.
+        depends_on: ''
+      - repo: private-pricing-engine
+        why: A private repository listed by mistake in the public row.
+        depends_on: ''
+      - repo: order-ledger
+        why: Renamed in ren-901.
+        depends_on: ren-901
+    pins_members:
+      - repo: private-pricing-engine
+        why: Members work here every day.
+        depends_on: ''
+      - repo: .github
+        why: Governance hub.
+        depends_on: ''
+    sections:
+      - title: Agents
+        repos: [support-triage-agent, private-pricing-engine]
+      - title: Ledgers
+        repos: [order-ledger]
+      - title: Forks
+        repos: [upstream-fork]
+    also_in_outgoing: []
+    also_in_incoming:
+      - repo: Northwind-Labs/lab-notebook
+        home_org: Northwind-Labs
+        why: Cross-listed lab work.
+      - repo: Northwind-Labs/secret-lab
+        home_org: Northwind-Labs
+        why: Private lab work that must never be named.
+    favorites:
+      - full_name: pallets/flask
+        why: The web framework under the triage agent.
+        evidence: requirements.txt
+    star_list:
+      name: 'Northwind: Built On'
+      description: Superseded by the reviewed profile entry.
+    open_questions:
+      - Should the pricing engine ever become public? The answer stays internal for now.
+  Northwind-Labs:
+    tier: T1
+    profile:
+      name: Northwind Labs
+      description: Experiments for the Northwind demo. A CompleteTech LLC organization.
+      blog: https://www.complete.tech
+      location: Cincinnati, OH
+    final_repos: [.github, lab-notebook, secret-lab]
+    pins_public: []
+    pins_members: []
+    sections:
+      - title: Lab
+        repos: [lab-notebook]
+    also_in_outgoing:
+      - repo: lab-notebook
+        also_in: [Northwind-Trading-Co]
+    also_in_incoming: []
+    favorites: []

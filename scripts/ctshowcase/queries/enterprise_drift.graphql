@@ -1,0 +1,10 @@
+# Validated enterprise read (audit/research/enterprise.md Appendix A, q_drift pattern).
+query($slug:String!){enterprise(slug:$slug){ownerInfo{
+ membersCanDeleteRepositoriesSetting
+ delAllowed: membersCanDeleteRepositoriesSettingOrganizations(first:100, value:true){totalCount nodes{login}}
+ membersCanChangeRepositoryVisibilitySetting
+ visAllowed: membersCanChangeRepositoryVisibilitySettingOrganizations(first:100, value:true){totalCount nodes{login}}
+ defaultRepositoryPermissionSetting
+ permRead: defaultRepositoryPermissionSettingOrganizations(first:100, value:READ){totalCount nodes{login}}
+ repositoryDeployKeySetting
+ keysOff: repositoryDeployKeySettingOrganizations(first:100, value:false){totalCount nodes{login}}}}}

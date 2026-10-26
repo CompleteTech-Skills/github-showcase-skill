@@ -1,0 +1,19 @@
+query($slug: String!) {
+  enterprise(slug: $slug) {
+    id slug name description websiteUrl location avatarUrl securityContactEmail readme url viewerIsAdmin
+    billingInfo { totalLicenses totalAvailableLicenses allLicensableUsersCount }
+    rulesets(first: 50) { nodes { databaseId name target enforcement } }
+    ownerInfo {
+      admins(first: 25) { edges { role node { login } } }
+      domains(first: 25) { nodes { id domain isVerified isApproved dnsHostName } }
+      pendingMemberInvitations(first: 100) { totalCount nodes { invitee { login } organization { login } role } }
+      pendingCollaboratorInvitations(first: 100) { totalCount }
+      defaultRepositoryPermissionSetting membersCanCreateRepositoriesSetting membersCanDeleteRepositoriesSetting
+      membersCanChangeRepositoryVisibilitySetting allowPrivateRepositoryForkingSetting membersCanInviteCollaboratorsSetting
+      membersCanDeleteIssuesSetting membersCanUpdateProtectedBranchesSetting membersCanViewDependencyInsightsSetting
+      membersCanMakePurchasesSetting organizationProjectsSetting repositoryProjectsSetting repositoryDeployKeySetting
+      twoFactorRequiredSetting ipAllowListEnabledSetting notificationDeliveryRestrictionEnabledSetting
+      samlIdentityProvider { id }
+    }
+  }
+}

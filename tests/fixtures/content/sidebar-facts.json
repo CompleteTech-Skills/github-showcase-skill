@@ -1,0 +1,7 @@
+{
+ "Northwind-Trading-Co/support-triage-agent": {"releases": [], "deployments": [{"id": 1, "environment": "github-pages"}], "visibility": "public", "has_pages": true},
+ "Northwind-Trading-Co/ledger-sync": {"releases": [{"tag_name": "v1.0.0"}], "deployments": [], "visibility": "private"},
+ "Northwind-Trading-Co/unknown-facts": {"releases": []},
+ "Pick-Your-AI/pya-app": {"releases": [], "deployments": []},
+ "BunsDev/someone-else": {"releases": [], "deployments": []}
+}

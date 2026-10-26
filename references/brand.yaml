@@ -1,0 +1,646 @@
+# CompleteTech showcase brand config: THE single place for brand data (spec A3).
+# Every colour, font, logo path, eyebrow, company label and footer string a generator uses comes from here.
+# Repo files (.github/showcase.yml) and CLI flags may override content only, never colours or fonts.
+# After editing, regenerate the stdlib lock copy:  python3 scripts/showcase.py config --write-lock
+schema_version: 1
+standard: ct-std-v1
+
+brand_strings:
+  company: CompleteTech LLC
+  short: CompleteTech
+  tagline: Innovation at Every Integration
+  website: https://www.complete.tech
+  demo_client: Northwind Trading Co.
+  demo_owner: Northwind-Trading-Co
+
+brand_assets:
+  logo_light: assets/brand/logo.png
+  logo_dark: assets/brand/logo-dark.png
+  logo_dark_candidate: assets/brand/logo-dark-full.png
+  dark_master: current            # current | candidate  (decision 19: flip after the user confirms)
+  mark_dark: assets/brand/mark-dark.png   # optional until the estate planner commits the re-measured crop
+  mark_light: assets/brand/mark-light.png   # cloud-and-bulb crop of logo.png for icon boxes under 200 px (proposal: §9.1 rule 2 approval pending)
+  bulb_dark: assets/brand/bulb-dark.png     # bulb only, cloud stroke removed by the mask (needs pilot approval, STANDARD §9.2)
+  # STANDARD §9.2 crop boxes [x0, y0, x1, y1] on the dark master chosen in q26 `logo` (decision 19). Phase 0.12 re-measures
+  # them on that master (never reuse old coordinates), sets measured: true, then runs `showcase.py config --crop`,
+  # which writes mark_dark and bulb_dark from these boxes. The v1 boxes (697, 26, 1681, 669) and (984, 121, 1442, 653)
+  # fit only the 2400x1198 logo-dark.png and are deliberately not filled in.
+  crops:
+    measured: false
+    mark_dark: null
+    bulb_dark: null
+    bulb_mask: {b_min: 150, r_max: 80, b_minus_g_min: 20}   # alpha 0 where B >= b_min and R <= r_max and B - G >= min
+
+footer:
+  href: https://www.complete.tech
+  logo_light_url: https://raw.githubusercontent.com/CompleteTech-LLC/.github/main/brand/logo.png
+  logo_dark_url: https://raw.githubusercontent.com/CompleteTech-LLC/.github/main/brand/logo-dark.png
+  alt: CompleteTech LLC
+  width: 200
+  line_prefix: Built by
+  line_suffix: "· Innovation at Every Integration"
+
+fonts:
+  poppins-regular: Poppins-Regular.ttf
+  poppins-medium: Poppins-Medium.ttf
+  poppins-semibold: Poppins-SemiBold.ttf
+  mono-regular: JetBrainsMono-Regular.ttf
+  mono-medium: JetBrainsMono-Medium.ttf
+  mono-bold: JetBrainsMono-Bold.ttf
+  fraunces-semibold: Fraunces-SemiBold.ttf
+  bricolage-medium: BricolageGrotesque-Medium.ttf
+  pressstart: PressStart2P-Regular.ttf
+
+# README scaffolding answers from the review page (defaults shown; change a value only after the user's answer).
+readme:
+  nav_first: false            # q57 nav: false = hero banner, then nav line, then title block; true = "Nav line first"
+  preserve_banner: above      # q57 pres: above = hero inserted above a preserve-list README's own banner (kept under it);
+                              #           unchanged = "Leave them unchanged" (no hero; banner n/a, `preserve-list`)
+  fork_readme: note           # q27: note = upstream README kept under the hero banner and the §7.4 G note, then the
+                              #       footer; full = "Full CompleteTech treatment" (the repo's §5.4 variant via --variant)
+# q57 aia ("Own palette in the same layout", the default) needs no switch: AI-Ascension keeps its `ai-ascension`
+# family palette and gets the hero above its existing <picture> banner. "CompleteTech palette" = set the AI-Ascension
+# org row's `family: completetech`.
+
+# Review surfaces for contact sheets (GitHub page colours; proofing only, never painted into assets).
+review:
+  bg_dark: "#0D1117"
+  bg_light: "#FFFFFF"
+  label_dark: "#8B949E"
+  label_light: "#57606A"
+
+# shields.io badge tokens (§7.2), hex without '#'
+badges:
+  accent: 1E3A8A
+  brand: 005ADD
+  positive: "067647"
+  neutral: 64748B
+  label: null
+  local_label_bg: "#555555"   # --badges local: label side (shields default)
+  local_text: "#FFFFFF"
+
+# Contrast candidates for an omitted chip fg (A3.3)
+contrast_candidates: ["#0F172A", "#FFFFFF", "#1E1E1E"]
+
+# GitHub linguist colours (data, not brand) for the card language dot
+languages:
+  Python: "#3572A5"
+  TypeScript: "#3178C6"
+  JavaScript: "#F1E05A"
+  Go: "#00ADD8"
+  Rust: "#DEA584"
+  PHP: "#4F5D95"
+  Shell: "#89E051"
+  PowerShell: "#012456"
+  HTML: "#E34C26"
+  CSS: "#563D7C"
+  C: "#555555"
+  C++: "#F34B7D"
+  C#: "#178600"
+  Java: "#B07219"
+  Kotlin: "#A97BFF"
+  Swift: "#F05138"
+  Lua: "#000080"
+  GDScript: "#355570"
+  Jupyter Notebook: "#DA5B0B"
+  Dockerfile: "#384D54"
+  Vue: "#41B883"
+  Svelte: "#FF3E00"
+  Astro: "#FF5A03"
+  Mermaid: "#FF3670"
+  default: "#94A3B8"
+
+# Defaults every family inherits (deep merge) before its own block applies.
+defaults:
+  measured: true
+  hold: false
+  banner: generate                  # generate | keep-existing
+  company_label: COMPLETETECH LLC
+  eyebrow_case: upper               # upper | asis
+  # gradient-grid: vertical base, then a horizontal #1E3A8A lift (0 -> 55%) measured on the decision 13 golden
+  canvas: {kind: gradient-grid, from: "#0F172A", to: "#001F3F", grid: "#1E3A8A", grid_opacity: 0.25, grid_pitch: 32,
+           overlay: {color: "#1E3A8A", from: 0.0, to: 0.55}}
+  tokens:
+    eyebrow: "#00A7FD"
+    title: "#F1F5F9"
+    subtitle: "#CBD5E1"
+    body: "#CBD5E1"
+    muted: "#94A3B8"
+    ink: "#0F172A"
+    plate_low: "#001F3F"
+    card_fill: "#F8FAFC"
+    card_ink: "#0F172A"           # wordmark ink on the icon card (T2 dark plates use their title colour)
+    card_edge: "#E2E8F0"
+    card_shadow: {dx: 6, dy: 8, blur: 12, color: "#000000", opacity: 0.35}
+    chip_key: {bg: "#FFC300", fg: "#0F172A"}
+    chip_attr: {bg: "#005ADD", fg: "#FFFFFF"}
+    bar: {from: "#005ADD", to: "#005ADD", height: 6}
+    edge: {color: "#00A7FD", opacity: 0.28}
+    gold_trace: "#FFC300"
+    accent: "#00A7FD"
+    accent_mid: "#0081ED"
+    accent_deep: "#005ADD"
+    signal_core: "#E0F4FF"
+  fonts:
+    eyebrow: poppins-semibold
+    title: mono-bold
+    subtitle: poppins-regular
+    chip: poppins-semibold
+    card_name: mono-medium
+    card_body: poppins-regular
+    card_chip_key: poppins-semibold
+    card_chip_attr: poppins-medium
+    display: poppins-semibold
+    tagline: mono-medium
+
+families:
+  completetech:
+    measured: true
+  ai-ascension:
+    measured: true
+    banner: keep-existing
+    company_label: AI Ascension
+    eyebrow_case: asis
+    canvas: {kind: flat, color: "#15120E"}
+    tokens:
+      eyebrow: "#F2B75C"
+      title: "#EDE4D3"
+      subtitle: "#EDE4D3"
+      body: "#EDE4D3"
+      muted: "#C9BFAE"
+      plate_low: "#2A241C"
+      card_fill: "#EDE4D3"
+      card_edge: "#C9BFAE"
+      chip_key: {bg: "#F2B75C", fg: "#15120E"}
+      chip_attr: {bg: "#E39B3A", fg: "#15120E"}
+      bar: {from: "#F2B75C", to: "#E39B3A", height: 6}
+      edge: {color: "#F2B75C", opacity: 0.28}
+      gold_trace: "#F2B75C"
+      accent: "#F2B75C"
+      accent_mid: "#E39B3A"
+      accent_deep: "#E39B3A"
+      signal_core: "#FFF4E0"
+    fonts: {title: fraunces-semibold, eyebrow: mono-medium, subtitle: bricolage-medium, card_name: fraunces-semibold,
+            card_body: bricolage-medium, display: fraunces-semibold}
+  jev-engineering:
+    measured: false
+    company_label: Jev Engineering
+    eyebrow_case: asis
+    canvas: {kind: flat-grid, color: "#010104", grid: "#22D3EE", grid_opacity: 0.07}
+    tokens:
+      eyebrow: "#22D3EE"
+      title: "#F1F5F9"
+      plate_low: "#0C075C"
+      card_fill: "#0C075C"          # §9.3 avatar field: a dark plate, never a white slab (decision 21)
+      card_ink: "#F1F5F9"
+      chip_key: {bg: "#22D3EE", fg: "#010104"}
+      chip_attr: {bg: "#8B5CF6", fg: "#010104"}
+      bar: {from: "#22D3EE", to: "#8B5CF6", height: 6}
+      edge: {color: "#22D3EE", opacity: 0.28}
+      gold_trace: "#22D3EE"
+      accent: "#22D3EE"
+      accent_mid: "#8B5CF6"
+      accent_deep: "#8B5CF6"
+  jevplay-games:
+    # Dark design (decision 21, "I like the dark ones"): ink canvas with the family's magenta halftone,
+    # pink/magenta accents from §9.3 and the art-direction night tile. The pink-ground variant is not used.
+    measured: true
+    company_label: jevplay.games
+    eyebrow_case: asis
+    icon_pixel_art: true            # §9.5 avatar rule: icons are scaled nearest-neighbour at an integer factor
+    canvas: {kind: halftone, color: "#1E1E1E", dot: "#E551BA", dot_opacity: 0.16, pitch: 12, radius: 2}
+    tokens:
+      eyebrow: "#F386A1"
+      title: "#FFFFFF"
+      subtitle: "#E5E7EB"
+      body: "#E5E7EB"
+      muted: "#C9CDD3"
+      ink: "#1E1E1E"
+      plate_low: "#1E1E1E"
+      card_fill: "#F386A1"
+      card_edge: "#F386A1"
+      card_shadow: {dx: 6, dy: 6, blur: 0, color: "#E551BA", opacity: 1.0}
+      chip_key: {bg: "#F386A1", fg: "#1E1E1E"}
+      chip_attr: {bg: "#3A1A33", fg: "#F386A1"}   # 6.35:1; pink key vs plum attribute read apart
+      bar: {from: "#E551BA", to: "#F386A1", height: 6}
+      edge: {color: "#F386A1", opacity: 0.45}
+      gold_trace: "#F386A1"
+      accent: "#F386A1"
+      accent_mid: "#E551BA"
+      accent_deep: "#E551BA"
+      signal_core: "#FFE0E5"
+  libreevolve:
+    measured: false
+    company_label: LibreEvolve
+    eyebrow_case: asis
+    canvas: {kind: flat-grid, color: "#021527", grid: "#10B981", grid_opacity: 0.07}
+    tokens:
+      eyebrow: "#10B981"
+      title: "#F1F5F9"
+      plate_low: "#021527"
+      card_fill: "#032530"
+      card_ink: "#F1F5F9"
+      chip_key: {bg: "#10B981", fg: "#021527"}
+      chip_attr: {bg: "#065F46", fg: "#F1F5F9"}
+      bar: {from: "#065F46", to: "#10B981", height: 6}
+      edge: {color: "#10B981", opacity: 0.28}
+      gold_trace: "#10B981"
+      accent: "#10B981"
+      accent_mid: "#10B981"
+      accent_deep: "#065F46"
+  touchedbyanagent:
+    measured: false
+    hold: true
+    company_label: Touched By An Agent
+    eyebrow_case: asis
+    canvas: {kind: flat-grid, color: "#1D1116", grid: "#F59E0B", grid_opacity: 0.07}
+    tokens:
+      eyebrow: "#F59E0B"
+      title: "#FDF2F8"
+      plate_low: "#1D1116"
+      card_fill: "#2F0132"          # §9.3 plum
+      card_ink: "#FDF2F8"
+      chip_key: {bg: "#F59E0B", fg: "#1D1116"}
+      chip_attr: {bg: "#E11D74"}
+      bar: {from: "#E11D74", to: "#F59E0B", height: 6}
+      edge: {color: "#F59E0B", opacity: 0.28}
+      gold_trace: "#F59E0B"
+      accent: "#F59E0B"
+      accent_mid: "#E11D74"
+      accent_deep: "#E11D74"
+  romgenie:
+    measured: false
+    company_label: romgenie
+    eyebrow_case: asis
+    canvas: {kind: flat-grid, color: "#002C31", grid: "#F4C430", grid_opacity: 0.07}
+    tokens:
+      eyebrow: "#F4C430"
+      title: "#F8FAFC"
+      plate_low: "#002C31"
+      card_fill: "#183B31"
+      card_ink: "#F8FAFC"
+      chip_key: {bg: "#F4C430", fg: "#002C31"}
+      chip_attr: {bg: "#B8860B"}
+      bar: {from: "#B8860B", to: "#F4C430", height: 6}
+      edge: {color: "#F4C430", opacity: 0.28}
+      gold_trace: "#F4C430"
+      accent: "#F4C430"
+      accent_mid: "#B8860B"
+      accent_deep: "#B8860B"
+
+# One row per in-scope owner. display_name/description/eyebrow copied verbatim from STANDARD §2.3.
+orgs:
+  CompleteTech-LLC:
+    family: completetech
+    former_slugs: []              # old logins after an approved org-rename (CQ-03; ORCHESTRATOR Phase 1.1)
+    tier: T1
+    display_name: CompleteTech LLC
+    nav_name: CompleteTech LLC
+    description: Company sites, client tools and AI integration work from Cincinnati, Ohio. Innovation at Every Integration.
+    eyebrow: null
+    banner_category: null
+    brand_topic: completetech
+    family_topics: []
+    footer: true
+    flagship: true
+  CompleteTech-Skills:
+    family: completetech
+    former_slugs: []
+    tier: T1
+    display_name: CompleteTech Skills
+    nav_name: CompleteTech LLC Skills
+    description: Claude and Codex agent skills for the agentic-services lifecycle, from discovery to invoice. A CompleteTech LLC organization.
+    eyebrow: SKILLS
+    banner_category: null
+    brand_topic: completetech
+    family_topics: [claude-skill, codex-skill, agentic-ai]
+    family_topics_scope: type:agent-skills
+    family_topics_omit: {creative-studio: [claude-skill]}
+    mark: assets/orgs/CompleteTech-Skills/mark.png
+    hub_url: https://www.complete.tech
+    footer: true
+    flagship: true
+    readme_preserve: [creative-studio]
+  CompleteTech-LLC-AI-Research:
+    family: completetech
+    former_slugs: []
+    tier: T1
+    mark: assets/orgs/CompleteTech-LLC-AI-Research/mark.png
+    display_name: CompleteTech AI Research
+    nav_name: CompleteTech AI Research
+    description: Agent harnesses, game-playing agents, benchmarks and AI experiments. A CompleteTech LLC organization.
+    eyebrow: AI RESEARCH
+    brand_topic: completetech
+    family_topics: [ai-research]
+    footer: true
+  CompleTetech-Security:
+    family: completetech
+    former_slugs: []
+    tier: T1
+    mark: assets/orgs/CompleTetech-Security/mark.png
+    display_name: CompleteTech Security
+    nav_name: CompleteTech Security
+    description: Offline, dependency-free CVE version checkers for network appliances and Node.js. A CompleteTech LLC organization.
+    eyebrow: SECURITY
+    banner_category: SECURITY TOOLS
+    brand_topic: completetech
+    family_topics: [security, cve]
+    license_chip: AGPL-3.0 or commercial
+    footer: true
+    flagship: true
+  CompleteTech-Infrastructure:
+    family: completetech
+    former_slugs: []
+    tier: T1
+    mark: assets/orgs/CompleteTech-Infrastructure/mark.png
+    display_name: CompleteTech Infrastructure
+    nav_name: CompleteTech Infrastructure
+    description: Homelab services, self-hosted hosts and Windows helper tools. A CompleteTech LLC organization.
+    eyebrow: INFRASTRUCTURE
+    brand_topic: completetech
+    family_topics: [homelab]
+    footer: true
+  CompleteTech-Commerce:
+    family: completetech
+    former_slugs: []
+    tier: T1
+    mark: assets/orgs/CompleteTech-Commerce/mark.png
+    display_name: CompleteTech Commerce
+    nav_name: CompleteTech Commerce
+    description: Trading, market research and vending projects. A CompleteTech LLC organization.
+    eyebrow: COMMERCE
+    brand_topic: completetech
+    family_topics: []
+    footer: true
+  CompleteTech-Creative:
+    family: completetech
+    former_slugs: []
+    tier: T1
+    mark: assets/orgs/CompleteTech-Creative/mark.png
+    display_name: CompleteTech Creative
+    nav_name: CompleteTech Creative
+    description: Writing, podcast, social media and content production tools. A CompleteTech LLC organization.
+    eyebrow: CREATIVE
+    brand_topic: completetech
+    family_topics: []
+    footer: true
+  CompleteTech-Pokemon:
+    family: completetech
+    former_slugs: []
+    tier: T1
+    mark: assets/orgs/CompleteTech-Pokemon/mark.png
+    display_name: CompleteTech TCG
+    nav_name: CompleteTech TCG
+    description: Trading-card shop, community site and Game Boy emulation tools. Not affiliated with Nintendo or The Pokémon Company. A CompleteTech LLC organization.
+    eyebrow: TCG
+    brand_topic: completetech
+    family_topics: []
+    disclaimer: Not affiliated with, endorsed by, or sponsored by Nintendo, Game Freak, Creatures or The Pokémon Company.
+    footer: true
+  CompleteTech-Data:
+    family: completetech
+    former_slugs: []
+    tier: T1
+    mark: assets/orgs/CompleteTech-Data/mark.png
+    display_name: CompleteTech Data
+    nav_name: CompleteTech Data
+    description: Business directories and public datasets, mostly for Ohio. A CompleteTech LLC organization.
+    eyebrow: DATA
+    brand_topic: completetech
+    family_topics: []
+    footer: true
+  CompleteTech-Games:
+    family: completetech
+    former_slugs: []
+    tier: T1
+    mark: assets/orgs/CompleteTech-Games/mark.png
+    display_name: CompleteTech Games
+    nav_name: CompleteTech Games
+    description: Crossword, puzzle and strategy game projects. A CompleteTech LLC organization.
+    eyebrow: GAMES
+    brand_topic: completetech
+    family_topics: []
+    footer: true
+  CompleteTech-Directories:
+    family: completetech
+    former_slugs: []
+    tier: T1
+    mark: assets/orgs/CompleteTech-Directories/mark.png
+    display_name: CompleteTech Directories
+    nav_name: CompleteTech Directories
+    description: Directory websites and the data behind them. A CompleteTech LLC organization.
+    eyebrow: DIRECTORIES
+    brand_topic: completetech
+    family_topics: []
+    footer: true
+  CompleteTech-Hardware:
+    family: completetech
+    former_slugs: []
+    tier: T1
+    mark: assets/orgs/CompleteTech-Hardware/mark.png
+    display_name: CompleteTech Hardware
+    nav_name: CompleteTech Hardware
+    description: KiCad electronics projects and hardware build tooling. A CompleteTech LLC organization.
+    eyebrow: HARDWARE
+    brand_topic: completetech
+    family_topics: []
+    footer: true
+  CompleteTechDiscord-Games:
+    family: completetech
+    former_slugs: []
+    tier: T1
+    mark: assets/orgs/CompleteTechDiscord-Games/mark.png
+    display_name: CompleteTech Discord Games
+    nav_name: CompleteTech Discord Games
+    description: Games built as Discord activities. Not affiliated with Discord Inc. A CompleteTech LLC organization.
+    eyebrow: DISCORD GAMES
+    brand_topic: completetech
+    family_topics: []
+    footer: true
+  CompleteTech-DiscordApps:
+    family: completetech
+    former_slugs: []
+    tier: T1
+    mark: assets/orgs/CompleteTech-DiscordApps/mark.png
+    display_name: CompleteTech Discord Apps
+    nav_name: CompleteTech Discord Apps
+    description: Discord apps and community bots. Not affiliated with Discord Inc. A CompleteTech LLC organization.
+    eyebrow: DISCORD APPS
+    brand_topic: completetech
+    family_topics: []
+    footer: true
+  CompleteTech-Patent-IP:
+    family: completetech
+    former_slugs: []
+    tier: T1
+    mark: assets/orgs/CompleteTech-Patent-IP/mark.png
+    display_name: CompleteTech Patent and IP
+    nav_name: CompleteTech Patent and IP
+    description: Patent research and intellectual-property tracking tools. A CompleteTech LLC organization.
+    eyebrow: PATENT AND IP
+    brand_topic: completetech
+    family_topics: []
+    footer: true
+  CompleteTech-Career-Toolkit:
+    family: completetech
+    former_slugs: []
+    tier: T1
+    mark: assets/orgs/CompleteTech-Career-Toolkit/mark.png
+    display_name: CompleteTech Career Toolkit
+    nav_name: CompleteTech Career Toolkit
+    description: Resume and career document tooling. A CompleteTech LLC organization.
+    eyebrow: CAREER TOOLKIT
+    brand_topic: completetech
+    family_topics: []
+    footer: true
+  CompleteTech-ManageEngine:
+    family: completetech
+    former_slugs: []
+    tier: T1
+    mark: assets/orgs/CompleteTech-ManageEngine/mark.png
+    display_name: CompleteTech ManageEngine Tools
+    nav_name: CompleteTech ManageEngine Tools
+    description: ServiceDesk Plus cloud-readiness tools. Not affiliated with ManageEngine or Zoho Corporation. A CompleteTech LLC organization.
+    eyebrow: MANAGEENGINE TOOLS
+    brand_topic: completetech
+    family_topics: []
+    footer: true
+  CompleteDotTech:
+    family: completetech
+    former_slugs: []
+    tier: T1-user
+    display_name: Timothy Wayne Gregg
+    nav_name: CompleteTech LLC
+    description: null
+    eyebrow: null
+    brand_topic: completetech
+    family_topics: []
+    footer: true
+    flagship: true
+    profile:
+      name: Timothy Wayne Gregg
+      eyebrow: COMPLETETECH LLC · CINCINNATI, OHIO
+      chips: ["key:complete.tech", "attr:Founder", "attr:AI integration"]
+  AI-Ascension:
+    family: ai-ascension
+    former_slugs: []
+    tier: T2
+    display_name: AI Ascension
+    nav_name: AI Ascension
+    description: "AI game-agent toolkit for Slay the Spire 2. Not affiliated with Mega Crit. Steward: CompleteTech LLC."
+    eyebrow: null
+    brand_topic: ai-ascension
+    family_topics: [sts2]
+    family_topics_except: [jev-factorio-agent]
+    banner: keep-existing
+    footer: true
+  Jev-Engineering:
+    family: jev-engineering
+    former_slugs: []
+    tier: T2
+    display_name: Jev Engineering
+    nav_name: Jev Engineering
+    description: "Jev structured-decision research and tooling. Steward: CompleteTech LLC."
+    eyebrow: null
+    brand_topic: jev
+    family_topics: []
+    footer: true
+  jevplay-games:
+    family: jevplay-games
+    former_slugs: []
+    tier: T2
+    display_name: jevplay.games
+    nav_name: jevplay.games
+    description: "Browser games played against Jev at jevplay.games. Steward: CompleteTech LLC."
+    eyebrow: null
+    brand_topic: jev
+    family_topics: [browser-game]
+    family_topics_scope: type:game
+    hub_url: https://jevplay.games
+    footer: true
+  LibreEvolve:
+    family: libreevolve
+    former_slugs: []
+    tier: T2
+    display_name: LibreEvolve
+    nav_name: LibreEvolve
+    description: "Open-source code-evolution workbench. Steward: CompleteTech LLC."
+    eyebrow: null
+    brand_topic: libreevolve
+    family_topics: []
+    footer: true
+  TouchedByAnAgent:
+    family: touchedbyanagent
+    former_slugs: []
+    tier: T2
+    display_name: Touched By An Agent
+    nav_name: Touched By An Agent
+    description: null
+    eyebrow: null
+    brand_topic: touchedbyanagent
+    family_topics: []
+    hub_url: https://touchedbyanagent.com
+    footer: true    # decision 18 includes TouchedByAnAgent ("all of them"); set to hold only if the user declines on the review page
+  romgenie-following-repos:
+    family: romgenie
+    former_slugs: []
+    tier: T2-R
+    display_name: romgenie following
+    nav_name: romgenie following
+    description: Forks of AI-agent projects followed by CompleteTech LLC. Credit and licenses belong to their upstream authors.
+    eyebrow: null
+    brand_topic: completetech
+    family_topics: []
+    footer: false
+  romgenie-archive-repostiory:
+    family: romgenie
+    former_slugs: []
+    tier: T2-R
+    display_name: romgenie archive
+    nav_name: romgenie archive
+    description: Retired CompleteTech LLC repositories, kept read-only for reference.
+    eyebrow: null
+    brand_topic: completetech
+    family_topics: []
+    footer: true
+  Pick-Your-AI:
+    family: completetech
+    former_slugs: []
+    tier: T3
+    display_name: Pick Your AI
+    nav_name: Pick Your AI
+    description: null
+    eyebrow: null
+    brand_topic: pick-your-ai
+    family_topics: []
+    footer: false
+  Jevelopers-neatHack-2026:
+    family: completetech
+    former_slugs: []
+    tier: T3
+    display_name: TicketStub
+    nav_name: TicketStub
+    description: null
+    eyebrow: null
+    brand_topic: null
+    family_topics: []
+    footer: false
+  # Synthetic demo owner (§1.2 fictional client); used only by fixtures and examples.
+  Northwind-Trading-Co:
+    family: completetech
+    former_slugs: []
+    tier: T1
+    display_name: Northwind Trading Co.
+    nav_name: Northwind Trading Co.
+    description: null
+    eyebrow: DEMO
+    brand_topic: completetech
+    family_topics: []
+    footer: true
+
+owners:
+  # decisions 1 and 2: MetatronAngelAgent is out of scope and PrompDev is another person's account
+  excluded: [BunsDev, GoZippy, h-mascot, lmvdz, GalaxyRuler, MetatronAngelAgent, PrompDev]
+  hold: []
+  t3: [Pick-Your-AI, Jevelopers-neatHack-2026]
+  watching: [romgenie-following-repos]

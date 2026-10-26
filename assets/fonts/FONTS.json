@@ -1,0 +1,69 @@
+{
+ "schema": 1,
+ "fonts": [
+  {
+   "file": "Poppins-Regular.ttf",
+   "sha256": "7e65201e9b79159e2300267cc885e16c8dcef2424cdfa09a29bfb0980a94a7ba",
+   "bytes": 160316,
+   "source_url": "https://raw.githubusercontent.com/google/fonts/main/ofl/poppins/Poppins-Regular.ttf",
+   "license": "Poppins-OFL.txt"
+  },
+  {
+   "file": "Poppins-Medium.ttf",
+   "sha256": "90373e7d838d32468438fc3e152dca0bdb12edcab99ea639f158790b1ba1fd05",
+   "bytes": 158576,
+   "source_url": "https://raw.githubusercontent.com/google/fonts/main/ofl/poppins/Poppins-Medium.ttf",
+   "license": "Poppins-OFL.txt"
+  },
+  {
+   "file": "Poppins-SemiBold.ttf",
+   "sha256": "d3bf1bdaf0550e83da9ac0b1d1d9fe6db086835a83aa28578e609a394b9a0286",
+   "bytes": 157312,
+   "source_url": "https://raw.githubusercontent.com/google/fonts/main/ofl/poppins/Poppins-SemiBold.ttf",
+   "license": "Poppins-OFL.txt"
+  },
+  {
+   "file": "JetBrainsMono-Regular.ttf",
+   "sha256": "a0bf60ef0f83c5ed4d7a75d45838548b1f6873372dfac88f71804491898d138f",
+   "bytes": 273900,
+   "source_url": "https://raw.githubusercontent.com/JetBrains/JetBrainsMono/v2.304/fonts/ttf/JetBrainsMono-Regular.ttf",
+   "license": "JetBrainsMono-OFL.txt"
+  },
+  {
+   "file": "JetBrainsMono-Medium.ttf",
+   "sha256": "31c92d01a8a08528b718a43addf0ad3df0af2ca4b7b3290a452f70f358e14d3d",
+   "bytes": 273860,
+   "source_url": "https://raw.githubusercontent.com/JetBrains/JetBrainsMono/v2.304/fonts/ttf/JetBrainsMono-Medium.ttf",
+   "license": "JetBrainsMono-OFL.txt"
+  },
+  {
+   "file": "JetBrainsMono-Bold.ttf",
+   "sha256": "5590990c82e097397517f275f430af4546e1c45cff408bde4255dad142479dcb",
+   "bytes": 277828,
+   "source_url": "https://raw.githubusercontent.com/JetBrains/JetBrainsMono/v2.304/fonts/ttf/JetBrainsMono-Bold.ttf",
+   "license": "JetBrainsMono-OFL.txt"
+  },
+  {
+   "file": "Fraunces-SemiBold.ttf",
+   "sha256": "7d17e12c7bf38bd298b695cecf95b5a6c0c291abedba7dc6bbf516b242f54223",
+   "bytes": 73192,
+   "source_url": "https://raw.githubusercontent.com/google/fonts/main/ofl/fraunces/Fraunces%5BSOFT,WONK,opsz,wght%5D.ttf",
+   "license": "Fraunces-OFL.txt",
+   "derived": "fontTools.varLib.instancer: wght=600 opsz=72 SOFT=0 WONK=0 (no Reserved Font Name)"
+  },
+  {
+   "file": "BricolageGrotesque-Medium.ttf",
+   "sha256": "1dd2a3b41e0ce8eff2d9000ce8e79e8a5d9d2f0b22f4e27dc8c59e94894fe50a",
+   "bytes": 115764,
+   "source_url": "https://raw.githubusercontent.com/ateliertriay/bricolage/main/fonts/ttf/BricolageGrotesque-Medium.ttf",
+   "license": "BricolageGrotesque-OFL.txt"
+  },
+  {
+   "file": "PressStart2P-Regular.ttf",
+   "sha256": "034c77f1f05ec89421e4a63f0e3a4ca1ecf852cc6d2bf611f126f275728e017d",
+   "bytes": 118204,
+   "source_url": "https://raw.githubusercontent.com/google/fonts/main/ofl/pressstart2p/PressStart2P-Regular.ttf",
+   "license": "PressStart2P-OFL.txt"
+  }
+ ]
+}

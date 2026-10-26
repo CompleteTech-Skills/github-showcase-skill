@@ -1,0 +1,7 @@
+interface:
+  display_name: "GitHub Showcase Skill"
+  short_description: "Make repos, orgs, projects and the Enterprise match CompleteTech"
+  default_prompt: "Use $github-showcase-skill to generate the hero banner and repo card for this repository and bring its README, description, topics, labels, links and images to the CompleteTech estate standard, so it matches the rest of the CompleteTech, AI Ascension, Jev Engineering, jevplay-games or LibreEvolve repositories; for an org, GitHub Project board or the CompleteTech Enterprise, use its org, project or enterprise commands to print the plan and writer jobs, without writing to GitHub."
+
+policy:
+  allow_implicit_invocation: true

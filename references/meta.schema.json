@@ -1,0 +1,201 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/CompleteTech-Skills/github-showcase-skill/references/meta.schema.json",
+  "title": "Normalized repository metadata (showcase.py meta)",
+  "type": "object",
+  "required": [
+    "owner",
+    "repo"
+  ],
+  "properties": {
+    "owner": {
+      "type": "string",
+      "minLength": 1
+    },
+    "repo": {
+      "type": "string",
+      "minLength": 1
+    },
+    "description": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "homepage": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "topics": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "fork": {
+      "type": "boolean"
+    },
+    "archived": {
+      "type": "boolean"
+    },
+    "visibility": {
+      "type": "string",
+      "enum": [
+        "public",
+        "private",
+        "internal",
+        "unknown"
+      ]
+    },
+    "is_template": {
+      "type": "boolean"
+    },
+    "default_branch": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "language": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "languages": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer"
+      }
+    },
+    "license": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "stargazers_count": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "created_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "pushed_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "last_substantive_commit": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "CQ-16: date of the newest default-branch commit whose message does not match ct-std-v1|showcase banner and card|[skip ci] (meta --from-gh)"
+    },
+    "last_substantive_sha": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "labels": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "color": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "readme_head": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "parent": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "health_percentage": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "has_issues": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "has_wiki": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "has_projects": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "has_discussions": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "delete_branch_on_merge": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "also_in": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "ahead_by": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "detected": {
+      "type": "object"
+    }
+  }
+}

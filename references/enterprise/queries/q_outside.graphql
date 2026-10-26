@@ -1,0 +1,10 @@
+query($slug: String!, $after: String) {
+  enterprise(slug: $slug) {
+    ownerInfo {
+      outsideCollaborators(first: 100, after: $after) {
+        totalCount pageInfo { hasNextPage endCursor }
+        edges { node { login } repositories(first: 100) { nodes { nameWithOwner isPrivate } } }
+      }
+    }
+  }
+}

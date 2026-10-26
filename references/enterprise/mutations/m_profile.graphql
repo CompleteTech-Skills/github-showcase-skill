@@ -1,0 +1,5 @@
+mutation($id: ID!, $name: String, $description: String, $website: String, $location: String) {
+  updateEnterpriseProfile(input: {enterpriseId: $id, name: $name, description: $description, websiteUrl: $website, location: $location}) {
+    enterprise { name description websiteUrl location }
+  }
+}

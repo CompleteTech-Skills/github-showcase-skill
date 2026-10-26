@@ -1,0 +1,19 @@
+{
+ "owner": "CompleteTech-Skills",
+ "repo": "github-showcase-skill",
+ "description": "Generate CompleteTech LLC README banners, repo cards and profile art, and check repositories against the standard.",
+ "homepage": "https://www.complete.tech",
+ "topics": ["completetech", "claude-skill", "codex-skill", "agentic-ai", "agent-skills", "python"],
+ "fork": false,
+ "archived": false,
+ "visibility": "public",
+ "is_template": false,
+ "default_branch": "main",
+ "language": "Python",
+ "languages": {"Python": 150000},
+ "license": "MIT",
+ "stargazers_count": 0,
+ "created_at": "2026-10-25T00:00:00Z",
+ "labels": [],
+ "_note": "Pre-publish metadata for this skill (spec §0); the repository is created by the orchestrator in Phase 4."
+}

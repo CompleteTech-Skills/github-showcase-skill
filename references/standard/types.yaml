@@ -1,0 +1,39 @@
+# STANDARD §5.4: type detection data and the type -> variant -> card category table (ct-std-v1).
+# Detection order (first match wins) is implemented in scripts/ctshowcase/detect.py rules 1-25;
+# the dependency and pattern lists it reads live here.
+standard: ct-std-v1
+domain_tlds: [com, tech, llc, club, app, ai, games, io, net, org]
+security_owner: CompleTetech-Security
+game_owners: [jevplay-games, CompleteTech-Games, CompleteTechDiscord-Games]
+research_owner: CompleteTech-LLC-AI-Research
+deps:
+  mcp-server: ["@modelcontextprotocol/sdk", mcp, fastmcp]
+  discord-bot: [discord.js, discord.py, py-cord, nextcord]
+  bot: [python-telegram-bot, slack_bolt, slack-bolt, "@slack/bolt", telegraf, tmi.js]
+  web-app: [react, next, vue, svelte, astro, streamlit]
+  api: [fastapi, flask, express]
+types:
+  fork:             {variant: G, category: null}
+  backup:           {variant: H, category: null}
+  github-profile:   {variant: J, category: null}
+  template:         {variant: C, category: Template}
+  agent-skills:     {variant: A, variant_elsewhere: C, category: Agent skill}
+  security-check:   {variant: F, category: CVE checker}
+  mcp-server:       {variant: C, category: MCP server}
+  chrome-extension: {variant: B, category: Chrome extension}
+  plugin:           {variant: C, category: Plugin}
+  discord-bot:      {variant: C, category: Discord bot}
+  bot:              {variant: C, category: Bot}
+  game:             {variant: E, category: Game}
+  mobile-app:       {variant: B, category: Mobile app}
+  infrastructure:   {variant: C, variant_private: I, category: Infrastructure}
+  website:          {variant: B, category: Website}
+  hardware:         {variant: C, variant_private: I, category: Hardware}
+  web-app:          {variant: B, category: Web app}
+  api:              {variant: C, category: API service}
+  cli:              {variant: C, category: CLI tool}
+  library:          {variant: C, category: Library}
+  research:         {variant: D, category: Research}
+  tutorial:         {variant: C, category: Tutorial}
+  dataset:          {variant: D, category: Dataset}
+  workspace:        {variant: C, variant_private: I, category: Workspace}

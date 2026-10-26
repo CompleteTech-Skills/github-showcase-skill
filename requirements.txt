@@ -1,0 +1,6 @@
+# Typesetting and compositing (scripts/showcase.py banner|card|org-tile|intro|contact-sheet)
+fonttools==4.67.0
+uharfbuzz==0.57.0
+pillow==13.0.0
+# brand.yaml, labels.yml, workflow and frontmatter parsing
+pyyaml==6.0.3

@@ -1,0 +1,77 @@
+{
+ "config_sha256": "4cd0caf82fc10496ecbad005894e93d2d009d3b8fc1785fea9c7ecd4d0bdbd4c",
+ "fingerprint": "1930f6c18169868cf0c62d6c0eeb612fad09664f33be876cf13702dfafa22b68",
+ "inputs": {
+  "description": "Generate CompleteTech LLC README banners, repo cards and profile art, and check repositories against the standard.",
+  "icon_sha256": null,
+  "language": "Python",
+  "license": "MIT",
+  "override_sha256": "f9af3c1586bb0da3a83c465ba8c7b560324d8532fb4c7b685e111a76136230d3",
+  "owner": "CompleteTech-Skills",
+  "repo": "github-showcase-skill",
+  "topics": [
+   "agent-skills",
+   "agentic-ai",
+   "claude-skill",
+   "codex-skill",
+   "completetech",
+   "python"
+  ],
+  "type": "agent-skills",
+  "visibility": "public"
+ },
+ "outputs": {
+  "banner.png": {
+   "bytes": 254246,
+   "chips": [
+    {
+     "box": [
+      520,
+      241.5,
+      170.0,
+      38
+     ],
+     "kind": "attr",
+     "source": "topics",
+     "text": "Claude · Codex"
+    },
+    {
+     "box": [
+      702.0,
+      241.5,
+      96.1,
+      38
+     ],
+     "kind": "attr",
+     "source": "meta",
+     "text": "Python"
+    },
+    {
+     "box": [
+      810.1,
+      241.5,
+      91.6,
+      38
+     ],
+     "kind": "attr",
+     "source": "readme",
+     "text": "Offline"
+    }
+   ],
+   "icon_source": "org-mark",
+   "px": [
+    2560,
+    720
+   ],
+   "scale": 2,
+   "sha256": "e6c80860e630c78025fe69421ed039efc1366b6945850f77da27882e5763f6b7"
+  },
+  "card.svg": {
+   "bytes": 21724,
+   "sha256": "dac24905e4fdddce62dac0f20071ddf2fe304874e0088f7ad9e256f82e29eff6"
+  }
+ },
+ "schema": 1,
+ "skill_version": "1.0.0",
+ "standard": "ct-std-v1"
+}

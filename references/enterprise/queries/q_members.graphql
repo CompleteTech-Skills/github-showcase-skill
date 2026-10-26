@@ -1,0 +1,8 @@
+query($slug: String!, $after: String) {
+  enterprise(slug: $slug) {
+    members(first: 100, after: $after) {
+      totalCount pageInfo { hasNextPage endCursor }
+      nodes { ... on EnterpriseUserAccount { login organizations(first: 100) { edges { role node { login } } } } }
+    }
+  }
+}

@@ -1,0 +1,7 @@
+[
+ {"databaseId": 103, "workflowName": "Tests", "headBranch": "main", "event": "push", "status": "completed", "conclusion": "failure", "createdAt": "2026-10-20T10:00:00Z", "headSha": "c3", "url": "https://github.com/Northwind-Trading-Co/support-triage-agent/actions/runs/103"},
+ {"databaseId": 102, "workflowName": "Tests", "headBranch": "main", "event": "push", "status": "completed", "conclusion": "success", "createdAt": "2026-10-19T10:00:00Z", "headSha": "c2", "url": "https://github.com/Northwind-Trading-Co/support-triage-agent/actions/runs/102"},
+ {"databaseId": 104, "workflowName": "Tests", "headBranch": "feature/x", "event": "push", "status": "completed", "conclusion": "success", "createdAt": "2026-10-21T10:00:00Z", "headSha": "f1", "url": "https://github.com/Northwind-Trading-Co/support-triage-agent/actions/runs/104"},
+ {"databaseId": 101, "workflowName": "Deploy site", "headBranch": "main", "event": "push", "status": "completed", "conclusion": "success", "createdAt": "2026-10-19T09:00:00Z", "headSha": "c2", "url": "https://github.com/Northwind-Trading-Co/support-triage-agent/actions/runs/101"},
+ {"databaseId": 105, "workflowName": "Docs lint", "headBranch": "main", "event": "push", "status": "in_progress", "conclusion": "", "createdAt": "2026-10-21T11:00:00Z", "headSha": "c4", "url": "https://github.com/Northwind-Trading-Co/support-triage-agent/actions/runs/105"}
+]

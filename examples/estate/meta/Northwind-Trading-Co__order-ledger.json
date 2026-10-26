@@ -1,0 +1,24 @@
+{
+ "owner": "Northwind-Trading-Co",
+ "repo": "order-ledger",
+ "description": "Record Northwind orders in an append-only ledger.",
+ "homepage": "",
+ "topics": [],
+ "fork": false,
+ "archived": false,
+ "visibility": "public",
+ "default_branch": "main",
+ "stargazers_count": 3,
+ "pushed_at": "2026-10-01T00:00:00Z",
+ "language": "Python",
+ "license": "MIT",
+ "has_issues": true,
+ "labels": [
+  {
+   "name": "bug",
+   "color": "d73a4a",
+   "description": "Something isn't working"
+  }
+ ],
+ "last_substantive_commit": "2026-10-20"
+}

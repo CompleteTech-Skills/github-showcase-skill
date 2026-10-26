@@ -1,0 +1,46 @@
+# Content module (`showcase.py content`)
+
+Repository content checks that the estate audit assigned to the skill: links (CQ-04, RP-09), the language bar (RP-07, CQ-08), Actions health and merge side effects (RP-06, RP-01, CQ-13), README images (RP-03, RP-10), the About sidebar (RP-05), repository icons (RT-04, decision 12) and the social preview (R10). Like every other module it is **read-only toward GitHub**: nothing here rewrites a README, edits `.gitattributes`, touches a workflow file or uploads anything. Each action reports facts and emits proposals: unified diffs, `gh` argv and `scripts/writer.py` jobs (`browser` jobs for UI-only steps, with the exact click path in `steps`).
+
+## Commands
+
+Run from inside the target checkout, or pass the global `--repo-dir DIR` and `--meta FILE` like the repository commands.
+
+```bash
+S=<skill-dir>/scripts/showcase.py
+python3 $S --meta meta.json content social [--out assets/social-preview.png] [--job]          # alias of social-preview
+python3 $S --meta meta.json content icon prompt [--glyph glyph.yaml] [--option A|B] [--out art/prompts/ORG/REPO/icon.md]
+python3 $S --meta meta.json content icon normalize --in candidate.png [--ground auto|transparent|keep] [--out assets/icon.png] [--preview icon-48.png]
+python3 $S --meta meta.json content icon check [--out assets/icon.png]
+python3 $S content links [FILE ...] [--base-ref origin/main] [--online [--cache links.json]] [--strict] [--diff]
+python3 $S --meta meta.json content linguist [--min-share 0.02] [--language Python]
+python3 $S --meta meta.json content actions [--runs runs.json] [--workflows workflows.json] [--pages pages.json] [--approval WORKFLOW=ID]
+python3 $S content images [FILE ...] [--base-ref HEAD] [--approval-id ID] [--out-dir candidates/] [--online]
+python3 $S content sidebar --facts facts.json [--packages packages.json]... [--current states.json] [--repo OWNER/REPO]
+```
+
+Every action also takes `--report FILE` (the JSON result), `--jobs FILE` (append the writer jobs as JSON lines), and `--registry`, `--approved`, `--approved-yaml`, `--actions` for the shared org resolver.
+
+| Action | Gap | Does | Writes |
+|---|---|---|---|
+| `social` | R10 | The 1280×640 repository social preview (the contract name; the top-level `social-preview` is a hidden, deprecated alias with the same options and file), plus with `--job` the `browser` upload job (Settings → Social preview → Edit → Upload, then a read-only `usesCustomOpenGraphImage` check). Public T1 and T2 repositories only; forks, archived, `.github` and Pages repositories get no job. | `--out` |
+| `icon prompt` | RT-04 | Fills the repository-icon prompt from the art direction (option A: the Neon Night glyph; option B: the isometric illustration) and the repository's facts. The glyph itself is the writer's: `needs-writer` (exit 1) until `--glyph` supplies `glyph_name`, `glyph_description`, `spark_placement` and `size_class`; nothing is written before then. | `--out` |
+| `icon normalize` | RT-04 | Keys a returned candidate to transparency (or keeps an opaque night tile full-bleed), trims and fits it to the 688 px live area of a 1024 px RGBA PNG, then runs the QA. A failing QA writes nothing (`art-fail:icon-qa`, exit 1). | `--out` (default `assets/icon.png` in the checkout), `--preview` |
+| `icon check` | RT-04 | Automated icon QA: size, byte budget, alpha, live area, coverage, contrast on the card, family inks, not the org glyph, one file. OCR and the 48 px set sheet stay manual. | nothing |
+| `links` | CQ-04, RP-09 | Every relative link, anchor and image target in the displayed README (GitHub's `.github/`, root, `docs/` precedence, or `--readme-path`), `docs/**`, `.github/*.md` and the org profile. With `--base-ref`, only breakage the change introduces fails; `--strict` fails any. `--online` adds cached, polite remote checks (HEAD first, one request per host per `--delay` seconds, at most `--max-remote`) and `gh` `full_name` checks for GitHub links, so a renamed org or repository is proposed under its current name. Offline, a link to this repository under a former estate owner (a transfer left its badges, release and clone URLs on the old org) is `moved` with a rewrite proposal; rewrites match whole targets, so `…/tests.yml` never half-rewrites `…/tests.yml/badge.svg`. Broken links carry proposals; `--diff` prints them as a unified diff that is never applied. | `--cache` |
+| `linguist` | RP-07, CQ-08 | Paths that distort the language bar (vendored, generated, docs and example trees), the proposed append-only `# ct-std linguist` block for `.gitattributes`, the bar before and after, and the primary language a chip, card dot or badge may show (manifest runtime, then a `language:` override, then the corrected top language). | nothing |
+| `actions` | RP-06, RP-01, CQ-13 | Red runs and README status badges for failing workflows, upstream-only automation in forks (CLA, stale, labeler), and what a README merge would start (deploys first). Workflow on/off changes are proposals that need a `workflow-toggle` approval (`--approval WORKFLOW=ID`, keyed by the workflow file name); the job's argv names the workflow file (`gh workflow disable stale.yml -R OWNER/REPO`), never its numeric id, because the guard matches the approval's `detail` against it. | nothing |
+| `images` | RP-03, RP-10 | README and docs image budget (bytes, pixels, alt text), lossless optimization proposals (pixel-identical candidates with `--out-dir`), lossy ones only with a per-repository approval (`--approval-id`, review q69), and dark-theme flags for images that vanish on the dark page. | `--out-dir` |
+| `sidebar` | RP-05 | Target state of the About "Include in the home page" boxes (Releases, Packages, Deployments shown only when they exist, decision 7) and the `browser` job that sets them; GitHub's default shows all three, so only repositories whose target differs get a job. A facts file keyed by `OWNER/REPO` plans the whole estate and returns `registry/sidebar.tsv` rows; a repository with a missing count gets no job, and a batch with no job but missing facts is `needs-input` (with `needs_input`, the number of such repositories), never `pass`. | nothing |
+
+## Results and exit codes
+
+Each action prints one JSON object (`command: "content"`, `action`, `owner`, `repo`, `result`, `logs`, plus its facts, `proposals` and `jobs`). `result` is `pass`, `warn`, `proposal`, `fail`, `needs-writer`, `needs-input` (a capture such as `--runs` is missing; the facts it could check are still reported) or `exempt`. `fail` and `needs-writer` exit 1, a refused owner or a usage error exits 2, and a missing required input (no art direction, no registry row for the org, or `links`/`images` run where there is no README or Markdown file to check) exits 4. Watching-org repositories and forks are `exempt` from icons; excluded, HOLD and T3 owners are refused under any of their logins (the shared resolver, CQ-03).
+
+## Network
+
+None by default. `links --online` and `images --online` make cached, rate-limited HEAD/GET requests to the hosts the files link to and read-only `gh api` GETs; `--cache` is the only state they keep. Local, private-network and `example.*` hosts are allowlisted and never fetched.
+
+## Without the estate bundle
+
+All actions run on a checkout and a metadata file alone. The registry and approvals refine the result when present (a renamed org's packages and links resolve to its current login; a registry `language:` override reaches the chip); without them the resolver uses `references/brand.yaml` and treats nothing as approved. `icon prompt`, `icon normalize` and `icon check` read the estate's `art/ART_DIRECTION.md` when the skill sits in the bundle; elsewhere pass `--art-direction FILE` (without it, `prompt` exits 4 with `needs-input:art-direction` and the QA skips the family-ink check). The skill's own [art-direction.md](art-direction.md) is the option B source.

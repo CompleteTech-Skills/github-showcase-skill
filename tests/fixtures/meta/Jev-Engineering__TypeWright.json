@@ -1,0 +1,146 @@
+{
+ "archived": false,
+ "created_at": "2026-09-20T00:58:50Z",
+ "default_branch": "main",
+ "description": "Declare a decision, compile typed Jev questions, measure them, and ship a JSON program",
+ "fork": false,
+ "has_discussions": false,
+ "has_issues": true,
+ "has_projects": true,
+ "has_wiki": false,
+ "health_percentage": 87,
+ "homepage": null,
+ "is_template": false,
+ "labels": [
+  {
+   "color": "1d76db",
+   "description": "Hierarchy work in architecture",
+   "name": "area:architecture"
+  },
+  {
+   "color": "1d76db",
+   "description": "Hierarchy work in compiler",
+   "name": "area:compiler"
+  },
+  {
+   "color": "1d76db",
+   "description": "Hierarchy work in evaluation",
+   "name": "area:evaluation"
+  },
+  {
+   "color": "1d76db",
+   "description": "Hierarchy work in examples",
+   "name": "area:examples"
+  },
+  {
+   "color": "1d76db",
+   "description": "Hierarchy work in quality",
+   "name": "area:quality"
+  },
+  {
+   "color": "1d76db",
+   "description": "Hierarchy work in runtime",
+   "name": "area:runtime"
+  },
+  {
+   "color": "1d76db",
+   "description": "Hierarchy work in tooling",
+   "name": "area:tooling"
+  },
+  {
+   "color": "d73a4a",
+   "description": "Something isn't working",
+   "name": "bug"
+  },
+  {
+   "color": "0075ca",
+   "description": "Improvements or additions to documentation",
+   "name": "documentation"
+  },
+  {
+   "color": "cfd3d7",
+   "description": "This issue or pull request already exists",
+   "name": "duplicate"
+  },
+  {
+   "color": "a2eeef",
+   "description": "New feature or request",
+   "name": "enhancement"
+  },
+  {
+   "color": "7057ff",
+   "description": "Good for newcomers",
+   "name": "good first issue"
+  },
+  {
+   "color": "008672",
+   "description": "Extra attention is needed",
+   "name": "help wanted"
+  },
+  {
+   "color": "5319e7",
+   "description": "Native typed hierarchy implementation and acceptance",
+   "name": "hierarchy"
+  },
+  {
+   "color": "e4e669",
+   "description": "This doesn't seem right",
+   "name": "invalid"
+  },
+  {
+   "color": "b60205",
+   "description": "Architecture or release gate for this milestone",
+   "name": "priority:P0"
+  },
+  {
+   "color": "d93f0b",
+   "description": "Required implementation work for this milestone",
+   "name": "priority:P1"
+  },
+  {
+   "color": "d876e3",
+   "description": "Further information is requested",
+   "name": "question"
+  },
+  {
+   "color": "fbca04",
+   "description": "Has open implementation prerequisites; see dependencies",
+   "name": "status:blocked"
+  },
+  {
+   "color": "0e8a16",
+   "description": "No open implementation prerequisite in this plan",
+   "name": "status:ready"
+  },
+  {
+   "color": "3e4b9e",
+   "description": "Parent tracking issue for a complete feature",
+   "name": "type:epic"
+  },
+  {
+   "color": "ffffff",
+   "description": "This will not be worked on",
+   "name": "wontfix"
+  }
+ ],
+ "language": "Python",
+ "languages": {
+  "PowerShell": 1194,
+  "Python": 951664,
+  "Shell": 873
+ },
+ "license": "MIT",
+ "owner": "Jev-Engineering",
+ "repo": "TypeWright",
+ "stargazers_count": 7,
+ "topics": [
+  "calibration",
+  "cli",
+  "compiler",
+  "jev",
+  "llm",
+  "python",
+  "typed-decisions"
+ ],
+ "visibility": "public"
+}

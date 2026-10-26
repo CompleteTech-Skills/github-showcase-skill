@@ -1,0 +1,54 @@
+# Projects module (`showcase.py project`)
+
+Decision 23 and STANDARD §13 (the estate Projects standard), following the estate research's skill-versus-browser split. The module is **read-only toward GitHub**. It prints the capture query, normalizes a captured board into the template spec, lints a board against §13, fills the board README, and plans `scripts/writer.py` jobs for the copy and its follow-up edits. It never runs a job.
+
+Rules it never bends:
+
+- A copy carries structure only: never `--drafts`, never items.
+- Nothing is deleted: projects, fields, options, items, views and workflows stay. An option list is replaced only with every existing option `id` kept.
+- Every mutation is printed **inline** (`-f query='mutation …'` with literal values or `-f` variables). Only read queries load from a file (`-F query=@FILE`), so the writer's guard sees each mutation.
+- Pick-Your-AI (T3, co-owned) is read, never changed, marked or linked.
+- Visibility stays private unless a visibility item is approved: an `approved.tsv` row `project-visibility ORG *`, or the key form `scripts/guard.py` and `build_approvals.py` use, `graphql project-visibility *`. No review question grants either today, so boards stay private (fails safe). The template and the Estate always stay private.
+- `copy-plan` titles a board with the org's `display_name` from `brand.yaml`, never its raw login: an org with no brand row (for example `CompleteTech-TCG` before its rename is approved and added to `former_slugs`) exits 4 `needs-input:display-name` and appends no job; pass `--display-name` or add the row.
+- The captured reference board wins (§13.1): a field whose options share no name with the standard's (Priority `P0`/`P1`/`P2`) keeps its own scale (`capture-wins:<field>`, never a merged list); Status always takes the standard list with Todo renamed to Backlog.
+
+## Commands
+
+```bash
+S=<skill-dir>/scripts/showcase.py
+python3 $S project capture-query --owner OWNER --number N                     # the validated read-only capture (GraphQL + REST field ids)
+python3 $S project normalize --capture capture.json [--rest-fields fields.json] [--out template.json]
+python3 $S project lint --capture capture.json --owner ORG [--role org|template|estate]
+python3 $S project copy-plan --target ORG [--role org|template|estate] [--source OWNER/N] [--approval-id ID] [--jobs jobs.jsonl]
+python3 $S project copy-plan --target ORG --copied after-copy.json [--workstreams ws.yaml] [--repos ORG/A,ORG/B] --files-dir DIR --jobs jobs.jsonl
+python3 $S project readme --capture after-copy.json --owner ORG [--out README.md]
+python3 $S project estate-plan [--copied after-copy.json] [--user-id ID] [--jobs jobs.jsonl]
+```
+
+| Action | Does | Writes |
+|---|---|---|
+| `capture-query` | Prints the §4.1 capture: `gh api graphql -F org=… -F number=… -F query=@project_capture.graphql` (the user variant for `@me`/CompleteDotTech), the REST project and fields reads (integer field ids), and `gh project field-list` as a cross-check. Items are never captured. | nothing |
+| `normalize` | Turns a capture (plus optional REST fields) into the template spec: fields with options, colours and descriptions, the iteration configuration, views (layout, filter, grouping, sort, visible fields), workflows, README, short description, linked repositories and the Mode A/B flag (`isIssueField`). Mode B logs `needs-user-choice:issue-fields`. | `--out` |
+| `lint` | §13 cells: `title`, `short-description` (one sentence, ≤ 120 characters, no emoji or dash, exact brand strings), `readme` (no emoji or placeholders; Purpose, Views, Fields, Workflow, Cadence and Links sections), `fields`, `options`, `workstreams` (colour by kind), `iteration` (14 days from Monday), `views` (present and in tab order), `workflows`, `visibility`, `template`, `mode`. Exit 1 on a `fail` cell. This is O10. | nothing |
+| `copy-plan` | **Stage 1** (no `--copied`): the `gh project copy` job (`create-project`, `approval_id` `q41.orgs`, or `q41.estate` for the Estate; `--approval-id` overrides) and the node-id read; then re-capture the new board. **Stage 2** (`--copied`): the full option lists (`updateProjectV2Field`; the first Status option renamed to Backlog so the closed and merged workflows keep it), missing fields (`createProjectV2Field`, iterations anchored at 2026-11-02), missing views (REST `POST …/projectsV2/N/views` bodies with integer field ids; with `--files-dir` each job's `--input` names the written file by its absolute path, so the writer's guard can read it; `--jobs` without `--files-dir` exits 2 and appends nothing when the plan has view bodies), filters (`updateProjectV2View`), the short description and README (`gh project edit`), repository links, the first status update (it links the Shipped view only once its number is known, else the board; `status-update:shipped-view-pending`), and `browser` jobs for every UI-only setting. | `--files-dir` (the REST view bodies), `--jobs` |
+| `readme` | Fills the §13.7 README template for a copied board (view numbers from the post-copy capture). The Fields table and the Workflow line document the board's own options (a kept scale such as P0/P1/P2, its workstreams, its Status flow), and in `copy-plan` the options the plan's jobs leave; emoji in option text are dropped from the README (`readme-emoji-stripped:<field>/<option>`). A missing view number is `needs-input:view-numbers` (exit 4); no brace may remain, and `TODO`/`TBD` are placeholders only in capitals (`Todo` is GitHub's default Status option). | `--out` |
+| `estate-plan` | The private cross-org "CompleteTech — Estate" board on CompleteDotTech: the copy, the Org, Stream kind, Workstream (text) and Health fields (in-scope T1, T2 and T2-R orgs; T3 only after sign-off; never HOLD or excluded), the Estate views, the read that lists labelled items, and a browser check that it stays private. | `--jobs` |
+
+Common flags: `--registry` and `--approved` (display names and approvals, through the shared resolver, so renamed orgs keep resolving), `--display-name`, `--title`, `--allow-t3`, `--no-status-update`, `--reviewed DATE`, `--out-of-scope TEXT`, `--user-id ID` (user-owned view paths).
+
+## Source board and stages
+
+1. Capture the reference board (Pick-Your-AI project 1, "Workstream Overview" view): `mkdir -p registry/projects state/screens/projects`, then `capture-query --owner Pick-Your-AI --number 1` and run each `reads[].argv` it prints (the GraphQL read already carries `-F org=Pick-Your-AI -F number=1 -F query=@<skill>/scripts/ctshowcase/queries/project_capture.graphql`), saving each output to its `out`. The **raw** GraphQL output is `registry/projects/workstream-overview.template.json` (the file `scripts/writer.py` reads for the T3 node-id check, so never overwrite it with the normalized form, which drops node ids); then run the printed `normalize` command, which writes the spec to `registry/projects/workstream-overview.spec.json`.
+2. Build the template on CompleteTech-LLC: `copy-plan --role template --target CompleteTech-LLC` (title `TEMPLATE — Workstream Portfolio`), apply, re-capture, then `copy-plan --role template --copied …`. Mark it as a template last (UI).
+3. Roll out per approved org: `copy-plan --target ORG --source CompleteTech-LLC/<template number>`, apply, re-capture, `copy-plan --copied …`. Without `--source`, the plan copies Pick-Your-AI/1 directly and logs `fallback:direct-copy` (§13.9 fallback).
+4. Optional Estate: `estate-plan`, after its `create-project` approval for `@me`.
+
+Each org's board title is `{display name} — Workstreams`; its short description is `{display name} workstreams: what is in flight, what is next and what has shipped, updated weekly.` The org's workstream names and descriptions are the writer's (`--workstreams`); until supplied, stage 2 logs `needs-input:workstreams` and keeps the generic options.
+
+## Jobs and logs
+
+Jobs follow the shared contract `{id, phase: "6.3", kind, org, approval_id?, argv, note}`; the `create-project` job carries the review question id that approves it (`q41.orgs`, `q41.estate`), which `scripts/writer.py` checks in `APPROVED_ACTIONS.yaml` while the guard checks the `create-project ORG *` row in `approved.tsv`; kinds are `create-project`, `project` (inline GraphQL and `gh project`/`gh api` REST calls) and `browser` (`project-view-settings`, `project-workflows`, `project-settings`, `project-check`) with exact click paths and a screenshot path under `state/screens/projects/`. Common logs: `needs-approval:create-project:ORG` (stage 1 only), `needs-input:workstreams`, `needs-input:view-numbers`, `rename-option:Todo->Backlog`, `optional-field-skipped:Tags`, `capture-wins:Priority`, `status-update:shipped-view-pending`, `visibility:private (no approval)`, `template-owner`, `fallback:direct-copy`.
+
+## Without the estate bundle
+
+`capture-query`, `normalize`, `lint` and `readme` work on any capture file. `copy-plan` and `estate-plan` use `references/brand.yaml` for display names and read approvals and the registry only when given (`--registry`, `--approved`) or found beside the skill (`$SHOWCASE_ESTATE_ROOT`); with none, every approval is "not yet given" and logged. Synthetic captures for trying the commands are in `tests/fixtures/project/`.
