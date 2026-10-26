@@ -237,7 +237,9 @@ def cmd_social(args):
     from ctshowcase import social
     from ctshowcase.typeset import Fonts
     ctx = context(args)
-    if gate_owner(ctx, args.allow_hold) == "watching" or ctx.det["type"] in ("fork", "backup", "github-profile"):
+    # R10 (ctx.social_applicable) includes backups and the personal-profile capstone: render whatever adopt uploads
+    if gate_owner(ctx, args.allow_hold) == "watching" or ctx.det["type"] == "fork" or \
+            (ctx.det["type"] == "github-profile" and ctx.repo == ".github"):
         return base("social-preview", ctx, result="exempt", logs=["exempt:no-social-preview"]), OK
     ctx.require_measured(args.allow_unmeasured)
     r = getattr(args, "_content_resolver", None)  # set by `content social` from its --registry/--approved* flags

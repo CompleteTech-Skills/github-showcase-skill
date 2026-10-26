@@ -57,7 +57,10 @@ def row(ctx: RepoContext) -> dict:
     if kept_default and ctx.det["type"] != "fork":
         logs.append("default-branch kept (user)")
     if ctx.det["type"] == "fork":
-        cells["R5"] = "pass"  # upstream default and merge settings are preserved (§10.1)
+        # upstream default and merge settings are preserved (§10.1); watching and archive org forks turn Issues off
+        utility = ctx.tier == "T2-R" or ctx.brand.owner_status(ctx.owner) == "watching"
+        issues = ctx.meta.get("has_issues")
+        cells["R5"] = "pass" if not utility or issues is False else ("unknown" if issues is None else "fail")
     elif ctx.meta.get("delete_branch_on_merge") is None:
         cells["R5"] = "unknown"
     else:

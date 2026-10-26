@@ -86,7 +86,9 @@ def adopt(ctx, resolver=None, *, approval_id: str | None = None, fresh: bool = F
         jobs.append(_job(_jid("p3", "settings", sid), argv, full, "§10.1 settings baseline (RP-13: a template-born "
                          "repository gets none of them).", approval_id))
         recs.append(records.record(owner, repo, "settings", "settings", {k: meta.get(k) for k in patch}, patch, "§10.1"))
-    if (meta.get("default_branch") or "main") != "main" and not fork:
+    if (meta.get("default_branch") or "main") != "main" and not fork and meta.get("default_branch_policy") == "keep":
+        logs.append("default-branch kept (user)")  # as doctor R5: the user declined the rename (RT-17)
+    elif (meta.get("default_branch") or "main") != "main" and not fork:
         checklist.append(f"default branch is {meta.get('default_branch')}: propose `rename-default-branch` in "
                          "NEW_PROPOSALS.yaml (§10.1, q52); never renamed by adopt")
     # §5.6 topics ------------------------------------------------------------------------------------------------

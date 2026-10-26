@@ -7,7 +7,9 @@ All notable changes to `github-showcase-skill` are recorded here. Versions follo
 ### Fixed
 
 - `doctor` reports disabled-Issues label checks, inapplicable social previews and archived community health as `n/a`, while preserving label coverage during approved archived polishing and unknown captured values on applicable surfaces. Social upload plans share the R10 applicability rule and include the personal-profile capstone.
-- R5 preserves upstream defaults on forks and accepts a captured user keep decision for other default branches without relaxing the merge or Issues checks.
+- `doctor` reports R11 as `n/a` for archived repositories and outside T1/T2 organizations (personal-account, utility and co-owned repositories), matching the definition of done.
+- R5 preserves upstream defaults on forks (forks in the watching and archive orgs still need Issues off, as `adopt` plans) and accepts a captured user keep decision for other default branches without relaxing the merge or Issues checks. `adopt` honours the same keep decision: it logs `default-branch kept (user)` instead of asking for a `rename-default-branch` proposal.
+- `content social` renders the personal-profile capstone and backup repositories, which R10 and the `adopt` upload job include; it previously exempted them, so the planned upload had no image.
 - Label job plans include a per-repository `labels:OWNER/REPO` group for writer reconciliation. Explicit orchestrator groups are preserved.
 - `adopt` withholds jobs and change records for an archived capture, with instructions to re-capture inside the approved unarchive/polish/re-archive cycle. Security jobs are emitted only for active eligible repositories.
 
