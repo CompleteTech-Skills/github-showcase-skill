@@ -237,18 +237,19 @@ def lead(ctx: RepoContext, banner: str, nav: str) -> list[str]:
     return [nav, banner] if nav_first(ctx) else [banner, nav]
 
 
-def inherited_tagline(ctx: RepoContext, body: str, text: str) -> bool:
+def inherited_tagline(ctx: RepoContext, body: str, text: str, fallback: bool = True) -> bool:
     """True when the tagline block `body` of README `text` came from the template this repository was generated from
     (never another repository's line is kept): it is one of meta template_taglines (the template's tagline when this
     repository was generated, and today); only when those are unknown, an untouched (pristine) template body stands in
-    as the proof. The template repository's own tagline is never inherited."""
+    as the proof (`fallback`; off for a line that was not in the block, which the template cannot have put there).
+    The template repository's own tagline is never inherited."""
     if ctx.meta.get("is_template"):
         return False
     known = [x.strip() for x in ctx.meta.get("template_taglines") or [] if isinstance(x, str) and x.strip()]
-    return body.strip() in known if known else bootstrap_state(text) == "pristine"
+    return body.strip() in known if known else fallback and bootstrap_state(text) == "pristine"
 
 
-def tagline_body(ctx: RepoContext, existing: str | None = None, text: str = "") -> str:
+def tagline_body(ctx: RepoContext, existing: str | None = None, text: str = "", fallback: bool = True) -> str:
     """The tagline block body, decided in this one place for header(), bootstrap(), upgrade() and header_only().
     R2: the tagline is the description. Without one (logged needs-input:description) the block keeps `existing`, the
     body it holds now in README `text`, unless that is inherited (guardrail 6: improve, never erase); nothing to keep
@@ -257,7 +258,7 @@ def tagline_body(ctx: RepoContext, existing: str | None = None, text: str = "") 
     if desc:
         return f'<p align="center"><b>{desc}</b></p>' if ctx.det["variant"] == "F" else f"**{desc}**"
     ctx.log("needs-input:description")
-    if existing is None or not existing.strip() or inherited_tagline(ctx, existing, text):
+    if existing is None or not existing.strip() or inherited_tagline(ctx, existing, text, fallback):
         return ""
     return existing
 
@@ -718,7 +719,8 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
         if carry:  # an unmarked tagline with no description: it moves into the block (the move is not a lost line)
             old_tag = carry[0].strip()
             removed.remove(carry[0])
-        new_tag = tagline_body(ctx, old_tag, text)
+        # a carried bare line was outside the block, so only an exact template tagline match makes it inherited
+        new_tag = tagline_body(ctx, old_tag, text, fallback=not carry)
         if old_tag and old_tag.strip() and not new_tag:
             # an inherited tagline is emptied (header mode does the same): its lines are dropped on purpose, so the
             # never-delete check must not report them as lost

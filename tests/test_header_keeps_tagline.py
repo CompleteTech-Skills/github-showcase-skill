@@ -7,6 +7,8 @@ bootstrap (the template workflow's step before header mode) and upgrade (its reb
 mode) decide the tagline block by the same rule (readme.tagline_body). With no description, when upgrade rebuilds the
 header (not in preserve mode), a single bare **...** line directly under the H1 moves into the block by that rule
 instead of being erased; a bold line inside a centred <div>/<p> block, or in preserve mode, stays as authored text."""
+from pathlib import Path
+
 from ctshowcase import readme as R
 
 TAGLINE = "**Route Northwind support tickets to the right queue.**"
@@ -367,3 +369,16 @@ def test_upgrade_leaves_other_unmarked_taglines_as_authored_text(make_ctx, tmp_p
             assert out.index("# Support Triage Agent") < out.index(line) < out.index("## Usage"), name
         else:  # the rebuilt block stays empty and the line is kept below the header as authored text
             assert _tagline_body(out) == "" and out.count(line) == 1, name
+
+
+def test_upgrade_keeps_an_owner_bold_line_in_a_pristine_copy(make_ctx, tmp_path):
+    # the template keeps its tagline inside the block, so a bare bold line under the header is never inherited:
+    # the pristine-body fallback must not erase it when the template's taglines are unknown
+    tpl = (Path(__file__).parent / "fixtures" / "template-README.md").read_text(encoding="utf-8")
+    once = R.bootstrap(make_ctx(tmp_path, repo="new-thing", description=""), tpl)
+    assert R.bootstrap_state(once) == "pristine"
+    own = "**My tool routes tickets.**"
+    text = once.replace("---\n", "---\n\n" + own + "\n", 1)
+    out, removed = R.upgrade(make_ctx(tmp_path, repo="new-thing", description=""), text)
+    assert own in out
+    assert R.preservation(text, out, removed) == []
