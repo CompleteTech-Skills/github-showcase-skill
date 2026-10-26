@@ -497,3 +497,29 @@ def test_fork_full_treatment_needs_the_variant(make_ctx, brand_with):
     full = RepoContext(brand_with(fork_readme="full"), ctx.meta, None)
     readme.upgrade(full, "# Tool\n")
     assert any(x.startswith("needs-input:fork-variant") for x in full.logs)
+
+
+def test_user_profile_lists_a_pinned_slug_fork_without_a_card(tmp_path):
+    """A `-fork` copy (type rule 1) has no card in `card` or doctor: the personal profile lists it as a line and stays
+    complete (GitHub forks are left out of the pins altogether)."""
+    import os
+    import shutil
+    import subprocess
+    import sys
+    root = _user_estate(tmp_path, "I run CompleteTech LLC from Cincinnati, OH. My work lives in the organizations below.")
+    reg_path = root / "registry" / "estate.yaml"
+    reg = yaml.safe_load(reg_path.read_text(encoding="utf-8"))
+    reg["profile"]["pins"].insert(0, {"repo": "Northwind-Trading-Co/upstream-fork"})
+    reg_path.write_text(yaml.safe_dump(reg, sort_keys=False), encoding="utf-8")
+    metas = tmp_path / "meta"
+    shutil.copytree(ESTATE / "meta", metas)
+    copy = metas / "Northwind-Trading-Co__upstream-fork.json"
+    copy.write_text(json.dumps(dict(json.loads(copy.read_text(encoding="utf-8")), fork=False)), encoding="utf-8")
+    p = subprocess.run([sys.executable, str(ROOT / "scripts" / "showcase.py"), "org", "profile", "--user",
+                        "CompleteDotTech", "--meta-dir", str(metas)], cwd=ROOT, capture_output=True, text=True,
+                       env=dict(os.environ, SHOWCASE_ESTATE_ROOT=str(root)))
+    r = json.loads(p.stdout)
+    assert "card-fallback:Northwind-Trading-Co/upstream-fork:exempt:no-card" in r["logs"], r["logs"]
+    assert "cards/Northwind-Trading-Co__upstream-fork.svg" not in r["readme"] and "upstream-fork" in r["readme"]
+    assert "Northwind-Trading-Co/upstream-fork" not in [a.get("repo") for a in r["assets"] if a["kind"] == "card"]
+    assert r["result"] == "ok", r["logs"]
