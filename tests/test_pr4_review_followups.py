@@ -135,5 +135,9 @@ def test_card_exemption_survives_owner_codes(tmp_path, owners, allow, repo, fork
     assert not out.exists(), p.stdout + p.stderr
     if p.returncode == 0:
         assert json.loads(p.stdout)["result"] == "exempt"
-    ctx = RepoContext(Brand(raw, cfg), normalize(m), None)
+    rd = tmp_path / "checkout"
+    rd.mkdir()
+    (rd / "README.md").write_text("# x\n", encoding="utf-8")
+    ctx = RepoContext(Brand(raw, cfg), normalize(m), rd)
     assert ctx.card_exempt() and ctx.art_status()["card"].startswith("exempt")  # a watching fork: bare `exempt`
+    assert doctor.row(ctx)["cells"]["card"] == "n/a"

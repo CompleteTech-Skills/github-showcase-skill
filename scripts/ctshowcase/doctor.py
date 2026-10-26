@@ -114,7 +114,8 @@ def row(ctx: RepoContext) -> dict:
     status = ctx.art_status()
     fstat = ctx.footer_status()
     if watching:
-        cells.update(banner=_cell(watching), icon=_cell(watching), card=_cell(watching), footer=_cell(watching))
+        cells.update(banner=_cell(watching), icon=_cell(watching), card=_cell(status["card"] or watching),
+                     footer=_cell(watching))  # art_status keeps exempt:no-card for forks, backups, profiles
     elif not rd:
         cells.update(banner="unknown", icon="unknown", card="unknown", footer="unknown")
     else:
