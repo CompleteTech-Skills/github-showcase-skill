@@ -52,6 +52,20 @@
     "is_template": {
       "type": "boolean"
     },
+    "template_repository": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "full_name of the template this repository was generated from (GitHub template_repository), or null"
+    },
+    "template_taglines": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "the taglines this repository may have inherited: the template README's tagline when this repository was generated and today"
+    },
     "default_branch": {
       "type": [
         "string",

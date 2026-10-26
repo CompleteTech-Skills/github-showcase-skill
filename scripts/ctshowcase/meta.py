@@ -13,9 +13,10 @@ from .errors import NeedsInput, ShowcaseError, USAGE
 FIELDS = ("owner", "repo", "description", "homepage", "topics", "fork", "archived", "visibility", "is_template",
           "default_branch", "language", "languages", "license", "stargazers_count", "created_at", "labels",
           "readme_head", "parent", "health_percentage", "has_issues", "has_wiki", "has_projects", "has_discussions",
-          "delete_branch_on_merge", "files", "manifests", "homepage_status", "file_sizes")
+          "delete_branch_on_merge", "files", "manifests", "homepage_status", "file_sizes", "template_repository", "template_taglines")
 # STANDARD §0 / CQ-16: estate commits never count as substantive (the bulk transfer and the run's own commits move
 # pushed_at, so recency uses the newest default-branch commit whose message does not match this)
+TAGLINE_BLOCK = re.compile(r"<!-- showcase:tagline:start -->\n?(.*?)\n?<!-- showcase:tagline:end -->", re.S)
 NON_SUBSTANTIVE = re.compile(r"ct-std-v1|showcase banner and card|\[skip ci\]")
 MANIFEST_PATHS = ("pyproject.toml", "package.json", "requirements.txt", "setup.py", "setup.cfg", "manifest.json",
                   "SKILL.md", "skill-package.json", "CLAW_HUB_PUBLISHING.md", ".github/showcase.yml",
@@ -59,6 +60,15 @@ def normalize(raw: dict) -> dict:
     vis = raw.get("visibility") or ("private" if raw.get("private") else ("public" if "private" in raw else "unknown"))
     m["visibility"] = vis
     m["is_template"] = bool(raw.get("is_template", False))
+    # GitHub's template_repository (the repository this one was generated from): its full_name, or None
+    tr = raw.get("template_repository")
+    m["template_repository"] = (tr.get("full_name") if isinstance(tr, dict) else tr if isinstance(tr, str) else None) or None
+    # the taglines this repository may have inherited from that template (meta --from-gh reads the template's README
+    # as it was when this repository was generated, and as it is now), so header mode can tell an inherited tagline
+    # from one written for this repository
+    tts = raw.get("template_taglines")
+    tts = [tts] if isinstance(tts, str) else tts if isinstance(tts, list) else []
+    m["template_taglines"] = list(dict.fromkeys(t.strip() for t in tts if isinstance(t, str) and t.strip()))
     m["default_branch"] = raw.get("default_branch") or "main"
     m["language"] = raw.get("language")
     m["languages"] = dict(raw.get("languages") or {})
@@ -194,6 +204,30 @@ def last_substantive(commits) -> tuple[str, str] | None:
     return None
 
 
+def _tagline_of(content: object) -> str | None:
+    """The tagline block of a contents-API README object, or None."""
+    if not (isinstance(content, dict) and content.get("content")):
+        return None
+    text = base64.b64decode(content["content"]).decode("utf-8", errors="replace").replace("\r\n", "\n")
+    m = TAGLINE_BLOCK.search(text.lstrip("\ufeff"))
+    return (m.group(1).strip() or None) if m else None
+
+
+def _template_taglines(tmpl: str, created_at: object) -> list[str]:
+    """The template's README tagline when this repository was generated from it (the last README commit at or before
+    `created_at`) and today; read-only GETs, an unreadable step is simply skipped."""
+    current = _gh(f"repos/{tmpl}/readme")
+    path = current.get("path") if isinstance(current, dict) else None
+    out = []
+    if path and isinstance(created_at, str) and re.fullmatch(r"\d{4}-\d\d-\d\dT[\d:]+Z", created_at):
+        hist = _gh(f"repos/{tmpl}/commits?path={path}&until={created_at}&per_page=1")
+        sha = hist[0].get("sha") if isinstance(hist, list) and hist and isinstance(hist[0], dict) else None
+        if sha and re.fullmatch(r"[0-9a-f]{40}", sha):
+            out.append(_tagline_of(_gh(f"repos/{tmpl}/contents/{path}?ref={sha}")))
+    out.append(_tagline_of(current))
+    return list(dict.fromkeys(t for t in out if t))
+
+
 def from_gh(full_name: str) -> dict:
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", full_name):
         raise ShowcaseError(f"invalid OWNER/REPO: {full_name}", log="usage")
@@ -209,6 +243,10 @@ def from_gh(full_name: str) -> dict:
     if isinstance(readme, dict) and readme.get("content"):
         text = base64.b64decode(readme["content"]).decode("utf-8", errors="replace")
         raw["readme_head"] = text[:4000]
+    tmpl = repo.get("template_repository")
+    tmpl_name = tmpl.get("full_name") if isinstance(tmpl, dict) else None
+    if tmpl_name and re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", tmpl_name):
+        raw["template_taglines"] = _template_taglines(tmpl_name, repo.get("created_at"))
     branch = repo.get("default_branch") or "main"
     hit = last_substantive(_gh(f"repos/{full_name}/commits?sha={branch}&per_page=100"))
     if hit:
