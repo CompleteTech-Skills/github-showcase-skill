@@ -111,3 +111,29 @@ def test_contract_docs_name_the_group_key_and_archived_adopt():
     assert "archived" in row and "pending" in row
     log = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8").split("## 1.0.0")[0]
     assert "R11" in log and "T1/T2" in log
+
+
+@pytest.mark.parametrize("owners,allow", [("watching", ["--allow-hold"]), ("t3", [])])
+@pytest.mark.parametrize("repo,fork", [("ledger-backup-20240101", False), ("widget-fork", False)])
+def test_card_exemption_survives_owner_codes(tmp_path, owners, allow, repo, fork):
+    """A backup or fork has no card in every owner state: `card` writes none (or the owner gate refuses first) and the
+    art_status card slot that lint all, doctor and the profile pages read says exempt:no-card."""
+    import yaml
+
+    from ctshowcase.config import Brand
+    from ctshowcase.context import RepoContext
+    from ctshowcase.meta import normalize
+    raw = yaml.safe_load((ROOT / "references" / "brand.yaml").read_text(encoding="utf-8"))
+    raw["owners"][owners] = list(raw["owners"].get(owners) or []) + ["Northwind-Trading-Co"]
+    cfg = tmp_path / "brand.yaml"
+    cfg.write_text(yaml.safe_dump(raw, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    m = meta_dict(repo=repo, fork=fork)
+    meta = tmp_path / "m.json"
+    meta.write_text(json.dumps(m), encoding="utf-8")
+    out = tmp_path / "card.svg"
+    p = run_cli("--config", cfg, "--meta", meta, "--no-repo-dir", "--format", "json", "card", "--out", out, *allow)
+    assert not out.exists(), p.stdout + p.stderr
+    if p.returncode == 0:
+        assert json.loads(p.stdout)["result"] == "exempt"
+    ctx = RepoContext(Brand(raw, cfg), normalize(m), None)
+    assert ctx.card_exempt() and ctx.art_status()["card"].startswith("exempt")  # a watching fork: bare `exempt`
