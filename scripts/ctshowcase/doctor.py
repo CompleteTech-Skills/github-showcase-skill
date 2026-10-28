@@ -19,7 +19,8 @@ LOGO_SHA = {"assets/logo.png": "a5c3c4ef55336ed4b883d3bc3bb6e1e942b836469bd2b293
 def r1(ctx) -> str:
     n = standard("naming")
     name = ctx.repo
-    if ctx.det["type"] == "fork" or name in n["exempt_names"] or any(re.search(p, name) for p in n["exempt_patterns"]) \
+    # GitHub forks keep the upstream name (§3.1); a non-network copy follows `UPSTREAM-fork`, as the estate proposals
+    if ctx.meta.get("fork") or name in n["exempt_names"] or any(re.search(p, name) for p in n["exempt_patterns"]) \
             or f"{ctx.owner}/{name}" in n["exempt_full"]:
         return "n/a"
     ok = re.match(n["n1"], name) and re.match(n["n2"], name)
@@ -54,10 +55,13 @@ def row(ctx: RepoContext) -> dict:
     cells["R4"] = "pass" if not hp or ctx.meta.get("homepage_status") == 200 else (
         "unknown" if ctx.meta.get("homepage_status") is None else "warn")
     kept_default = ctx.meta.get("default_branch_policy") == "keep" and ctx.meta.get("default_branch") != "main"
-    if kept_default and ctx.det["type"] != "fork":
+    if kept_default and not ctx.is_fork:
         logs.append("default-branch kept (user)")
-    if ctx.det["type"] == "fork":
-        cells["R5"] = "pass"  # upstream default and merge settings are preserved (§10.1)
+    if ctx.is_fork:
+        # upstream default and merge settings are preserved (§10.1); watching and archive org forks turn Issues off
+        utility = ctx.tier == "T2-R" or ctx.brand.owner_status(ctx.owner) == "watching"
+        issues = ctx.meta.get("has_issues")
+        cells["R5"] = "pass" if not utility or issues is False else ("unknown" if issues is None else "fail")
     elif ctx.meta.get("delete_branch_on_merge") is None:
         cells["R5"] = "unknown"
     else:
@@ -65,7 +69,7 @@ def row(ctx: RepoContext) -> dict:
             ctx.meta.get("delete_branch_on_merge") is True and (ctx.repo == ".github" or ctx.meta.get("has_issues") is True)
         cells["R5"] = "pass" if ok else "fail"
     # archived repositories are in scope (decision 6: unarchive, polish, re-archive), so R6 applies to them
-    if ctx.tier in ("T2-R", "T3") or ctx.det["type"] == "fork" or \
+    if ctx.tier in ("T2-R", "T3") or ctx.is_fork or \
             (ctx.meta.get("has_issues") is False and ctx.repo != ".github"):
         cells["R6"] = "n/a"
     elif not ctx.meta.get("labels"):
@@ -99,7 +103,7 @@ def row(ctx: RepoContext) -> dict:
     og = ctx.meta.get("uses_custom_og_image")
     cells["R10"] = ("unknown" if og is None else ("pass" if og else "fail")) if ctx.social_applicable() else "n/a"
     hpct = ctx.meta.get("health_percentage")
-    if not ctx.public or ctx.meta.get("archived") or ctx.det["type"] in ("fork", "github-profile") or \
+    if not ctx.public or ctx.meta.get("archived") or ctx.is_fork or ctx.det["type"] == "github-profile" or \
             ctx.tier not in ("T1", "T2"):
         cells["R11"] = "n/a"
     else:
@@ -110,7 +114,8 @@ def row(ctx: RepoContext) -> dict:
     status = ctx.art_status()
     fstat = ctx.footer_status()
     if watching:
-        cells.update(banner=_cell(watching), icon=_cell(watching), card=_cell(watching), footer=_cell(watching))
+        cells.update(banner=_cell(watching), icon=_cell(watching), card=_cell(status["card"] or watching),
+                     footer=_cell(watching))  # art_status keeps exempt:no-card for forks, backups, profiles
     elif not rd:
         cells.update(banner="unknown", icon="unknown", card="unknown", footer="unknown")
     else:

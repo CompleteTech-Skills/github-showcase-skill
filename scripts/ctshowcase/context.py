@@ -115,10 +115,22 @@ class RepoContext:
         return d
 
     # -- which generated surfaces apply ------------------------------------------------------------------
+    @property
+    def is_fork(self) -> bool:
+        """Type rule 1 (GitHub's fork flag or a `-fork` slug, even under a repo-config type override) or a detected
+        `fork` type: doctor, adopt, labels, the social preview and the watching-org rules all use this one test, and
+        org labels and the estate proposals use rule 1 itself, so a fork is never a fork to only some of them."""
+        from .detect import is_fork
+        return is_fork(dict(self.meta, repo=self.repo)) or self.det["type"] == "fork"
+
+    def card_exempt(self) -> bool:
+        """§5.4: forks (any `is_fork`), backups and profile repositories never get a card, whoever owns them: art_status
+        keeps `exempt:no-card` in the card slot under the watching, t3-signoff and hold owner codes."""
+        return self.is_fork or self.det["type"] in ("backup", "github-profile")
+
     def social_applicable(self) -> bool:
         """R10: public product repositories, including the personal-profile capstone."""
-        return (self.public and not self.meta.get("archived") and not self.meta.get("fork")
-                and self.det["type"] != "fork" and self.repo != ".github"
+        return (self.public and not self.meta.get("archived") and not self.is_fork and self.repo != ".github"
                 and not self.repo.lower().endswith(".github.io")
                 and self.tier in ("T1", "T1-user", "T2"))
 
@@ -135,13 +147,14 @@ class RepoContext:
         watching = self.watching_status()
         if watching == "exempt:watching-fork":
             return {"banner": "exempt", "card": "exempt", "icon": "exempt:watching-fork"}
+        no_card = "exempt:no-card" if self.card_exempt() else None  # §5.4 holds whatever the owner code says
         if watching:  # a watching-org repository that is not a fork and not its `.github`: decided explicitly
-            return {"banner": watching, "card": watching, "icon": watching}
+            return {"banner": watching, "card": no_card or watching, "icon": watching}
         if status in ("t3", "hold", "excluded"):
             code = {"t3": "t3-signoff", "hold": "hold", "excluded": "exempt"}[status]
-            return {"banner": code, "card": code, "icon": code}
-        if self.det["type"] in ("fork", "backup", "github-profile"):
-            out["card"] = "exempt:no-card"
+            return {"banner": code, "card": no_card or code, "icon": code}
+        if no_card:
+            out["card"] = no_card
         if self.det["type"] == "github-profile" and self.repo.lower() == self.owner.lower():
             out["banner"] = "exempt:profile-readme"  # the personal profile README opens with the intro (decision 15)
         if self.repo == ".github" and self.placeholder_org():
@@ -159,7 +172,7 @@ class RepoContext:
         generator; nothing is exempted by owner alone. None outside the watching org."""
         if self.brand.owner_status(self.owner) != "watching":
             return None
-        if self.meta.get("fork") or self.det["type"] == "fork":
+        if self.is_fork:
             return "exempt:watching-fork"
         if self.repo == ".github":
             return None

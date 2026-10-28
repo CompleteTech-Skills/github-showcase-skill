@@ -55,7 +55,7 @@ def adopt(ctx, resolver=None, *, approval_id: str | None = None, fresh: bool = F
         raise Refused(f"{owner} family is on hold: adopt plans nothing for it", log="hold")
     full = f"{resolver.canonical(owner) if resolver else owner}/{repo}"
     meta, det = ctx.meta, ctx.det
-    fork, archived, private = bool(meta.get("fork")), bool(meta.get("archived")), not ctx.public
+    fork, archived, private = ctx.is_fork, bool(meta.get("archived")), not ctx.public
     watching = status == "watching"
     utility = ctx.tier in ("T2-R",) or watching
     recs, jobs, pending, checklist, logs = [], [], [], [], list(ctx.logs)
@@ -86,7 +86,9 @@ def adopt(ctx, resolver=None, *, approval_id: str | None = None, fresh: bool = F
         jobs.append(_job(_jid("p3", "settings", sid), argv, full, "§10.1 settings baseline (RP-13: a template-born "
                          "repository gets none of them).", approval_id))
         recs.append(records.record(owner, repo, "settings", "settings", {k: meta.get(k) for k in patch}, patch, "§10.1"))
-    if (meta.get("default_branch") or "main") != "main" and not fork:
+    if (meta.get("default_branch") or "main") != "main" and not fork and meta.get("default_branch_policy") == "keep":
+        logs.append("default-branch kept (user)")  # as doctor R5: the user declined the rename (RT-17)
+    elif (meta.get("default_branch") or "main") != "main" and not fork:
         checklist.append(f"default branch is {meta.get('default_branch')}: propose `rename-default-branch` in "
                          "NEW_PROPOSALS.yaml (§10.1, q52); never renamed by adopt")
     # §5.6 topics ------------------------------------------------------------------------------------------------
@@ -236,7 +238,7 @@ def _registered(resolver) -> set[str]:
 
 def classify(meta: dict, brand, resolver) -> list[dict]:
     """POLICY.md rules for one unregistered repository: a list of proposals (kind, reason). Never an action."""
-    from .detect import standard
+    from .detect import is_fork, standard
     repo = meta["repo"]
     n = standard("naming")
     out = []
@@ -276,7 +278,8 @@ def classify(meta: dict, brand, resolver) -> list[dict]:
         new = re.sub(r"[^a-z0-9]+", "-", repo.lower()).strip("-")
         add("rename", "Typo, leading underscore or digit, or inconsistent casing: rename to kebab-case (POLICY).",
             new_name=new)
-    if (meta.get("default_branch") or "main") != "main":
+    if (meta.get("default_branch") or "main") != "main" and not is_fork(meta) and \
+            meta.get("default_branch_policy") != "keep":  # adopt and doctor R5 follow the same two exceptions
         add("rename-default-branch", f"Default branch is {meta.get('default_branch')}: forks keep upstream's; "
                                      "feature-named defaults on uncoupled repos rename to main (POLICY, q52).")
     if meta.get("visibility") == "private":

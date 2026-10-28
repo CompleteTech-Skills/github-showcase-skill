@@ -733,6 +733,10 @@ def _render_cards(estate: Estate, entries: list[dict], allow_unmeasured: bool) -
         try:
             fonts = fonts or Fonts(estate.brand)
             ctx = RepoContext(estate.brand, normalize(raw), None)
+            exempt = "exempt:no-card" if ctx.card_exempt() else ctx.art_status()["card"] or ""
+            if exempt.startswith("exempt"):  # forks, backups, the profile repository: no card, as `card` and doctor
+                failed[full] = exempt
+                continue
             ctx.require_measured(allow_unmeasured)
             svg, _, _ = cardmod.render(ctx, fonts)
         except ShowcaseError as exc:
@@ -859,7 +863,7 @@ def profile(estate: Estate, org: str, *, out_dir: str | Path | None = None, rend
     card_svgs, no_card = _render_cards(estate, data["featured"] + data["also_from"], allow_unmeasured)
     for full, why in sorted(no_card.items()):
         logs.append(f"card-fallback:{full}:{why}")
-        incomplete = True
+        incomplete = incomplete or not why.startswith("exempt")  # a card the standard exempts is not missing
     text, badges = profile_readme(estate, org, data, banner=banner, email=email, no_card=no_card)
     data_json = json.dumps(data, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
     public_names = {e["repo"].lower() for k in ("featured", "forks", "archived", "also_from") for e in data[k]}
@@ -1197,6 +1201,7 @@ def user_profile(estate: Estate, login: str, *, out_dir: str | Path | None = Non
     card_svgs, no_card = _render_cards(estate, data["pins"] + data["more_projects"], allow_unmeasured)
     for full, why in sorted(no_card.items()):
         logs.append(f"card-fallback:{full}:{why}")
+    missing_card = any(not why.startswith("exempt") for why in no_card.values())  # an exempt card is not missing
     tile_orgs = [o for g in data["org_directory"] for o in g["orgs"] if o["tile"]]
     tile_svgs, no_tile = _render_tiles(estate, tile_orgs)
     logs += [f"tile-fallback:{o}" for o in sorted(no_tile)]
@@ -1228,7 +1233,7 @@ def user_profile(estate: Estate, login: str, *, out_dir: str | Path | None = Non
     assets += [{"kind": "badge", **b} for b in badges]
     assets.append({"kind": "data", "path": "data.json"})
     res = {"command": "org", "action": "profile", "owner": USER_LOGIN, "user": True,
-           "result": "fail" if hits else ("incomplete" if (no_card or no_tile) else "ok"), "readme": text, "data": data,
+           "result": "fail" if hits else ("incomplete" if (missing_card or no_tile) else "ok"), "readme": text, "data": data,
            "assets": assets, "leaks": hits, "logs": sorted(set(logs + slog)), "variant": "personal"}
     if hits:
         return res, CHECK_FAILED
@@ -1632,6 +1637,7 @@ def _labels_known(m: dict) -> bool:
 
 def labels_plan(estate: Estate, org: str, *, allow_t3: bool = False) -> tuple[dict, int]:
     from . import labels as labelsmod
+    from .detect import is_fork
     login, row, reg = _gate(estate, org, allow_t3=allow_t3)
     tier, fam = _tier(row), row.get("family")
     repos, jobs, logs = [], [], []
@@ -1650,7 +1656,7 @@ def labels_plan(estate: Estate, org: str, *, allow_t3: bool = False) -> tuple[di
         if m is None or m.get("error") and "labels" not in m:
             repos.append({"repo": full, "result": "unknown", "log": "needs-input:metadata"})
             continue
-        if m.get("fork"):
+        if is_fork(dict(m, repo=m.get("_repo") or m.get("repo") or n)):  # rule 1 on the captured slug, as adopt
             repos.append({"repo": full, "result": "skip", "log": "fork"})
             continue
         if m.get("archived"):
