@@ -5,9 +5,11 @@ default behaviour; they must stay true while the related behaviour flags are off
 
 These are characterization tests, not regression tests for a bug. They pass on the base commit
 2be04ac by design, because this unit changes no production code (E4.4.1 pins current defaults).
+Evidence: copying this file and tests/fixtures/detect/ onto a clean `git archive` of 2be04ac gives
+"3 passed". So these tests are not expected to fail on base; a failure on base would mean the
+pinned default is wrong, not that the tests are broken.
 A failure here means default detection changed, which needs a decision-record review before the
-expected values are updated. Verify on base by copying this file and tests/fixtures/detect/ onto
-2be04ac; all three tests should pass there.
+expected values are updated.
 """
 import json
 from pathlib import Path
