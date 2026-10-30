@@ -32,6 +32,8 @@ Family topics apply only to non-fork repos other than `.github`, in this order:
 | jevplay-games | `browser-game` | only type `game` |
 | All other orgs | none | — |
 
+An org row may list `topics_extra`: topics the org approves beyond the closed vocabulary. Lowercase a-z, 0-9, hyphen, 1-50 chars, at most 20.
+
 ## Type: detection, topic, variant and card label
 
 **Detection (first match wins, checked on the default branch).** "Dependency" means a name in `requirements*.txt`, `pyproject.toml` dependencies, or `package.json` `dependencies`/`devDependencies`. File patterns match anywhere in the tree unless "root" is stated.
