@@ -1,6 +1,7 @@
 """README lint: R7 + decision 13 (banner first, plain <img>) + decision 18 (footer last, exact) (spec A6.11)."""
 from __future__ import annotations
 
+import html
 import re
 from pathlib import Path
 from urllib.parse import unquote
@@ -13,6 +14,10 @@ from .readme import BANNER_BLOCK, EMOJI, MARK, is_footer_like, masked, normalize
 IMG_MD = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)[^)]*\)")
 IMG_HTML = re.compile(r"<img\b([^>]*)>", re.I)
 PALETTE = {"1E3A8A", "005ADD", "067647", "64748B", "E551BA", "F386A1", "1E1E1E"}
+REF_DEFINITION = re.compile(
+    r"^ {0,3}\[((?:\\.|[^\]\\\n])+)\]:[ \t]*(?:\n[ \t]*)?(?:<([^<>\n]+)>|(\S+?))"
+    r"(?:[ \t]+(?:\"[^\"\n]*\"|'[^'\n]*'|\([^\)\n]*\)))?[ \t]*$", re.M)
+REF_IMAGE = re.compile(r"!\[((?:\\.|[^\]\\])*)\](?:\[((?:\\.|[^\]\\])*)\])?(?!\()")
 
 
 def _outside_code(text: str) -> str:
@@ -21,6 +26,32 @@ def _outside_code(text: str) -> str:
     text = re.sub(r"```.*?```", "", text, flags=re.S)
     text = re.sub(r"`[^`\n]*`", "", text)
     return re.sub(r"<!--.*?-->", "", text, flags=re.S)
+
+
+def _reference_images(text: str, document: str) -> list[tuple[str, str]]:
+    """Resolve full, collapsed and shortcut image references used in the header.
+
+    Definitions may occur anywhere outside code; the first definition wins, and labels are
+    case-insensitive with collapsed whitespace. Unused definitions are not images.
+    """
+    def label(value):
+        value = html.unescape(re.sub(r"\\([^\w\s])", r"\1", value))
+        return " ".join(value.split()).casefold()
+
+    definitions = {}
+    for match in REF_DEFINITION.finditer(_outside_code(document)):
+        definitions.setdefault(label(match.group(1)), html.unescape(match.group(2) or match.group(3)))
+    sources = []
+    for match in REF_IMAGE.finditer(text):
+        pos = match.start() - 1
+        while pos >= 0 and text[pos] == "\\":
+            pos -= 1
+        if (match.start() - pos - 1) % 2:
+            continue  # an escaped exclamation mark is text, not an image
+        key = label(match.group(2) or match.group(1))
+        if key in definitions:
+            sources.append((match.group(1), definitions[key]))
+    return sources
 
 
 def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
@@ -95,16 +126,16 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
     # badges 2-4, palette tokens only
     shields = re.findall(r"img\.shields\.io/badge/([^)\"\s]+)", plain)
     header_part = plain.split("\n---\n", 1)[0]
-    hb = re.findall(r"img\.shields\.io/badge/([^)\"\s]+)", header_part)
     badge_header = _outside_code(header_part)
     image_sources = [m.group(2) for m in IMG_MD.finditer(badge_header)]
+    image_sources += [source for _, source in _reference_images(badge_header, plain)]
     for image in IMG_HTML.finditer(badge_header):
         source = re.search(r"\bsrc\s*=\s*(['\"])(.*?)\1", image.group(1))
         if source:
             image_sources.append(source.group(2))
-    svg_badges = sum(bool(re.fullmatch(r"(?:\./)?docs/images/badges/[^/?#]+\.svg(?:[?#].*)?", unquote(src))
-                          or re.search(r"(?:^|/)badge\.svg(?:[?#].*)?$", src)) for src in image_sources)
-    nbadges = len(hb) + svg_badges
+    nbadges = sum(bool(src.startswith("https://img.shields.io/badge/")
+                       or re.fullmatch(r"(?:\./)?docs/images/badges/[^/?#]+\.svg(?:[?#].*)?", unquote(src))
+                       or re.search(r"(?:^|/)badge\.svg(?:[?#].*)?$", src)) for src in image_sources)
     if not preserve:
         from .readme import badges as derivable
         floor = min(2, len(derivable(ctx)))  # a public repo with no licence and no language derives fewer than two
@@ -173,6 +204,10 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
         src = re.search(r'src="([^"]+)"', m.group(1))
         if src:
             _local(path, src.group(1), fails, example="examples" in src.group(1))
+    for alt, source in _reference_images(_outside_code(plain), plain):
+        if not alt.strip():
+            fails.append(f"R7 image without alt text: {source[:40]}")
+        _local(path, source, fails)
     body = _outside_code(plain)
     ph = re.search(rv["placeholder_regex"], body)
     if ph or re.search(r"<…>|<\.\.\.>", body):

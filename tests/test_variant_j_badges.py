@@ -285,3 +285,17 @@ def test_legacy_like_authored_custom_badge_block_stays_owned_by_author(make_ctx,
     after, removed = readme.upgrade(ctx, before)
     assert badge_block(after) == authored
     assert readme.preservation(before, after, removed) == []
+
+
+@pytest.mark.parametrize("mode", ["upgrade", "header"])
+def test_cli_legacy_remote_license_migrates_to_local_without_shrink(make_ctx, tmp_path, mode):
+    ctx = profile_context(make_ctx, tmp_path)
+    text = readme.scaffold(ctx)
+    legacy = "![License MIT](https://img.shields.io/badge/license-MIT-64748B)"
+    (tmp_path / "README.md").write_text(text.replace(badge_block(text), legacy), encoding="utf-8")
+    result = profile_cli(ctx, tmp_path, "readme", "--mode", mode, "--badges", "local", "--write")
+    assert "readme-shrink" not in result.get("logs", [])
+    actual = (tmp_path / "README.md").read_text(encoding="utf-8")
+    assert "docs/images/badges/type-github-profile.svg" in actual
+    assert "docs/images/badges/license-mit.svg" in actual
+    assert not any("badge" in f for f in profile_cli(ctx, tmp_path, "lint", "readme")["fails"])
