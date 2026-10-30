@@ -282,9 +282,15 @@ def header(ctx: RepoContext, keep_banner: str | None = None, title: str | None =
 # ------------------------------------------------------------------------------------------------
 # License (§7.6) and section facts
 # ------------------------------------------------------------------------------------------------
+FACTUAL_MIT = "Code and documentation are licensed under the MIT License; see `LICENSE`."
+FACTUAL_MIT_SKILLS = "Code, templates, and documentation are licensed under the MIT License. See `LICENSE` and `BRAND_ASSETS.md`."
+
+
 def license_section(ctx: RepoContext) -> tuple[str, str] | None:
     rv = standard("readme-variants")["license_rows"]
     lic, f = ctx.meta.get("license"), ctx.facts
+    # the rights holder the owner approved (org row `license_wording`); absent or blank means no rights sentence (issue 36)
+    holder = (ctx.org.get("license_wording") or "").strip()
     third = f.known and (ctx.repo.endswith("-fork") or any(x.startswith(("vendor/", "third_party/")) for x in f.files))
     if third:
         ctx.log("needs-input:upstream")
@@ -295,23 +301,29 @@ def license_section(ctx: RepoContext) -> tuple[str, str] | None:
     if not ctx.public:
         if ctx.same_owner("TouchedByAnAgent"):
             return "License", rv["private_hold"]
+        if not holder:
+            ctx.log("needs-input:license-wording")
+            return None
         year = (ctx.meta.get("created_at") or "")[:4]
         if not year:
             ctx.log("needs-input:license-year")
             return None
-        private = rv["private"].replace("<year>", year)
-        if ctx.org.get("family") not in (None, "completetech"):
-            private = private.replace("CompleteTech LLC", ctx.org.get("display_name") or ctx.owner)
+        private = rv["private"].replace("<year>", year).replace("CompleteTech LLC", holder)
         return "License", private
     if lic == "MIT":
+        if not holder:
+            ctx.log("needs-input:license-wording")
+            return "License", FACTUAL_MIT_SKILLS if f.exists("BRAND_ASSETS.md") else FACTUAL_MIT
         if f.exists("BRAND_ASSETS.md"):
-            return "License", rv["skills_mit"]
+            return "License", rv["skills_mit"].replace("CompleteTech LLC", holder)
         if ctx.tier.startswith("T2") or ctx.org.get("family") not in (None, "completetech"):
-            return "License", rv["t2_mit"].replace("<Brand>", ctx.org.get("display_name") or ctx.owner)
-        return "License", rv["t1_mit"]
+            return "License", rv["t2_mit"].replace("<Brand>", holder)
+        return "License", rv["t1_mit"].replace("CompleteTech LLC", holder)
     if lic and lic not in ("NOASSERTION",):
-        brand = ctx.company
-        return "License", rv["other"].replace("<license>", lic).replace("<path>", "LICENSE").replace("<Brand>", brand)
+        if not holder:
+            ctx.log("needs-input:license-wording")
+            return "License", f"Licensed under the {lic}; see `LICENSE`."
+        return "License", rv["other"].replace("<license>", lic).replace("<path>", "LICENSE").replace("<Brand>", holder)
     ctx.log("needs-input:license")
     return None
 

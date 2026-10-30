@@ -8,7 +8,10 @@ LICENSE_ROWS = [
     (dict(owner="CompleteTech-LLC", repo="thing-fork"), None, None),
     (dict(owner="CompleteTech-Skills", repo="x-skill", license="MIT", brand_assets=True), "## License", "seals, and brand assets"),
     (dict(owner="CompleteTech-LLC", repo="thing", license="MIT"), "## License", "CompleteTech LLC names and logos"),
-    (dict(owner="LibreEvolve", repo="thing", license="MIT"), "## License", "LibreEvolve names and logos"),
+    # issue 36: LibreEvolve has no approved license_wording in brand.yaml, so only the factual line is written (see
+    # tests/test_license_wording.py for the configured-holder case)
+    (dict(owner="LibreEvolve", repo="thing", license="MIT"), "## License",
+     "Code and documentation are licensed under the MIT License; see `LICENSE`."),
     (dict(owner="CompleteTech-LLC", repo="thing", license="Apache-2.0"), "## License", "Licensed under the Apache-2.0"),
     (dict(owner="CompleteTech-LLC", repo="thing", license=None, visibility="private", created_at="2025-01-01T00:00:00Z"),
      "## License", "Copyright (c) 2025 CompleteTech LLC"),
