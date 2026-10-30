@@ -621,6 +621,23 @@ def test_icon_prompt_needs_writer_then_ok(brand, icon_ctx):
     assert md.startswith("# Repo icon prompt: Northwind-Trading-Co/support-triage-agent") and "```text" in md
 
 
+def test_icon_prompt_states_the_flat_ground(brand, icon_ctx):
+    """The option-A prompt names the family card colour as one flat ground and forbids vignette and glow."""
+    glyph = {"glyph_name": "Inbox Tray", "glyph_description": "An open tray seen front-on.",
+             "spark_placement": "held inside the tray", "size_class": "wide"}
+    # the bundled art direction carries the template sentence the ground clause rewrites, so it is the
+    # format asserted here. KNOWN GAP (reproduced, deliberately not fixed): the synthetic estate-format fixture
+    # (tests/fixtures/content/ART_DIRECTION.min.md, passed as ART) has no such sentence, so its prompt gets no flat
+    # ground clause and still asks for "one very soft round pool ... about 880 px across" in its BACKGROUND line.
+    # Changing that needs a decision on estate templates; this test does not cover it.
+    p = C.icon_prompt(icon_ctx, resolver(brand), C.load_art_direction(), glyph)["prompt"]
+    assert "perfectly flat" in p
+    assert brand.style(NW)["tokens"]["card_fill"].upper() in p
+    assert "no vignette, texture, gradient, shadow or glow" in p
+    assert "Keep the background empty" not in p
+    assert "880 px" not in p  # the bundled template has no light pool to conflict with the flat ground
+
+
 def test_icon_prompt_parses_the_bundled_art_direction(brand, fixture_meta):
     from ctshowcase.context import RepoContext
     from ctshowcase.meta import normalize
@@ -663,6 +680,126 @@ def test_icon_keep_ground_and_failures(brand):
     with pytest.raises(ArtFail):
         noisy = _noise(64, 64)
         C.normalize_icon(noisy, "auto", card)
+
+
+@pytest.mark.parametrize("ground,card,mode,reason", [
+    ("#F8FAFC", "#0F172A", "transparent", "uniform-ground"),  # pale tile on a dark card: keyed out (#52)
+    ("#E6EDF5", "#0F172A", "transparent", "uniform-ground"),
+    ("#171D28", "#F8FAFC", "keep", "night-tile"),
+    ("#0F172A", "#0F172A", "transparent", "near-card"),
+    # Measured dE(#000000, #0F172A) is 16.5 > CONTENT_DE 12, so pure black on that card is a night tile.
+    ("#000000", "#0F172A", "keep", "night-tile"),
+    ("#171D28", None, "keep", "night-tile"),  # no card colour: the luminance rule decides
+])
+def test_icon_auto_ground_rule(ground, card, mode, reason):
+    img = _candidate(ground, ink=(70, 184, 255), size=1000, box=(250, 250, 750, 750))
+    info = C.normalize_icon(img, "auto", card)[1]
+    assert info["mode"] == mode
+    assert info["auto_reason"] == reason
+
+
+def test_icon_pale_ground_on_dark_card_keys_to_small_rgba(brand):
+    img, info = C.normalize_icon(_candidate("#F8FAFC", ink=(16, 185, 129), size=1024, box=(250, 250, 750, 750)),
+                                 "auto", "#032530")
+    assert info["mode"] == "transparent" and img.mode == "RGBA" and img.getpixel((0, 0))[3] == 0
+    assert len(C.icon_bytes(img)[0]) <= 300_000
+    # explicit modes are unchanged
+    kept = C.normalize_icon(_candidate("#F8FAFC", size=1024, box=(250, 250, 750, 750)), "keep", "#032530")[0]
+    assert kept.mode == "RGB"
+
+
+
+def test_icon_pale_ground_auto_then_strict_contrast_qa_integrates():
+    """Epic #51 integration: #52's auto keying of a flat pale ground on a dark card feeds #57's QA with
+    --strict and --min-contrast 4.5 turned on, and the result passes inside the 300 KB budget. Before #52 the
+    same candidate was kept opaque (mode keep) and failed contrast-on-card at 2.43:1 (measured on 5cc54c0)."""
+    card = "#032530"  # synthetic dark card colour
+    cand = _candidate("#F8FAFC", ink=(16, 185, 129), size=800, box=(200, 260, 600, 560))
+    img, info = C.normalize_icon(cand, "auto", card)
+    assert info["mode"] == "transparent" and info["auto_reason"] == "uniform-ground", info
+    data = C.icon_bytes(img)[0]
+    assert len(data) <= 300_000
+    qa = C.icon_qa(data, card=card, ink=["#10B981", "#A87C00"], strict=True, min_contrast=4.5)
+    assert _check_result(qa, "contrast-on-card") == "pass" and qa["result"] in ("pass", "warn"), qa
+    assert _check_result(qa, "family-ink") == "pass", qa
+
+def _vignette(top, bottom, size=1024):
+    from PIL import Image, ImageDraw
+    from ctshowcase.color import rgb
+    t, b = rgb(top), rgb(bottom)
+    im = Image.new("RGB", (size, size))
+    d = ImageDraw.Draw(im)
+    for y in range(size):
+        k = y / (size - 1)
+        d.line([(0, y), (size, y)], fill=tuple(round(t[i] + (b[i] - t[i]) * k) for i in range(3)))
+    d.rounded_rectangle((250, 250, 750, 750), radius=40, outline=(16, 185, 129), width=40)
+    return im
+
+
+def test_icon_ground_tolerance_boundaries():
+    from ctshowcase.iconbox import corner_spread
+    img = _vignette("#F8FAFC", "#EEF0F2")  # measured corner dE 3.48, above the default 3.0
+    assert 3.1 < corner_spread(img) < 4.9
+    with pytest.raises(ArtFail) as e:
+        C.normalize_icon(img, "auto", "#032530")
+    msg = str(e.value)
+    assert "3.4" in msg and "--ground-tolerance 3" in msg
+    out, info = C.normalize_icon(img, "auto", "#032530", tolerance=5)
+    assert info["mode"] == "transparent" and out.getpixel((0, 0))[3] == 0 and out.getpixel((512, 100))[3] == 0
+    far = _vignette("#F8FAFC", "#B0B8C4")  # corner dE far above 5
+    with pytest.raises(ArtFail, match="--ground-tolerance 5"):
+        C.normalize_icon(far, "auto", "#032530", tolerance=5)
+
+
+def _radial(corner, centre, size=1024):
+    from PIL import Image, ImageDraw
+    from ctshowcase.color import rgb
+    c, m = rgb(corner), rgb(centre)
+    im = Image.new("RGB", (size, size))
+    px = im.load()
+    far = 2 * (size / 2) ** 2
+    for y in range(size):
+        for x in range(size):
+            k = 1 - ((x - size / 2) ** 2 + (y - size / 2) ** 2) / far * 2
+            k = max(0.0, k)
+            px[x, y] = tuple(round(c[i] + (m[i] - c[i]) * k) for i in range(3))
+    ImageDraw.Draw(im).rounded_rectangle((250, 250, 750, 750), radius=40, outline=(16, 185, 129), width=40)
+    return im
+
+
+def test_icon_radial_vignette_with_matching_corners_keys_at_raised_tolerance():
+    """Review B: corners agree (dE 0) but the interior is darker; raising --ground-tolerance must widen the key
+    so interior ground becomes transparent, while the default tolerance keeps the base key."""
+    img = _radial("#EEF0F2", "#D8E0EA")
+    base = C.normalize_icon(img, "auto", "#032530")[0]
+    out, info = C.normalize_icon(img, "auto", "#032530", tolerance=5)
+    assert info["mode"] == "transparent"
+    assert out.getpixel((512, 512))[3] == 0  # empty interior of the outline
+    assert base.getpixel((512, 512))[3] != 0  # default tolerance unchanged
+
+
+def test_icon_vignetted_night_tile_passes_qa_after_flattening():
+    """Review A/B: a kept (night-tile) ground vignetted past the default tolerance is flattened, so icon_qa and the
+    banner/card tile code (default tolerance) accept what `normalize --ground-tolerance 5` accepted."""
+    from ctshowcase.iconbox import corner_ground, corner_spread
+    img = _vignette("#171D28", "#1F2530")
+    assert 3.1 < corner_spread(img) < 4.9
+    out, info = C.normalize_icon(img, "auto", "#F8FAFC", tolerance=5)
+    assert info["mode"] == "keep" and info["auto_reason"] == "night-tile"
+    assert corner_ground(out) is not None
+    qa = C.icon_qa(C.icon_bytes(out)[0], card="#F8FAFC")
+    assert not [c for c in qa["checks"] if c["check"] == "opaque-ground" and c["result"] != "pass"]
+
+
+def test_icon_explicit_transparent_keeps_base_key_threshold():
+    """Review A/B: within the default tolerance the key stays KEY_DE (6) in explicit modes; it only widens when
+    --ground-tolerance is raised above the default."""
+    from PIL import ImageDraw
+    im = _vignette("#FFFFFF", "#F9F9F9")
+    d = ImageDraw.Draw(im)
+    d.rectangle((250, 250, 750, 750), fill=(234, 234, 234))
+    out, info = C.normalize_icon(im, "transparent", "#032530")
+    assert info["mode"] == "transparent" and out.getbbox() is not None
 
 
 def test_icon_not_the_org_glyph(brand, tmp_path):
