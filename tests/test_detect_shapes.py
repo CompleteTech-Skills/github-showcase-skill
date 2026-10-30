@@ -244,3 +244,96 @@ def test_readme_cli_accepts_variant_k():
 
     out = run_cli("readme", "--help")
     assert out.returncode == 0 and "J,K}" in out.stdout
+
+
+# E4.4.3 (issue #82): a `type-suggestion:<type>` log when rule 24 detection is low confidence. It never changes the
+# detected type; the suggestion dict is added beside it and is on by default.
+NORTHWIND_SHAPE = {"owner": "Northwind-Trading-Co", "repo": "shape-check"}
+
+
+def test_planning_heavy_suggests_workspace():
+    m = load("planning_heavy")
+    out = detect(m, RepoFacts(m))
+    assert out["suggestion"]["type"] == "workspace"
+    assert out["suggestion"]["key"] == "type"
+    assert out["suggestion"]["file"] == ".github/showcase.yml"
+    assert out["suggestion"]["reason"] == "planning-json-share"
+    assert out["type"] == "dataset" and out["rule"] == 24
+
+
+def test_clear_dataset_no_suggestion():
+    m = dict(NORTHWIND_SHAPE, files=["a.csv", "b.py"], file_sizes={"a.csv": 900, "b.py": 100})
+    out = detect(m, RepoFacts(m))
+    assert (out["type"], out["rule"]) == ("dataset", 24)
+    assert "suggestion" not in out
+    assert 900 / 1000 >= 0.75
+
+
+def test_narrow_dataset_suggests():
+    m = dict(NORTHWIND_SHAPE, files=["a.csv", "b.py"], file_sizes={"a.csv": 600, "b.py": 400})
+    out = detect(m, RepoFacts(m))
+    assert out["type"] == "dataset"
+    assert out["suggestion"]["type"] == "workspace"
+    assert out["suggestion"]["reason"] == "narrow-dataset-share"
+
+
+def test_type_override_no_suggestion():
+    m = load("planning_heavy")
+    out = detect(m, RepoFacts(m), {"type": "dataset"})
+    assert (out["type"], out["rule"]) == ("dataset", 0)
+    assert "suggestion" not in out
+
+
+def test_tuned_planning_no_suggestion():
+    m = load("planning_heavy")
+    out = detect(m, RepoFacts(m), {"detect_tuned": True})
+    assert out["type"] == "workspace"
+    assert "suggestion" not in out
+
+
+def test_context_logs_type_suggestion(make_ctx):
+    m = load("planning_heavy")
+    ctx = make_ctx(files=m["files"], file_sizes=m["file_sizes"])
+    assert ctx.det["type"] == "dataset"
+    assert "type-suggestion:workspace" in ctx.logs
+
+
+def test_docs_only_no_suggestion():
+    m = load("docs_only")
+    out = detect(m, RepoFacts(m))
+    assert out["type"] == "workspace" and "suggestion" not in out
+
+
+def test_all_planning_suggests_workspace():
+    # Every byte is planning JSON: the planning-excluded data share is 0% (no kept bytes), so case (a) applies.
+    # Tuned detection moves this repo to workspace (rule 25), so it needs no suggestion.
+    m = dict(NORTHWIND_SHAPE, files=["planning/a.json", "issues/issue1.json"],
+             file_sizes={"planning/a.json": 900, "issues/issue1.json": 100})
+    out = detect(m, RepoFacts(m))
+    assert (out["type"], out["rule"]) == ("dataset", 24)
+    assert out["suggestion"]["type"] == "workspace"
+    assert out["suggestion"]["reason"] == "planning-json-share"
+    tuned = detect(m, RepoFacts(m), {"detect_tuned": True})
+    assert (tuned["type"], tuned["rule"]) == ("workspace", 25)
+    assert "suggestion" not in tuned
+
+
+def test_tuned_zero_byte_retained_file_still_suggests():
+    # Review finding (E4.4.3): tuned detection keeps README.md (0 bytes), so the kept total is 0 and the tuned type stays
+    # dataset (0 * 2 >= 0). The planning-excluded share is then 0%, so case (a) still applies and must suggest workspace.
+    m = dict(NORTHWIND_SHAPE, files=["planning/a.json", "README.md"],
+             file_sizes={"planning/a.json": 900, "README.md": 0})
+    tuned = detect(m, RepoFacts(m), {"detect_tuned": True})
+    assert (tuned["type"], tuned["rule"]) == ("dataset", 24)
+    assert tuned["suggestion"]["type"] == "workspace"
+    assert tuned["suggestion"]["reason"] == "planning-json-share"
+
+
+def test_suggestion_edge_cases_without_sizes():
+    # Empty file sizes, or a zero total, never divide: no suggestion and no exception.
+    assert "suggestion" not in detect(dict(NORTHWIND_SHAPE, files=["README.md"]), RepoFacts(dict(NORTHWIND_SHAPE)))
+    zero = dict(NORTHWIND_SHAPE, files=["a.csv"], file_sizes={"a.csv": 0})
+    assert "suggestion" not in detect(zero, RepoFacts(zero))
+    from ctshowcase.detect import suggestion
+    assert suggestion(zero, "dataset", 24, False) is None
+    assert suggestion(NORTHWIND_SHAPE, "workspace", 25, False) is None

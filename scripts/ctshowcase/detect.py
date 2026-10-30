@@ -119,6 +119,43 @@ def detect_type(meta: dict, facts: RepoFacts | None = None, tuned: bool = False)
     return "workspace", 25
 
 
+DATA_SUFFIXES = (".csv", ".json", ".parquet")
+
+
+def suggestion(meta: dict, type_: str, rule: int, tuned: bool = False) -> dict | None:
+    """E4.4.3 (issue #82): a low-confidence rule 24 (dataset) detection, with the `.github/showcase.yml` key to set.
+
+    Only for a detection with no type override or config (`rule != 0`). Rule 25 is the fallback and never suggests.
+    (a) planning-excluded data share below 50% while the raw share is at least 50%: `planning-json-share`.
+    (b) raw data share below 75%: `narrow-dataset-share`. The check (a) comes first. Returns None when there is no size
+    evidence (empty sizes or a zero total), so nothing divides by zero.
+    """
+    if rule != 24:
+        return None
+    sizes = meta.get("file_sizes") or {}
+    total = sum(sizes.values())
+    if not sizes or total <= 0:
+        return None
+
+    def data_bytes(items) -> int:
+        return sum(v for k, v in items if k.endswith(DATA_SUFFIXES))
+
+    raw_share = data_bytes(sizes.items()) / total
+    kept = [(k, v) for k, v in sizes.items() if not _is_planning(k)]
+    kept_total = sum(v for _, v in kept)
+    # An all-planning tree keeps no bytes: its planning-excluded data share is 0%, which is below 50% (case (a)).
+    kept_share = data_bytes(kept) / kept_total if kept_total > 0 else 0.0
+    # `tuned` needs no guard here: a tuned detection that moved the repo to workspace is rule 25 and returned above.
+    # A tuned detection that stayed rule 24 (e.g. only a zero-byte README is kept) still gets case (a) evidence.
+    if raw_share >= 0.5 and kept_share < 0.5:
+        reason = "planning-json-share"
+    elif raw_share < 0.75:
+        reason = "narrow-dataset-share"
+    else:
+        return None
+    return {"type": "workspace", "key": "type", "file": ".github/showcase.yml", "reason": reason}
+
+
 def _same_login(a, b) -> bool:
     return bool(a and b) and str(a).lower() == str(b).lower()
 
@@ -155,6 +192,10 @@ def detect(meta: dict, facts: RepoFacts | None = None, override: dict | None = N
         type_, rule = detect_type(meta, facts, tuned=tuned)
     variant = (override or {}).get("variant") or variant_for(type_, meta, same_owner, tuned=tuned)
     out = {"type": type_, "rule": rule, "variant": variant, "category": card_category(type_)}
+    if not type_override:
+        sug = suggestion(meta, type_, rule, tuned=tuned)
+        if sug is not None:
+            out["suggestion"] = sug
     if not facts.known and not type_override:
         # rules 5, 8-11 and 13-24 need the file tree; without it the type is provisional
         out["provisional"] = True
