@@ -13,6 +13,26 @@ from .context import RepoContext
 from .detect import standard
 
 COLUMNS = ["R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8", "R9", "R10", "R11", "banner", "icon", "card", "footer"]
+# Skill-controlled: the skill renders or checks these from files it generates (logo files, banner, icon, card, README footer).
+SKILL_CELLS = ["R9", "banner", "icon", "card", "footer"]
+# Owner-controlled: GitHub-side state or content the skill must not write (name, description, topics, homepage, repo
+# settings, labels, README sections, license, social preview upload, community health).
+OWNER_CELLS = ["R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8", "R10", "R11"]
+_SKILL_DONE = ("pass", "warn", "n/a")
+_OWNER_PENDING = ("fail", "unknown", "hold", "incomplete")
+
+
+def verdict(cells: dict[str, str]) -> tuple[str, list[str]]:
+    """Split a doctor row's cells into (skill_complete, owner_pending).
+
+    skill_complete is "yes" only when every SKILL_CELLS value is pass, warn or n/a. Anything else (incomplete, fail,
+    unknown, hold, or a missing key) is "no"; a banner marked incomplete is therefore not skill-complete.
+    owner_pending lists the OWNER_CELLS ids, in OWNER_CELLS order, whose value is fail, unknown, hold or incomplete.
+    A missing key counts as unknown. Pure function: no I/O, no network.
+    """
+    skill_complete = "yes" if all(cells.get(c, "unknown") in _SKILL_DONE for c in SKILL_CELLS) else "no"
+    owner_pending = [c for c in OWNER_CELLS if cells.get(c, "unknown") in _OWNER_PENDING]
+    return skill_complete, owner_pending
 LOGO_SHA = {"assets/logo.png": "a5c3c4ef55336ed4b883d3bc3bb6e1e942b836469bd2b2933bc8cc230b321621",
             "assets/logo-dark.png": "0dc00c0e5159518ff1d552b7052293b4e545ddd35be489e6d114e3ea64db27ec"}
 
