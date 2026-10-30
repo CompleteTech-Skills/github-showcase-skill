@@ -81,26 +81,29 @@ def _block_org(name: str, family: str, tier: str, display: str) -> list[str]:
     ]
 
 
-def _insert_before(text: str, eol: str, anchor: str, block: list[str]) -> str:
-    """Insert `block` above the top-level `anchor:` key. The block goes after the previous section's last entry and
-    before the blank lines and column-0 comments that introduce `anchor:` (for example the "One row per owner" note)."""
+def _append_to_section(text: str, eol: str, section: str, block: list[str]) -> str:
+    """Append `block` after the last entry of the top-level `section:` mapping, whatever key follows it (or none), so a
+    config with sorted or reordered top-level keys works. The block goes before the blank lines and column-0 comments
+    that introduce the next top-level key (for example the "One row per owner" note)."""
     lines = text.split(eol)
-    idx = next((i for i, line in enumerate(lines) if line == f"{anchor}:"), None)
+    idx = next((i for i, line in enumerate(lines) if line == f"{section}:"), None)
     if idx is None:
-        raise ShowcaseError(f"brand.yaml has no top-level `{anchor}:` section", log="config")
-    j = idx
-    while j > 0 and (lines[j - 1].strip() == "" or lines[j - 1].startswith("#")):
+        raise ShowcaseError(f"brand.yaml has no top-level `{section}:` section", log="config")
+    j = idx + 1
+    while j < len(lines) and not (lines[j] and lines[j][0] not in " 	#"):
+        j += 1  # j: the next top-level key line, or the end of the file
+    while j > idx + 1 and (lines[j - 1].strip() == "" or lines[j - 1].startswith("#")):
         j -= 1
     return eol.join(lines[:j] + block + lines[j:])
 
 
-def _apply(args, action: str, section: str, anchor: str, block: list[str], check) -> tuple[dict, int]:
+def _apply(args, action: str, section: str, block: list[str], check) -> tuple[dict, int]:
     b = load_brand(args.config)
     path = b.path
     with open(path, encoding="utf-8", newline="") as fh:
         old = fh.read()
     eol = "\r\n" if "\r\n" in old else "\n"
-    new = _insert_before(old, eol, anchor, block)
+    new = _append_to_section(old, eol, section, block)
     raw = load_yaml_text(new)
     errors = schema_errors(raw)
     if errors:
@@ -143,7 +146,7 @@ def cmd_add_family(args):
     def check(brand: Brand):
         brand.family(args.name)  # raises ConfigError when the merged family cannot be built
 
-    obj, code = _apply(args, "add-family", "families", "orgs", block, check)
+    obj, code = _apply(args, "add-family", "families", block, check)
     obj["family"] = args.name
     obj["accent_contrast"] = round(contrast(args.accent, args.background), 2)
     return obj, code
@@ -175,7 +178,7 @@ def cmd_add_org(args):
         if brand.org(args.name).get("family") != args.family:
             raise ShowcaseError("the new org row did not resolve to its family", log="config")
 
-    obj, code = _apply(args, "add-org", "orgs", "owners", block, check)
+    obj, code = _apply(args, "add-org", "orgs", block, check)
     obj["org"] = args.name
     obj["owners_edited"] = False
     return obj, code

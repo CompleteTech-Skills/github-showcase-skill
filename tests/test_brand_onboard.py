@@ -206,3 +206,28 @@ def test_recorded_t3_owner_needs_allow_t3_even_when_tier_is_omitted_or_t2(cfg, t
     assert r.returncode == 2 and "t3-signoff" in json.loads(r.stdout)["logs"], r.stdout
     assert "Acme-Widgets" not in _raw(cfg)["orgs"]
     assert _cli(cfg, *argv, pre=("--allow-t3",)).returncode == 0
+
+
+# ------------------------------------------------------------------------- review regression: top-level key order (E6)
+def _write_reordered(cfg, order):
+    """Re-serialise brand.yaml with the given top-level key order (sorted keys put languages before orgs)."""
+    import yaml
+    raw = _raw(cfg)
+    keys = sorted(raw) if order == "sorted" else [k for k in raw if k != "owners"] + ["owners"]
+    if order == "owners-first":
+        keys = ["owners"] + [k for k in raw if k != "owners"]
+    cfg.write_text(yaml.safe_dump({k: raw[k] for k in keys}, sort_keys=False, allow_unicode=True), encoding="utf-8")
+
+
+@pytest.mark.parametrize("order", ["sorted", "owners-first", "owners-last"])
+def test_onboarding_works_when_top_level_keys_are_reordered(cfg, order):
+    _write_reordered(cfg, order)
+    before_owners = _raw(cfg)["owners"]
+    r = _cli(cfg, *ADD_FAMILY, "--write")
+    assert r.returncode == 0, r.stdout + r.stderr
+    r = _cli(cfg, *ADD_ORG, "--write")
+    assert r.returncode == 0, r.stdout + r.stderr
+    raw = _raw(cfg)
+    assert "acme-widgets" in raw["families"] and raw["orgs"]["Acme-Widgets"]["family"] == "acme-widgets"
+    assert "acme-widgets" not in raw["languages"] and raw["owners"] == before_owners
+    assert C.schema_errors(raw) == []
