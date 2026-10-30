@@ -202,7 +202,10 @@ def merge(ctx: RepoContext, also_in: list[str] | None = None, prune: bool = Fals
     proposed = core
     if not prune:
         # additive default: existing out-of-vocabulary topics fill the room left by the required set; they never
-        # displace a required topic and never affect the domain/tech ranking above
+        # displace a required topic and never affect the domain/tech ranking above. Contract: a retained extra is
+        # appended after `core`, in `current` order, deduplicated, and logged review-remove:TOPIC; an extra beyond `room`
+        # is only in `remove`; `topics-short` counts the retained extras. Dedicated regression tests for this path are
+        # tracked by task 93 and are not part of this change.
         extras = [x for x in extras_kept if x not in core]
         room = limit - len(core)
         kept = extras[:max(room, 0)]
