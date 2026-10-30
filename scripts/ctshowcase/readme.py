@@ -492,7 +492,7 @@ def callout_only(ctx: RepoContext, text: str, removed: list[str] | None = None) 
                 out = out[:match.start()] + footermod.block(ctx.brand) + out[match.end():]
         out, old_footer = drop_old_footer(out, ctx.brand)
         removed.extend(old_footer)
-        if footermod.check(ctx.brand, out)[0] == "fail:missing":
+        if old_footer or footermod.check(ctx.brand, out)[0] == "fail:missing":
             out = out.rstrip("\n") + "\n\n" + footermod.block(ctx.brand) + "\n"
     return out
 
@@ -549,7 +549,7 @@ def _footer_logo_url(url: str, brand) -> bool:
 def is_footer_copy(block: str, brand) -> bool:
     """Every line of `block` is a line of the decision 18 footer or a drifted copy of one: only centring, link, logo,
     `<br>`/`<sub>` markup, with complete.tech links, the footer's own logo image (its src or srcset is the brand footer
-    logo URL or a drifted form of it, or its alt is exactly the company) and as text only the credit line ("Built by
+    logo URL or a drifted form of it) and as text only the credit line ("Built by
     <company>", optionally with the suffix). A sponsor or partner image (whatever its file name), a thanks line or
     any other authored text makes it not a footer copy, so it is never removed."""
     import html
@@ -562,15 +562,14 @@ def is_footer_copy(block: str, brand) -> bool:
             return True
         if name == "a":
             return "complete.tech" in attrs.lower()
-        for a in FOOTER_ATTR.finditer(attrs):  # never a file name that merely contains "logo"
+        sources = []
+        for a in FOOTER_ATTR.finditer(attrs):  # an alt label never proves image ownership
             key = a.group(1).lower()
             val = html.unescape(next(g for g in a.groups()[1:] if g is not None)).strip()
-            if key == "alt" and val in (company, f["alt"]):
-                return True
-            parts = [p.split()[0] for p in val.split(",") if p.split()]
-            if key in ("src", "srcset") and parts and all(_footer_logo_url(u, brand) for u in parts):
-                return True
-        return False
+            if key in ("src", "srcset"):
+                parts = [p.split()[0] for p in val.split(",") if p.split()]
+                sources.append(bool(parts) and all(_footer_logo_url(u, brand) for u in parts))
+        return bool(sources) and all(sources)
 
     for line in block.splitlines():
         if not line.strip():

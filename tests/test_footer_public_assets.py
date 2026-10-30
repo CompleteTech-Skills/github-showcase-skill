@@ -148,3 +148,47 @@ def test_watching_fork_keeps_legacy_footer_exemption(brand, tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout)["result"] == "exempt"
     assert path.read_text(encoding="utf-8") == before
+
+
+@pytest.mark.parametrize("variant", ["A", "G", "H"])
+def test_unknown_image_with_company_alt_never_gets_shrink_exemption(brand, tmp_path, variant):
+    ctx = RepoContext(relocated(brand), normalize(meta_dict()), tmp_path)
+    ctx.det["variant"] = variant
+    image = '<img src="https://example.test/partner-art.png" alt="CompleteTech LLC">'
+    content = footer.markup(old_brand(brand)).replace("</p>", image + "\n</p>")
+    before = "# Synthetic\n\n" + "Authored instructions.\n" * 600 + readme.wrap("footer", content) + "\n"
+    assert not readme.is_footer_copy(content, ctx.brand)
+    after, removed = readme.upgrade(ctx, before)
+    assert image not in removed
+    assert image in after or readme.preservation(before, after, removed)
+    path = tmp_path / "README.md"
+    path.write_text(before, encoding="utf-8")
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict(owner="CompleteTech-Skills")), encoding="utf-8")
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--variant", variant, "--write")
+    assert result.returncode == (1 if variant == "A" else 0), result.stdout + result.stderr
+    assert image in path.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("variant", ["G", "H"])
+def test_callout_replaces_removed_footer_despite_authored_company_credit(brand, tmp_path, variant):
+    metadata = meta_dict(owner="CompleteTech-Skills", fork=variant == "G", archived=variant == "H",
+                         parent={"full_name": "Upstream-Synth/tool"}, ahead_by=0)
+    ctx = RepoContext(relocated(brand), normalize(metadata), tmp_path)
+    ctx.det["variant"] = variant
+    credit = "Built by [CompleteTech LLC](https://www.complete.tech) and [Northwind](https://example.test)"
+    before = "# Synthetic\n\n" + "Authored instructions.\n" * 600 + "\n" + credit + "\n\n" + footer.markup(old_brand(brand)) + "\n"
+    after, removed = readme.upgrade(ctx, before)
+    assert readme.preservation(before, after, removed) == []
+    assert credit in after
+    assert footer.markup(ctx.brand) in after
+    assert LEGACY not in after
+    assert readme.upgrade(ctx, after)[0] == after
+    (tmp_path / "README.md").write_text(before, encoding="utf-8")
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(metadata), encoding="utf-8")
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--variant", variant, "--write")
+    assert result.returncode == 0, result.stdout + result.stderr
+    written = (tmp_path / "README.md").read_text(encoding="utf-8")
+    assert credit in written
+    assert footer.markup(ctx.brand) in written
