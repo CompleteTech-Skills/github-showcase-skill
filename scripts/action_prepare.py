@@ -93,7 +93,7 @@ def summary(meta: str) -> None:
     for cmd in ("describe", "topics"):
         p = subprocess.run([sys.executable, str(script), "--meta", meta, "--repo-dir", ".", cmd, "--gh"] if cmd == "topics"
                            else [sys.executable, str(script), "--meta", meta, "--repo-dir", ".", cmd],
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, encoding="utf-8")
         try:
             r = json.loads(p.stdout)
         except ValueError:

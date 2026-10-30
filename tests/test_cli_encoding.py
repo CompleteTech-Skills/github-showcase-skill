@@ -5,6 +5,8 @@ import os
 import subprocess
 import sys
 
+import pytest
+
 from conftest import ROOT, meta_dict
 
 import showcase
@@ -95,3 +97,22 @@ def test_stdout_keeps_surrogateescape_filename(monkeypatch):
     assert showcase.main(["--meta", "missing-\udcff.json", "--no-repo-dir", "describe"]) == 2
     payload = json.loads(raw.getvalue().decode("utf-8", errors="surrogateescape"))
     assert "missing-\udcff.json" in payload["error"]
+
+
+@pytest.mark.parametrize("name", ["Íris", "café"])
+def test_action_summary_decodes_cli_utf8_under_legacy_locale(tmp_path, name):
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict(description=f"Run Northwind {name} exports")), encoding="utf-8")
+    summary = tmp_path / "summary.md"
+    # Simulate the Windows consumer's locale on every platform. The CLI runs
+    # in its own process and must still emit UTF-8; stdout encoding alone does
+    # not control subprocess text decoding in the Action helper.
+    launcher = ("import locale, runpy, sys; locale.getencoding = lambda: 'cp1252'; "
+                "sys.argv = sys.argv[1:]; runpy.run_path(sys.argv[0], run_name='__main__')")
+    result = subprocess.run([sys.executable, "-c", launcher, str(ROOT / "scripts" / "action_prepare.py"),
+                             "summary", str(meta)], cwd=tmp_path, capture_output=True,
+                            env=dict(os.environ, PYTHONUTF8="0", PYTHONIOENCODING="cp1252:strict",
+                                     GITHUB_STEP_SUMMARY=str(summary)))
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    text = summary.read_text(encoding="utf-8")
+    assert f"Run Northwind {name} exports." in text
