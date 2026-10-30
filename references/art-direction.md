@@ -95,15 +95,15 @@ Use the same model and version for a whole family run (pipeline rule 4) and reco
 1. After the run, search the `run.jsonl` events (or the final message) for the image file path Codex reports for the generated image, and use exactly that path.
 2. Never pick the newest file in the generated-images folder. Parallel sessions write into the same place, so the newest file can belong to another run and the wrong image gets normalized.
 3. If the run output names no image path, treat the attempt as failed. Do not fall back to the newest file or to a directory listing.
-4. Pass the chosen path to `content icon normalize --in PATH`. In the `PROMPTS.md` provenance block, record the Codex session id and the path in the prose beside the record; the Provenance record fenced template itself does not change.
-5. Use one run per candidate set. Do not run candidates for several repositories in the same working directory at once unless you can tell their outputs apart.
+4. Pass the chosen path to `content icon normalize --in PATH`. In the `PROMPTS.md` provenance block, record the Codex session id and only the image file name, or the path written relative to `$CODEX_HOME` (for example `$CODEX_HOME/generated_images/<file>`), in the prose beside the record. Never record the absolute path: it contains the local user name. The Provenance record fenced template itself does not change.
+5. Use one run per candidate. Do not run candidates for several repositories in the same working directory at once unless you can tell their outputs apart.
 
 ### Retry and attempt limits
 
-- A run that finishes with no image path is retried as a NEW run with the same prompt, at most 2 retries (3 attempts total) per candidate set. Parallel runs can finish without a path, which is why a retry is allowed.
+- The limit applies per candidate, not per candidate set. A run that finishes with no image path is retried as a NEW run with the same prompt, at most 2 retries (3 attempts total) for that candidate. Parallel runs can finish without a path, which is why a retry is allowed.
 - Retries never alter the prompt.
-- Attempts that produced a path count toward pipeline rule 7 (4 candidates, then 4 more once, then log `art-fail`). Empty attempts do not count as candidates but do count toward the 3-attempt cap.
-- After the cap, stop and log `art-fail` with a one-line reason. Do not loop.
+- A run that returns a path produces one candidate and ends that candidate's attempts. Successful candidates never count toward the cap, so the four-candidate round of pipeline rule 7 (then 4 more once, then log `art-fail`) is still reachable. Only empty runs count toward the 3 attempts, and they are not candidates.
+- After the cap for any one candidate, stop and log `art-fail` with a one-line reason. Do not loop.
 
 ### Privacy: only public facts go into prompts
 

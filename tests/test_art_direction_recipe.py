@@ -250,3 +250,26 @@ def test_recipe_privacy_and_sandbox_headings():
     headings = [line for line in section.splitlines() if line.startswith("### ")]
     assert any(h.startswith("### Privacy") for h in headings)
     assert any(h.startswith("### Sandbox") for h in headings)
+
+
+def test_recipe_provenance_never_records_absolute_path():
+    # The generated-images folder is inside $CODEX_HOME (the user's home), so the
+    # absolute path holds the local user name. Provenance records the file name or a
+    # $CODEX_HOME-relative path only.
+    section = _recipe(_text())
+    step = next(l for l in section.splitlines() if l.startswith("4. "))
+    assert "$CODEX_HOME" in step
+    assert "file name" in step
+    assert "never record the absolute path" in step.lower()
+    assert "record the codex session id and the path" not in step.lower()
+
+
+def test_recipe_attempt_cap_is_per_candidate():
+    # Successful runs are candidates and must not exhaust the cap, otherwise the
+    # four-candidate round (pipeline rule 7) could never complete.
+    section = _recipe(_text())
+    lowered = section.lower()
+    assert "per candidate, not per candidate set" in lowered
+    assert "per candidate set" not in lowered.replace("per candidate, not per candidate set", "")
+    assert "successful candidates never count toward the cap" in lowered
+    assert "only empty runs count toward the 3 attempts" in lowered
