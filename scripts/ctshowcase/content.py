@@ -2500,6 +2500,8 @@ def _cmd_sidebar(args, cli, resolver, head):
         try:
             resolver.check_owner(o, repo=r)
         except Refused as exc:
+            if str(exc.log or "").startswith("t3-signoff:"):
+                raise  # a sign-off refusal must reach the exit-2 handler, never read as a pass with the repo skipped
             skipped.append({"repo": full, "why": exc.log})
             continue
         meta = dict((f or {}).get("meta") or {}, owner=o, repo=r)

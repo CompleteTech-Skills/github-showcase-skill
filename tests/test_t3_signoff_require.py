@@ -291,3 +291,44 @@ def test_report_jobs_carry_signoff_id(tmp_path):
     finally:
         signoff.set_required(False)
         signoff.reset()
+
+
+# --- review round 3 ---
+
+def test_hold_owner_is_refused_even_with_a_record(tmp_path, monkeypatch):
+    """No shipped owner is on HOLD, so build one in-process: a valid `*` record must not lift hold (Brand and Resolver)."""
+    from ctshowcase import signoff
+    from ctshowcase.config import Brand
+    from ctshowcase.errors import Refused
+    from ctshowcase.resolver import Resolver
+    brand = Brand({"owners": {"hold": ["Held-Co"]}}, ROOT / "references" / "brand.yaml")
+    resolver = Resolver(brand, {}, None)
+    b = _bundle(tmp_path, [{"id": "t3s-h", "owner": "Held-Co", "repos": ["*"]}])
+    monkeypatch.setenv("SHOWCASE_ESTATE_ROOT", str(b))
+    signoff.set_required(True)
+    try:
+        for check in (brand.check_owner, resolver.check_owner):
+            with pytest.raises(Refused) as exc:
+                check("Held-Co", allow_t3=True)
+            assert exc.value.log == "hold"
+    finally:
+        signoff.set_required(False)
+        signoff.reset()
+
+
+@pytest.mark.parametrize("body", ["signoffs: 7\n", "signoffs: [unclosed\n", "- not: [valid\n"])
+def test_malformed_signoff_file_refuses_instead_of_raising(tmp_path, body):
+    d = tmp_path / "bundle" / "decisions"
+    d.mkdir(parents=True)
+    (d / "t3-signoffs.yaml").write_text(body, encoding="utf-8")
+    r = _run(tmp_path, tmp_path / "bundle", "--require-t3-signoff", "--allow-t3", "describe")
+    assert r.returncode == 2 and "t3-signoff:missing" in _out(r) and "Traceback" not in _out(r), _out(r)
+
+
+@pytest.mark.parametrize("records,why", [([], "missing"), ([{"id": "t3s-x", "expires": "2000-01-01"}], "expired")])
+def test_keyed_sidebar_batch_does_not_swallow_signoff_refusals(tmp_path, records, why):
+    facts = tmp_path / "facts.json"
+    facts.write_text(json.dumps({f"{OWNER}/northwind-synthetic": {}}), encoding="utf-8")
+    r = _run(tmp_path, _bundle(tmp_path, records), "--require-t3-signoff", "--allow-t3",
+             "content", "sidebar", "--facts", str(facts))
+    assert r.returncode == 2 and f"t3-signoff:{why}" in _out(r), _out(r)

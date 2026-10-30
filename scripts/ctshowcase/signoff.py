@@ -72,9 +72,14 @@ def load_records(root: Path | None = None) -> list[dict]:
     path = root / "decisions" / SIGNOFF_FILE if root else None
     if not path or not path.is_file():
         return []
-    data = load_yaml_text(path.read_text(encoding="utf-8"))
+    try:
+        data = load_yaml_text(path.read_text(encoding="utf-8"))
+    except Exception:  # invalid YAML or unreadable file: no usable records, so the gate refuses (t3-signoff:missing)
+        return []
     items = data.get("signoffs") if isinstance(data, dict) else data
-    return [r for r in items or [] if isinstance(r, dict)]
+    if not isinstance(items, list):  # `signoffs: 7` and similar: fail closed instead of raising TypeError
+        return []
+    return [r for r in items if isinstance(r, dict)]
 
 
 def _expiry(rec: dict) -> _dt.date | None:
