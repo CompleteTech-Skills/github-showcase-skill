@@ -678,8 +678,8 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
             is_hdr = is_header_line(ln) or bold
             if preserve:  # additive only: just an old nav line is replaced
                 is_hdr = s_.startswith("**") and " · " in s_ and not "".join(keep_pre).strip()
-            elif bold and not is_header_line(ln) and old_tag is not None:
-                # a tagline block already exists: this bold line is authored text beside it, never an old tagline
+            elif bold and not is_header_line(ln) and (old_tag or "").strip():
+                # a tagline block already holds a line: this bold line is authored text beside it, never an old tagline
                 keep_pre.append(ln)
                 continue
             elif bold and not is_header_line(ln) and not desc:
@@ -981,6 +981,14 @@ def preservation(before: str, after: str, removed: list[str]) -> list[str]:
     for r in removed:
         b_lines[r.strip()] -= 1
     a_lines = Counter(ln.strip() for ln in after.splitlines() if ln.strip())
+    # a refreshed tagline (non-empty old body replaced by a different one) is generated text: the lines it newly adds
+    # never stand in for an authored line that went missing elsewhere (a Notes line equal to the new description)
+    tag = {w: next((m.group(2) for m in find_blocks(MARK, t) if m.group(1) == "tagline"), None)
+           for w, t in (("old", before), ("new", after))}
+    if (tag["old"] or "").strip() and tag["new"] is not None and tag["old"].strip() != tag["new"].strip():
+        fresh = Counter(ln.strip() for ln in tag["new"].splitlines() if ln.strip())
+        fresh.subtract(Counter(ln.strip() for ln in tag["old"].splitlines() if ln.strip()))
+        a_lines.subtract(+fresh)
     for ln, n in b_lines.items():
         if n <= 0:
             continue

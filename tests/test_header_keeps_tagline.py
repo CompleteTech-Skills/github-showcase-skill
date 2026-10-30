@@ -443,3 +443,26 @@ def test_cli_upgrade_refresh_keeps_an_authored_bold_line_beside_the_block(tmp_pa
     assert p.returncode == 0, p.stdout + p.stderr
     after = (repo / "README.md").read_text(encoding="utf-8")
     assert warning in after and TAGLINE not in after and _tagline_body(after) == f"**{NEW_DESC}**"
+
+
+def test_empty_tagline_block_without_description_carries_the_bold_line(make_ctx, tmp_path):
+    # the "already holds a line" rule needs a non-empty block: an empty one still receives the carried line
+    own = "**My own tool line.**"
+    text = ("# T\n\n<!-- showcase:tagline:start -->\n<!-- showcase:tagline:end -->\n\n" + own
+            + "\n\n## Usage\n\nRun it.\n")
+    out, removed = R.upgrade(make_ctx(tmp_path, description=""), text)
+    assert _tagline_body(out) == own and out.count(own) == 1 and "## About" not in out
+    assert not R.preservation(text, out, removed)
+
+
+def test_refreshed_tagline_cannot_hide_a_deleted_authored_line(make_ctx, tmp_path):
+    # the regenerated tagline equals an authored Notes line: upgrade merges the two ## Notes sections and drops one body
+    # copy, and the generated tagline must not count as that line's surviving copy
+    line = f"**{NEW_DESC}**"
+    text = TEXT + f"\n## Notes\n\n{line}\n\n## Notes\n\nKeep this other note.\n"
+    ctx = make_ctx(tmp_path, description=NEW_DESC)
+    out, removed = R.upgrade(ctx, text)
+    assert _tagline_body(out) == line
+    if out.count(line) < 2:  # the authored copy outside the tagline block was lost: it must be reported
+        assert R.preservation(text, out, removed)
+    assert R.preservation(text, out.replace("Keep this other note.", ""), removed)
