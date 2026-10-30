@@ -147,6 +147,49 @@ def test_strict_owner_applies_in_estate_mode(tmp_path):
     assert r.returncode == 2 and "unknown-org" in r.stdout + r.stderr, (r.stdout, r.stderr)
 
 
+def _estate_two_metas(tmp_path, owners):
+    d = tmp_path / "meta"
+    d.mkdir()
+    for i, o in enumerate(owners):
+        (d / f"m{i}.json").write_text(json.dumps(dict(META, owner=o, repo=f"x-synth-{i}")), encoding="utf-8")
+    return d
+
+
+def test_strict_owner_estate_skips_excluded_owners_like_estate_doctor(tmp_path):
+    # Review: estate_doctor skips excluded owners and placeholders, so the strict pre-gate must not refuse the whole run
+    # for them. BunsDev is in owners.excluded; Northwind-Trading-Co is registered (synthetic).
+    d = _estate_two_metas(tmp_path, ["Northwind-Trading-Co", "BunsDev"])
+    base = ["doctor", "--estate", "--meta-dir", str(d), "--registry",
+            str(ROOT / "examples" / "estate" / "registry" / "estate.yaml")]
+    assert run(*base).returncode == 0
+    r = run(*base, "--strict-owner")
+    assert r.returncode == 0, (r.stdout, r.stderr)
+
+
+def test_strict_owner_estate_ignores_ownerless_metadata(tmp_path):
+    d = tmp_path / "meta"
+    d.mkdir()
+    (d / "m.json").write_text(json.dumps({k: v for k, v in META.items() if k not in ("owner", "name")}), encoding="utf-8")
+    base = ["doctor", "--estate", "--meta-dir", str(d), "--registry",
+            str(ROOT / "examples" / "estate" / "registry" / "estate.yaml")]
+    r = run(*base, "--strict-owner")
+    assert "unknown-org" not in r.stdout + r.stderr, (r.stdout, r.stderr)
+
+
+def test_strict_owner_estate_honours_registry_former_slugs(tmp_path):
+    # Review: the gate must use the same alias-aware resolver as estate_doctor (--registry former_slugs).
+    import yaml
+    reg = yaml.safe_load((ROOT / "examples" / "estate" / "registry" / "estate.yaml").read_text(encoding="utf-8"))
+    reg["orgs"]["Northwind-Trading-Co"]["former_slugs"] = ["Acme-Old"]
+    rp = tmp_path / "reg.yaml"
+    rp.write_text(yaml.safe_dump(reg), encoding="utf-8")
+    d = _estate_two_metas(tmp_path, ["Acme-Old"])
+    base = ["doctor", "--estate", "--meta-dir", str(d), "--registry", str(rp)]
+    assert run(*base).returncode == 0
+    r = run(*base, "--strict-owner")
+    assert r.returncode == 0, (r.stdout, r.stderr)
+
+
 def test_strict_owner_refuses_a_family_on_hold_unless_allowed(tmp_path, cfg):
     assert run("--config", str(cfg), "brand", "add-org", "Acme-Held", "--family", "touchedbyanagent", "--tier", "T1",
                "--display-name", "Acme Held", "--write").returncode == 0

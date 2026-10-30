@@ -818,14 +818,24 @@ def cmd_new(args):
     return res, OK
 
 
-def strict_owner_gate(b, owner, allow_hold=False) -> None:
-    """`doctor --strict-owner`: the banner/card/social gate (gate_owner) plus the unregistered-owner refusal."""
+def strict_owner_gate(b, owner, allow_hold=False, resolver=None) -> None:
+    """`doctor --strict-owner`: the banner/card/social gate (gate_owner) plus the unregistered-owner refusal.
+
+    With a resolver (estate mode) every check is alias-aware, so a renamed org that --registry/--approved know under
+    a former slug passes exactly as it does in estate_doctor."""
     from ctshowcase.errors import Refused
-    b.check_owner(owner)  # excluded/hold/T3; the global --allow-t3 is honoured via t3_signed_off()
-    if not b.org(owner)["known"]:
+    if resolver is not None:
+        resolver.check_owner(owner, allow_hold=True)  # excluded/T3 under any login; hold is decided below
+        known = resolver.brand_key(owner) is not None or b.org(owner)["known"]
+        on_hold = resolver.family_hold(owner)
+    else:
+        b.check_owner(owner)  # excluded/hold/T3; the global --allow-t3 is honoured via t3_signed_off()
+        known = b.org(owner)["known"]
+        on_hold = bool(b.style(owner).get("hold"))
+    if not known:
         raise Refused(f"{owner} is not in brand.yaml; run `showcase.py brand add-org` (dry run by default)",
                       log="unknown-org")
-    if b.style(owner).get("hold") and not allow_hold:
+    if on_hold and not allow_hold:
         raise ShowcaseError(f"{owner} family is on hold; pass --allow-hold", log="hold")
 
 
@@ -854,18 +864,24 @@ def cmd_doctor(args):
                     key = f"{o}/{x.get('repo') or x.get('name')}".lower() if o else f"#{len(seen)}"
                     seen[key] = x
         metas = list(seen.values())
-        if getattr(args, "strict_owner", False):  # every owner found must pass the same gate as a single repository
-            b = brand(args)
+        b = brand(args)
+        resolver = _resolver_args(args, require_registry=True)
+        if getattr(args, "strict_owner", False):  # every owner estate_doctor reports on must pass the single-repo gate
             from ctshowcase.meta import normalize
             owners = set()
             for m in metas:  # normalize first: an owner given only as full_name must be gated too
                 try:
-                    owners.add(normalize(m)["owner"])
+                    n = normalize(m)
                 except ShowcaseError:
                     continue
-            for o in sorted(owners - {None, ""}):
-                strict_owner_gate(b, o, args.allow_hold)
-        res = intake.estate_doctor(brand(args), _resolver_args(args, require_registry=True), metas,
+                o = n.get("owner")
+                # same skips as intake.estate_doctor; an ownerless meta normalises to the literal 'unknown'
+                if not o or o == "unknown" or b.owner_status(o) == "excluded" or resolver.is_placeholder(o):
+                    continue
+                owners.add(o)
+            for o in sorted(owners):
+                strict_owner_gate(b, o, args.allow_hold, resolver=resolver)
+        res = intake.estate_doctor(b, resolver, metas,
                                    template_dir=args.template_dir, checkouts=args.checkouts, out=args.out)
         return res, OK
     ctx = context(args)

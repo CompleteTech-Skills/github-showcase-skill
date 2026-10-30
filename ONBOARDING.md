@@ -50,8 +50,10 @@ To onboard a new org, preview and then add its brand rows (both commands are dry
 
 ```bash
 python scripts/showcase.py brand add-family acme-widgets --company-label "Acme Widgets" --canvas "#101820" --accent "#FEE715"
+# review the printed YAML block and diff, then write the family first (add-org refuses an unknown family)
+python scripts/showcase.py brand add-family acme-widgets --company-label "Acme Widgets" --canvas "#101820" --accent "#FEE715" --write
 python scripts/showcase.py brand add-org Acme-Widgets --family acme-widgets --tier T1 --display-name "Acme Widgets"
-# review the printed YAML block and diff, then repeat with --write (family first)
+# review that preview too, then repeat the add-org command with --write
 python scripts/showcase.py --meta M.json --no-repo-dir doctor --strict-owner  # optional: refuse owners not in brand.yaml
 ```
 
