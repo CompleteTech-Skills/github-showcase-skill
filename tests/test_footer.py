@@ -72,6 +72,16 @@ def _check_meta(cfg, meta, tmp_path, readme):
     return proc, json.loads(proc.stdout)
 
 
+# Base evidence (re-run by the E2.3.2 review; synthetic fixtures only). The regression base is the commit BEFORE task 45
+# (2be04ac, before 5854405 "footer: take the owner from --meta for --check"). There, `footer --check README --meta M`
+# ignores the owner's `footer` setting: 8 of these 16 tests fail (test_check_meta_footer_false_exempt, _footer_hold,
+# test_check_meta_agrees_with_org_flag[False|hold], test_check_meta_agrees_with_context[False|hold],
+# test_check_meta_t3_refused, test_check_meta_watching_fork_exempt_nonfork_held_dotgithub_checked) and 8 pass (guards for
+# unchanged behaviour: footer True, default --check, --org, unknown owner). The task-45 merge 3e45b87, which this branch
+# is based on, already contains the fix, so all 16 pass there by design. Reproduce on a base export with
+# `git archive 2be04ac | tar -x -C <dir>`, copy this file in, and run `python -m pytest -q tests/test_footer.py`.
+
+
 def test_check_meta_footer_false_exempt(tmp_path):
     cfg = _cfg(tmp_path, False)
     proc, out = _check_meta(cfg, _meta(tmp_path, "Northwind-Trading-Co"), tmp_path, _readme(tmp_path))
