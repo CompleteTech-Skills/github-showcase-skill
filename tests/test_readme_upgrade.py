@@ -14,7 +14,7 @@ READMES = sorted((ROOT / "tests" / "fixtures" / "readmes").glob("*.md"))
 def ctx_for(brand, name, tmp_path, skill=False):
     shutil.copy(ROOT / "tests" / "fixtures" / "readmes" / f"{name}.md", tmp_path / "README.md")
     if skill:
-        (tmp_path / "SKILL.md").write_text("---\nname: x\n---\n")
+        (tmp_path / "SKILL.md").write_text("---\nname: x\n---\n", encoding="utf-8")
     return RepoContext(brand, load_file(FIX / f"{name}.json"), tmp_path)
 
 
@@ -35,7 +35,7 @@ def test_preservation_and_idempotence(brand, tmp_path, path):
 
 def test_variant_a_header_and_order(brand, tmp_path):
     ctx = ctx_for(brand, "CompleteTech-Skills__agentic-email-skill", tmp_path, skill=True)
-    after, _ = readme.upgrade(ctx, (tmp_path / "README.md").read_text())
+    after, _ = readme.upgrade(ctx, (tmp_path / "README.md").read_text(encoding="utf-8"))
     assert ctx.det["variant"] == "A"
     assert "**CompleteTech LLC Skills** · [Start here](ONBOARDING.md)" in after
     lines = after.splitlines()
@@ -46,7 +46,7 @@ def test_variant_a_header_and_order(brand, tmp_path):
 
 def test_renames_and_notes(brand, tmp_path, make_ctx):
     text = "# Thing\n\nIntro text.\n\n## Installation\n\npip install thing\n\n## Fun Stuff ✨\n\nKept.\n\n## Licence\n\nMIT.\n"
-    (tmp_path / "README.md").write_text(text)
+    (tmp_path / "README.md").write_text(text, encoding="utf-8")
     ctx = make_ctx(repo_dir=tmp_path, description="Run the thing for teams.")
     after, removed = readme.upgrade(ctx, text)
     assert "## Install\n\npip install thing" in after and "## Notes\n\n### Fun Stuff" in after
@@ -62,7 +62,7 @@ def test_shrink_guard(tmp_path):
 
 def test_preserve_list_banner_kept(brand, brand_with, tmp_path):
     ctx = ctx_for(brand, "jevplay-games__jev-minesweeper", tmp_path)
-    before = (tmp_path / "README.md").read_text()
+    before = (tmp_path / "README.md").read_text(encoding="utf-8")
     after, _ = readme.upgrade(ctx, before)
     # q57 pres default: the hero goes above; the README's own banner stays directly under the new header
     assert "preserve-banner:kept-below-hero" in ctx.logs and "assets/banner.png" in after
@@ -91,7 +91,7 @@ def test_g_h_and_bootstrap(brand, tmp_path, make_ctx):
     if not tmpl.is_file():
         tmpl = ROOT / "tests" / "fixtures" / "template-README.md"
     text = tmpl.read_text(encoding="utf-8")
-    (tmp_path / "pyproject.toml").write_text("[project]\nname='a'\nrequires-python='>=3.10'\n[project.scripts]\na='a:main'\n")
+    (tmp_path / "pyproject.toml").write_text("[project]\nname='a'\nrequires-python='>=3.10'\n[project.scripts]\na='a:main'\n", encoding="utf-8")
     ctx = make_ctx(repo_dir=tmp_path, repo="support-triage-agent", description="Run the triage agent for teams.")
     out = readme.bootstrap(ctx, text)
     assert ctx.det["variant"] == "C" and "## Install" in out and "## Quick Start" in out and "Template." not in out
@@ -105,10 +105,10 @@ def test_cli_dry_run_and_write(tmp_path):
     meta = FIX / "CompleteTech-LLC__LoL_OBS_Overlay.json"
     p = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme")
     assert p.returncode == 0 and json.loads(p.stdout)["diff"].startswith("--- a/README.md")
-    before = (tmp_path / "README.md").read_text()
+    before = (tmp_path / "README.md").read_text(encoding="utf-8")
     p = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--write", "--records", tmp_path / "rec.jsonl")
-    assert p.returncode == 0 and (tmp_path / "README.md").read_text() != before
-    rec = json.loads((tmp_path / "rec.jsonl").read_text().splitlines()[0])
+    assert p.returncode == 0 and (tmp_path / "README.md").read_text(encoding="utf-8") != before
+    rec = json.loads((tmp_path / "rec.jsonl").read_text(encoding="utf-8").splitlines()[0])
     assert rec["std"] == "ct-std-v1" and rec["kind"] == "readme"
 
 
@@ -121,8 +121,8 @@ def test_template_bootstrap_b9(tmp_path):
     assert run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--bootstrap", "--write").returncode == 0
     lint = json.loads(run_cli("--meta", meta, "--repo-dir", tmp_path, "lint", "readme").stdout)
     assert lint["result"] == "incomplete", lint
-    text = (tmp_path / "README.md").read_text()
+    text = (tmp_path / "README.md").read_text(encoding="utf-8")
     assert text.rstrip().endswith("<!-- showcase:footer:end -->") and "## Install" in text
     again = json.loads(run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--bootstrap").stdout)
     assert again["result"] == "unchanged"
-    assert "Northwind-Trading-Co/.github" in (tmp_path / "CONTRIBUTING.md").read_text()
+    assert "Northwind-Trading-Co/.github" in (tmp_path / "CONTRIBUTING.md").read_text(encoding="utf-8")

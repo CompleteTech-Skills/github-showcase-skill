@@ -3,8 +3,9 @@ import os
 import subprocess
 
 import yaml
+import pytest
 
-from conftest import EX, ROOT, run_cli
+from conftest import EX, ROOT, run_bash, run_cli
 
 
 def test_action_contract():
@@ -27,6 +28,7 @@ def test_fingerprint_changed_flag(tmp_path):
     assert json.loads(p.stdout)["changed"] is False
 
 
+@pytest.mark.requires_bash
 def test_commit_script_dry_run(tmp_path):
     script = ROOT / "scripts" / "action_commit.sh"
     if not script.is_file():
@@ -35,6 +37,6 @@ def test_commit_script_dry_run(tmp_path):
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     subprocess.run(["git", "-C", str(tmp_path), "commit", "-q", "--allow-empty", "-m", "init"], check=True,
                    env=dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@e", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@e"))
-    p = subprocess.run(["bash", str(script), "msg [skip ci]", "fail"], cwd=tmp_path, capture_output=True, text=True,
-                       env=dict(os.environ, SHOWCASE_DRY_RUN="1"))
+    p = run_bash(script.read_text(encoding="utf-8"), "msg [skip ci]", "fail", cwd=tmp_path,
+                 env=dict(os.environ, SHOWCASE_DRY_RUN="1"))
     assert p.returncode == 0, p.stdout + p.stderr

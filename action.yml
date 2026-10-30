@@ -148,11 +148,12 @@ runs:
           fi
           return "$rc"
         }
+        # Bash 3.2 treats an empty array as unset under nounset; expand only when populated.
         if [[ ",$SHOWCASE_OUTPUTS," == *",banner,"* ]]; then
-          art banner banner.png --allow-few-chips "${extra[@]}"
+          art banner banner.png --allow-few-chips ${extra[@]+"${extra[@]}"}
         fi
         if [[ ",$SHOWCASE_OUTPUTS," == *",card,"* ]]; then
-          art card card.svg --png "$RUNNER_TEMP/card.png" "${extra[@]}"
+          art card card.svg --png "$RUNNER_TEMP/card.png" ${extra[@]+"${extra[@]}"}
         fi
         # A held repository (exit 2: a watching-org repository that is neither a fork nor `.github`) keeps its
         # README untouched until someone decides; like a held art family, that skips the output and keeps the run green.

@@ -16,8 +16,8 @@ from ctshowcase import resolver as R
 from ctshowcase.errors import ArtFail, NeedsInput, Refused
 
 FIX = ROOT / "tests" / "fixtures" / "content"
-ACTIONS = json.loads((FIX / "estate-actions.json").read_text())
-ART = (FIX / "ART_DIRECTION.min.md").read_text()
+ACTIONS = json.loads((FIX / "estate-actions.json").read_text(encoding="utf-8"))
+ART = (FIX / "ART_DIRECTION.min.md").read_text(encoding="utf-8")
 NW = "Northwind-Trading-Co"
 
 
@@ -171,11 +171,11 @@ def test_links_offline(brand, checkout):
     assert by[("README.md", "docs/img/missing.png")]["status"] == "broken"
     assert not any("nope.md" in t for _, t in by)
     assert res["result"] == "warn" and "dead-link" in res["logs"] and "link-rewrite" in res["logs"]
-    before = (checkout / "README.md").read_text()
+    before = (checkout / "README.md").read_text(encoding="utf-8")
     diff = C.proposal_diff(tree, res["proposals"])
     assert "[Bad case](docs/Guide.md)" in diff and "[Moved](conf/config.md)" in diff and "CompleteTech-TCG" in diff
     assert "#quickstart" in diff  # no near slug: left as it is, reported only
-    assert (checkout / "README.md").read_text() == before  # never rewritten
+    assert (checkout / "README.md").read_text(encoding="utf-8") == before  # never rewritten
 
 
 def test_links_flag_this_repository_under_a_former_owner(brand, tmp_path):
@@ -235,7 +235,7 @@ def test_base_ref_separates_introduced_from_preexisting(tmp_path):
     git(root, "init", "-q")
     git(root, "add", "-A")
     git(root, "commit", "-qm", "base")
-    (root / "README.md").write_text("# T\n\n[Start](#quickstart) [Old rot](docs/gone.md)\n\n## Quick Start\n")
+    (root / "README.md").write_text("# T\n\n[Start](#quickstart) [Old rot](docs/gone.md)\n\n## Quick Start\n", encoding="utf-8")
     res = C.links_report(C.Tree(root), ["README.md"], base=C.Tree(root, "HEAD"))
     by = {x["target"]: x for x in res["findings"]}
     assert by["#quickstart"]["introduced"] and by["#quickstart"]["proposal"]["new"] == "#quick-start"
@@ -320,7 +320,7 @@ def test_linguist_proposes_generated_and_example_paths(tmp_path):
     assert res["diff"].startswith("--- a/.gitattributes") and "+# ct-std linguist" in res["diff"]
     assert " * text=auto" in res["diff"]  # existing lines kept (append-only)
     assert not re.search(r"\b(eol|binary|filter=lfs)\b", "\n".join(res["gitattributes_lines"]))
-    assert (root / ".gitattributes").read_text() == "* text=auto\n"
+    assert (root / ".gitattributes").read_text(encoding="utf-8") == "* text=auto\n"
 
 
 def test_linguist_existing_block_and_overrides(tmp_path):
@@ -389,8 +389,8 @@ def test_push_filters():
 @pytest.mark.parametrize("runs_file", ["runs-gh.json", "runs-rest.json"])
 def test_actions_report(brand, runs_file):
     meta = meta_dict(default_branch="main", has_pages=False)
-    res = C.actions_report(meta, runs=json.loads((FIX / runs_file).read_text()),
-                           workflows=json.loads((FIX / "workflows-rest.json").read_text()), workflow_files=WF,
+    res = C.actions_report(meta, runs=json.loads((FIX / runs_file).read_text(encoding="utf-8")),
+                           workflows=json.loads((FIX / "workflows-rest.json").read_text(encoding="utf-8")), workflow_files=WF,
                            readme=BADGE, root_files=["vercel.json", "README.md"], resolver=resolver(brand))
     w = {r["path"]: r for r in res["workflows"]}
     tests = w[".github/workflows/tests.yml"]
@@ -525,8 +525,8 @@ def test_new_files_from_git(tmp_path):
 # ---------------------------------------------------------------------------------------------------
 def test_sidebar_plan_single_repo(brand):
     r = resolver(brand)
-    facts = json.loads((FIX / "sidebar-facts.json").read_text())
-    pk = C.packages_by_repo(json.loads((FIX / "packages.json").read_text()), r)
+    facts = json.loads((FIX / "sidebar-facts.json").read_text(encoding="utf-8"))
+    pk = C.packages_by_repo(json.loads((FIX / "packages.json").read_text(encoding="utf-8")), r)
     res = C.sidebar_plan(meta_dict(), facts[f"{NW}/support-triage-agent"], resolver=r, packages=pk)
     assert res["row"]["show_releases"] is False and res["row"]["show_deployments"] is True
     assert res["row"]["show_packages"] is False and res["result"] == "proposal"
@@ -563,7 +563,7 @@ def test_sidebar_cli_estate_file(capsys, tmp_path):
     jobs = tmp_path / "jobs.jsonl"
     code, out = run_content(capsys, "--no-repo-dir", "content", "sidebar", "--facts", FIX / "sidebar-facts.json",
                             "--packages", FIX / "packages.json", "--jobs", jobs, *NO_ESTATE)
-    lines = [json.loads(x) for x in jobs.read_text().splitlines()]
+    lines = [json.loads(x) for x in jobs.read_text(encoding="utf-8").splitlines()]
     assert len(lines) == 2 and all(j["kind"] == "browser" and j["steps"] for j in lines)
     assert code == 0 and out["repos"] == 3
     assert {s["repo"] for s in out["skipped"]} == {"Pick-Your-AI/pya-app", "BunsDev/someone-else"}
@@ -578,7 +578,7 @@ def test_sidebar_cli_estate_file(capsys, tmp_path):
 def test_sidebar_cli_batch_with_missing_facts_is_not_a_pass(capsys, tmp_path):
     """Round-2 defect: a batch where every repository lacked its packages count (so got no job) read as `pass`."""
     facts = tmp_path / "facts.json"
-    facts.write_text(json.dumps({f"{NW}/support-triage-agent": {"releases": [{"id": 1}], "deployments": []}}))
+    facts.write_text(json.dumps({f"{NW}/support-triage-agent": {"releases": [{"id": 1}], "deployments": []}}), encoding="utf-8")
     code, out = run_content(capsys, "--no-repo-dir", "content", "sidebar", "--facts", facts, *NO_ESTATE)
     assert code == 0 and out["result"] == "needs-input" and out["needs_input"] == 1 and out["jobs"] == []
     assert out["logs"] == [f"{NW}/support-triage-agent:needs-input:sidebar-facts:packages"]
@@ -679,7 +679,7 @@ def test_icon_cli_normalize_and_check(capsys, tmp_path, brand):
     src = tmp_path / "cand.png"
     _candidate(card).save(src)
     meta = tmp_path / "meta.json"
-    meta.write_text(json.dumps(meta_dict()))
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
     out = tmp_path / "repo" / "assets" / "icon.png"
     code, res = run_content(capsys, "--meta", meta, "--no-repo-dir", "content", "icon", "normalize", "--in", src,
                             "--out", out, "--preview", tmp_path / "p48.png", "--art-direction", FIX / "ART_DIRECTION.min.md",
@@ -695,7 +695,7 @@ def test_icon_cli_normalize_and_check(capsys, tmp_path, brand):
 
 def test_icon_watching_org_is_exempt(capsys, tmp_path):
     meta = tmp_path / "meta.json"
-    meta.write_text(json.dumps(meta_dict(owner="romgenie-following-repos", repo="tool", fork=True)))
+    meta.write_text(json.dumps(meta_dict(owner="romgenie-following-repos", repo="tool", fork=True)), encoding="utf-8")
     code, res = run_content(capsys, "--meta", meta, "--no-repo-dir", "content", "icon", "prompt", *NO_ESTATE)
     assert code == 0 and res["result"] == "exempt"
 
@@ -706,7 +706,7 @@ def test_icon_watching_org_is_exempt(capsys, tmp_path):
 def test_cli_refuses_excluded_and_t3(capsys, tmp_path):
     for owner in ("BunsDev", "Pick-Your-AI"):
         meta = tmp_path / f"{owner}.json"
-        meta.write_text(json.dumps(meta_dict(owner=owner, repo="x")))
+        meta.write_text(json.dumps(meta_dict(owner=owner, repo="x")), encoding="utf-8")
         code, res = run_content(capsys, "--meta", meta, "--no-repo-dir", "content", "linguist", *NO_ESTATE)
         assert code == 2 and res["result"] == "refused"
 
@@ -715,7 +715,7 @@ def test_cli_actions_and_linguist(capsys, tmp_path):
     root = write(tmp_path / "repo", {**WF, "README.md": BADGE + "\n", "pyproject.toml": "[project]\nname='x'\n",
                                      "src/a.py": "x" * 100, "reports/r.html": "h" * 9000})
     meta = tmp_path / "meta.json"
-    meta.write_text(json.dumps(meta_dict(languages={"HTML": 9000, "Python": 100})))
+    meta.write_text(json.dumps(meta_dict(languages={"HTML": 9000, "Python": 100})), encoding="utf-8")
     code, res = run_content(capsys, "--meta", meta, "--repo-dir", root, "content", "actions", "--runs",
                             FIX / "runs-rest.json", "--workflows", FIX / "workflows-rest.json", "--report",
                             tmp_path / "actions.json", *NO_ESTATE)
@@ -734,7 +734,7 @@ def test_cli_images(capsys, tmp_path):
 
 def test_cli_social_alias_emits_upload_job(capsys, tmp_path):
     meta = tmp_path / "meta.json"
-    meta.write_text(json.dumps(meta_dict()))
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
     out = tmp_path / "social.png"
     code, res = run_content(capsys, "--format", "json", "--meta", meta, "--no-repo-dir", "content", "social", "--out", out,
                             "--job", *NO_ESTATE)

@@ -5,7 +5,11 @@ import os
 import subprocess
 import sys
 
-from conftest import ROOT
+import pytest
+
+from conftest import ROOT, run_bash
+
+pytestmark = pytest.mark.requires_bash
 
 ENV = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@e", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@e",
            SHOWCASE_DRY_RUN="1")
@@ -38,8 +42,8 @@ def _prepare_and_commit(repo):
                         "Northwind-Trading/northwind-support-triage-agent"], cwd=repo, capture_output=True, text=True)
     assert p.stdout.strip() == "true", p.stdout + p.stderr
     (repo / "docs" / "images" / "banner.png").write_bytes(b"own banner")  # the regenerated art
-    p = subprocess.run(["bash", str(ROOT / "scripts" / "action_commit.sh"), "docs: regenerate [skip ci]", "fail"],
-                       cwd=repo, capture_output=True, text=True, env=ENV)
+    p = run_bash((ROOT / "scripts" / "action_commit.sh").read_text(encoding="utf-8"),
+                 "docs: regenerate [skip ci]", "fail", cwd=repo, env=ENV)
     assert p.returncode == 0, p.stdout + p.stderr
 
 

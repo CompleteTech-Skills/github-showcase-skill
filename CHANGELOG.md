@@ -10,6 +10,10 @@ All notable changes to `github-showcase-skill` are recorded here. Versions follo
 
 ### Fixed
 
+- Windows contributor tests now use explicit UTF-8, native path basenames, a platform-independent read-only metadata stub, and Git Bash with stdin-safe Action scripts. All 15 issue #9 failures are individually documented; the full suite now runs in Windows, Linux and macOS CI.
+- Lint accepts file operands after options on older Python 3.12 versions while continuing to reject unrecognized options.
+- The Action's optional render arguments support macOS Bash 3.2, including an empty argument array with `set -u`.
+
 - `org health` and `org doctor` run available checkout/snapshot checks without the private estate registry, retaining missing-org errors when a registry is supplied or discovered. Doctor combines available file and visibility evidence without inventing completeness or dropping explicit absence, normalizes REST/GraphQL privacy fields, distinguishes absent fields from explicitly cleared identity fields, checks private links under known renamed repository/owner paths and supported verification reason codes, and reports incomplete registry-dependent coverage instead of aborting or claiming the org is done.
 - Older valid custom brand configs without the optional icon palette tokens retain icon normalization, checking and option B illustration prompts; missing palette inputs are reported without a traceback, and the bundled option A glyph prompt explains which tokens to add or how to supply an explicit palette.
 - `content icon` uses the bundled `references/art-direction.md` in every working directory. The option A glyph template uses dedicated, contrasting `icon_ink` and `icon_spark` brand tokens and the documented family seed (or the tool's default when absent) without requiring private estate files; explicit art-direction overrides remain supported and missing paths are named in the error.

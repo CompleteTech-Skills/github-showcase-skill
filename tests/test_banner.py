@@ -62,7 +62,7 @@ def test_text_column_chips_and_bar(php2shell, brand):
 def test_sidecar_and_fingerprint_stable(tmp_path):
     meta = FIX / "CompleteTech-Skills__agentic-email-skill.json"
     _render(tmp_path, meta)
-    side = json.loads((tmp_path / "docs/images/.showcase.json").read_text())
+    side = json.loads((tmp_path / "docs/images/.showcase.json").read_text(encoding="utf-8"))
     p = run_cli("--meta", meta, "--no-repo-dir", "fingerprint", "--out-dir", tmp_path / "docs/images")
     assert json.loads(p.stdout)["changed"] is False
     assert json.loads(p.stdout)["fingerprint"] == side["fingerprint"]
@@ -71,7 +71,7 @@ def test_sidecar_and_fingerprint_stable(tmp_path):
 def test_long_slug_two_lines(tmp_path):
     meta = tmp_path / "m.json"
     meta.write_text(json.dumps({"owner": "Northwind-Trading-Co", "repo": "northwind-customer-support-email-triage-agent-pilot-x",
-                                "description": "Run the Northwind triage agent.", "visibility": "public", "license": "MIT"}))
+                                "description": "Run the Northwind triage agent.", "visibility": "public", "license": "MIT"}), encoding="utf-8")
     p, out = _render(tmp_path, meta, "--chip", "Python", "--chip", "MIT")
     assert p.returncode == 0, p.stdout + p.stderr
     assert len(json.loads(p.stdout)["title_lines"]) == 2
@@ -79,7 +79,7 @@ def test_long_slug_two_lines(tmp_path):
 
 def test_empty_description_exit_4(tmp_path):
     meta = tmp_path / "m.json"
-    meta.write_text(json.dumps({"owner": "Northwind-Trading-Co", "repo": "x", "description": ""}))
+    meta.write_text(json.dumps({"owner": "Northwind-Trading-Co", "repo": "x", "description": ""}), encoding="utf-8")
     p, out = _render(tmp_path, meta)
     assert p.returncode == 4 and not out.exists()
 
@@ -87,11 +87,11 @@ def test_empty_description_exit_4(tmp_path):
 def test_keep_existing_and_refusals(tmp_path):
     meta = tmp_path / "m.json"
     meta.write_text(json.dumps({"owner": "AI-Ascension", "repo": "sts2-agent", "description": "Play Slay the Spire 2 with agents.",
-                                "visibility": "public", "language": "Python", "license": "MIT"}))
+                                "visibility": "public", "language": "Python", "license": "MIT"}), encoding="utf-8")
     repo = tmp_path / "repo"
     repo.mkdir()
     # q57 aia/pres defaults: the hero in AI-Ascension's own palette goes above the README's own banner ...
-    (repo / "README.md").write_text('<p align="center"><img src="assets/hero.png" alt="STS2"></p>\n\n# STS2 Agent\n')
+    (repo / "README.md").write_text('<p align="center"><img src="assets/hero.png" alt="STS2"></p>\n\n# STS2 Agent\n', encoding="utf-8")
     p, out = _render(tmp_path, meta, repo_dir=repo)
     assert p.returncode == 0 and json.loads(p.stdout)["result"] == "ok" and out.exists(), p.stdout + p.stderr
     out.unlink()
@@ -101,12 +101,12 @@ def test_keep_existing_and_refusals(tmp_path):
                 "--format", "json", "banner", "--out", out)
     assert p.returncode == 0 and json.loads(p.stdout)["result"] == "exempt" and not out.exists()
     # ... and a README without one gets the family-palette banner (decision 13)
-    (repo / "README.md").write_text("# STS2 Agent\n\nPlay it.\n")
+    (repo / "README.md").write_text("# STS2 Agent\n\nPlay it.\n", encoding="utf-8")
     p, out = _render(tmp_path, meta, repo_dir=repo)
     assert p.returncode == 0 and json.loads(p.stdout)["result"] == "ok" and out.exists(), p.stdout + p.stderr
-    meta.write_text(json.dumps({"owner": "BunsDev", "repo": "x", "description": "Something."}))
+    meta.write_text(json.dumps({"owner": "BunsDev", "repo": "x", "description": "Something."}), encoding="utf-8")
     assert _render(tmp_path, meta)[0].returncode == 2
-    meta.write_text(json.dumps({"owner": "romgenie-following-repos", "repo": "x", "description": "Fork.", "fork": True}))
+    meta.write_text(json.dumps({"owner": "romgenie-following-repos", "repo": "x", "description": "Fork.", "fork": True}), encoding="utf-8")
     assert json.loads(_render(tmp_path, meta)[0].stdout)["result"] == "exempt"
 
 
@@ -130,7 +130,7 @@ def test_org_mark_fills_the_card(tmp_path):
 def test_fewer_than_two_chips(tmp_path):
     meta = tmp_path / "m.json"
     meta.write_text(json.dumps({"owner": "Northwind-Trading-Co", "repo": "tiny", "description": "Run the tiny tool.",
-                                "visibility": "public"}))
+                                "visibility": "public"}), encoding="utf-8")
     p, out = _render(tmp_path, meta)
     assert p.returncode == 4 and "banner-chips" in p.stdout and not out.exists()
     p, out = _render(tmp_path, meta, "--allow-few-chips")
