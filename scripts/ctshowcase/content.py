@@ -2030,7 +2030,8 @@ def _de(a, b) -> float:
 def normalize_icon(img, ground: str = "auto", card: str | None = None, pixel_art: bool = False):
     """(1024 px RGBA or RGB image, info). Transparent icons are keyed (ΔE ≤ 6 from the ground, 2 px feather),
     trimmed to their alpha box and fitted to the 688 px live area; an icon with its own opaque ground (an avatar-style
-    night tile) is kept full-bleed (`ground="keep"`)."""
+    night tile) is kept full-bleed (`ground="keep"`). In auto mode only a dark ground (relative luminance < 0.2) that is
+    not within dE 12 of the card colour is kept as a night tile; every other uniform ground is keyed out."""
     from PIL import Image, ImageFilter
     from .color import rgb as hexrgb
     from .iconbox import corner_ground, native_pixels
@@ -2046,9 +2047,13 @@ def normalize_icon(img, ground: str = "auto", card: str | None = None, pixel_art
         elif gnd is None:
             raise ArtFail("icon-ground", "corners are neither transparent nor one opaque ground")
         else:
+            from .color import luminance
+            from .iconbox import DARK_PLATE
             lab = _lab_cache()
             near_card = card is not None and _de(lab(hexrgb(gnd)), lab(hexrgb(card))) <= CONTENT_DE
-            mode = "transparent" if near_card else "keep"
+            night_tile = (not near_card) and luminance(gnd) < DARK_PLATE
+            mode = "keep" if night_tile else "transparent"
+            info["auto_reason"] = "near-card" if near_card else ("night-tile" if night_tile else "uniform-ground")
     info["mode"] = mode
     if mode == "keep":
         if gnd is None:
