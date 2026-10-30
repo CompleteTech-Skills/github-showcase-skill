@@ -904,6 +904,9 @@ def _no_text(qa):
 
 
 def test_icon_ocr_off_by_default_keeps_manual(brand):
+    # Regression guard: the no-flag output must equal today's manual entry. The
+    # kwdefault assertion pins that --ocr exists and defaults OFF (it fails on base).
+    assert C.icon_qa.__kwdefaults__["ocr"] is False
     card = brand.style(NW)["tokens"]["card_fill"]
     data = C.icon_bytes(C.normalize_icon(_candidate(card), "transparent", card)[0])[0]
     qa = C.icon_qa(data, card=card)
