@@ -27,7 +27,9 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
 
-FORBIDDEN = re.compile(r'completetech|CompleteDotTech|005ADD', re.I)
+# 1E3A8A is CompleteTech's badge accent and grid navy (art-direction.md, brand.yaml badges.accent and the completetech
+# canvas): epic 35 review 4 found every non-CompleteTech language badge still painted it, uncaught by this pattern.
+FORBIDDEN = re.compile(r'completetech|CompleteDotTech|005ADD|1E3A8A', re.I)
 LEGIT_COMPLETETECH_ROWS = {'CompleteDotTech': 'the CompleteTech owner user account (display name is a person)'}  # the synthetic demo owner is added at runtime from brand.raw['brand_strings']['demo_owner'] (currently Northwind-Trading-Co)
 KNOWN_MISMATCHES = {'Jevelopers-neatHack-2026'}  # TicketStub: refused (needs-input:org-family) until it has its own family (task 43)
 
@@ -186,13 +188,30 @@ def rendered_leaks(brand, owner: str, tmp_path: Path) -> dict[str, list[str]]:
         'card': svg.decode() if isinstance(svg, bytes) else svg,
         'card text': scene_text(card_scene, card_info),
         'banner text': scene_text(banner_scene, banner_info),
-        'banner style tokens': json.dumps(ctx.style, sort_keys=True),
+        'banner style tokens': json.dumps(painted_style(ctx.style), sort_keys=True),
+        'family canvas': repr(banner.canvas_nodes(ctx.style, 1280, 640)),
         # decision 18: the footer is the one place the CompleteTech name is correct; strip only it (Type badges are
         # scanned: each non-CompleteTech family sets badge_brand, so no 005ADD badge is exempt)
         'readme scaffold': text.replace(footer.block(brand), ''),
         'readme lint': json.dumps(readmelint.lint(ctx, tmp_path / 'README.md')),
     }
     return {k: sorted({m.lower() for m in FORBIDDEN.findall(v)}) for k, v in surfaces.items() if FORBIDDEN.search(v)}
+
+
+def painted_style(style: dict) -> dict:
+    """ctx.style minus canvas keys no renderer reads for this family's canvas kind. Brand.family deep-merges each
+    family over the completetech base, so a flat, flat-grid or halftone canvas inherits the gradient-grid keys
+    (`overlay` #1E3A8A, and `grid` #1E3A8A where the family sets none). Only a gradient-grid canvas paints the
+    overlay (banner.canvas_nodes, intro.py `if gradient`), and flat or halftone never draw a grid; the scan of the
+    real canvas nodes ('family canvas' above) proves neither reaches a non-CompleteTech output."""
+    reads = {'gradient-grid': None, 'flat': {'kind', 'color'},
+             'flat-grid': {'kind', 'color', 'grid', 'grid_opacity', 'grid_pitch'},
+             'halftone': {'kind', 'color', 'pitch', 'radius', 'dot', 'dot_opacity'}}
+    style = copy.deepcopy(style)
+    keep = reads.get(style.get('canvas', {}).get('kind'))
+    if keep is not None:
+        style['canvas'] = {k: v for k, v in style['canvas'].items() if k in keep}
+    return style
 
 
 def _org_params():
@@ -231,6 +250,43 @@ def test_every_non_completetech_family_sets_its_own_badge_colour(brand):
     missing = {name for name, fam in brand.raw['families'].items()
                if name != 'completetech' and not (fam or {}).get('badge_brand')}
     assert missing == set()
+
+
+def test_every_non_completetech_family_sets_its_own_badge_accent(brand):
+    # epic 35 review 4: without badge_accent the language/runtime badge fell back to the global badges.accent 1E3A8A
+    ct = {str(brand.raw['badges'][k]).upper() for k in ('accent', 'brand')}
+    fams = {name: fam or {} for name, fam in brand.raw['families'].items() if name != 'completetech'}
+    assert {n for n, f in fams.items() if not f.get('badge_accent')} == set()
+    assert {n for n, f in fams.items() if str(f['badge_accent']).upper() in ct} == set()
+
+
+def _white_text_contrast(hex6: str) -> float:
+    def lin(x):
+        x /= 255
+        return x / 12.92 if x <= 0.03928 else ((x + 0.055) / 1.055) ** 2.4
+    r, g, b = (lin(int(hex6[i:i + 2], 16)) for i in (0, 2, 4))
+    return 1.05 / (0.2126 * r + 0.7152 * g + 0.0722 * b + 0.05)
+
+
+def test_family_badge_accents_are_contrast_checked(brand):
+    # shields.io draws white text on the message side; every family accent clears 4.5:1
+    low = {n: f['badge_accent'] for n, f in brand.raw['families'].items()
+           if (f or {}).get('badge_accent') and _white_text_contrast(str(f['badge_accent'])) < 4.5}
+    assert low == {}
+
+
+@pytest.mark.parametrize('owner', ['LibreEvolve', 'AI-Ascension', 'TouchedByAnAgent', 'Jev-Engineering'])
+def test_language_badge_uses_the_family_accent(brand, owner):
+    # reviewer scenario (epic 35 review 4): a public Python MIT repo emitted language-Python-1E3A8A for each T2 family
+    from conftest import meta_dict
+    from ctshowcase import readme
+    from ctshowcase.context import RepoContext
+    from ctshowcase.meta import normalize
+    ctx = RepoContext(brand, normalize(meta_dict(owner=owner, repo='thing', language='Python')), None, type_override='cli')
+    urls = [u for _, u, _ in readme.badges(ctx)]
+    lang = [u for u in urls if '/badge/language-' in u]
+    assert lang and not any(FORBIDDEN.search(u) for u in urls), urls
+    assert lang[0].endswith('-' + str(ctx.style['badge_accent']))
 
 
 # -- Unknown owners (no brand.yaml row) ---------------------------------------------------------------

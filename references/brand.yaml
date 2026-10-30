@@ -170,6 +170,7 @@ families:
     banner: keep-existing
     company_label: AI Ascension
     badge_brand: "8A591C"          # README Type badge (shields.io hex, no #): icon_spark dark amber, 5.96:1 with white text
+    badge_accent: "2A241C"          # language/runtime badge (not CompleteTech 1E3A8A): plate_low dark umber, 15.36:1
     eyebrow_case: asis
     canvas: {kind: flat, color: "#15120E"}
     tokens:
@@ -198,6 +199,7 @@ families:
     measured: false
     company_label: Jev Engineering
     badge_brand: "0C075C"          # plate_low navy (8B5CF6 is 4.23:1, under 4.5 with white badge text)
+    badge_accent: "010104"          # language/runtime badge (not CompleteTech 1E3A8A): canvas ink, 20.85:1 (22D3EE and 8B5CF6 fail 4.5 with white text)
     eyebrow_case: asis
     canvas: {kind: flat-grid, color: "#010104", grid: "#22D3EE", grid_opacity: 0.07}
     tokens:
@@ -222,6 +224,7 @@ families:
     measured: true
     company_label: jevplay.games
     badge_brand: "6B214F"          # icon_spark deep magenta, 10.74:1 (E551BA is 3.38:1)
+    badge_accent: "3A1A33"          # language/runtime badge (not CompleteTech 1E3A8A): chip_attr plum, 15.27:1
     eyebrow_case: asis
     icon_pixel_art: true            # §9.5 avatar rule: icons are scaled nearest-neighbour at an integer factor
     canvas: {kind: halftone, color: "#1E1E1E", dot: "#E551BA", dot_opacity: 0.16, pitch: 12, radius: 2}
@@ -282,6 +285,7 @@ families:
     measured: false
     company_label: LibreEvolve
     badge_brand: "065F46"          # accent_deep green, 7.68:1
+    badge_accent: "032530"          # language/runtime badge (not CompleteTech 1E3A8A): card_fill deep teal, 16.02:1
     eyebrow_case: asis
     canvas: {kind: flat-grid, color: "#021527", grid: "#10B981", grid_opacity: 0.07}
     tokens:
@@ -305,6 +309,7 @@ families:
     hold: true
     company_label: Touched By An Agent
     badge_brand: "E11D74"          # accent_mid pink, 4.54:1
+    badge_accent: "2F0132"          # language/runtime badge (not CompleteTech 1E3A8A): card_fill plum, 17.93:1
     eyebrow_case: asis
     canvas: {kind: flat-grid, color: "#1D1116", grid: "#F59E0B", grid_opacity: 0.07}
     tokens:
@@ -327,6 +332,7 @@ families:
     measured: false
     company_label: romgenie
     badge_brand: "183B31"          # card_fill green, 12.29:1 (B8860B is 3.25:1)
+    badge_accent: "002C31"          # language/runtime badge (not CompleteTech 1E3A8A): canvas deep teal, 14.95:1
     eyebrow_case: asis
     canvas: {kind: flat-grid, color: "#002C31", grid: "#F4C430", grid_opacity: 0.07}
     tokens:
