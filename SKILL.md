@@ -113,13 +113,19 @@ Checks (`describe`, `topics`, `labels`, `readme`, `footer`, `meta`, `fingerprint
 
 ## Orgs, Projects, the Enterprise and Content
 
+CLI stdout and stderr use UTF-8, including redirected Windows output, raw footer markup,
+JSON, help and errors. Decode captured CLI output as UTF-8; JSON keeps Unicode characters
+without ASCII escaping. Existing stream error handlers are preserved, so diagnostics
+can still escape undecodable filenames. No `PYTHONIOENCODING` workaround is needed.
+The Action summary and quality validator also decode CLI results as UTF-8.
+
 The four command groups follow the same rules as the repository commands: read-only toward GitHub, one JSON object on stdout (`command`, `action`, `owner`, `result`, `logs[]`), the same exit codes, and refusals for excluded, HOLD and T3 owners. What they add:
 
 **Command-name contract.** The orchestrator, the standard and other workstreams call these names, so they are fixed: the repository commands in the Command Reference; the top-level generators `banner`, `card`, `org-banner`, `org-tile`, `intro` and `contact-sheet`; and the groups `org {profile,about,pins,labels,health,doctor}`, `project {capture-query,normalize,copy-plan,readme,lint,estate-plan}`, `enterprise {snapshot-query,discover,snapshot,doctor,seat-check,diff,plan}` and `content {social,icon,links,linguist,actions,images,sidebar}`. The social preview is `content social`; the old top-level `social-preview` still parses as a hidden, deprecated alias (same options, same file, logged `deprecated:social-preview`) and is not documented as a command.
 
 - **Writer jobs.** Every planned GitHub change is a `scripts/writer.py` job `{id, phase, kind, repo|org, approval_id?, group?, argv, note}`; `--jobs FILE` appends them as JSON lines. Label jobs carry `group: labels:OWNER/REPO` for the writer's half-completed-group reconciliation unless the orchestrator passes its own group. UI-only steps are `kind: "browser"` jobs with `url`, `ui_action` and the exact click path in `steps`. A job that needs an approval carries the id `scripts/writer.py` looks up in `decisions/APPROVED_ACTIONS.yaml` (`ent-001`/`ent-002` for the Enterprise, `q41.orgs`/`q41.estate` for a project copy, the ids you pass with `--approval-id` or `--approval`). Mutations are always inline in `argv`; only read queries load from a file. The skill never runs a job: the orchestrator's writer does, after its guard and approval checks, or, used standalone, the user does after approving it.
 - **One org resolver (CQ-03).** Every org lookup (in `enterprise doctor` too) goes through `scripts/ctshowcase/resolver.py`, which maps old and new logins from `former_slugs` in `brand.yaml` or the registry, the registry's `placeholders`, and approved `org-rename`/`org-merge` items; repository slugs the registry writes after a pending `rename` or `transfer` resolve to today's slug the same way. After an approved rename (for example `CompleTetech-Security` to `CompleteTech-Security`) the brand row, the registry row, the watching-org exemption and every refusal still resolve, and jobs name the new login.
-- **The estate registry is private.** `org` reads `registry/estate.yaml` (`--registry FILE`, or the bundle beside the skill, or `$SHOWCASE_ESTATE_ROOT`) and renders public pages only from its public slice. Never copy the registry into a repository. Without it, registry-backed `org` actions exit 4 (`needs-input:registry`); `org labels ORG --repos-from-gh` instead discovers accessible repositories with paginated read-only GitHub GETs and uses the committed brand identity without reading the registry; `project`, `enterprise` and `content` run on their input files alone. `examples/estate/` is a synthetic Northwind registry for trying every `org` action offline.
+- **The estate registry is private.** `org` reads `registry/estate.yaml` (`--registry FILE`, or the bundle beside the skill, or `$SHOWCASE_ESTATE_ROOT`) and renders public pages only from its public slice. Never copy the registry into a repository. Without it, `org health` checks a supplied `.github` checkout or captured files, and `org doctor` runs the checks supported by its snapshot, checkout and avatar; registry-dependent coverage is reported as `needs-input:registry`, with `done: no`. `org labels ORG --repos-from-gh` instead discovers accessible repositories with paginated read-only GitHub GETs and uses the committed brand identity without reading the registry or estate decisions. Remaining registry-backed `org` actions exit 4 without a registry; `project`, `enterprise` and `content` run on their input files alone. `examples/estate/` is a synthetic Northwind registry for trying every `org` action offline. See [the coverage table](references/org.md#registry-free-health-and-doctor) for partial O2/O3 checks.
 
 | Group | Typical sequence | Reference |
 |---|---|---|
@@ -127,6 +133,18 @@ The four command groups follow the same rules as the repository commands: read-o
 | `project` | `project capture-query` (reference board), `normalize`, `copy-plan --target ORG` (stage 1), re-capture, `copy-plan --copied FILE --files-dir DIR --jobs J` (stage 2), `readme`, `lint` | [references/projects.md](references/projects.md) |
 | `enterprise` | `enterprise snapshot-query --slug S` or `snapshot --slug S --out F`, then `doctor`, `seat-check`, `plan --jobs J`; `diff` after the run | [references/enterprise.md](references/enterprise.md) |
 | `content` | `content links --base-ref origin/main`, `linguist`, `actions`, `images`, `sidebar --facts F`, `icon prompt`, `icon normalize`, `icon check`, `social --job` | [references/content.md](references/content.md) |
+
+`content icon` defaults to the installed skill's `references/art-direction.md`,
+including a repository glyph template for option A and the illustration template
+for option B. Palette values come from `references/brand.yaml`; documented family
+seeds are used when available, otherwise the prompt uses the tool's default seed. Use
+`--art-direction FILE` to select another file; relative paths use the current
+directory, and missing files report `needs-input:art-direction` with the selected path.
+Older custom configs without `icon_ink`/`icon_spark` keep normalization and checks
+available (family-ink QA is skipped with `needs-input:icon-palette`). The bundled
+option A glyph prompt names the missing tokens with exit 4; add them or pass an
+explicit palette through `--art-direction`. Option B illustration prompts do not
+require these glyph tokens.
 
 ```bash
 S=<skill-dir>/scripts/showcase.py

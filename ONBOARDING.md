@@ -26,6 +26,10 @@ python scripts/showcase.py fonts --check
 
 On Windows PowerShell, create the environment with `py -3 -m venv .venv`, then use `.\.venv\Scripts\python.exe` instead of `python` in subsequent commands. Activation is optional; do not change machine execution policy for this skill. For an existing checkout, skip `git clone` and start at environment setup.
 
+The CLI writes UTF-8 to stdout and stderr, including redirected Windows output. When
+capturing output from Python, use `subprocess.run(..., encoding="utf-8")`. No
+`PYTHONIOENCODING` override is required for non-ASCII JSON, footer text or diagnostics.
+
 ## 3. Run a safe demonstration
 
 Run from the skill root. The commands below use the bundled synthetic Northwind Trading Co. metadata and a small synthetic checkout in `examples/repos/`, not a real repository, and name that checkout with `--repo-dir`. On a real repository, run `python3 <skill-dir>/scripts/showcase.py` from inside the repository's checkout instead: with `--meta` and no `--repo-dir`, the command refuses (exit 2) unless the current directory is the checkout the metadata describes, so it never writes into the skill. Outputs go to `output/`, which git ignores; choose new filenames when retaining earlier output.

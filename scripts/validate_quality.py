@@ -151,7 +151,7 @@ SECTION_6_5_SHA256 = "1a081fd129b7f58c369cd83d1ee35848a6fbfd9970b5f8ce781501c3d7
 def showcase(*args: str, check: bool = True, capture: bool = True) -> subprocess.CompletedProcess:
     cmd = [*SHOWCASE, *args]
     print("$", " ".join(cmd[1:]))
-    return subprocess.run(cmd, cwd=ROOT, check=check, capture_output=capture, text=True)
+    return subprocess.run(cmd, cwd=ROOT, check=check, capture_output=capture, text=True, encoding="utf-8")
 
 
 def gate_help() -> None:

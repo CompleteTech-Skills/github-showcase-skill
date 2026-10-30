@@ -1,5 +1,8 @@
 # Issue labels
 
+Label-plan JSON and diagnostic text use UTF-8, including the rename arrow (`→`).
+Decode captured CLI stdout and stderr as UTF-8 on Windows as well as Linux and macOS.
+
 All label plans (`labels --plan`, `org labels` and `adopt`) carry `group: labels:OWNER/REPO` for the writer's half-completed-group reconciliation. An explicit orchestrator group takes precedence. For archived repositories, `adopt` emits no mutations until metadata is re-captured inside the approved unarchive/polish/re-archive window; the user approval and writer remain required.
 
 Condensed from `ct-std-v1` §6, verbatim where it matters. `showcase.py labels --emit-yml` prints the `labels.yml` below byte for byte; `labels --plan` runs passes A and B against the repository's current labels (renames before creates, never `--force`, never a delete) and prints the same plan as `gh label edit/create … -R OWNER/REPO` argv and as `scripts/writer.py` jobs (`--jobs FILE` appends them; `--gh` also prints command lines). The skill never writes labels: the orchestrator's writer applies the jobs after re-reading the live labels, and a standalone user runs the printed argv after approving it. The machine-readable file is `references/standard/labels.yml`.
