@@ -1,7 +1,10 @@
 """The footer uses published masters and migrates the former broken asset paths."""
 import copy
+import json
 
-from conftest import ROOT, meta_dict
+import pytest
+
+from conftest import ROOT, meta_dict, run_cli
 from ctshowcase import footer, readme
 from ctshowcase.config import Brand
 from ctshowcase.context import RepoContext
@@ -84,3 +87,64 @@ def test_authored_content_inside_footer_markers_is_not_exempt(brand, tmp_path):
     assert "Authored partner acknowledgement." not in removed
     assert any("Authored partner acknowledgement." in problem
                for problem in readme.preservation(before, after, removed))
+
+
+@pytest.mark.parametrize("variant", ["G", "H"])
+@pytest.mark.parametrize("marked", [True, False])
+def test_callout_upgrade_migrates_legacy_footer(brand, tmp_path, variant, marked):
+    metadata = meta_dict(owner="CompleteTech-Skills", fork=variant == "G", archived=variant == "H",
+                         parent={"full_name": "Upstream-Synth/tool", "default_branch": "main"}, ahead_by=0)
+    ctx = RepoContext(relocated(brand), normalize(metadata), tmp_path)
+    ctx.det["variant"] = variant
+    old = footer.block(old_brand(brand)) if marked else footer.markup(old_brand(brand))
+    before = "# Synthetic upstream\n\nAuthored upstream instructions.\n\n" + old + "\n"
+    after, removed = readme.upgrade(ctx, before)
+    assert readme.preservation(before, after, removed) == []
+    assert LEGACY not in after
+    assert "Authored upstream instructions." in after
+    assert footer.check(ctx.brand, after)[0] == "pass"
+    assert readme.upgrade(ctx, after)[0] == after
+
+    (tmp_path / "README.md").write_text(before, encoding="utf-8")
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(metadata), encoding="utf-8")
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--variant", variant, "--write")
+    assert result.returncode == 0, result.stdout + result.stderr
+    written = (tmp_path / "README.md").read_text(encoding="utf-8")
+    assert LEGACY not in written
+    assert footer.check(ctx.brand, written)[0] == "pass"
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--variant", variant, "--write")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (tmp_path / "README.md").read_text(encoding="utf-8") == written
+
+
+@pytest.mark.parametrize("variant", ["G", "H"])
+@pytest.mark.parametrize("marked", [True, False])
+def test_callout_upgrade_preserves_authored_footer_content(brand, tmp_path, variant, marked):
+    ctx = RepoContext(relocated(brand), normalize(meta_dict()), tmp_path)
+    ctx.det["variant"] = variant
+    content = footer.markup(old_brand(brand)).replace("</p>", "Authored partner acknowledgement.\n</p>")
+    old = readme.wrap("footer", content) if marked else content
+    before = "# Synthetic upstream\n\nAuthored instructions.\n\n" + old + "\n"
+    after, removed = readme.upgrade(ctx, before)
+    assert old in after
+    assert readme.preservation(before, after, removed) == []
+    assert LEGACY in after
+
+
+def test_watching_fork_keeps_legacy_footer_exemption(brand, tmp_path):
+    metadata = meta_dict(owner="romgenie-following-repos", fork=True,
+                         parent={"full_name": "Upstream-Synth/tool"}, ahead_by=0)
+    ctx = RepoContext(relocated(brand), normalize(metadata), tmp_path)
+    before = "# Upstream\n\nOriginal instructions.\n\n" + footer.block(old_brand(brand)) + "\n"
+    after, removed = readme.upgrade(ctx, before)
+    assert LEGACY in after
+    assert not removed
+    path = tmp_path / "README.md"
+    path.write_text(before, encoding="utf-8")
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(metadata), encoding="utf-8")
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--write")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout)["result"] == "exempt"
+    assert path.read_text(encoding="utf-8") == before

@@ -455,7 +455,7 @@ def fork_callout(ctx: RepoContext) -> str | None:
 BANNER_BLOCK = re.compile(re.escape(start("banner")) + r".*?" + re.escape(end("banner")) + r"\n*", re.S)
 
 
-def callout_only(ctx: RepoContext, text: str) -> str:
+def callout_only(ctx: RepoContext, text: str, removed: list[str] | None = None) -> str:
     """Variants G and H (§7.4): the hero banner block, then the callout (unless one is already there), then the body
     unchanged, then the decision 18 footer. Nothing else changes. Watching-org forks never reach here (`readme`
     exempts them). Review q27 "Full CompleteTech treatment" (brand.yaml readme.fork_readme: full) means the fork
@@ -482,8 +482,18 @@ def callout_only(ctx: RepoContext, text: str) -> str:
     elif m:
         lead_banner = text.lstrip("\n")[:m.end()].rstrip("\n") + "\n\n"
     out = lead_banner + out.lstrip("\n")
-    if footer_wanted(ctx) and footermod.check(ctx.brand, out)[0] == "fail:missing":
-        out = out.rstrip("\n") + "\n\n" + footermod.block(ctx.brand) + "\n"
+    if footer_wanted(ctx):
+        # G/H preserve the upstream body, but our recognized footer can still
+        # follow configured publication changes. Never replace authored credits.
+        removed = removed if removed is not None else []
+        for match in reversed(find_blocks(MARK, out)):
+            if match.group(1) == "footer" and is_footer_copy(match.group(2), ctx.brand):
+                removed.extend(line for line in match.group(2).splitlines() if line.strip())
+                out = out[:match.start()] + footermod.block(ctx.brand) + out[match.end():]
+        out, old_footer = drop_old_footer(out, ctx.brand)
+        removed.extend(old_footer)
+        if footermod.check(ctx.brand, out)[0] == "fail:missing":
+            out = out.rstrip("\n") + "\n\n" + footermod.block(ctx.brand) + "\n"
     return out
 
 
@@ -594,7 +604,8 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
     variant = ctx.det["variant"]
     rv = standard("readme-variants")
     if variant in ("G", "H"):
-        return callout_only(ctx, normalize_text(text)), []
+        removed: list[str] = []
+        return callout_only(ctx, normalize_text(text), removed), removed
     text = normalize_text(text)
     body, blocks = _strip_markers(text)
     want_footer = footer_wanted(ctx)

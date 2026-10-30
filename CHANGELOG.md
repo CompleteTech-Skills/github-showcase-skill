@@ -10,7 +10,7 @@ All notable changes to `github-showcase-skill` are recorded here. Versions follo
 
 ### Fixed
 
-- Footer logo URLs now use the existing published masters in this skill instead of missing `.github/brand` files. README refresh safely migrates the former URLs without dropping authored partner credits; the decision 18 artwork, theme selection and credit remain unchanged.
+- Footer logo URLs now use the existing published masters in this skill instead of missing `.github/brand` files. README refresh, including fork and archived callout-only variants, safely migrates the former URLs without dropping authored partner credits; the decision 18 artwork, theme selection and credit remain unchanged.
 - Windows contributor tests now use explicit UTF-8, native path basenames, a platform-independent read-only metadata stub, and Git Bash with stdin-safe Action scripts. All 15 issue #9 failures are individually documented; the full suite now runs in Windows, Linux and macOS CI.
 - Lint accepts file operands after options on older Python 3.12 versions while continuing to reject unrecognized options.
 - The Action's optional render arguments support macOS Bash 3.2, including an empty argument array with `set -u`.
