@@ -74,6 +74,34 @@ Starred values are approximate until the estate planner re-measures them and pub
 | Screenshot (B, E) | `assets/screenshot.webp` | 1600×1000 viewport | WebP q80 ≤ 300 KB; captured from the live URL in a browser, never drawn by an image model |
 | Provenance | `assets/PROMPTS.md`, `.github/profile/assets/PROMPTS.md` | — | Markdown, one block per committed generated asset |
 
+## Repository glyph prompt template
+
+`content icon prompt` uses this self-contained option A template by default. Its
+palette slots and flat render inks come from the selected family's tokens in
+`brand.yaml`; the writer supplies the four glyph fields with `--glyph`. It does
+not require the estate's avatar tables or reference images. An explicit
+`--art-direction FILE` may instead supply the estate-format `(b) Family palette`
+and `(d) Shared prompt template` sections.
+
+```text
+NEON NIGHT REPO ICON · {ACCOUNT}
+
+Create one square 1024 × 1024 px image of a single repository glyph.
+Use a simple geometric silhouette with a luminous outline and one accent spark.
+Keep the background empty and the glyph inside the central 688 × 688 px square.
+Size class {SIZE_CLASS}.
+
+GLYPH: {GLYPH_NAME}. {GLYPH_DESCRIPTION}
+SPARK PLACEMENT: {SPARK_PLACEMENT}
+PALETTE: outline {LINE_HEX}, core {CORE_HEX}, glow {GLOW_HEX}; one spark in {SPARK_HEX}.
+
+No text, letters, numbers, words, logos, brand marks, human figures or third-party IP.
+{EXTRA_NEGATIVES}
+Produce four candidates. Use seed {SEED} when supported.
+The lock pass renders assets/icon.png as a flat glyph in the family's light-surface
+inks, without a tile or glow. Do not render the repository name in the image.
+```
+
 ## Prompt template for illustrations
 
 ```text

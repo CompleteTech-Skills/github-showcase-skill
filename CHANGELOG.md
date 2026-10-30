@@ -6,6 +6,7 @@ All notable changes to `github-showcase-skill` are recorded here. Versions follo
 
 ### Fixed
 
+- `content icon` uses the bundled `references/art-direction.md` in every working directory. The option A glyph template uses brand tokens without requiring private estate files; explicit art-direction overrides remain supported and missing paths are named in the error.
 - `doctor` reports disabled-Issues label checks, inapplicable social previews and archived community health as `n/a`, while preserving label coverage during approved archived polishing and unknown captured values on applicable surfaces. Social upload plans share the R10 applicability rule and include the personal-profile capstone.
 - `doctor` reports R11 as `n/a` for archived repositories and outside T1/T2 organizations (personal-account, utility and co-owned repositories), matching the definition of done.
 - R5 preserves upstream defaults on forks (forks in the watching and archive orgs still need Issues off, as `adopt` plans) and accepts a captured user keep decision for other default branches without relaxing the merge or Issues checks. `adopt` and the `doctor --estate` proposals honour the same keep decision: `adopt` logs `default-branch kept (user)` instead of asking for a `rename-default-branch` proposal, and neither asks for one on a fork.

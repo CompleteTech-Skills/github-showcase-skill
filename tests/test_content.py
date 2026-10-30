@@ -621,14 +621,14 @@ def test_icon_prompt_needs_writer_then_ok(brand, icon_ctx):
     assert md.startswith("# Repo icon prompt: Northwind-Trading-Co/support-triage-agent") and "```text" in md
 
 
-@pytest.mark.skipif(not C.DEFAULT_ART_DIRECTION.is_file(), reason="estate art direction not beside the skill")
-def test_icon_prompt_parses_the_real_art_direction(brand, fixture_meta):
+def test_icon_prompt_parses_the_bundled_art_direction(brand, fixture_meta):
     from ctshowcase.context import RepoContext
     from ctshowcase.meta import normalize
     ctx = RepoContext(brand, normalize(fixture_meta("CompleteTech-Skills__agentic-email-skill")), None)
     res = C.icon_prompt(ctx, resolver(brand), C.load_art_direction())
     assert res["missing"] == ["GLYPH_DESCRIPTION", "GLYPH_NAME", "SIZE_CLASS", "SPARK_PLACEMENT"]
-    assert res["facts"]["org_glyph"].startswith("Three module squares")
+    assert res["facts"]["org_glyph"] is None  # bundled defaults do not require the estate's avatar inventory
+    assert res["render"]["ink"] == brand.style("CompleteTech-Skills")["tokens"]["chip_attr"]["bg"]
 
 
 def test_icon_normalize_keys_trims_and_passes_qa(brand):
