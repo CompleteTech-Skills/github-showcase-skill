@@ -336,6 +336,30 @@ def license_omitted(ctx: RepoContext) -> bool:
     return not third and not ctx.public and not (ctx.org.get("license_wording") or "").strip()
 
 
+GENERATED_PRIVATE = re.compile(r"Proprietary\.(?: Copyright \(c\) \d{4} .+?\.)? All rights reserved\.")
+
+
+def generated_license_body(body: str) -> bool:
+    """True when a License section body is text this tool wrote (marked, or exactly a private license row), so
+    dropping it for an org without `license_wording` removes no authored words (issue 36)."""
+    paras = [p.strip() for p in re.split(r"\n\s*\n", body.replace(LICENSE_MARK, "\n\n")) if p.strip()]
+    return LICENSE_MARK in body or bool(paras) and all(GENERATED_PRIVATE.fullmatch(p) for p in paras)
+
+
+def gate_managed_license(ctx: RepoContext, text: str, removed: list[str]) -> str:
+    """Upgrade of a README that already has a managed `showcase:license` section: without org `license_wording` the
+    rights sentence is replaced by the factual line (public) or the section is dropped (private). Orgs with wording
+    are untouched. Lines that go are recorded in `removed` as intentional (issue 36)."""
+    if (ctx.org.get("license_wording") or "").strip() or LICENSE_MARK not in masked(text):
+        return text
+    new = license_block(ctx, text)
+    if new != text:
+        gone = set(new.splitlines())
+        removed += [ln for ln in text.splitlines() if ln.strip() and ln not in gone]
+        ctx.log("needs-input:license-wording")
+    return new
+
+
 def section_facts(ctx: RepoContext, h2: str) -> str | None:
     """Body for a scaffolded section, only from repo facts; None means omit + needs-input."""
     f = ctx.facts
@@ -749,7 +773,7 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
                 out.append(f"## {lic[0]}\n\n{lic[1]}")
         if want_footer:
             out.append(footermod.block(ctx.brand))
-        return "\n\n".join(x for x in out if x) + "\n", removed
+        return gate_managed_license(ctx, "\n\n".join(x for x in out if x) + "\n", removed), removed
     else:
         if carry:  # an unmarked tagline with no description: it moves into the block (the move is not a lost line)
             old_tag = carry[0].strip()
@@ -782,10 +806,12 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
     if existing_notes or notes:
         nb = "\n\n".join(x for x in ([existing_notes] if existing_notes else []) + notes)
         out.append(f"## Notes\n\n{nb}")
-    if license_body and license_omitted(ctx):
+    if license_body and license_omitted(ctx) and generated_license_body(license_body[1]):
         removed += [ln for ln in license_body[1].splitlines() if ln.strip()]
         ctx.log("needs-input:license-wording")
     elif license_body:
+        if license_omitted(ctx):  # authored text is never dropped: keep it and flag the missing wording (issue 36)
+            ctx.log("needs-input:license-wording")
         out.append(f"## {license_body[0]}\n\n{license_body[1].strip()}")
     else:
         lic = license_section(ctx)
@@ -796,7 +822,7 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
     for b in ("template-body", "checklist"):  # inserted in reverse: the checklist stays above the body
         if b in blocks:
             out.insert(1 if not preserve else 1, wrap(b, blocks[b]))
-    return "\n\n".join(x for x in out if x) + "\n", removed
+    return gate_managed_license(ctx, "\n\n".join(x for x in out if x) + "\n", removed), removed
 
 
 def header_only(ctx: RepoContext, text: str) -> str:
