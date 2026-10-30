@@ -1894,19 +1894,28 @@ def doctor(estate: Estate, org: str, snap: dict, *, repo_dir: str | Path | None 
                              "fork": m.get("isFork", m.get("fork")), "archived": m.get("isArchived", m.get("archived")),
                              "description": m.get("description"), "stargazers_count": m.get("stargazerCount", 0),
                              "pushed_at": m.get("pushedAt")})
-        elif "files" in m:
-            current_files, current_complete = _captured_files(existing)
-            incoming_files, incoming_complete = _captured_files(m)
-            if not current_complete:
-                if incoming_complete:
-                    evidence = {"files": m["files"], "files_complete": True}
-                else:
-                    # Partial trees can prove presence, never the absence of an unlisted file.
-                    merged = dict(current_files)
-                    for path, value in incoming_files.items():
-                        if value is not None and value is not False and merged.get(path) in (None, False):
-                            merged[path] = value
-                    evidence = {"files": merged, "files_complete": False}
+        else:
+            evidence = {}
+            if estate.visibility(f"{login}/{m['name']}") == "unknown":
+                visibility = str(m.get("visibility") or "").lower()
+                private = m.get("isPrivate", m.get("private"))
+                if visibility in ("public", "private", "internal"):
+                    evidence["visibility"] = visibility
+                elif isinstance(private, bool):
+                    evidence["visibility"] = "private" if private else "public"
+            if "files" in m:
+                current_files, current_complete = _captured_files(existing)
+                incoming_files, incoming_complete = _captured_files(m)
+                if not current_complete:
+                    if incoming_complete:
+                        evidence.update(files=m["files"], files_complete=True)
+                    else:
+                        # Unlisted paths are unknown; explicit map entries retain presence or absence.
+                        merged = dict(current_files)
+                        for path, value in incoming_files.items():
+                            merged.setdefault(path, value)
+                        evidence.update(files=merged, files_complete=False)
+            if evidence:
                 estate.add_meta({**existing, **evidence})
     so = _snap_org(snap)
     cells: dict[str, str] = {}

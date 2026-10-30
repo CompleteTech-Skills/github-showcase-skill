@@ -212,3 +212,36 @@ def test_cli_helper_ignores_ambient_sibling_registry(tmp_path, monkeypatch):
     proc, result = cli(isolated, "health", ORG, "--dot-github", str(checkout(isolated)))
     assert proc.returncode == 0, result
     assert result["result"] == "pass"
+
+
+@pytest.mark.parametrize("absent", [False, None])
+def test_snapshot_explicit_file_absence_supplements_metadata(brand, absent):
+    snap = snapshot(brand)
+    snap["repos"][0]["files"] = {"SECURITY.md": absent, "profile/assets/banner.jpg": absent}
+    snap["repos"][0]["files_complete"] = False
+    estate = O.Estate(brand, Resolver(brand))
+    estate.add_meta({"owner": ORG, "repo": ".github", "visibility": "public"})
+    result = O.doctor(estate, ORG, snap)
+    assert result["cells"]["O4"] == result["cells"]["O9"] == "fail"
+
+
+def test_snapshot_visibility_supplements_incomplete_metadata(brand):
+    snap = snapshot(brand)
+    snap["repos"].append({"name": "synthetic-private", "visibility": "PRIVATE"})
+    snap["profile_readme"] = f"See https://github.com/{ORG}/synthetic-private"
+    estate = O.Estate(brand, Resolver(brand))
+    estate.add_meta({"owner": ORG, "repo": "synthetic-private", "description": "Preserved description"})
+    result = O.doctor(estate, ORG, snap)
+    assert result["cells"]["O3"] == "fail"
+    assert any("private-slug" in note for note in result["notes"])
+    assert estate.meta(f"{ORG}/synthetic-private")["description"] == "Preserved description"
+
+
+@pytest.mark.parametrize(("existing", "captured"), [("private", "PUBLIC"), ("public", "PRIVATE")])
+def test_snapshot_does_not_overwrite_established_visibility(brand, existing, captured):
+    snap = snapshot(brand)
+    snap["repos"].append({"name": "synthetic-project", "visibility": captured})
+    estate = O.Estate(brand, Resolver(brand))
+    estate.add_meta({"owner": ORG, "repo": "synthetic-project", "visibility": existing})
+    O.doctor(estate, ORG, snap)
+    assert estate.visibility(f"{ORG}/synthetic-project") == existing
