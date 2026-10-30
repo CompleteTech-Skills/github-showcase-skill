@@ -64,12 +64,14 @@ Family topics apply only to non-fork repos other than `.github`, in this order:
 | 24 | `*.csv`, `*.json` and `*.parquet` ≥ 50% of bytes | `dataset` |
 | 25 | otherwise | `workspace` |
 
+With `detect_tuned: true`, rule 24 ignores `planning/`, `.github/ISSUE_TEMPLATE/`, `issues/` and `issue<N>.json` bytes, and a low-confidence dataset detection logs `type-suggestion:<type>` (set `type` in `.github/showcase.yml`, or pass `--type`).
+
 **The 24 type topics are reserved.** A repo carries exactly one of them, and only as its type topic.
 
 | Type topic | README variant ([readme-variants.md](readme-variants.md)) | Card category ([banner-layout.md](banner-layout.md)) |
 |---|---|---|
 | `agent-skills` | A in CompleteTech-Skills; C elsewhere | Agent skill |
-| `website`, `web-app`, `mobile-app`, `chrome-extension` | B | Website, Web app, Mobile app, Chrome extension |
+| `website`, `web-app`, `mobile-app` (K with `detect_tuned: true`), `chrome-extension` | B | Website, Web app, Mobile app, Chrome extension |
 | `cli`, `library`, `api`, `mcp-server`, `bot`, `discord-bot`, `plugin`, `template`, `tutorial` | C | CLI tool, Library, API service, MCP server, Bot, Discord bot, Plugin, Template, Tutorial |
 | `research`, `dataset` | D | Research, Dataset |
 | `game` | E | Game |
@@ -79,7 +81,7 @@ Family topics apply only to non-fork repos other than `.github`, in this order:
 | `github-profile` | J (`.github`) or the CompleteDotTech profile rules (`CompleteDotTech/CompleteDotTech`) | no card |
 | `infrastructure`, `hardware`, `workspace` | I when private; C when public | Infrastructure, Hardware, Workspace |
 
-A private repo on variants A–E keeps that variant, adds the I callout and the private License text (row 7 in [readme-variants.md](readme-variants.md)), and its nav line ends with ` · Internal`.
+A private repo on variants A–E or K keeps that variant, adds the I callout and the private License text (row 7 in [readme-variants.md](readme-variants.md)), and its nav line ends with ` · Internal`.
 
 ## Org membership topics (decision 5)
 

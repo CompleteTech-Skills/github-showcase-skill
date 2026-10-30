@@ -76,7 +76,9 @@ def inputs(meta: dict, repo_dir: str | Path | None) -> dict:
     # the key at all, both the untuned and the tuned type are recorded: a change to either regenerates, whichever one the
     # renderer uses. An override that never names the key records only `type`, exactly as before.
     flag_text = override_text if rd is not None else _manifest_override_text(meta)
-    names_flag = "detect_tuned" in flag_text
+    # A valid double-quoted YAML key may spell the name with escapes ("detect\x5ftuned"), so a backslash in the text is
+    # treated conservatively as possibly naming the key (recording the tuned type too costs at most one extra regeneration).
+    names_flag = "detect_tuned" in flag_text or "\\" in flag_text
     try:  # the detected type picks the README variant and the eyebrow: a new type (code landed) regenerates
         from .detect import detect
         from .facts import RepoFacts

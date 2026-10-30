@@ -194,6 +194,17 @@ def test_fingerprint_flow_mapping_without_pyyaml(tmp_path, monkeypatch):
     assert _fp(with_csv, tmp_path) != _fp(without, tmp_path)
 
 
+def test_fingerprint_escaped_detect_tuned_key(tmp_path):
+    # Review finding (E4.4.3 B): `"detect\x5ftuned": true` is a valid double-quoted YAML key that enables tuning but
+    # lacks the literal substring. A backslash is treated conservatively as naming the key, so the tuned type is recorded.
+    _write_override(tmp_path, '"detect\\x5ftuned": true\n')
+    base = dict(NORTHWIND, files=["planning/plan.json", "src/build.py"],
+                file_sizes={"planning/plan.json": 9000, "src/build.py": 1000})
+    grown = dict(base, files=base["files"] + ["a.csv"], file_sizes=dict(base["file_sizes"], **{"a.csv": 1500}))
+    assert fingerprint.inputs(base, tmp_path)["type_tuned"] == "workspace"
+    assert _fp(base, tmp_path) != _fp(grown, tmp_path)
+
+
 def test_fingerprint_scoped_away_override_follows_untuned_type(tmp_path):
     # `for:` names another repository, so RepoContext drops this override and renders the untuned type. Growing
     # src/build.py moves the untuned type dataset -> workspace; the fingerprint must change even though the tuned type
@@ -318,15 +329,26 @@ def test_all_planning_suggests_workspace():
     assert "suggestion" not in tuned
 
 
-def test_tuned_zero_byte_retained_file_still_suggests():
-    # Review finding (E4.4.3): tuned detection keeps README.md (0 bytes), so the kept total is 0 and the tuned type stays
-    # dataset (0 * 2 >= 0). The planning-excluded share is then 0%, so case (a) still applies and must suggest workspace.
+def test_tuned_zero_byte_retained_file_is_workspace():
+    # Review finding (E4.4.3 B): tuned detection keeps only README.md (0 bytes); 0 * 2 >= 0 must not select dataset.
+    # Untuned behaviour is unchanged (dataset/24).
     m = dict(NORTHWIND_SHAPE, files=["planning/a.json", "README.md"],
              file_sizes={"planning/a.json": 900, "README.md": 0})
     tuned = detect(m, RepoFacts(m), {"detect_tuned": True})
-    assert (tuned["type"], tuned["rule"]) == ("dataset", 24)
-    assert tuned["suggestion"]["type"] == "workspace"
-    assert tuned["suggestion"]["reason"] == "planning-json-share"
+    assert (tuned["type"], tuned["rule"]) == ("workspace", 25)
+    assert "suggestion" not in tuned
+    assert detect(m, RepoFacts(m))["rule"] == 24
+
+
+def test_tuned_mixed_planning_data_suggests_on_kept_share():
+    # Review finding (E4.4.3 B): 9000 planning + 600 csv + 400 code. Kept data share is 60% (dataset, low confidence);
+    # the raw share is 96%, which must not hide the suggestion when tuned. Untuned keeps the raw-share rule (no suggestion).
+    m = dict(NORTHWIND_SHAPE, files=["planning/a.json", "d.csv", "x.py"],
+             file_sizes={"planning/a.json": 9000, "d.csv": 600, "x.py": 400})
+    tuned = detect(m, RepoFacts(m), {"detect_tuned": True})
+    assert tuned["rule"] == 24
+    assert tuned["suggestion"]["reason"] == "narrow-dataset-share"
+    assert "suggestion" not in detect(m, RepoFacts(m))
 
 
 def test_suggestion_edge_cases_without_sizes():

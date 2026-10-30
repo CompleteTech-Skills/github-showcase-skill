@@ -112,7 +112,8 @@ def detect_type(meta: dict, facts: RepoFacts | None = None, tuned: bool = False)
     sizes = meta.get("file_sizes") or {}
     if tuned:
         sizes = {k: v for k, v in sizes.items() if not _is_planning(k)}
-    if sizes:
+    # Tuned: planning-only repos retain zero bytes; 0 * 2 >= 0 must not pick dataset, so they fall through to workspace.
+    if sizes and (not tuned or sum(sizes.values()) > 0):
         data = sum(v for k, v in sizes.items() if k.endswith((".csv", ".json", ".parquet")))
         if data * 2 >= sum(sizes.values()):
             return "dataset", 24
@@ -149,7 +150,8 @@ def suggestion(meta: dict, type_: str, rule: int, tuned: bool = False) -> dict |
     # A tuned detection that stayed rule 24 (e.g. only a zero-byte README is kept) still gets case (a) evidence.
     if raw_share >= 0.5 and kept_share < 0.5:
         reason = "planning-json-share"
-    elif raw_share < 0.75:
+    elif (kept_share if tuned else raw_share) < 0.75:
+        # tuned confidence is judged on the bytes detection kept, not the planning bytes it excluded
         reason = "narrow-dataset-share"
     else:
         return None
