@@ -4,6 +4,8 @@ import os
 import subprocess
 import sys
 
+import pytest
+
 from conftest import ROOT
 from ctshowcase import org as O
 from ctshowcase.resolver import Resolver
@@ -102,3 +104,45 @@ def test_registry_free_checks_still_refuse_excluded_and_unsigned_t3(tmp_path):
         proc, result = cli(tmp_path, "health", org, "--dot-github", str(checkout(tmp_path)))
         assert proc.returncode == 2
         assert "cells" not in result
+
+
+@pytest.mark.parametrize("name", [None, ""])
+def test_captured_cleared_identity_differs_from_missing_identity(brand, name):
+    snap = snapshot(brand)
+    snap["org"]["name"] = name
+    result = O.doctor(O.Estate(brand, Resolver(brand)), ORG, snap)
+    assert result["cells"]["O2"] == "fail"
+    assert any("O2 name" in note for note in result["notes"])
+    del snap["org"]["name"]
+    result = O.doctor(O.Estate(brand, Resolver(brand)), ORG, snap)
+    assert result["cells"]["O2"] == "needs-input:registry"
+
+
+def test_snapshot_file_evidence_supplements_metadata_without_tree(brand):
+    snap = snapshot(brand)
+    snap["repos"][0]["files"] = []
+    estate = O.Estate(brand, Resolver(brand))
+    estate.add_meta({"owner": ORG, "repo": ".github", "visibility": "public", "description": "Preserve metadata"})
+    result = O.doctor(estate, ORG, snap)
+    assert result["cells"]["O4"] == "fail"
+    assert result["cells"]["O9"] == "fail"
+    assert any("O4 missing: SECURITY.md" == note for note in result["notes"])
+    assert estate.meta(f"{ORG}/.github")["description"] == "Preserve metadata"
+
+
+def test_incomplete_snapshot_does_not_replace_complete_metadata_tree(brand):
+    snap = snapshot(brand)
+    snap["repos"][0].update(files=[], files_complete=False)
+    estate = O.Estate(brand, Resolver(brand))
+    estate.add_meta({"owner": ORG, "repo": ".github", "visibility": "public",
+                     "files": list(O.T1_FILES + O.FORMS) + ["profile/assets/banner.jpg"], "files_complete": True})
+    result = O.doctor(estate, ORG, snap)
+    assert result["cells"]["O4"] == result["cells"]["O9"] == "pass"
+
+
+@pytest.mark.parametrize(("org", "reason"), [("CompleteTech-LLC", "email-blank"), ("TouchedByAnAgent", "hold")])
+def test_unverified_snapshot_has_available_reason_without_registry(brand, org, reason):
+    snap = {"org": {"is_verified": False, "blog": "https://www.complete.tech", "email": None}}
+    result = O.doctor(O.Estate(brand, Resolver(brand)), org, snap)
+    assert result["cells"]["O11"] == "warn"
+    assert f"O11 not verified: {reason}" in result["notes"]

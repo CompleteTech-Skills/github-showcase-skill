@@ -48,12 +48,12 @@ For an org known to `brand.yaml`, `org health ORG --dot-github CHECKOUT` checks 
 | Cell | Evidence checked without a registry | Missing coverage |
 |---|---|---|
 | O1 avatar | Local avatar colour check, or a captured identicon URL | Without a local image, a non-identicon URL does not prove the colour test |
-| O2 About | Captured name and description compared with non-empty brand identity fields | Desired About fields in the registry; a detected mismatch is `fail`, otherwise `needs-input:registry` |
+| O2 About | Captured name and description compared with non-empty brand identity fields; an explicit null or empty value is a mismatch, while an absent key is unknown | Desired About fields in the registry; a detected mismatch is `fail`, otherwise `needs-input:registry` |
 | O3 profile | Captured/checkout README emptiness and links to captured private repositories, including known former logins | Required listings and internal notes from the registry; a detected violation is `fail`, otherwise `needs-input:registry` |
 | O4 health | Checkout or captured `.github` file evidence | Missing file input is `unknown` |
 | O6 pins | No desired pin order can be inferred | `needs-input:registry` |
-| O9 banner | Checkout or the `.github` entry's `files` in snapshot `repos`, with brand applicability rules | Missing file input is `unknown` |
-| O11 verified | Captured verified status | Missing status is `unknown`; no registry-specific exception is inferred |
+| O9 banner | Checkout or the `.github` entry's `files` in snapshot `repos`, supplementing missing/incomplete metadata trees, with brand applicability rules | Missing file input is `unknown` |
+| O11 verified | Captured verified status; an unverified org gets the existing reason code from captured website/email, configured enterprise domains and known HOLD status | Missing status is `unknown`; unavailable registry-specific desired fields are not inferred |
 
 These partial checks never certify the full org standard or a public profile's full privacy review. With a registry row, the existing full assessment and pin-order checks remain in effect. Every command remains read-only; `health` and `doctor` emit no writer jobs.
 

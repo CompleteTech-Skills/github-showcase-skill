@@ -1297,6 +1297,15 @@ def verified_domain(blog: str, email: str | None, domains: list[str], *, hold=Fa
             "badge_eligible": reason is None, "reason": reason}
 
 
+def _verified_domains() -> list[str]:
+    from .enterprise import desired
+    try:
+        domains = list((desired() or {}).get("domains") or [])
+    except Exception:  # an unreadable enterprise.yaml must not block the About plan or snapshot check
+        domains = []
+    return domains or ["complete.tech", "www.complete.tech"]
+
+
 def about(estate: Estate, org: str, *, email_approved: bool | None = None, allow_t3: bool = False,
           in_enterprise: bool | None = None) -> tuple[dict, int]:
     r = estate.resolver
@@ -1329,13 +1338,8 @@ def about(estate: Estate, org: str, *, email_approved: bool | None = None, allow
         fails.append(f"description is {len(payload['description'])} characters (max {ORG_DESC_MAX})")
     if re.search(r"[\U0001F000-\U0001FAFF]", payload.get("description", "")):
         fails.append("description has an emoji")
-    from .enterprise import desired
-    try:
-        domains = list((desired() or {}).get("domains") or [])
-    except Exception:  # an unreadable enterprise.yaml must not block the About plan
-        domains = []
-    vd = verified_domain(payload.get("blog") or prof.get("blog") or "", payload.get("email"), domains or
-                         ["complete.tech", "www.complete.tech"], hold=hold, in_enterprise=in_enterprise)
+    vd = verified_domain(payload.get("blog") or prof.get("blog") or "", payload.get("email"), _verified_domains(),
+                         hold=hold, in_enterprise=in_enterprise)
     if vd["reason"]:
         logs.append(vd["reason"])
     argv = ["gh", "api", "-X", "PATCH", f"orgs/{login}"]
@@ -1838,19 +1842,20 @@ def avatar_colours(path: str | Path) -> int:
 def _snap_org(snap: dict) -> dict:
     o = snap.get("org") or {}
     gql = (snap.get("graphql") or {}).get("data", snap.get("graphql") or {}).get("organization") or {}
-    return {"name": o.get("name", gql.get("name")), "description": o.get("description", gql.get("description")),
+    fields = {"name": o.get("name", gql.get("name")), "description": o.get("description", gql.get("description")),
             "blog": o.get("blog", gql.get("websiteUrl")), "location": o.get("location", gql.get("location")),
             "email": o.get("email", gql.get("email")), "twitter_username": o.get("twitter_username", gql.get("twitterUsername")),
             "is_verified": o.get("is_verified", gql.get("isVerified")), "avatar_url": o.get("avatar_url", gql.get("avatarUrl")),
             "pinned": [n.get("nameWithOwner") for n in ((gql.get("pinnedItems") or {}).get("nodes") or []) if n]
             if gql.get("pinnedItems") is not None else snap.get("pinned_public")}
+    return {k: v for k, v in fields.items() if k not in ("name", "description") or k in o or k in gql}
 
 
 def _partial_profile_checks(estate: Estate, row: dict, so: dict, text: str | None) -> tuple[dict, list[str]]:
     """Check known identity and captured private links without inventing a registry's desired state."""
     cells, notes = {}, []
     differences = [k for k, expected in (("name", row.get("display_name")), ("description", row.get("description")))
-                   if expected and so.get(k) is not None and so[k] != expected]
+                   if expected and k in so and so[k] != expected]
     cells["O2"] = "fail" if differences else "needs-input:registry"
     notes += [f"O2 {k}: differs from brand identity" for k in differences]
     notes.append("O2 checked captured name/description against brand; desired About fields need registry")
@@ -1880,11 +1885,18 @@ def doctor(estate: Estate, org: str, snap: dict, *, repo_dir: str | Path | None 
     login, row, reg = _gate(estate, org, allow_t3=allow_t3, allow_hold=True, require_registry=False)
     has_registry = r.registry_key(org) is not None
     for m in snap.get("repos") or []:
-        if isinstance(m, dict) and m.get("name") and not estate.meta(f"{login}/{m['name']}"):
+        if not isinstance(m, dict) or not m.get("name"):
+            continue
+        existing = estate.meta(f"{login}/{m['name']}")
+        if existing is None:
             estate.add_meta({**m, "owner": login, "repo": m["name"], "visibility": str(m.get("visibility", "")).lower(),
                              "fork": m.get("isFork", m.get("fork")), "archived": m.get("isArchived", m.get("archived")),
                              "description": m.get("description"), "stargazers_count": m.get("stargazerCount", 0),
                              "pushed_at": m.get("pushedAt")})
+        elif "files" in m and (existing.get("files") is None or
+                               m.get("files_complete") is True and existing.get("files_complete") is not True):
+            # Keep richer metadata; supplement its absent/incomplete tree with the captured tree as one unit.
+            estate.add_meta({**existing, "files": m["files"], "files_complete": m.get("files_complete", False)})
     so = _snap_org(snap)
     cells: dict[str, str] = {}
     notes: list[str] = []
@@ -1967,7 +1979,9 @@ def doctor(estate: Estate, org: str, snap: dict, *, repo_dir: str | Path | None 
     if so.get("is_verified") is True:
         cells["O11"] = "pass"
     elif so.get("is_verified") is False:
-        vd = want.get("verified_domain") or {}
+        vd = (want.get("verified_domain") or {}) if has_registry else verified_domain(
+            so.get("blog") or "", so.get("email"), _verified_domains(),
+            hold=r.family_hold(org) or r.owner_status(org) == "hold")
         cells["O11"] = "warn" if vd.get("reason") else "fail"
         notes.append(f"O11 not verified: {vd.get('reason') or 'no reason code'}")
     else:
