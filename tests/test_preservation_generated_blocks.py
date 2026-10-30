@@ -79,7 +79,9 @@ def test_outside_duplicate_survives_when_generated_copy_is_removed(make_ctx, tmp
     before = "# T\n\n<!-- showcase:tagline:start -->\nSame line.\n<!-- showcase:tagline:end -->\n\nSame line.\n\n" + PAD + "\n"
     after = "# T\n\n<!-- showcase:tagline:start -->\n\n<!-- showcase:tagline:end -->\n\n" + PAD + "\n"
     assert lost(R.preservation(before, after, [])) == ["lost line: Same line."]
-    assert lost(R.preservation(before, after, ["Same line."])) == []  # the removal discounts the outside copy
+    # the removal is used up by the stripped block line (upgrade() lists the emptied tagline there); it must not also
+    # discount the authored copy outside the block, which is lost here
+    assert lost(R.preservation(before, after, ["Same line."])) == ["lost line: Same line."]
     assert lost(R.preservation(before, after.replace(PAD, PAD + "\nSame line.\n"), [])) == []
 
 

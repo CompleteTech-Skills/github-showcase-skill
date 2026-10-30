@@ -978,10 +978,19 @@ def _guard_text(before: str, after: str) -> str:
 def preservation(before: str, after: str, removed: list[str]) -> list[str]:
     """Every original non-header line survives (heading lines may be renamed); size drop <= 10%."""
     problems = []
-    b_lines = Counter(ln.strip() for ln in _guard_text(before, after).splitlines()
-                      if ln.strip() and not ln.strip().startswith("<!-- showcase:"))
+    def counted(text: str) -> Counter:
+        return Counter(ln.strip() for ln in text.splitlines()
+                       if ln.strip() and not ln.strip().startswith("<!-- showcase:"))
+    b_lines = counted(_guard_text(before, after))
+    # lines _guard_text dropped with a regenerated block: a `removed` entry that names one is used up by that block and
+    # must not also discount a copy of the line outside the block (that copy has to survive)
+    gen = counted(before.replace("\r\n", "\n")) - b_lines
     for r in removed:
-        b_lines[r.strip()] -= 1
+        r = r.strip()
+        if gen[r] > 0:
+            gen[r] -= 1
+        else:
+            b_lines[r] -= 1
     a_lines = Counter(ln.strip() for ln in after.splitlines() if ln.strip())
     for ln, n in b_lines.items():
         if n <= 0:
