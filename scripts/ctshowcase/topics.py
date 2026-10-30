@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 
+from .config import t3_signed_off
 from .context import RepoContext
 from .detect import standard
 
@@ -64,7 +65,7 @@ def membership_topics(ctx: RepoContext, also_in: list[str]) -> tuple[list[str], 
         if status in ("excluded", "hold"):
             logs.append(f"exempt:also-in:{org}")
             continue
-        if status == "t3":
+        if status == "t3" and not t3_signed_off():
             logs.append(f"t3-signoff:also-in:{org}")
             continue
         known, topic = org_topic(ctx.brand, org)

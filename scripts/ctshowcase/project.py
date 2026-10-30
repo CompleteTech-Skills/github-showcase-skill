@@ -9,6 +9,7 @@ variables); only read queries load from a file (`-F query=@file`); Pick-Your-AI 
 """
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import re
@@ -1153,7 +1154,7 @@ def register(sub) -> None:
     s.add_argument("--approved", help="decisions/approved.tsv")
     s.add_argument("--approved-yaml", help="decisions/APPROVED_ACTIONS.yaml (approved org renames and merges, CQ-03)")
     s.add_argument("--actions", help="decisions/estate-actions.json (the old and new names of approved org renames)")
-    s.add_argument("--allow-t3", action="store_true")
+    s.add_argument("--allow-t3", action="store_true", default=argparse.SUPPRESS)
     s.add_argument("--no-status-update", action="store_true")
     s.add_argument("--files-dir", help="copy-plan: write the REST view bodies under DIR (paths as in `files`)")
     s.add_argument("--out", help="normalize: write the template spec JSON here; readme: write the README here")
@@ -1239,7 +1240,7 @@ def cmd_project(args):
     copied = _load(args.copied)
     if act == "estate-plan":
         res = estate_plan(r, source=args.source, copied=copied, user_id=args.user_id, approval_id=args.approval_id,
-                          allow_t3=args.allow_t3, reviewed=args.reviewed)
+                          allow_t3=getattr(args, "allow_t3", False), reviewed=args.reviewed)
     else:
         if not args.target:
             raise ShowcaseError("copy-plan needs --target ORG (or @me)", log="usage")
@@ -1247,7 +1248,7 @@ def cmd_project(args):
         res = copy_plan(args.target, role=args.role, source=args.source, title=args.title, display_name=args.display_name,
                         copied=copied, workstreams=ws, repositories=[x for x in (args.repos or "").split(",") if x] or None,
                         approval_id=args.approval_id, resolver=r, user_id=args.user_id, out_of_scope=args.out_of_scope,
-                        reviewed=args.reviewed, status_update=not args.no_status_update, allow_t3=args.allow_t3)
+                        reviewed=args.reviewed, status_update=not args.no_status_update, allow_t3=getattr(args, "allow_t3", False))
     if args.jobs and res.get("files") and not args.files_dir:
         # each REST view job reads its body with --input; the writer's guard refuses a body it cannot read
         raise ShowcaseError("copy-plan writes REST view bodies: pass --files-dir DIR with --jobs so each view job's --input "

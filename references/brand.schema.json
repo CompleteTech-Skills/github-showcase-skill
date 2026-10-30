@@ -197,6 +197,12 @@
     "company_label": {
      "type": "string"
     },
+    "badge_brand": {
+     "type": "string"
+    },
+    "badge_accent": {
+     "type": "string"
+    },
     "eyebrow_case": {
      "enum": [
       "upper",

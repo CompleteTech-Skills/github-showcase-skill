@@ -308,8 +308,11 @@ def _star_entry(estate: Estate, org: str, reg: dict) -> dict | None:
     return sl if sl.get("name") else None
 
 
-def _star_held(estate: Estate, org: str) -> str | None:
+def _star_held(estate: Estate, org: str, allow_t3: bool = False) -> str | None:
+    from .config import t3_signed_off
     st = estate.resolver.owner_status(org)
+    if st == "t3" and (allow_t3 or t3_signed_off()):
+        st = None  # co-owner sign-off lifts the T3 hold (decision 12); HOLD and excluded stay held
     if st in ("t3", "hold", "excluded"):
         return st
     if estate.resolver.family_hold(org):
@@ -1523,7 +1526,7 @@ def star_list_plan(estate: Estate, org: str, *, lists_capture: dict | None = Non
     login = r.canonical(org)
     reg = r.registry_org(org)
     entry = _star_entry(estate, org, reg)
-    held = _star_held(estate, org)
+    held = _star_held(estate, org, allow_t3)
     base = {"org": login, "reads": [{"name": "star-lists", "argv": read_command("star_lists")}], "jobs": [], "pending": [],
             "logs": []}
     if not entry:
@@ -2226,7 +2229,7 @@ def register(sub) -> None:
     s.add_argument("--render", action="store_true", help="profile: also render the cards, badges and org banner into --out-dir")
     s.add_argument("--banner", help="profile: hero path relative to profile/ (default assets/banner.jpg, or assets/intro.svg)")
     s.add_argument("--email-approved", action="store_true", default=None, help="the org email (q26) is approved")
-    s.add_argument("--allow-t3", action="store_true", help="T3 org after co-owner sign-off")
+    s.add_argument("--allow-t3", action="store_true", default=argparse.SUPPRESS, help="T3 org after co-owner sign-off")
     s.add_argument("--allow-unmeasured", action="store_true")
     s.add_argument("--lists", help="pins/profile: star_lists.graphql capture (SOC-01)")
     s.add_argument("--repo-ids", help="pins: JSON {owner/repo: node id} from repo_id.graphql reads")
@@ -2290,30 +2293,30 @@ def cmd_org(args):
     estate = estate_from_args(args)
     act = args.action
     if act == "profile" and args.user:
-        res, code = user_profile(estate, args.user, out_dir=args.out_dir, render=args.render, allow_t3=args.allow_t3,
+        res, code = user_profile(estate, args.user, out_dir=args.out_dir, render=args.render, allow_t3=getattr(args, "allow_t3", False),
                                  allow_unmeasured=args.allow_unmeasured, meta_dir=args.meta_dir)
     elif act == "profile":
         res, code = profile(estate, org, out_dir=args.out_dir, render=args.render, banner=args.banner,
-                            email_approved=args.email_approved, allow_t3=args.allow_t3,
+                            email_approved=args.email_approved, allow_t3=getattr(args, "allow_t3", False),
                             allow_unmeasured=args.allow_unmeasured, lists_capture=_json_file(args.lists),
                             meta_dir=args.meta_dir)
     elif act == "about":
-        res, code = about(estate, org, email_approved=args.email_approved, allow_t3=args.allow_t3)
+        res, code = about(estate, org, email_approved=args.email_approved, allow_t3=getattr(args, "allow_t3", False))
     elif act == "pins":
-        res, code = pins(estate, org, allow_t3=args.allow_t3, lists_capture=_json_file(args.lists),
+        res, code = pins(estate, org, allow_t3=getattr(args, "allow_t3", False), lists_capture=_json_file(args.lists),
                          repo_ids=_json_file(args.repo_ids))
         res["jobs"] = res["jobs"] + res["star_list"].get("jobs", [])
     elif act == "labels":
         if args.repos_from_gh:
-            capture_label_repos(estate, org, allow_t3=args.allow_t3)
-        res, code = labels_plan(estate, org, allow_t3=args.allow_t3, checkouts=args.checkouts, dot_github=args.dot_github,
+            capture_label_repos(estate, org, allow_t3=getattr(args, "allow_t3", False))
+        res, code = labels_plan(estate, org, allow_t3=getattr(args, "allow_t3", False), checkouts=args.checkouts, dot_github=args.dot_github,
                                 registry_free=args.repos_from_gh)
     elif act == "health":
-        res, code = health(estate, org, repo_dir=args.dot_github, allow_t3=args.allow_t3)
+        res, code = health(estate, org, repo_dir=args.dot_github, allow_t3=getattr(args, "allow_t3", False))
     else:
         snap = _json_file(args.snapshot) or {}
         row = doctor(estate, org, snap, repo_dir=args.dot_github, avatar=args.avatar, email_approved=args.email_approved,
-                     allow_t3=args.allow_t3)
+                     allow_t3=getattr(args, "allow_t3", False))
         if args.org_doctor_format != "json":
             print(as_tsv(row, args.header) if args.org_doctor_format == "tsv" else as_md(row, args.header))
             return None, OK

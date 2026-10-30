@@ -237,6 +237,37 @@ families:
       signal_core: "#FFE0E5"
       icon_ink: "#3A1A33"
       icon_spark: "#6B214F"      # deep magenta: readable on pink
+  pickyourai:
+    # Pick Your AI's own palette, from Pick-Your-AI/.github assets/PROMPTS.md and build_assets.py (teal surfaces, one amber
+    # accent, deep teal ground). Not CompleteTech branding. Unmeasured: the layout has no Pick Your AI golden yet.
+    measured: false
+    company_label: Pick Your AI
+    badge_brand: "0F766E"          # README badges (shields.io hex, no #): teal, not CompleteTech blue
+    badge_accent: "115E59"
+    eyebrow_case: upper
+    canvas: {kind: flat-grid, color: "#042F2E", grid: "#14B8A6", grid_opacity: 0.07}
+    tokens:
+      eyebrow: "#5EEAD4"
+      title: "#F0FDFA"
+      subtitle: "#CCFBF1"
+      body: "#CCFBF1"
+      muted: "#99F6E4"
+      ink: "#042F2E"
+      plate_low: "#042F2E"
+      card_fill: "#F0FDFA"           # light icon card, as CompleteTech: the icon prompt and QA assume dark ink on a light plate
+      card_ink: "#042F2E"
+      card_edge: "#CCFBF1"
+      card_shadow: {dx: 6, dy: 8, blur: 12, color: "#000000", opacity: 0.35}
+      chip_key: {bg: "#FBBF24", fg: "#042F2E"}
+      chip_attr: {bg: "#115E59", fg: "#F0FDFA"}
+      bar: {from: "#115E59", to: "#14B8A6", height: 6}
+      edge: {color: "#14B8A6", opacity: 0.28}
+      gold_trace: "#FBBF24"
+      accent: "#14B8A6"
+      accent_mid: "#14B8A6"
+      accent_deep: "#115E59"
+      icon_ink: "#0F766E"
+      icon_spark: "#B45309"          # deep amber: readable on the light icon card (the chip and accent stay #FBBF24)
   libreevolve:
     measured: false
     company_label: LibreEvolve
@@ -618,7 +649,7 @@ orgs:
     family_topics: []
     footer: true
   Pick-Your-AI:
-    family: completetech
+    family: pickyourai
     former_slugs: []
     tier: T3
     display_name: Pick Your AI
@@ -627,6 +658,8 @@ orgs:
     eyebrow: null
     brand_topic: pick-your-ai
     family_topics: []
+    mark: assets/orgs/Pick-Your-AI/mark.png
+    hub_url: https://pickyour.ai
     footer: false
   Jevelopers-neatHack-2026:
     family: completetech

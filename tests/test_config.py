@@ -49,7 +49,7 @@ def test_owner_lists(brand):
 
 
 @pytest.mark.parametrize("family", ["completetech", "ai-ascension", "jev-engineering", "jevplay-games", "libreevolve",
-                                    "touchedbyanagent", "romgenie"])
+                                    "touchedbyanagent", "romgenie", "pickyourai"])
 def test_contrast(brand, family):
     f = brand.family(family)
     t, c = f["tokens"], f["canvas"]
