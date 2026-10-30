@@ -83,9 +83,33 @@ def _parse_slug(s) -> tuple[str, str]:
     return owner, repo
 
 
+def _check_assume(args) -> None:
+    """Every --assume-repo is checked before any command runs (usage, exit 2): its format, and, when --meta names a
+    repository, that it is the same one. This runs even for commands that never reach repo_dir() (fonts, config, or
+    --no-repo-dir), so a malformed or other-repository override cannot be silently accepted."""
+    assumed = getattr(args, "assume_repo", None)
+    if assumed is None:
+        return
+    _parse_slug(assumed)
+    if not getattr(args, "meta", None) or getattr(args, "from_gh", None):
+        return
+    from ctshowcase.meta import load_file
+    m = load_file(args.meta)
+    if not (m.get("owner") and m.get("repo")):
+        return  # the checkout's origin supplies the slug; repo_dir() checks it
+    want = f"{m['owner']}/{m['repo']}"
+    if not _same_slug(args, want, assumed):
+        # No checkout is needed for this refusal, so the original origin-mismatch wording (which names a checkout) does
+        # not apply here; the usage error still names both repositories.
+        raise ShowcaseError(f"--assume-repo {assumed} names another repository than --meta {want}; pass the matching "
+                            "--meta, or drop --assume-repo", log="usage")
+
+
 def _apply_assume(args, meta: dict) -> dict:
     """--assume-repo (off by default): the run describes the named repository whatever the checkout's origin says. It
-    overrides the metadata's slug only; the remote is never changed."""
+    overrides the metadata's slug only; the remote is never changed. Honoured by every command that resolves the
+    repository through context(), cmd_meta and cmd_fingerprint. `content links` and `content images` read their slug
+    from --meta or the checkout's origin (content._owner_repo) and ignore the flag; see tests/test_renamed_origin.py."""
     if not getattr(args, "assume_repo", None):
         return meta
     owner, repo = _parse_slug(args.assume_repo)
@@ -121,9 +145,7 @@ def repo_dir(args) -> Path | None:
                                     f"{have} is the old name of {want} (a renamed repository), fix the checkout with "
                                     f"`git remote set-url origin https://github.com/{want}.git` or pass "
                                     f"--assume-repo {want}", log="usage")
-        elif assumed and not _same_slug(args, want, assumed):
-            raise ShowcaseError(f"--assume-repo {assumed} names another repository than --meta {want}; pass the matching "
-                                "--meta, or drop --assume-repo", log="usage")
+        # A different --assume-repo than --meta is refused in _check_assume(), before any command runs.
         if not explicit and have is None:
             raise ShowcaseError(f"--meta {want} without --repo-dir: run from inside that repository's checkout, or pass "
                                 "--repo-dir DIR or --no-repo-dir", log="usage")
@@ -1261,6 +1283,7 @@ def _main(argv=None) -> int:
     if args.format is None:
         args.format = "text" if args.command in GENERATORS else "json"
     try:
+        _check_assume(args)
         obj, code = args.func(args)
     except ShowcaseError as exc:
         obj = {"command": args.command, "result": "refused" if exc.code == USAGE and exc.log in ("hold", "t3-signoff", "exempt")
