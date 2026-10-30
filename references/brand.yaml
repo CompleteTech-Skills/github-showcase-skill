@@ -347,6 +347,8 @@ orgs:
     brand_topic: completetech
     family_topics: []
     footer: true
+    # license_wording: the legal holder name the owner approved for rights claims; absent = write no claim (issue 36)
+    license_wording: CompleteTech LLC
     flagship: true
   CompleteTech-Skills:
     family: completetech
@@ -364,6 +366,7 @@ orgs:
     mark: assets/orgs/CompleteTech-Skills/mark.png
     hub_url: https://www.complete.tech
     footer: true
+    license_wording: CompleteTech LLC
     flagship: true
     readme_preserve: [creative-studio]
   CompleteTech-LLC-AI-Research:
@@ -378,6 +381,7 @@ orgs:
     brand_topic: completetech
     family_topics: [ai-research]
     footer: true
+    license_wording: CompleteTech LLC
   CompleteTech-Security:
     family: completetech
     former_slugs: [CompleTetech-Security]
@@ -392,6 +396,7 @@ orgs:
     family_topics: [security, cve]
     license_chip: AGPL-3.0 or commercial
     footer: true
+    license_wording: CompleteTech LLC
     flagship: true
   CompleteTech-Infrastructure:
     family: completetech
@@ -405,6 +410,7 @@ orgs:
     brand_topic: completetech
     family_topics: [homelab]
     footer: true
+    license_wording: CompleteTech LLC
   CompleteTech-Commerce:
     family: completetech
     former_slugs: []
@@ -417,6 +423,7 @@ orgs:
     brand_topic: completetech
     family_topics: []
     footer: true
+    license_wording: CompleteTech LLC
   CompleteTech-Creative:
     family: completetech
     former_slugs: []
@@ -429,6 +436,7 @@ orgs:
     brand_topic: completetech
     family_topics: []
     footer: true
+    license_wording: CompleteTech LLC
   CompleteTech-Pokemon:
     family: completetech
     former_slugs: []
@@ -442,6 +450,7 @@ orgs:
     family_topics: []
     disclaimer: Not affiliated with, endorsed by, or sponsored by Nintendo, Game Freak, Creatures or The Pokémon Company.
     footer: true
+    license_wording: CompleteTech LLC
   CompleteTech-Data:
     family: completetech
     former_slugs: []
@@ -454,6 +463,7 @@ orgs:
     brand_topic: completetech
     family_topics: []
     footer: true
+    license_wording: CompleteTech LLC
   CompleteTech-Games:
     family: completetech
     former_slugs: []
@@ -466,6 +476,7 @@ orgs:
     brand_topic: completetech
     family_topics: []
     footer: true
+    license_wording: CompleteTech LLC
   CompleteTech-Directories:
     family: completetech
     former_slugs: []
@@ -478,6 +489,7 @@ orgs:
     brand_topic: completetech
     family_topics: []
     footer: true
+    license_wording: CompleteTech LLC
   CompleteTech-Hardware:
     family: completetech
     former_slugs: []
@@ -490,6 +502,7 @@ orgs:
     brand_topic: completetech
     family_topics: []
     footer: true
+    license_wording: CompleteTech LLC
   CompleteTechDiscord-Games:
     family: completetech
     former_slugs: []
@@ -502,6 +515,7 @@ orgs:
     brand_topic: completetech
     family_topics: []
     footer: true
+    license_wording: CompleteTech LLC
   CompleteTech-DiscordApps:
     family: completetech
     former_slugs: []
@@ -514,6 +528,7 @@ orgs:
     brand_topic: completetech
     family_topics: []
     footer: true
+    license_wording: CompleteTech LLC
   CompleteTech-Patent-IP:
     family: completetech
     former_slugs: []
@@ -526,6 +541,7 @@ orgs:
     brand_topic: completetech
     family_topics: []
     footer: true
+    license_wording: CompleteTech LLC
   CompleteTech-Career-Toolkit:
     family: completetech
     former_slugs: []
@@ -538,6 +554,7 @@ orgs:
     brand_topic: completetech
     family_topics: []
     footer: true
+    license_wording: CompleteTech LLC
   CompleteTech-ManageEngine:
     family: completetech
     former_slugs: []
@@ -550,6 +567,7 @@ orgs:
     brand_topic: completetech
     family_topics: []
     footer: true
+    license_wording: CompleteTech LLC
   CompleteDotTech:
     family: completetech
     former_slugs: []
@@ -561,6 +579,7 @@ orgs:
     brand_topic: completetech
     family_topics: []
     footer: true
+    license_wording: CompleteTech LLC
     flagship: true
     profile:
       name: Timothy Wayne Gregg
@@ -684,6 +703,7 @@ orgs:
     brand_topic: completetech
     family_topics: []
     footer: true
+    license_wording: CompleteTech LLC
 
 owners:
   # decisions 1 and 2: MetatronAngelAgent is out of scope and PrompDev is another person's account

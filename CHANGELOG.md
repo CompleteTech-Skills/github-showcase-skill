@@ -11,6 +11,7 @@ All notable changes to `github-showcase-skill` are recorded here. Versions follo
 
 ### Fixed
 
+- README License rows no longer write a trademark, reserved-rights or copyright sentence for an organization unless its `brand.yaml` row sets `license_wording`; without it the public row keeps only the factual license line, a private repository gets no License row, and `needs-input:license-wording` is logged. The CompleteTech organizations are configured and keep their wording. The TouchedByAnAgent private hold row ("Proprietary. All rights reserved.") is a rights sentence too, so it also needs `license_wording`. Header refresh and bootstrap remove an existing managed License section for that omission, and README lint no longer requires it.
 - Windows contributor tests now use explicit UTF-8, native path basenames, a platform-independent read-only metadata stub, and Git Bash with stdin-safe Action scripts. All 15 issue #9 failures are individually documented; the full suite now runs in Windows, Linux and macOS CI.
 - Lint accepts file operands after options on older Python 3.12 versions while continuing to reject unrecognized options.
 - The Action's optional render arguments support macOS Bash 3.2, including an empty argument array with `set -u`.
