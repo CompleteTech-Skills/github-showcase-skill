@@ -245,3 +245,40 @@ def test_snapshot_does_not_overwrite_established_visibility(brand, existing, cap
     estate.add_meta({"owner": ORG, "repo": "synthetic-project", "visibility": existing})
     O.doctor(estate, ORG, snap)
     assert estate.visibility(f"{ORG}/synthetic-project") == existing
+
+
+@pytest.mark.parametrize("visibility", [{"visibility": "PRIVATE"}, {"isPrivate": True}, {"private": True}])
+@pytest.mark.parametrize("seeded", [False, True])
+def test_private_visibility_aliases_work_on_first_and_supplemental_ingestion(brand, visibility, seeded):
+    snap = snapshot(brand)
+    snap["repos"].append({"name": "secret-proj", **visibility})
+    snap["profile_readme"] = f"See https://github.com/{ORG}/secret-proj"
+    estate = O.Estate(brand, Resolver(brand))
+    if seeded:
+        estate.add_meta({"owner": ORG, "repo": "secret-proj"})
+    result = O.doctor(estate, ORG, snap)
+    assert estate.visibility(f"{ORG}/secret-proj") == "private"
+    assert result["cells"]["O3"] == "fail"
+    assert any("private-slug" in note for note in result["notes"])
+
+
+@pytest.mark.parametrize("email_approved", [False, True])
+def test_registry_free_doctor_does_not_invent_email_or_approval_notes(tmp_path, email_approved):
+    snap = tmp_path / "snapshot.json"
+    snap.write_text(json.dumps({"org": {"name": "x"}}), encoding="utf-8")
+    args = ["--email-approved"] if email_approved else []
+    proc, result = cli(tmp_path, "doctor", ORG, "--snapshot", str(snap), *args)
+    assert proc.returncode == 0
+    assert result["cells"]["O2"] == "fail"
+    assert not any("email empty" in note or "needs-approval:org-email" in note for note in result["notes"])
+
+
+@pytest.mark.parametrize("visibility", [{"visibility": "PRIVATE"}, {"isPrivate": True}, {"private": True}])
+@pytest.mark.parametrize("seeded", [False, True])
+def test_private_dot_github_fails_health_for_all_snapshot_aliases(brand, visibility, seeded):
+    repo = {"name": ".github", **visibility, "files": list(O.T1_FILES + O.FORMS), "files_complete": True}
+    estate = O.Estate(brand, Resolver(brand))
+    if seeded:
+        estate.add_meta({"owner": ORG, "repo": ".github"})
+    result = O.doctor(estate, ORG, {"repos": [repo]})
+    assert result["cells"]["O4"] == "fail"

@@ -1879,6 +1879,17 @@ def _partial_profile_checks(estate: Estate, row: dict, so: dict, text: str | Non
     return cells, notes
 
 
+def _snapshot_visibility(meta: dict) -> str:
+    """Normalize the supported REST/GraphQL visibility fields on every snapshot ingestion path."""
+    visibility = str(meta.get("visibility") or "").lower()
+    if visibility in ("public", "private", "internal"):
+        return visibility
+    for key in ("isPrivate", "private"):
+        if isinstance(meta.get(key), bool):
+            return "private" if meta[key] else "public"
+    return ""
+
+
 def doctor(estate: Estate, org: str, snap: dict, *, repo_dir: str | Path | None = None, avatar: str | Path | None = None,
            email_approved: bool | None = None, allow_t3: bool = False) -> dict:
     """O1 avatar, O2 About, O3 profile README, O4 health, O6 pins, O9 banner, O11 verified badge."""
@@ -1890,19 +1901,15 @@ def doctor(estate: Estate, org: str, snap: dict, *, repo_dir: str | Path | None 
             continue
         existing = estate.meta(f"{login}/{m['name']}")
         if existing is None:
-            estate.add_meta({**m, "owner": login, "repo": m["name"], "visibility": str(m.get("visibility", "")).lower(),
+            estate.add_meta({**m, "owner": login, "repo": m["name"], "visibility": _snapshot_visibility(m),
                              "fork": m.get("isFork", m.get("fork")), "archived": m.get("isArchived", m.get("archived")),
                              "description": m.get("description"), "stargazers_count": m.get("stargazerCount", 0),
                              "pushed_at": m.get("pushedAt")})
         else:
             evidence = {}
             if estate.visibility(f"{login}/{m['name']}") == "unknown":
-                visibility = str(m.get("visibility") or "").lower()
-                private = m.get("isPrivate", m.get("private"))
-                if visibility in ("public", "private", "internal"):
+                if visibility := _snapshot_visibility(m):
                     evidence["visibility"] = visibility
-                elif isinstance(private, bool):
-                    evidence["visibility"] = "private" if private else "public"
             if "files" in m:
                 current_files, current_complete = _captured_files(existing)
                 incoming_files, incoming_complete = _captured_files(m)
@@ -1932,14 +1939,15 @@ def doctor(estate: Estate, org: str, snap: dict, *, repo_dir: str | Path | None 
     # O2 About
     want, _ = about(estate, org, email_approved=email_approved, allow_t3=allow_t3) if has_registry else ({}, OK)
     payload = want.get("payload") or {}
-    if so.get("name") is None and so.get("description") is None:
-        cells["O2"] = "unknown"
-    else:
-        diff = [k for k, v in payload.items() if (so.get(k) or "") != v]
-        cells["O2"] = "pass" if not diff else "fail"
-        notes += [f"O2 {k}: {so.get(k)!r} != {payload[k]!r}" for k in diff]
-        if "email" not in payload and not so.get("email"):
-            notes.append("O2 email empty (needs-approval:org-email)")
+    if has_registry:
+        if so.get("name") is None and so.get("description") is None:
+            cells["O2"] = "unknown"
+        else:
+            diff = [k for k, v in payload.items() if (so.get(k) or "") != v]
+            cells["O2"] = "pass" if not diff else "fail"
+            notes += [f"O2 {k}: {so.get(k)!r} != {payload[k]!r}" for k in diff]
+            if "email" not in payload and not so.get("email"):
+                notes.append("O2 email empty (needs-approval:org-email)")
     # O3 profile README
     text = snap.get("profile_readme")
     if text is None and repo_dir and (Path(repo_dir) / "profile" / "README.md").is_file():
