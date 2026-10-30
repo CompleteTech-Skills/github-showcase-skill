@@ -65,14 +65,20 @@ def test_write_adds_family_then_org_and_config_stays_valid(cfg):
 
 def test_duplicates_are_refused_and_nothing_changes(cfg):
     before = cfg.read_bytes()
-    for argv in (["brand", "add-family", "Ai-Ascension", "--company-label", "X", "--canvas", "#000000",
-                  "--accent", "#FFFFFF"],
-                 ["brand", "add-org", "completetech-skills", "--family", "completetech", "--tier", "T1",
-                  "--display-name", "X"],
-                 ["brand", "add-org", "Pick-Your-AI", "--family", "completetech", "--tier", "T1", "--display-name", "X"],
-                 ["brand", "add-org", "Acme-Widgets", "--family", "no-such-family", "--tier", "T1", "--display-name", "X"]):
+    # Existing rows below (completetech family, its orgs) are brand.yaml data, not hardcoded brand strings.
+    # Exit code 2 alone is not evidence: argparse also exits 2 for an unknown subcommand, which is what the base does,
+    # so each case must also carry the specific refusal reason.
+    for argv, reason in ((["brand", "add-family", "completetech", "--company-label", "X", "--canvas", "#000000",
+                           "--accent", "#FFFFFF"], "already exists"),
+                         (["brand", "add-org", "completetech-skills", "--family", "completetech", "--tier", "T1",
+                           "--display-name", "X"], "already"),
+                         (["brand", "add-org", "Pick-Your-AI", "--family", "completetech", "--tier", "T1",
+                           "--display-name", "X"], "already"),
+                         (["brand", "add-org", "Acme-Widgets", "--family", "no-such-family", "--tier", "T1",
+                           "--display-name", "X"], "unknown family")):
         r = run("--config", str(cfg), *argv, "--write")
         assert r.returncode == 2, (argv, r.stdout, r.stderr)
+        assert reason in r.stdout + r.stderr and "invalid choice" not in r.stderr, (argv, r.stdout, r.stderr)
     assert cfg.read_bytes() == before
 
 
@@ -151,3 +157,10 @@ def test_strict_owner_refuses_a_family_on_hold_unless_allowed(tmp_path, cfg):
     assert "hold" in (run(*base, "--strict-owner").stdout + run(*base, "--strict-owner").stderr)
     assert run(*base, "--strict-owner", "--allow-hold").returncode != 2
     assert run(*base).returncode != 2  # off by default
+
+
+def test_org_brand_topic_defaults_to_the_family_name(cfg):
+    r = run("--config", str(cfg), "brand", "add-org", "Acme-Widgets", "--family", "completetech", "--tier", "T1",
+            "--display-name", "Acme Widgets")
+    assert r.returncode == 0, (r.stdout, r.stderr)
+    assert "brand_topic: \"completetech\"" in r.stdout or "brand_topic: completetech" in r.stdout, r.stdout

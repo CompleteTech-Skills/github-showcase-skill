@@ -57,7 +57,7 @@ def family_block(name: str, *, company_label: str, canvas: str, accent: str, acc
 
 
 def org_block(owner: str, *, family: str, tier: str, display_name: str, nav_name: str | None = None,
-              description: str | None = None, eyebrow: str | None = None, brand_topic: str = "completetech") -> list[str]:
+              description: str | None = None, eyebrow: str | None = None, brand_topic: str | None = None) -> list[str]:
     if not LOGIN.match(owner or ""):
         raise ShowcaseError(f"org login must be letters, digits and hyphens, got {owner!r}", log="usage")
     if tier not in TIERS:
@@ -71,7 +71,7 @@ def org_block(owner: str, *, family: str, tier: str, display_name: str, nav_name
         f"    nav_name: {_q(nav_name or display_name)}",
         f"    description: {_q(description) if description else 'null'}",
         f"    eyebrow: {_q(eyebrow) if eyebrow else 'null'}",
-        f"    brand_topic: {_q(brand_topic)}",
+        f"    brand_topic: {_q(brand_topic or family)}",  # default: the family slug, no hardcoded brand
         "    family_topics: []",
         "    footer: true",
     ]
@@ -220,5 +220,5 @@ def register(sub, func) -> None:
     o.add_argument("--nav-name")
     o.add_argument("--description")
     o.add_argument("--eyebrow")
-    o.add_argument("--brand-topic", default="completetech")
+    o.add_argument("--brand-topic", default=None, help="topic for the org (default: the family name)")
     common(o)
