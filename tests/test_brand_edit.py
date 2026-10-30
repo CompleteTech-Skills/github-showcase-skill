@@ -164,3 +164,63 @@ def test_org_brand_topic_defaults_to_the_family_name(cfg):
             "--display-name", "Acme Widgets")
     assert r.returncode == 0, (r.stdout, r.stderr)
     assert "brand_topic: \"completetech\"" in r.stdout or "brand_topic: completetech" in r.stdout, r.stdout
+
+
+# -- review fixes: T3 sign-off, path spelling, YAML-reserved names, full_name owners ------------------------
+def test_added_t3_org_stays_behind_the_signoff_gate(tmp_path, cfg):
+    r = run("--config", str(cfg), "brand", "add-org", "Acme-Coowned", "--family", "completetech", "--tier", "T3",
+            "--display-name", "Acme Coowned", "--write")
+    assert r.returncode == 0, r.stdout
+    import yaml
+    assert "Acme-Coowned" in yaml.safe_load(cfg.read_text(encoding="utf-8"))["owners"]["t3"]
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(dict(META, owner="Acme-Coowned", repo="acme-synthetic")), encoding="utf-8")
+    base = ["--config", str(cfg), "--meta", str(meta), "--no-repo-dir"]
+    r = run(*base, "doctor", "--strict-owner")
+    assert r.returncode == 2 and "t3-signoff" in r.stdout + r.stderr, (r.stdout, r.stderr)
+    assert run(*base, "--allow-t3", "doctor", "--strict-owner").returncode != 2
+
+
+def test_relative_config_spelling_of_the_default_still_regenerates_locks(tmp_path, monkeypatch):
+    import os
+    from ctshowcase import config as C, detect
+    import showcase
+    refs = tmp_path / "references"
+    refs.mkdir()
+    yml, lock, std = refs / "brand.yaml", refs / "brand.lock.json", tmp_path / "standard.lock.json"
+    shutil.copyfile(ROOT / "references" / "brand.yaml", yml)
+    monkeypatch.setattr(C, "DEFAULT_CONFIG", yml)
+    monkeypatch.setattr(C, "LOCK", lock)
+    monkeypatch.setattr(detect, "STANDARD_LOCK", std)
+    monkeypatch.chdir(tmp_path)
+    assert os.path.join("references", "brand.yaml") != str(yml)  # a relative spelling, not equal to the absolute Path
+    assert showcase.main(["--config", os.path.join("references", "brand.yaml"), "brand", "add-org", "Fabrikam-Co",
+                          "--family", "completetech", "--tier", "T1", "--display-name", "Fabrikam", "--write"]) == 0
+    assert "Fabrikam-Co" in json.loads(lock.read_text(encoding="utf-8"))["orgs"] and std.is_file()
+
+
+def test_yaml_reserved_names_stay_string_keys(cfg):
+    import yaml
+    for name in ("yes", "123"):
+        r = run("--config", str(cfg), "brand", "add-family", name, "--company-label", "X", "--canvas", "#101820",
+                "--accent", "#FEE715", "--write")
+        assert r.returncode == 0, r.stdout
+    r = run("--config", str(cfg), "brand", "add-org", "true", "--family", "yes", "--tier", "T1", "--display-name", "T",
+            "--write")
+    assert r.returncode == 0, r.stdout
+    raw = yaml.safe_load(cfg.read_text(encoding="utf-8"))
+    assert {"yes", "123"} <= set(raw["families"]) and "true" in raw["orgs"]
+    assert all(isinstance(k, str) for sec in ("families", "orgs") for k in raw[sec])
+    assert run("--config", str(cfg), "config").returncode in (0, 1)  # no crash
+
+
+def test_strict_owner_gates_full_name_only_metadata(tmp_path):
+    d = tmp_path / "meta"
+    d.mkdir()
+    m = {k: v for k, v in dict(META, repo="acme-synthetic", full_name="Pick-Your-AI/acme-synthetic").items()
+         if k not in ("owner", "name")}
+    (d / "m.json").write_text(json.dumps(m), encoding="utf-8")
+    base = ["doctor", "--estate", "--meta-dir", str(d), "--registry",
+            str(ROOT / "examples" / "estate" / "registry" / "estate.yaml")]
+    r = run(*base, "--strict-owner")
+    assert r.returncode == 2 and "t3-signoff" in r.stdout + r.stderr, (r.stdout, r.stderr)

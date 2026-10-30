@@ -52,7 +52,7 @@ To onboard a new org, preview and then add its brand rows (both commands are dry
 python scripts/showcase.py brand add-family acme-widgets --company-label "Acme Widgets" --canvas "#101820" --accent "#FEE715"
 python scripts/showcase.py brand add-org Acme-Widgets --family acme-widgets --tier T1 --display-name "Acme Widgets"
 # review the printed YAML block and diff, then repeat with --write (family first)
-python scripts/showcase.py doctor --strict-owner --meta M.json   # optional: refuse owners not in brand.yaml
+python scripts/showcase.py --meta M.json --no-repo-dir doctor --strict-owner  # optional: refuse owners not in brand.yaml
 ```
 
 `--write` edits `references/brand.yaml`, regenerates `references/brand.lock.json` and the standard lock, and validates the schema; on any `schema_errors` it restores `brand.yaml` byte for byte. A new family is `measured: false`, so a banner needs `--allow-unmeasured` until its layout is measured.

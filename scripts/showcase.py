@@ -856,8 +856,14 @@ def cmd_doctor(args):
         metas = list(seen.values())
         if getattr(args, "strict_owner", False):  # every owner found must pass the same gate as a single repository
             b = brand(args)
-            for o in sorted({(m.get("owner") or {}).get("login") if isinstance(m.get("owner"), dict) else m.get("owner")
-                             for m in metas} - {None, ""}):
+            from ctshowcase.meta import normalize
+            owners = set()
+            for m in metas:  # normalize first: an owner given only as full_name must be gated too
+                try:
+                    owners.add(normalize(m)["owner"])
+                except ShowcaseError:
+                    continue
+            for o in sorted(owners - {None, ""}):
                 strict_owner_gate(b, o, args.allow_hold)
         res = intake.estate_doctor(brand(args), _resolver_args(args, require_registry=True), metas,
                                    template_dir=args.template_dir, checkouts=args.checkouts, out=args.out)

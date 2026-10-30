@@ -36,7 +36,7 @@ def family_block(name: str, *, company_label: str, canvas: str, accent: str, acc
     canvas, accent, title = _hex("--canvas", canvas), _hex("--accent", accent), _hex("--title", title)
     deep = _hex("--accent-deep", accent_deep) if accent_deep else accent
     return [
-        f"  {name}:",
+        f"  {_q(name)}:",  # quoted: `yes`/`true`/`123` must stay string keys
         "    measured: false",
         f"    company_label: {_q(company_label)}",
         f"    eyebrow_case: {eyebrow_case}",
@@ -63,8 +63,8 @@ def org_block(owner: str, *, family: str, tier: str, display_name: str, nav_name
     if tier not in TIERS:
         raise ShowcaseError(f"tier must be one of {', '.join(TIERS)}", log="usage")
     return [
-        f"  {owner}:",
-        f"    family: {family}",
+        f"  {_q(owner)}:",
+        f"    family: {_q(family)}",
         "    former_slugs: []",
         f"    tier: {tier}",
         f"    display_name: {_q(display_name)}",
@@ -96,6 +96,25 @@ def check_new_org(brand: C.Brand, owner: str, family: str) -> None:
             raise Refused(f"{owner} is already listed under owners.{status}; resolve that decision first", log="duplicate")
     if brand.org(owner)["known"]:
         raise Refused(f"{owner} already resolves to a brand.yaml org (renamed login); nothing to add", log="duplicate")
+
+
+def add_t3_owner(text: str, owner: str) -> str:
+    """Register `owner` under owners.t3: the co-owner sign-off gate (Brand.check_owner) reads only that list, so a T3 org
+    row alone would pass every owner gate."""
+    nl = "\r\n" if "\r\n" in text else "\n"
+    lines = text.split(nl)
+    top = next((i for i, ln in enumerate(lines) if ln.startswith("owners:")), None)
+    if top is None:
+        raise ConfigError("brand.yaml has no top-level `owners:` key")
+    for i in range(top + 1, len(lines)):
+        if re.match(r"^[A-Za-z_]", lines[i]):
+            break
+        m = re.match(r"^(  t3:\s*\[)(.*)(\]\s*)$", lines[i])
+        if m:
+            items = [x for x in (m.group(2).strip(),) if x]
+            lines[i] = f"{m.group(1)}{', '.join(items + [_q(owner)])}{m.group(3)}"
+            return nl.join(lines)
+    raise ConfigError("brand.yaml owners.t3 must be a one-line flow list (`t3: [a, b]`)")
 
 
 def insert(text: str, section: str, block: list[str]) -> str:
@@ -175,6 +194,8 @@ def run(args, brand) -> tuple[dict, int]:
                           brand_topic=args.brand_topic)
     old = path.read_bytes().decode("utf-8")
     new = insert(old, section, block)
+    if action == "add-org" and args.tier == "T3":  # T3 needs co-owner sign-off: owners.t3 is what the gates read
+        new = add_t3_owner(new, args.owner)
     diff, errs = unified(old, new, "references/brand.yaml"), _errors(new)
     out = {"command": "brand", "action": action, "key": key, "path": str(path), "yaml": "\n".join(block) + "\n",
            "diff": diff, "schema_errors": errs, "written": False, "logs": []}
@@ -183,7 +204,7 @@ def run(args, brand) -> tuple[dict, int]:
         out["result"] = "dry-run" if not errs else "fail"
         return out, OK if not errs else CHECK_FAILED
     locks = []
-    if path == C.DEFAULT_CONFIG:  # the skill's own config: same lock set as `config --write-lock`
+    if path.resolve() == C.DEFAULT_CONFIG.resolve():  # the skill's own config: same lock set as `config --write-lock`
         locks = [(C.LOCK, C.lock_text), (STANDARD_LOCK, lambda _raw: standard_lock_text())]
     else:
         out["logs"].append("custom --config: no lock copies regenerated")
