@@ -68,7 +68,7 @@ For a multi-skill handoff, preserve the source facts, artifact paths, `logs[]` c
 
 ## Safety and permissions
 
-The documented generation workflow is local. Installation may contact GitHub and package indexes. `meta --from-gh` makes read-only `gh api` GETs, and `fonts --fetch` downloads the pinned fonts; nothing else uses the network. Generation does not push commits, change descriptions, topics, labels or settings, publish documents, grant approval or install background services. Review the boundaries in [SKILL.md](SKILL.md) before using real repositories.
+The documented generation workflow is local. Installation may contact GitHub and package indexes. `meta --from-gh` and the opt-in `org labels ORG --repos-from-gh` mode make read-only `gh api` GETs. `fonts --fetch` downloads the pinned fonts. Org-wide label planning emits proposed jobs for review; it never applies them. Generation does not push commits, change descriptions, topics, labels or settings, publish documents, grant approval or install background services. Review the boundaries in [SKILL.md](SKILL.md) before using real repositories.
 
 ## Troubleshooting and verification
 

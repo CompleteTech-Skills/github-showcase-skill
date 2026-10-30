@@ -4,6 +4,10 @@ All notable changes to `github-showcase-skill` are recorded here. Versions follo
 
 ## Unreleased
 
+### Added
+
+- `org labels ORG --repos-from-gh` plans labels across accessible repositories without the private estate registry, with paginated read-only GitHub capture, optional verified local checkouts, unchanged reference guards, and a documented org-default-forms-first workflow. Registry-backed plans still require the org registry row, and checkout repository names match GitHub case-insensitively, including resolved pending renames. Registry-free runs also isolate lazy brand lookups from estate decision files, and held reference rewrites retain their file/line guidance with an incomplete result. Workflow/labeler/release/Renovate references remain final skips rather than unresolved input requests. Missing Windows device-named checkouts fall back to captured metadata instead of aborting the org plan. Pending transfers check the repository's current owner's default issue forms and hold renames when that evidence is unavailable. Sparse or partially missing checkouts retain reference holds based on captured paths and the Git index, while unrelated omitted files remain allowed.
+
 ### Fixed
 
 - `org health` and `org doctor` run available checkout/snapshot checks without the private estate registry, retaining missing-org errors when a registry is supplied or discovered. Doctor combines available file and visibility evidence without inventing completeness or dropping explicit absence, normalizes REST/GraphQL privacy fields, distinguishes absent fields from explicitly cleared identity fields, checks private links under known renamed repository/owner paths and supported verification reason codes, and reports incomplete registry-dependent coverage instead of aborting or claiming the org is done.

@@ -15,8 +15,10 @@ import hashlib
 import json
 import re
 import shlex
+import subprocess
 from datetime import date
 from pathlib import Path
+from urllib.parse import quote
 
 from . import STANDARD
 from . import footer as footermod
@@ -115,7 +117,8 @@ class Estate:
         """Repository names homed in the org: the registry's final_repos (decision 5: one home), or, for an org
         whose row lists none, every captured repository of that owner."""
         login = self.resolver.canonical(org)
-        names = list(self.resolver.registry_org(org).get("final_repos") or [])
+        reg = self.resolver.registry_org(org) if self.resolver.registry_key(org) is not None else {}
+        names = list(reg.get("final_repos") or [])
         if names:
             return names
         seen: set[str] = set()
@@ -1604,6 +1607,110 @@ def star_list_plan(estate: Estate, org: str, *, lists_capture: dict | None = Non
 # =====================================================================================================
 # labels (STANDARD §6.1): the labels module per repository, dry-run plans only
 # =====================================================================================================
+def _label_checkout_evidence(directory: Path, meta: dict | None, *, defaults_only: bool = False) -> tuple[Path | None, dict]:
+    """Use a checkout only when its captured and indexed reference files are actually present.
+
+    Sparse checkouts and local deletions must not turn a missing form into evidence that no form exists.
+    Unrelated omitted files do not matter; package.json matters for a member's Renovate configuration.
+    """
+    from . import labels as labelsmod
+    evidence = dict(meta or {})
+    captured, _ = _captured_files(evidence)
+    paths = {p for p, value in captured.items() if value is not None and value is not False}
+    try:
+        proc = subprocess.run(["git", "-C", str(directory), "ls-files", "--cached", "-z"],
+                              capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10)
+        indexed = proc.returncode == 0
+        if indexed:
+            paths.update(p for p in proc.stdout.split("\0") if p)
+    except (OSError, subprocess.SubprocessError):
+        indexed = False
+    relevant = (labelsmod.default_form_file if defaults_only
+                else lambda p: labelsmod.reference_file(p) or p.lower() == "package.json")
+    try:
+        complete = indexed and all((directory / p).is_file() for p in paths if relevant(p))
+    except OSError:
+        complete = False
+    if complete:
+        return directory, evidence
+    evidence.update(files=sorted(paths), files_complete=False)
+    return None, evidence
+
+
+def _covered_label_defaults(defaults: dict, meta: dict | None) -> dict:
+    """Retain an unverified default-form hold when a supplied checkout omits relevant files."""
+    from . import labels as labelsmod
+    if defaults.get("dir") is None:
+        return defaults
+    directory, evidence = _label_checkout_evidence(defaults["dir"], meta, defaults_only=True)
+    return defaults if directory is not None else labelsmod.defaults_source(defaults["repo"], meta=evidence)
+
+
+def _label_api(path: str, *, pages: bool = False, optional: bool = False):
+    """Read GitHub only; --slurp preserves page boundaries so malformed/incomplete output is never a plan."""
+    argv = ["gh", "api", "-X", "GET", path] + (["--paginate", "--slurp"] if pages else [])
+    try:
+        proc = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", timeout=60)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise NeedsInput("gh", f"cannot read {path}: {type(exc).__name__}") from None
+    if proc.returncode:
+        if optional:
+            return None
+        raise NeedsInput("gh", f"cannot read {path}; check GitHub access and retry")
+    try:
+        data = json.loads(proc.stdout)
+    except ValueError:
+        raise NeedsInput("gh", f"invalid JSON from {path}") from None
+    if pages:
+        if not isinstance(data, list) or not all(isinstance(page, list) for page in data):
+            raise NeedsInput("gh", f"invalid paginated response from {path}")
+        return [item for page in data for item in page]
+    return data
+
+
+def capture_label_repos(estate: Estate, org: str, *, allow_t3: bool = False) -> None:
+    """Discover accessible repositories and capture only the live labels and tree needed for a label plan."""
+    from .detect import is_fork
+    login, row, _ = _gate(estate, org, allow_t3=allow_t3, require_registry=False)
+    if _tier(row) in ("T2-R", "T3") or row.get("family") == "romgenie":
+        return
+    entries = _label_api(f"orgs/{login}/repos?type=all&per_page=100", pages=True)
+    captures = {}
+    for item in entries:
+        if not isinstance(item, dict):
+            raise NeedsInput("gh", "repository listing contains a non-object entry")
+        owner = item.get("owner")
+        owner = owner.get("login") if isinstance(owner, dict) else None
+        name = item.get("name")
+        full_name = item.get("full_name")
+        if (not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+", name)
+                or name in (".", "..") or not owner or not estate.resolver.same(owner, login)
+                or not isinstance(full_name, str) or full_name.lower() != f"{owner}/{name}".lower()):
+            raise NeedsInput("gh", "repository listing contains an invalid or unexpected owner/repository")
+        raw = dict(item, owner=login, repo=name)
+        full = f"{login}/{name}"
+        if name == ".github" or not (raw.get("archived") or raw.get("has_issues") is False or is_fork(raw)):
+            labels = _label_api(f"repos/{full}/labels?per_page=100", pages=True)
+            if not all(isinstance(lb, dict) and isinstance(lb.get("name"), str) and lb["name"]
+                       and isinstance(lb.get("color"), str)
+                       and isinstance(lb.get("description") or "", str) for lb in labels):
+                raise NeedsInput("gh", f"invalid labels response for {full}")
+            raw.update(labels=labels, labels_complete=True)
+            branch = quote(str(raw.get("default_branch") or "main"), safe="")
+            tree = _label_api(f"repos/{full}/git/trees/{branch}?recursive=1", optional=True)
+            if isinstance(tree, dict) and isinstance(tree.get("tree"), list):
+                valid = all(isinstance(t, dict) and isinstance(t.get("path"), str)
+                            and t.get("type") in ("blob", "tree", "commit") for t in tree["tree"])
+                if valid:
+                    raw["files"] = sorted(t["path"] for t in tree["tree"] if t["type"] == "blob")
+                    raw["files_complete"] = tree.get("truncated") is False
+        captures[full.lower()] = raw
+    # Only replace metadata after the entire listing and required label reads succeeded.
+    estate.metas.clear()
+    for raw in captures.values():
+        estate.add_meta(raw)
+
+
 def label_ops_argv(full: str, ops: list[dict]) -> list[list[str]]:
     out = []
     for op in ops:
@@ -1638,13 +1745,14 @@ def _labels_known(m: dict) -> bool:
     seeds every repository with default labels, so planning against [] would create every standard label beside the
     defaults and rename none (`labels --plan` re-reads the live labels instead)."""
     v = m.get("labels")
-    return bool(v) and isinstance(v, (list, str)) and v not in ("[]", "")
+    return (v == [] and m.get("labels_complete") is True) or (bool(v) and isinstance(v, (list, str)) and v not in ("[]", ""))
 
 
-def labels_plan(estate: Estate, org: str, *, allow_t3: bool = False) -> tuple[dict, int]:
+def labels_plan(estate: Estate, org: str, *, allow_t3: bool = False, checkouts: str | None = None,
+                dot_github: str | None = None, registry_free: bool = False) -> tuple[dict, int]:
     from . import labels as labelsmod
     from .detect import is_fork
-    login, row, reg = _gate(estate, org, allow_t3=allow_t3)
+    login, row, reg = _gate(estate, org, allow_t3=allow_t3, require_registry=not registry_free)
     tier, fam = _tier(row), row.get("family")
     repos, jobs, logs = [], [], []
     if tier in ("T2-R", "T3") or fam == "romgenie":
@@ -1654,11 +1762,18 @@ def labels_plan(estate: Estate, org: str, *, allow_t3: bool = False) -> tuple[di
     std = labelsmod.standard_labels()
     dep = next((lb for lb in std if lb["name"] == "dependencies"), None)
     names = estate.repos_of(org)
-    names.sort(key=lambda n: (estate.visibility(f"{login}/{n}") != "public", n.lower()))  # public first (§6.1)
+    names.sort(key=lambda n: (n != ".github", estate.visibility(f"{login}/{n}") != "public", n.lower()))
     defaults = labelsmod.defaults_source(f"{login}/.github", meta=estate.meta(f"{login}/.github"))
+    if dot_github:
+        defaults = labelsmod.defaults_for(login, "_member_", path=dot_github, resolver=estate.resolver)
+        defaults = _covered_label_defaults(defaults, estate.meta(f"{login}/.github"))
+    checkout_root = Path(checkouts) if checkouts else None
+    if checkout_root is not None and not checkout_root.is_dir():
+        raise ShowcaseError("--checkouts must be a directory containing ORG/REPO checkouts", log="usage")
     for n in names:
         m = estate.meta(f"{login}/{n}")
         full = estate.current(f"{login}/{n}")  # labels are written where the repository is today
+        current_owner, current_name = full.split("/", 1)
         if m is None or m.get("error") and "labels" not in m:
             repos.append({"repo": full, "result": "unknown", "log": "needs-input:metadata"})
             continue
@@ -1686,14 +1801,43 @@ def labels_plan(estate: Estate, org: str, *, allow_t3: bool = False) -> tuple[di
         else:
             # no checkout here: §6.4 rule 0 runs against the captured file lists of the repository and of the org's
             # .github (its default issue forms apply to a repository without forms of its own); unproven renames are held
-            ops, lg = labelsmod.plan(existing, None, files=m.get("files"), complete=m.get("files_complete") is True,
-                                     defaults=defaults)
-        writes = [o for o in ops if o["op"] != "skip"]
+            repo_dir = checkout_root / login / n if checkout_root is not None else None
+            member_meta = m
+            if repo_dir is not None and repo_dir.is_dir():
+                origin = labelsmod._checkout_origin(repo_dir)
+                if (not origin or origin[1].lower() != current_name.lower()
+                        or not estate.resolver.same(origin[0], current_owner)):
+                    raise ShowcaseError(f"--checkouts entry for {full} must have its matching GitHub origin", log="usage")
+                repo_dir, member_meta = _label_checkout_evidence(repo_dir, m)
+            else:
+                repo_dir = None
+            repo_defaults = defaults
+            if current_name == ".github":
+                repo_defaults = labelsmod.defaults_source(full, repo_dir=repo_dir, meta=member_meta)
+            elif not estate.resolver.same(current_owner, login):
+                # A pending transfer is still governed by its current owner's inherited forms.
+                source_dir = checkout_root / current_owner / ".github" if checkout_root is not None else None
+                if source_dir is not None and source_dir.is_dir():
+                    repo_defaults = labelsmod.defaults_for(current_owner, current_name, path=source_dir,
+                                                           resolver=estate.resolver)
+                    repo_defaults = _covered_label_defaults(repo_defaults, estate.meta(f"{current_owner}/.github"))
+                else:
+                    repo_defaults = labelsmod.defaults_source(f"{current_owner}/.github",
+                                                             meta=estate.meta(f"{current_owner}/.github"))
+            ops, lg = labelsmod.plan(existing, repo_dir, files=member_meta.get("files"),
+                                     complete=member_meta.get("files_complete") is True,
+                                     defaults=repo_defaults)
+        writes = sorted((o for o in ops if o["op"] != "skip"), key=lambda o: o["op"] == "create")
         logs += lg
         unchecked = [{"label": o["name"], "new_name": o["new_name"], "check_files": o["check_files"]} for o in ops
                      if o.get("log") == labelsmod.NEEDS_CHECKOUT]
-        repos.append({"repo": full, "result": "plan" if writes else "needs-input" if unchecked else "pass", "ops": writes,
-                      "logs": lg, **({"needs_checkout": unchecked} if unchecked else {})})
+        held_ops = [o for o in ops if o.get("log") in
+                    (labelsmod.NEEDS_CHECKOUT, "label-rewrite-first")]
+        rewrites = [{"label": o["name"], "new_name": o["new_name"], **hit}
+                    for o in ops for hit in o.get("rewrite_references") or []]
+        repos.append({"repo": full, "result": "needs-input" if held_ops else "plan" if writes else "pass", "ops": writes,
+                      "logs": lg, **({"needs_checkout": unchecked} if unchecked else {}),
+                      **({"held": held_ops} if held_ops else {}), **({"rewrite_first": rewrites} if rewrites else {})})
         for argv in label_ops_argv(full, writes):  # ids from the operation, never its position
             jobs.append(job(label_job_id(PHASE["labels"], full, argv), PHASE["labels"], "labels", argv,
                             repo=full, note="§6.3 pass A renames before pass B creates; never --force, never a delete."))
@@ -1716,8 +1860,8 @@ def labels_plan(estate: Estate, org: str, *, allow_t3: bool = False) -> tuple[di
     if unknown:
         logs.append(f"needs-input:metadata:{len(unknown)}")
     # a rename rule 0 could not check, or labels that were not captured, is never a pass
-    held = any(x.get("needs_checkout") or x.get("log") == "needs-input:labels" for x in repos)
-    return {"command": "org", "action": "labels", "owner": login, "result": "plan" if jobs else "needs-input" if held else "pass",
+    held = any(x.get("held") or x.get("log") == "needs-input:labels" for x in repos)
+    return {"command": "org", "action": "labels", "owner": login, "result": "incomplete" if held else "plan" if jobs else "pass",
             "repos": repos, "jobs": jobs, "logs": sorted(set(logs))}, OK
 
 
@@ -2069,6 +2213,8 @@ def register(sub) -> None:
     s.add_argument("--org", dest="org_opt", help=argparse.SUPPRESS)
     s.add_argument("--registry", help="registry/estate.yaml (default: the bundle's)")
     s.add_argument("--meta-dir", help="per-repository metadata JSONs (the scratch capture or `meta` output)")
+    s.add_argument("--repos-from-gh", action="store_true", help="labels: discover accessible org repositories with paginated GitHub GETs; no registry needed")
+    s.add_argument("--checkouts", help="labels: local ORG/REPO checkouts under DIR for label-reference checks")
     s.add_argument("--decisions", help="decisions/decisions.json (exposure flags keep repos out of the public slice)")
     s.add_argument("--approved", help="decisions/approved.tsv")
     s.add_argument("--approved-yaml", help="decisions/APPROVED_ACTIONS.yaml")
@@ -2085,7 +2231,7 @@ def register(sub) -> None:
     s.add_argument("--lists", help="pins/profile: star_lists.graphql capture (SOC-01)")
     s.add_argument("--repo-ids", help="pins: JSON {owner/repo: node id} from repo_id.graphql reads")
     s.add_argument("--snapshot", help="doctor: org snapshot JSON ({org, graphql, repos, profile_readme})")
-    s.add_argument("--dot-github", help="health/doctor: checkout of the org's .github repository")
+    s.add_argument("--dot-github", help="health/doctor/labels: checkout of the org's .github repository")
     s.add_argument("--avatar", help="doctor: the org avatar image (O1 colour test)")
     s.add_argument("--jobs", help="append the writer jobs (JSON lines) to FILE")
     s.add_argument("--doctor-format", dest="org_doctor_format", choices=("tsv", "json", "md"), default="json")
@@ -2096,6 +2242,12 @@ def register(sub) -> None:
 def estate_from_args(args) -> Estate:
     from .config import load_brand
     brand = load_brand(getattr(args, "config", None))
+    if getattr(args, "repos_from_gh", False):
+        resolver = Resolver(brand)
+        # Brand's lazy resolver otherwise discovers default decision files during owner-status checks.
+        # This run is explicitly brand-only; share its resolver without consulting the estate bundle.
+        brand._resolver = resolver
+        return Estate(brand, resolver)
     resolver = Resolver.from_paths(brand, args.registry, args.approved, args.approved_yaml, args.actions,
                                    require_registry=args.action not in ("health", "doctor"))
     estate = Estate(brand, resolver, flags=load_flags(args.decisions or _default_decisions()))
@@ -2129,6 +2281,12 @@ def cmd_org(args):
         org = args.user
     if not org:
         raise ShowcaseError("org needs an org login (showcase.py org ACTION ORG)", log="usage")
+    if args.repos_from_gh and args.action != "labels":
+        raise ShowcaseError("--repos-from-gh goes with `org labels`", log="usage")
+    if args.checkouts and args.action != "labels":
+        raise ShowcaseError("--checkouts goes with `org labels`", log="usage")
+    if args.repos_from_gh and any((args.registry, args.meta_dir, args.decisions, args.approved, args.approved_yaml, args.actions)):
+        raise ShowcaseError("--repos-from-gh uses live metadata and brand identity; omit registry, metadata and decision inputs", log="usage")
     estate = estate_from_args(args)
     act = args.action
     if act == "profile" and args.user:
@@ -2146,7 +2304,10 @@ def cmd_org(args):
                          repo_ids=_json_file(args.repo_ids))
         res["jobs"] = res["jobs"] + res["star_list"].get("jobs", [])
     elif act == "labels":
-        res, code = labels_plan(estate, org, allow_t3=args.allow_t3)
+        if args.repos_from_gh:
+            capture_label_repos(estate, org, allow_t3=args.allow_t3)
+        res, code = labels_plan(estate, org, allow_t3=args.allow_t3, checkouts=args.checkouts, dot_github=args.dot_github,
+                                registry_free=args.repos_from_gh)
     elif act == "health":
         res, code = health(estate, org, repo_dir=args.dot_github, allow_t3=args.allow_t3)
     else:
