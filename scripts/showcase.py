@@ -376,7 +376,7 @@ def cmd_footer(args):
 
 
 def cmd_readme(args):
-    from ctshowcase import readme, records
+    from ctshowcase import readme, readme_managed, records
     ctx = context(args)
     gate_owner(ctx, allow_hold=True)
     rd = ctx.repo_dir
@@ -390,6 +390,13 @@ def cmd_readme(args):
     gate_watching(ctx, remedy=README_HOLD_REMEDY)
     if args.variant and args.variant != "auto":
         ctx.det["variant"] = args.variant
+    managed = readme_managed.source(before, ctx.override)
+    if managed:  # a generator owns this README (issue #71): never rewrite it, in any mode
+        ctx.log("needs-input:readme-managed")
+        ctx.log(f"readme-managed:{managed}")
+        if args.write:
+            return base("readme", ctx, result="needs-input", written=False,
+                        error=f"README.md is generated ({managed}); not rewritten"), NEEDS_INPUT
     ctx.local_badges = args.badges == "local"
     mode = args.mode
     contrib_new = None
@@ -448,6 +455,8 @@ def cmd_readme(args):
     if args.diff or not args.write:
         if args.format == "text":
             sys.stdout.write(diff)
+            if managed:  # the text form has no logs line: say why this is only a preview
+                print("readme: " + " ".join(l for l in ctx.logs if "readme-managed" in l), file=sys.stderr)
             return None, OK
         res["diff"] = diff
     return res, OK

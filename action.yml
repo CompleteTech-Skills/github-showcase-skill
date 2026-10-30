@@ -172,9 +172,21 @@ runs:
             fi
             echo "::error title=CompleteTech Showcase::readme failed (exit 2, see the log above)"
           fi
+          # A README a generator owns (generated-file header, front matter, or `readme: managed` in
+          # .github/showcase.yml) is never rewritten: exit 4 with needs-input:readme-managed is a skip, not a failure.
+          if [ "$rc" -eq 4 ]; then
+            held="$(python -c 'import json,sys;d=json.load(open(sys.argv[1]));print("yes" if "needs-input:readme-managed" in (d.get("logs") or []) else "")' "$RUNNER_TEMP/readme.json" 2>/dev/null || true)"
+            if [ "$held" = "yes" ]; then
+              echo "::warning title=CompleteTech Showcase::README skipped: it is generated or marked 'readme: managed' (see the log above)"
+              skipped=1
+              readme_managed=true
+              return 0
+            fi
+          fi
           return "$rc"
         }
         bootstrapped=false
+        readme_managed=false
         case "$SHOWCASE_README" in
           header)
             readme_step --mode header --write
@@ -188,7 +200,7 @@ runs:
               readme_step --bootstrap --write
               [ "$before" != "$(sha256sum README.md)" ] && bootstrapped=true
             fi
-            readme_step --mode header --write
+            [ "$readme_managed" = "true" ] || readme_step --mode header --write
             ;;
           none)
             ;;

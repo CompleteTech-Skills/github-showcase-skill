@@ -116,19 +116,31 @@
       ]
     },
     "readme": {
-      "type": [
-        "object",
-        "null"
-      ],
-      "additionalProperties": false,
-      "properties": {
-        "header": {
-          "type": "boolean"
+      "description": "`managed`: a generator owns the README, so `readme --write` never rewrites it (exit 4, needs-input:readme-managed); `authored`: detection of generated READMEs is off; null: detect",
+      "anyOf": [
+        {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "header": {
+              "type": "boolean"
+            },
+            "footer": {
+              "type": "boolean"
+            }
+          }
         },
-        "footer": {
-          "type": "boolean"
+        {
+          "type": "string",
+          "enum": [
+            "managed",
+            "authored"
+          ]
         }
-      }
+      ]
     },
     "reason": {
       "type": [
