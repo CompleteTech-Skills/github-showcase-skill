@@ -1977,7 +1977,7 @@ def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = Non
         prompt = re.sub(r"\b4 candidates\b", "1 image", prompt)
         prompt = prompt.replace("seed {SEED} if the tool supports seeds", "seed: {SEED}")
         # legacy "Use seed {SEED} when supported." would assert a seed (or "not supported") unconditionally
-        prompt = re.sub(r"Use seed \{SEED\}(?: (?:when|if) (?:supported|the tool supports seeds))?\.",
+        prompt = re.sub(r"\bUse seed \{SEED\}(?: (?:when|if) (?:supported|the tool supports seeds))?\.",
                         "{SEED_INSTRUCTION}", prompt, flags=re.I)
         prompt = re.sub(r"The pipeline downsamples your image[^.]*\.",
                         "The lock pass traces your image into the compositor, which renders the flat 1024 × 1024 px "
@@ -2000,6 +2000,8 @@ def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = Non
     prompt = re.sub(r"\bProduce (?:four|4) candidates\.", "Produce one image.", prompt, flags=re.I)
     prompt = re.sub(r"\b(?:four|4) candidates\b", "1 image", prompt, flags=re.I)
     missing = sorted(set(re.findall(r"\{([A-Z_]+)\}", prompt)))
+    if option.upper() == "A" and not str(glyph.get("SIZE_CLASS") or "").strip() and "SIZE_CLASS" not in missing:
+        missing = sorted(missing + ["SIZE_CLASS"])  # a literal-size custom template must not bypass the size_class check
     ink = colours.get("INK") or []
     return {"prompt": prompt, "missing": missing, "invalid": invalid, "facts": facts, "option": option.upper(),
             "requested": requested,

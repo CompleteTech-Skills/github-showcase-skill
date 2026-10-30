@@ -825,3 +825,58 @@ def test_icon_prompt_cli_invalid_size_class_blocks_out_even_without_a_size_place
     assert result["result"] == "needs-writer"
     assert "SIZE_CLASS" in result["invalid"]
     assert not out.exists()
+
+
+def _cli_prompt(monkeypatch, tmp_path, capsys, glyph_data, art_text=None, extra=()):
+    monkeypatch.chdir(tmp_path)
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    glyph = tmp_path / "glyph.json"
+    glyph.write_text(json.dumps(glyph_data), encoding="utf-8")
+    out = tmp_path / "prompt.md"
+    args = ["--meta", str(meta), "--no-repo-dir", "content", "icon", "prompt", "--option", "A",
+            "--glyph", str(glyph), "--out", str(out)]
+    if art_text is not None:
+        art_file = tmp_path / "art.md"
+        art_file.write_text(art_text, encoding="utf-8")
+        args += ["--art-direction", str(art_file)]
+    code = C.main(args + list(extra))
+    return code, json.loads(capsys.readouterr().out), out
+
+
+_NO_SIZE = {"glyph_name": "Inbox", "glyph_description": "An open tray.", "spark_placement": "inside the tray"}
+
+
+def test_icon_prompt_cli_missing_size_class_names_allowed_values(monkeypatch, tmp_path, capsys):
+    code, result, out = _cli_prompt(monkeypatch, tmp_path, capsys, _NO_SIZE)
+    assert code == 1 and result["result"] == "needs-writer"
+    assert result["missing"] == ["SIZE_CLASS"] and result["invalid"] == {}
+    for allowed in ("WIDE", "TALL", "SQUARE", "DIAGONAL"):
+        assert allowed in result["note"]
+    assert not out.exists()
+
+
+def test_icon_prompt_cli_missing_size_class_with_literal_size_template(monkeypatch, tmp_path, capsys):
+    """A custom template with a literal size (no {SIZE_CLASS}) must not bypass the missing-size_class check."""
+    art = C.load_art_direction().replace("{SIZE_CLASS}", "WIDE")
+    code, result, out = _cli_prompt(monkeypatch, tmp_path, capsys, _NO_SIZE, art_text=art)
+    assert code == 1 and result["result"] == "needs-writer"
+    assert "SIZE_CLASS" in result["missing"]
+    for allowed in ("WIDE", "TALL", "SQUARE", "DIAGONAL"):
+        assert allowed in result["note"]
+    assert not out.exists()
+
+
+def test_icon_prompt_legacy_seed_clause_inside_template_is_normalised(monkeypatch, tmp_path, capsys):
+    """'Use seed {SEED} when supported.' inside the fenced template must follow the real seed request (word boundary)."""
+    art = C.load_art_direction()
+    assert "{SEED}" in art or "{SEED_INSTRUCTION}" in art
+    art = art.replace("{SEED_INSTRUCTION}", "Use seed {SEED} when supported.")
+    if "Use seed {SEED} when supported." not in art:
+        art = art.replace("{SEED}", "Use seed {SEED} when supported.", 1)
+    data = dict(_NO_SIZE, size_class="wide")
+    code, result, _ = _cli_prompt(monkeypatch, tmp_path, capsys, data, art_text=art)
+    assert "when supported" not in result["prompt"] and "not supported when" not in result["prompt"]
+    assert "Use seed" not in result["prompt"]  # no seed requested: nothing asserted in the prompt
+    code, result, _ = _cli_prompt(monkeypatch, tmp_path, capsys, data, art_text=art, extra=["--seed", "4242"])
+    assert "when supported" not in result["prompt"] and "Use seed 4242." in result["prompt"]
