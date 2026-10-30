@@ -209,8 +209,9 @@ def test_fingerprint_flow_style_escaped_key(tmp_path):
     # Review finding (E4.4.4 B): `{"detect\x5ftuned": true}` is a flow mapping with an escaped key that enables tuning.
     # The escaped-key check must also match after `{` or `,`. Adding data.csv moves tuned workspace -> dataset while the
     # untuned type stays dataset, so only type_tuned can move the fingerprint (checkout and metadata-only inputs).
-    text = '{"detect\x5ftuned": true}\n'
-    nested = 'subtitle: x\nk: {"a\x5fb": 1, "detect\x5ftuned": true}\n'
+    text = '{"detect\\x5ftuned": true}\n'
+    nested = 'subtitle: x\nk: {"a\\x5fb": 1, "detect\\x5ftuned": true}\n'
+    assert "detect_tuned" not in text + nested and "\\x5f" in text  # the YAML keeps the literal backslash escape
     base = dict(NORTHWIND, files=["planning/a.json", "src/build.py"],
                 file_sizes={"planning/a.json": 9000, "src/build.py": 1000})
     grown = dict(base, files=base["files"] + ["data.csv"], file_sizes=dict(base["file_sizes"], **{"data.csv": 1500}))
@@ -223,6 +224,19 @@ def test_fingerprint_flow_style_escaped_key(tmp_path):
         return fingerprint.fingerprint(fingerprint.inputs(meta, None), "cfg")
     assert meta_fp(base, text) != meta_fp(grown, text)
     assert meta_fp(base, nested) != meta_fp(grown, nested)
+
+
+def test_fingerprint_explicit_key_and_properties(tmp_path):
+    # Review finding (E4.4.5 B): `? "detect\x5ftuned"` (colon on the next line) and tagged/anchored escaped keys also
+    # enable tuning, so the tuned type must be recorded and a data change must move the fingerprint.
+    base = dict(NORTHWIND, files=["planning/a.json", "src/build.py"],
+                file_sizes={"planning/a.json": 9000, "src/build.py": 1000})
+    grown = dict(base, files=base["files"] + ["data.csv"], file_sizes=dict(base["file_sizes"], **{"data.csv": 1500}))
+    for text in ('? "detect\\x5ftuned"\n: true\n', '&k "detect\\x5ftuned": true\n', '!!str "detect\\x5ftuned": true\n'):
+        assert "detect_tuned" not in text
+        _write_override(tmp_path, text)
+        assert fingerprint.inputs(base, tmp_path)["type_tuned"] == "workspace", text
+        assert _fp(base, tmp_path) != _fp(grown, tmp_path), text
 
 
 def test_fingerprint_scoped_away_override_follows_untuned_type(tmp_path):

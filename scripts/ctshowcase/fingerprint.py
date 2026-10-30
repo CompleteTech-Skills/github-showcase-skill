@@ -78,7 +78,8 @@ def inputs(meta: dict, repo_dir: str | Path | None) -> dict:
     flag_text = override_text if rd is not None else _manifest_override_text(meta)
     # A double-quoted YAML key may spell the name with escapes ("detect\x5ftuned"), so a backslash inside a quoted
     # mapping key (at a line start or after a flow `{` or `,`) counts as possibly naming it. A backslash in a value (a Windows path in `subtitle:`) does not.
-    names_flag = "detect_tuned" in flag_text or bool(re.search(r'(?:^|[{,])\s*"[^"\n]*\\[^"\n]*"\s*:', flag_text, re.M))
+    # An explicit key (`? "detect\x5ftuned"`, colon on a later line) and tag/anchor properties (`&a "..."`) count too.
+    names_flag = "detect_tuned" in flag_text or bool(re.search(_ESCAPED_KEY, flag_text, re.M))
     try:  # the detected type picks the README variant and the eyebrow: a new type (code landed) regenerates
         from .detect import detect
         from .facts import RepoFacts
@@ -96,6 +97,11 @@ def inputs(meta: dict, repo_dir: str | Path | None) -> dict:
         if rd is None:  # metadata-only: no override file to hash, so the captured text stands in for override_sha256
             out["override_text_sha256"] = hashlib.sha256(flag_text.encode("utf-8")).hexdigest()
     return out
+
+
+_QUOTED_ESCAPE = r'"[^"\n]*\\[^"\n]*"'
+_PROPS = r'(?:[!&]\S*\s+)*'
+_ESCAPED_KEY = r'(?:^|[{,])\s*(?:\?\s+' + _PROPS + _QUOTED_ESCAPE + '|' + _PROPS + _QUOTED_ESCAPE + r'\s*:)'
 
 
 def fingerprint(inp: dict, cfg_sha: str) -> str:

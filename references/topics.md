@@ -64,7 +64,7 @@ Family topics apply only to non-fork repos other than `.github`, in this order:
 | 24 | `*.csv`, `*.json` and `*.parquet` ≥ 50% of bytes | `dataset` |
 | 25 | otherwise | `workspace` |
 
-With `detect_tuned: true`, rule 24 ignores `planning/`, `.github/ISSUE_TEMPLATE/`, `issues/` and `issue<N>.json` bytes, and a low-confidence dataset detection logs `type-suggestion:<type>` (set `type` in `.github/showcase.yml`, or pass `--type`).
+With `detect_tuned: true`, rule 24 ignores `planning/`, `.github/ISSUE_TEMPLATE/`, `issues/` and `issue<N>.json` bytes. A low-confidence dataset detection, in any mode, logs `type-suggestion:<type>` (set `type` in `.github/showcase.yml`, or pass `--type`).
 
 **The 24 type topics are reserved.** A repo carries exactly one of them, and only as its type topic.
 
