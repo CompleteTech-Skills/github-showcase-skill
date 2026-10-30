@@ -276,3 +276,18 @@ def test_tagline_in_fenced_code_is_ignored(tmp_path):
     rd = _repo(tmp_path)
     (rd / "README.md").write_text(fenced, encoding="utf-8")
     assert not set(DRIFT) & set(_doctor_logs(rd))
+
+
+def test_doctor_sidecar_drift_without_readme(tmp_path):
+    # review E5.2.3 (A P3 / B P2): the staged-render sidecar check depends only on docs/images/.showcase.json and a
+    # non-empty live description, so it must still log drift when README.md is absent. The tagline check alone needs
+    # the README.
+    rd = _repo(tmp_path)
+    p = run_cli("--meta", META, "--repo-dir", rd, "--format", "json", "banner",
+                "--out", rd / "docs/images/banner.png", "--description", "Staged sentence.")
+    assert p.returncode == 0, p.stderr
+    assert (rd / "docs/images/.showcase.json").is_file()
+    (rd / "README.md").unlink()
+    logs = _doctor_logs(rd)
+    assert "drift:staged-description" in logs
+    assert "drift:tagline-description" not in logs

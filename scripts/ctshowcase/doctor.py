@@ -183,11 +183,13 @@ def row(ctx: RepoContext) -> dict:
                      (rd / "README.md").read_text(encoding="utf-8"), re.S):
             logs.append("checklist: open")
     # E5.2.3 drift (logs only): the README tagline and any staged render differ from the live About text
+    # Only the tagline check needs README.md; the sidecar check depends on the sidecar and the live text alone.
     live = (ctx.meta.get("description") or "").strip()
-    if rd and live and (rd / "README.md").is_file():
-        tag = tagline_text((rd / "README.md").read_text(encoding="utf-8"))
-        if tag is not None and not _same_words(tag, live):
-            logs.append("drift:tagline-description")
+    if rd and live:
+        if (rd / "README.md").is_file():
+            tag = tagline_text((rd / "README.md").read_text(encoding="utf-8"))
+            if tag is not None and not _same_words(tag, live):
+                logs.append("drift:tagline-description")
         side = rd / "docs" / "images"
         if (side / fp.SIDECAR).is_file():
             data = fp.read_sidecar(side)
