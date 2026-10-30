@@ -137,3 +137,11 @@ def test_render_audit_catches_a_family_regression(brand, tmp_path):
     raw['orgs']['Pick-Your-AI']['family'] = 'completetech'
     leaks = rendered_leaks(Brand(raw, brand.path), 'Pick-Your-AI', tmp_path)
     assert {'card', 'banner style tokens'} <= set(leaks), leaks
+
+
+def test_data_audit_catches_a_family_regression(brand):
+    # Mutation evidence for the data audit: a non-CompleteTech row moved to the completetech family in
+    # an in-memory copy must be reported, so the audit is not vacuous even though it passes on base.
+    raw = copy.deepcopy(brand.raw)
+    raw['orgs']['Pick-Your-AI']['family'] = 'completetech'
+    assert 'Pick-Your-AI' in family_mismatches(raw)
