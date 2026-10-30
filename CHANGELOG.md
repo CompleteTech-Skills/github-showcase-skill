@@ -6,6 +6,8 @@ All notable changes to `github-showcase-skill` are recorded here. Versions follo
 
 ### Added
 
+- `--assume-repo OWNER/REPO` (global, off by default) treats a checkout whose `origin` still names a renamed repository's old name as the named repository for one run, logged as `origin-renamed:OLD->OWNER/REPO`. It never edits the remote, and a different repository than `--meta` is still refused. The stale-origin refusal now names both the `git remote set-url origin` fix and this flag.
+
 - `org labels ORG --repos-from-gh` plans labels across accessible repositories without the private estate registry, with paginated read-only GitHub capture, optional verified local checkouts, unchanged reference guards, and a documented org-default-forms-first workflow. Registry-backed plans still require the org registry row, and checkout repository names match GitHub case-insensitively, including resolved pending renames. Registry-free runs also isolate lazy brand lookups from estate decision files, and held reference rewrites retain their file/line guidance with an incomplete result. Workflow/labeler/release/Renovate references remain final skips rather than unresolved input requests. Missing Windows device-named checkouts fall back to captured metadata instead of aborting the org plan. Pending transfers check the repository's current owner's default issue forms and hold renames when that evidence is unavailable. Sparse or partially missing checkouts retain reference holds based on captured paths and the Git index, while unrelated omitted files remain allowed.
 
 ### Fixed

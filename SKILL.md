@@ -162,8 +162,12 @@ python3 $S --meta meta.json content links --base-ref origin/main --diff     # in
 
 ## Command Reference
 
+### Global flag: `--assume-repo OWNER/REPO`
+
+Off by default. Use it only when a checkout's `origin` still names the old name of a renamed repository and the remote has not been updated. It treats the checkout as `OWNER/REPO` for this run; the run logs `origin-renamed:OLD->OWNER/REPO` (`logs[]`) and never edits the remote. Without it, a stale origin is refused (exit 2) and the refusal names the fix. Use `--assume-repo` with `--meta` only for the same repository (a case-only or former-owner spelling is the same repository); a different `OWNER/REPO` is refused. The permanent fix is `git remote set-url origin https://github.com/OWNER/REPO.git`, run by the operator.
+
 ```text
-python3 <skill-dir>/scripts/showcase.py [--config PATH] [--repo-dir DIR | --no-repo-dir] [--meta FILE] [--type TYPE] [--format json|text] [--quiet] [--version] <command> [options]
+python3 <skill-dir>/scripts/showcase.py [--config PATH] [--repo-dir DIR | --no-repo-dir] [--assume-repo OWNER/REPO] [--meta FILE] [--type TYPE] [--format json|text] [--quiet] [--version] <command> [options]
 
 meta --from-gh OWNER/REPO [--out FILE] [--allow-t3]
 fingerprint [--out-dir docs/images] [--github-output]
