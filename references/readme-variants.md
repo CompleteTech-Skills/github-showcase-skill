@@ -64,6 +64,8 @@ BADGE 1 BADGE 2 [BADGE 3] [BADGE 4]
 3. License: `license-SPDX-64748B`, or `license-proprietary-64748B` for private repositories; omitted while a public repository has no license.
 4. CI, public repositories only: the Actions badge of a workflow whose file name contains `test`, else `ci`, using the current owner.
 
+Variant J (`.github`) uses the `GitHub profile` type badge from `references/standard/types.yaml`, even though the profile has no card category. With a known license this produces two badges without requiring a language. A public profile without a known license gets only its type badge and the existing `badges-short` warning; no license is invented. Nonempty authored badge blocks in variant J survive both upgrade and header refresh unchanged, including HTML badge rows. `lint readme` still checks their count and palette; an empty block is regenerated.
+
 Each label and message segment doubles `-` and `_` (shields.io's escapes) and is then percent-encoded, so `C#` reads `language-C%23-1E3A8A` and `#`, `?`, `/` or `%` never end the path early.
 
 | Token | Hex | Use |

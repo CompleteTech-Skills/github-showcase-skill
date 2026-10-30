@@ -172,8 +172,10 @@ def badges(ctx: RepoContext) -> list[tuple[str, str, str | None]]:
         topics = set(ctx.meta.get("topics") or [])
         rt = [n for t, n in (("claude-skill", "Claude"), ("codex-skill", "Codex")) if t in topics] or ["Claude", "Codex"]
         out.append(("Agent skill", f"{SHIELDS}agent%20skill-{shield(' | '.join(rt))}-{b['brand']}", None))
-    elif ctx.det.get("category"):
-        out.append((f"Type {ctx.det['category']}", f"{SHIELDS}type-{shield(ctx.det['category'])}-{b['brand']}{extra}", None))
+    else:
+        category = standard("types")["types"][ctx.det["type"]].get("badge_category", ctx.det.get("category"))
+        if category:
+            out.append((f"Type {category}", f"{SHIELDS}type-{shield(category)}-{b['brand']}{extra}", None))
     lic = ctx.meta.get("license")
     if not ctx.public:
         out.append(("License proprietary", f"{SHIELDS}license-proprietary-{b['neutral']}", None))
@@ -226,6 +228,13 @@ def badges_html(ctx) -> str:
     return '<p align="center">\n' + "\n".join(parts) + "\n</p>"
 
 
+def badge_body(ctx: RepoContext, existing: str | None = None) -> str:
+    """Variant J keeps authored badge rows; lint still checks their count and palette."""
+    if ctx.det["variant"] == "J" and existing and existing.strip():
+        return existing
+    return badges_html(ctx) if ctx.det["variant"] == "F" else badges_md(ctx)
+
+
 def nav_first(ctx: RepoContext) -> bool:
     """§7.1 order: hero banner, then the nav line (review q57 `nav` default); brand.yaml `readme.nav_first` restores
     the nav-first order only if the user answers "Nav line first"."""
@@ -263,16 +272,16 @@ def tagline_body(ctx: RepoContext, existing: str | None = None, text: str = "") 
 
 
 def header(ctx: RepoContext, keep_banner: str | None = None, title: str | None = None,
-           tagline: str | None = None) -> str:
+           tagline: str | None = None, existing_badges: str | None = None) -> str:
     """The §7.2 header. `tagline` is the tagline block body a caller already decided with tagline_body() (the body it
     carries over from the header it replaces); None writes the description's tagline, or an empty block."""
     tag = wrap("tagline", tagline_body(ctx) if tagline is None else tagline)
     banner = keep_banner if keep_banner is not None else wrap("banner", banner_html(ctx))
     if ctx.det["variant"] == "F":
-        parts = [*lead(ctx, banner, wrap("nav", nav_line(ctx))), wrap("badges", badges_html(ctx)), tag, "---"]
+        parts = [*lead(ctx, banner, wrap("nav", nav_line(ctx))), wrap("badges", badge_body(ctx, existing_badges)), tag, "---"]
         return "\n\n".join(p for p in parts if p)
     parts = [*lead(ctx, banner, wrap("nav", nav_line(ctx))), '<div align="center">', f"# {title or product_name(ctx)}",
-             wrap("badges", badges_md(ctx)), tag, "</div>", "---"]
+             wrap("badges", badge_body(ctx, existing_badges)), tag, "</div>", "---"]
     return "\n\n".join(p for p in parts if p)
 
 
@@ -615,7 +624,10 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
         tag = tagline_body(ctx, old_tag, text)
         if old_tag.strip() and not tag:  # an inherited tagline, emptied on purpose (not a lost line)
             removed += [ln for ln in old_tag.splitlines() if ln.strip()]
-        body, _ = _strip_markers(text, keep={"tagline": tag})
+        keep = {"tagline": tag}
+        if variant == "J" and blocks.get("badges", "").strip():
+            keep["badges"] = blocks["badges"]
+        body, _ = _strip_markers(text, keep=keep)
         if want_footer:
             body, _ = drop_old_footer(body, ctx.brand)  # its lines are already in `removed`
         pre, sections = split_sections(body)
@@ -731,7 +743,7 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
             # an inherited tagline is emptied (header mode does the same): its lines are dropped on purpose, so the
             # never-delete check must not report them as lost
             removed += [ln for ln in old_tag.splitlines() if ln.strip()]
-        out.append(header(ctx, tagline=new_tag))
+        out.append(header(ctx, tagline=new_tag, existing_badges=blocks.get("badges")))
         co = callout(ctx)
         if co and co not in intro:
             out.append(co)
@@ -776,10 +788,11 @@ def header_only(ctx: RepoContext, text: str) -> str:
     if ctx.repo_dir is not None and not (ctx.repo_dir / "docs" / "images" / "banner.png").is_file():
         gen["banner"] = ""  # no image yet (for example no description): an empty block, never a broken image
         ctx.log("needs-input:banner")
-    gen["badges"] = badges_html(ctx) if ctx.det["variant"] == "F" else badges_md(ctx)
 
     def sub(m):
         b, body = m.group(1), m.group(2)
+        if b == "badges":
+            return wrap(b, badge_body(ctx, body))
         if b == "checklist":
             if re.search(r"- \[ \]", body):
                 return m.group(0)
