@@ -40,10 +40,26 @@ def test_no_non_completetech_row_uses_the_completetech_family(brand):
     assert family_mismatches(brand.raw) == set()
 
 
+def undefined_families(raw: dict) -> set[str]:
+    families = raw['families']
+    return {owner for owner, row in raw['orgs'].items() if row['family'] not in families}
+
+
 def test_every_org_family_exists(brand):
-    families = brand.raw['families']
-    for owner, row in brand.raw['orgs'].items():
-        assert row['family'] in families or row['family'] == 'completetech', owner
+    # 'completetech' is an ordinary key of families (brand.yaml); no special case, so a removed
+    # families.completetech fails here instead of being silently accepted by the org rows.
+    assert undefined_families(brand.raw) == set()
+
+
+def test_family_existence_check_catches_removed_completetech_family(brand):
+    # Evidence that the membership check above is not vacuous: drop families.completetech from an
+    # in-memory copy and every completetech org row must be reported as undefined.
+    import copy
+    raw = copy.deepcopy(brand.raw)
+    del raw['families']['completetech']
+    reported = undefined_families(raw)
+    assert 'CompleteDotTech' in reported
+    assert reported == {owner for owner, row in raw['orgs'].items() if row['family'] == 'completetech'}
 
 
 def test_legit_exceptions_still_exist(brand):
