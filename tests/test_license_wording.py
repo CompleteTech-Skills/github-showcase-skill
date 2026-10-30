@@ -1,4 +1,11 @@
-"""Issue 36: License rows write a rights sentence only when the org row sets `license_wording` (synthetic owners only)."""
+"""Issue 36: License rows write a rights sentence only when the org row sets `license_wording` (synthetic owners only).
+
+The gating itself landed in a192d1f (issue 36), so this file is a characterization suite for that behaviour and
+is test-only (task 39). Evidence that it guards the gating: run against the pre-issue-36 readme.py
+(`git show 2be04ac:scripts/ctshowcase/readme.py`) with the current tests and brand.yaml, 23 tests fail (every
+no-holder, factual-line, blank-wording and holder-substitution case). The remaining 35 pass there because they
+pin unchanged CompleteTech output, which is the regression they are meant to catch.
+"""
 import copy
 
 import pytest
@@ -257,7 +264,12 @@ def test_completetech_output_unchanged(make_ctx, tmp_path, owner, files, heading
     assert "needs-input:license-wording" not in ctx.logs
 
 
-@pytest.mark.parametrize("owner", ["CompleteTech-LLC", "CompleTetech-Security"])
+@pytest.mark.parametrize("owner", [
+    "CompleteTech-LLC",
+    # deliberate former slug, not a typo: references/brand.yaml lists `former_slugs: [CompleTetech-Security]` on the
+    # CompleteTech-Security row, and the resolver (CQ-03) must keep renamed orgs resolving to the same row
+    "CompleTetech-Security",
+])
 def test_completetech_private_output_unchanged(make_ctx, tmp_path, owner):
     ctx = make_ctx(repo_dir=tmp_path, owner=owner, repo="thing", license=None, visibility="private",
                    created_at="2025-01-01T00:00:00Z")
