@@ -93,8 +93,19 @@ def repo_dir(args) -> Path | None:
         want = f"{m.get('owner')}/{m.get('repo')}"
         have = _origin_slug(rd)
         if have and not _same_slug(args, want, have):
-            raise ShowcaseError(f"metadata describes {want} but {rd.resolve()} is a checkout of {have}; pass the right "
-                                "--repo-dir, or --no-repo-dir to use the metadata alone", log="usage")
+            assumed = getattr(args, "assume_repo", None)
+            if assumed and _same_slug(args, want, assumed):
+                # Explicit operator override for a renamed repository whose origin still has the old slug. Read-only:
+                # the skill never rewrites the remote and makes no network call to follow GitHub's rename redirect.
+                args._assume_note = f"assume-repo:{assumed} (origin names {have}; the remote is unchanged)"
+            else:
+                why = (f"--assume-repo {assumed} does not match the metadata's {want}" if assumed else
+                       "the origin may be a renamed repository's old slug")
+                raise ShowcaseError(
+                    f"metadata describes {want} but {rd.resolve()} is a checkout of {have} ({why}); fix the remote with "
+                    f"`git remote set-url origin https://github.com/{want}.git`, or pass `--assume-repo {want}` to accept "
+                    "this checkout as that repository for this run (the skill never edits the remote), or pass the right "
+                    "--repo-dir, or --no-repo-dir to use the metadata alone", log="usage")
         if not explicit and have is None:
             raise ShowcaseError(f"--meta {want} without --repo-dir: run from inside that repository's checkout, or pass "
                                 "--repo-dir DIR or --no-repo-dir", log="usage")
@@ -121,7 +132,14 @@ def context(args, b=None):
     b = b or brand(args)
     rd = repo_dir(args)
     meta = merged(args.meta, str(rd) if rd else None)
-    return RepoContext(b, meta, rd, type_override=getattr(args, "type_override", None))
+    assumed = getattr(args, "assume_repo", None)
+    if assumed and not args.meta:  # no metadata to compare: the stale origin slug is replaced by the stated one
+        meta = dict(meta, owner=assumed.split("/")[0], repo=assumed.split("/")[1])
+        args._assume_note = f"assume-repo:{assumed} (origin names {_origin_slug(rd) if rd else None}; the remote is unchanged)"
+    ctx = RepoContext(b, meta, rd, type_override=getattr(args, "type_override", None))
+    if getattr(args, "_assume_note", None):
+        ctx.log(args._assume_note)
+    return ctx
 
 
 def base(cmd, ctx=None, **kw) -> dict:
@@ -950,6 +968,9 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--quiet", action="store_true")
     p.add_argument("--allow-t3", action="store_true",
                    help="treat a T3 (co-owned) owner as signed off for this run: every repository command and generator, not just `meta`; pass only when a t3-metadata or t3-signoff row is approved (default: T3 owners are refused, exit 2)")
+    p.add_argument("--assume-repo", metavar="OWNER/REPO",
+                   help="accept a checkout whose origin names a renamed repository's old slug as OWNER/REPO for this run "
+                        "(logged; the remote is never changed and no network call is made; default: a mismatch is refused, exit 2)")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__} ({STANDARD})")
     sub = p.add_subparsers(dest="command", required=True, metavar="<command>")
 
@@ -1222,6 +1243,8 @@ def _main(argv=None) -> int:
         cli.error("unrecognized arguments: " + " ".join(remaining))
     from ctshowcase.config import set_t3_signed_off
     set_t3_signed_off(getattr(args, "allow_t3", False))
+    if args.assume_repo and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+", args.assume_repo):
+        cli.error("--assume-repo expects OWNER/REPO")
     if args.format is None:
         args.format = "text" if args.command in GENERATORS else "json"
     try:
