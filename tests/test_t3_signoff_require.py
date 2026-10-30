@@ -1,4 +1,5 @@
-"""`--require-t3-signoff` (issue 23): `--allow-t3` needs a valid, unexpired sign-off record in the estate bundle.
+"""`--require-t3-signoff` (issue 23): `--allow-t3` needs a valid, unexpired sign-off record in the file named by
+`--t3-signoff-file` (env SHOWCASE_T3_SIGNOFF_FILE). There is no default location (the maintainer has not chosen one).
 
 Synthetic records only (owner Pick-Your-AI is the brand.yaml T3 owner; the ids and dates are made up). The existing
 tests/test_allow_t3_global.py is the proof that behaviour without the new flag is unchanged and stays untouched.
@@ -29,6 +30,8 @@ def _bundle(tmp_path, records):
         lines.append(f"    owner: {r.get('owner', OWNER)}")
         lines.append(f"    repos: {json.dumps(r.get('repos', ['*']))}")
         lines.append(f"    approved: {str(r.get('approved', True)).lower()}")
+        lines.append(f"    approver: {r.get('approver', 'synthetic-co-owner')}")
+        lines.append(f"    approved_on: {r.get('approved_on', '2026-01-15')}")
         lines.append(f"    expires: {r.get('expires', '2099-12-31')}")
     (d / "t3-signoffs.yaml").write_text("\n".join(lines) + "\n", encoding="utf-8")
     return tmp_path / "bundle"
@@ -39,9 +42,15 @@ def _run(tmp_path, bundle, *argv, owner=OWNER, env=None):
     meta.write_text(json.dumps(dict(META, owner=owner, repo="northwind-synthetic")), encoding="utf-8")
     e = dict(os.environ, SHOWCASE_ESTATE_ROOT=str(bundle))
     e.pop("SHOWCASE_REQUIRE_T3_SIGNOFF", None)
+    e.pop("SHOWCASE_T3_SIGNOFF_FILE", None)
     e.update(env or {})
-    return subprocess.run([*SHOWCASE, "--meta", str(meta), "--no-repo-dir", *argv], cwd=ROOT, env=e,
+    rec = ["--t3-signoff-file", str(_file(bundle))] if bundle is not None else []
+    return subprocess.run([*SHOWCASE, "--meta", str(meta), "--no-repo-dir", *rec, *argv], cwd=ROOT, env=e,
                           capture_output=True, text=True, encoding="utf-8")
+
+
+def _file(bundle):
+    return Path(bundle) / "decisions" / "t3-signoffs.yaml"
 
 
 def _out(r):
@@ -119,7 +128,7 @@ def test_writer_jobs_carry_the_signoff_id(tmp_path):
     rec = {"id": "t3s-8", "owner": OWNER, "repos": ["*"], "approved": True, "expires": "2099-12-31"}
     signoff.set_required(True)
     try:
-        signoff._granted()[OWNER.lower()] = [rec]
+        signoff._grant(OWNER.lower(), rec)
         out = tmp_path / "jobs.jsonl"
         append(out, [{"id": "a", "phase": "p", "kind": "repo-settings", "repo": f"{OWNER}/x", "argv": []},
                      {"id": "b", "phase": "p", "kind": "repo-settings", "repo": f"{OWNER}/y", "argv": [],
@@ -137,7 +146,7 @@ def test_writer_jobs_carry_the_signoff_id(tmp_path):
 def test_jobs_are_untouched_without_the_flag(tmp_path):
     from ctshowcase import signoff
     from ctshowcase.records import append
-    signoff._granted()[OWNER.lower()] = {"id": "t3s-8", "repos": ["*"]}
+    signoff._grant(OWNER.lower(), {"id": "t3s-8", "repos": ["*"]})
     try:
         out = tmp_path / "jobs.jsonl"
         append(out, [{"id": "a", "phase": "p", "kind": "k", "repo": f"{OWNER}/x"}])
@@ -157,7 +166,8 @@ def test_state_does_not_outlive_the_invocation(tmp_path, capsys):
 @pytest.mark.parametrize("repo,expect", [(None, "scope"), ("a", None), ("B", None), ("c", "scope")])
 def test_evaluate_scope_rules(repo, expect):
     from ctshowcase import signoff
-    recs = [{"id": "s", "owner": OWNER, "repos": ["a", f"{OWNER}/b"], "approved": True, "expires": "2099-01-01"}]
+    recs = [{"id": "s", "owner": OWNER, "repos": ["a", f"{OWNER}/b"], "approved": True, "approver": "x",
+             "approved_on": "2026-01-01", "expires": "2099-01-01"}]
     rec, why = signoff.evaluate([OWNER], repo, records=recs)
     assert why == expect and (rec is None) == (expect is not None)
 
@@ -177,9 +187,12 @@ def test_repo_scoped_record_is_honoured_by_repository_commands(tmp_path, argv):
 
 def test_record_without_an_id_never_authorizes(tmp_path):
     from ctshowcase import signoff
-    rec = {"owner": OWNER, "repos": ["*"], "approved": True, "expires": "2099-12-31"}
-    assert signoff.evaluate([OWNER], None, records=[rec]) == (None, "missing")
-    assert signoff.evaluate([OWNER], None, records=[dict(rec, id="  ")]) == (None, "missing")
+    rec = {"owner": OWNER, "repos": ["*"], "approved": True, "approver": "x", "approved_on": "2026-01-01",
+           "expires": "2099-12-31"}
+    # a record with no usable id breaks the schema: refused as invalid (it never authorizes), not silently missing
+    assert signoff.evaluate([OWNER], None, records=[rec])[0] is None
+    assert signoff.evaluate([OWNER], None, records=[rec])[1].startswith("invalid:")
+    assert signoff.evaluate([OWNER], None, records=[dict(rec, id="  ")])[1].startswith("invalid:")
     assert signoff.evaluate([OWNER], None, records=[dict(rec, id="t3s-1")])[1] is None
 
 
@@ -190,7 +203,7 @@ def test_alias_record_matches_every_later_check(tmp_path, monkeypatch):
     from ctshowcase.org import _t3_granted as org_granted
     from ctshowcase.project import _t3_granted as project_granted
     b = _bundle(tmp_path, [{"id": "t3s-10", "owner": "Old-Login"}])
-    monkeypatch.setenv("SHOWCASE_ESTATE_ROOT", str(b))
+    monkeypatch.setenv("SHOWCASE_T3_SIGNOFF_FILE", str(_file(b)))
     signoff.set_required(True)
     set_t3_signed_off(True)
     try:
@@ -213,11 +226,11 @@ def test_project_gate_registers_the_grant_and_reports_the_reason(tmp_path, monke
     resolver = Resolver(brand, {}, None)
     signoff.set_required(True)
     try:
-        monkeypatch.setenv("SHOWCASE_ESTATE_ROOT", str(_bundle(tmp_path / "ok", [{"id": "t3s-11"}])))
+        monkeypatch.setenv("SHOWCASE_T3_SIGNOFF_FILE", str(_file(_bundle(tmp_path / "ok", [{"id": "t3s-11"}]))))
         assert _gate_target(resolver, OWNER, allow_t3=True) == OWNER
         assert signoff.record_for(OWNER, None)["id"] == "t3s-11"  # so stamp() can put it on the writer job
         signoff.reset()
-        monkeypatch.setenv("SHOWCASE_ESTATE_ROOT", str(_bundle(tmp_path / "old", [{"id": "t3s-12", "expires": "2000-01-01"}])))
+        monkeypatch.setenv("SHOWCASE_T3_SIGNOFF_FILE", str(_file(_bundle(tmp_path / "old", [{"id": "t3s-12", "expires": "2000-01-01"}]))))
         with pytest.raises(Refused) as exc:
             _gate_target(resolver, OWNER, allow_t3=True)
         assert exc.value.log == "t3-signoff:expired"
@@ -259,13 +272,15 @@ def test_qualified_scope_for_another_owner_refuses(tmp_path):
 def test_garbage_expiry_never_validates(tmp_path):
     b = _bundle(tmp_path, [{"id": "t3s-5", "expires": "2099-12-31garbage"}])
     r = _run(tmp_path, b, "--require-t3-signoff", "--allow-t3", "describe")
-    assert r.returncode == 2 and "t3-signoff:expired" in _out(r), _out(r)
+    assert r.returncode == 2 and "t3-signoff:invalid" in _out(r) and "expires" in _out(r), _out(r)
 
 
 def test_malformed_repos_refuses_instead_of_raising(tmp_path):
-    b = _raw_bundle(tmp_path, f"  - id: t3s-6\n    owner: {OWNER}\n    repos: 7\n    approved: true\n    expires: 2099-12-31\n")
+    b = _raw_bundle(tmp_path, f"  - id: t3s-6\n    owner: {OWNER}\n    repos: 7\n    approved: true\n"
+                              "    approver: x\n    approved_on: 2026-01-01\n    expires: 2099-12-31\n")
     r = _run(tmp_path, b, "--require-t3-signoff", "--allow-t3", "describe")
-    assert r.returncode == 2 and "t3-signoff:scope" in _out(r) and "Traceback" not in _out(r), _out(r)
+    assert r.returncode == 2 and "t3-signoff:invalid" in _out(r) and "repos" in _out(r), _out(r)
+    assert "Traceback" not in _out(r), _out(r)
 
 
 def test_adopt_and_content_links_honour_repo_scoped_record(tmp_path):
@@ -280,7 +295,7 @@ def test_report_jobs_carry_signoff_id(tmp_path):
     signoff.set_required(True)
     try:
         rec = {"id": "t3s-8", "owner": OWNER, "repos": ["*"], "approved": True, "expires": "2099-12-31"}
-        signoff._granted()[OWNER.lower()] = [rec]
+        signoff._grant(OWNER.lower(), rec)
         from ctshowcase.content import _finish
         import argparse
         rp = tmp_path / "report.json"
@@ -304,7 +319,7 @@ def test_hold_owner_is_refused_even_with_a_record(tmp_path, monkeypatch):
     brand = Brand({"owners": {"hold": ["Held-Co"]}}, ROOT / "references" / "brand.yaml")
     resolver = Resolver(brand, {}, None)
     b = _bundle(tmp_path, [{"id": "t3s-h", "owner": "Held-Co", "repos": ["*"]}])
-    monkeypatch.setenv("SHOWCASE_ESTATE_ROOT", str(b))
+    monkeypatch.setenv("SHOWCASE_T3_SIGNOFF_FILE", str(_file(b)))
     signoff.set_required(True)
     try:
         for check in (brand.check_owner, resolver.check_owner):
@@ -345,7 +360,7 @@ def test_signoff_state_is_context_local(tmp_path, monkeypatch):
     from ctshowcase import signoff
     from ctshowcase.config import Brand, reset_t3_signed_off, set_t3_signed_off
     from ctshowcase.errors import Refused
-    monkeypatch.setenv("SHOWCASE_ESTATE_ROOT", str(_bundle(tmp_path, [])))
+    monkeypatch.setenv("SHOWCASE_T3_SIGNOFF_FILE", str(_file(_bundle(tmp_path, []))))
     brand = Brand({"owners": {"t3": [OWNER]}}, ROOT / "references" / "brand.yaml")
     barrier = threading.Barrier(2, timeout=10)
     out: dict[str, tuple] = {}
@@ -356,7 +371,7 @@ def test_signoff_state_is_context_local(tmp_path, monkeypatch):
         run = signoff.reset()
         try:
             if not strict:
-                signoff._granted()["someone-else"] = [{"id": "t3s-lax"}]
+                signoff._grant("someone-else", {"id": "t3s-lax"})
             barrier.wait()  # both states are live at once
             try:
                 result = ("passed", brand.check_owner(OWNER, allow_t3=True))
@@ -386,10 +401,174 @@ def test_main_restores_an_enclosing_runs_signoff_state(tmp_path, capsys):
     req = signoff.set_required(True)
     run = signoff.reset()
     try:
-        signoff._granted()["outer"] = [{"id": "t3s-outer"}]
+        signoff._grant("outer", {"id": "t3s-outer"})
         showcase.main(["config"])
         capsys.readouterr()
-        assert signoff.required() is True and signoff._granted() == {"outer": [{"id": "t3s-outer"}]}
+        assert signoff.required() is True and signoff._granted() == {"outer": ({"id": "t3s-outer"},)}
     finally:
         signoff.restore(run)
         signoff.reset_required(req)
+
+
+# --- review round 4: explicit record file, record schema, timestamp expiry, copy-on-write state, change records ---
+
+def test_no_record_file_refuses_without_a_default(tmp_path):
+    """The canonical path in the estate bundle is still the maintainer's choice (issue 24), so the tool must not pick
+    one: a valid record sitting at the formerly hard-coded bundle path is NOT read unless the file is named."""
+    b = _bundle(tmp_path, [{"id": "t3s-d"}])
+    r = _run(tmp_path, None, "--require-t3-signoff", "--allow-t3", "describe", env={"SHOWCASE_ESTATE_ROOT": str(b)})
+    assert r.returncode == 2 and "t3-signoff:no-file" in _out(r) and "--t3-signoff-file" in _out(r), _out(r)
+
+
+def test_record_file_may_have_any_name_and_come_from_env(tmp_path):
+    src = _file(_bundle(tmp_path, [{"id": "t3s-env"}]))
+    chosen = tmp_path / "elsewhere" / "my-approved-actions.yaml"
+    chosen.parent.mkdir()
+    chosen.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    r = _run(tmp_path, None, "--require-t3-signoff", "--allow-t3", "describe",
+             env={"SHOWCASE_ESTATE_ROOT": str(tmp_path / "nowhere"), "SHOWCASE_T3_SIGNOFF_FILE": str(chosen)})
+    assert r.returncode != 2 and "t3-signoff" not in _out(r), _out(r)
+
+
+@pytest.mark.parametrize("expires,why", [
+    ("2026-10-30T00:00:00+00:00", "expired"),   # same calendar day, but the instant has passed
+    ("2026-10-30T12:43:59Z", "expired"),
+    ("2026-10-30T12:45:00+00:00", None),
+    ("2026-10-30T14:00:00+02:00", "expired"),   # 12:00Z
+    ("2026-10-30", None),                       # a date is valid through that whole day (inclusive)
+    ("2026-10-29", "expired"),
+])
+def test_timestamp_expiry_is_compared_as_an_instant(expires, why):
+    import datetime as dt
+    from ctshowcase import signoff
+    now = dt.datetime(2026, 10, 30, 12, 44, tzinfo=dt.timezone.utc)
+    rec = {"id": "t", "owner": OWNER, "repos": ["*"], "approved": True, "approver": "x", "approved_on": "2026-01-01",
+           "expires": expires}
+    assert signoff.evaluate([OWNER], None, records=[rec], now=now)[1] == why
+    aware = dt.datetime(2026, 10, 30, 0, 0, tzinfo=dt.timezone.utc)  # what YAML yields for an unquoted timestamp
+    assert signoff.evaluate([OWNER], None, records=[dict(rec, expires=aware)], now=now)[1] == "expired"
+
+
+def test_naive_timestamp_expiry_is_invalid():
+    import datetime as dt
+    from ctshowcase import signoff
+    rec = {"id": "t", "owner": OWNER, "repos": ["*"], "approved": True, "approver": "x", "approved_on": "2026-01-01"}
+    for naive in ("2099-12-31T00:00:00", dt.datetime(2099, 12, 31)):
+        assert signoff.evaluate([OWNER], None, records=[dict(rec, expires=naive)])[1].startswith("invalid:")
+
+
+@pytest.mark.parametrize("drop", ["approver", "approved_on"])
+def test_audit_fields_are_required(tmp_path, drop):
+    body = (f"  - id: t3s-a\n    owner: {OWNER}\n    repos: ['*']\n    approved: true\n"
+            "    approver: x\n    approved_on: 2026-01-01\n    expires: 2099-12-31\n")
+    body = "\n".join(line for line in body.split("\n") if not line.strip().startswith(drop + ":"))
+    r = _run(tmp_path, _raw_bundle(tmp_path, body), "--require-t3-signoff", "--allow-t3", "describe")
+    assert r.returncode == 2 and "t3-signoff:invalid" in _out(r) and drop in _out(r), _out(r)
+
+
+def test_approved_as_a_string_is_reported_invalid_not_missing(tmp_path):
+    body = (f"  - id: t3s-s\n    owner: {OWNER}\n    repos: ['*']\n    approved: 'true'\n"
+            "    approver: x\n    approved_on: 2026-01-01\n    expires: 2099-12-31\n")
+    r = _run(tmp_path, _raw_bundle(tmp_path, body), "--require-t3-signoff", "--allow-t3", "describe")
+    assert r.returncode == 2 and "t3-signoff:invalid" in _out(r) and "t3s-s" in _out(r), _out(r)
+
+
+def _iso(v):
+    import datetime as dt
+    if isinstance(v, (dt.date, dt.datetime)):
+        return v.isoformat()
+    if isinstance(v, dict):
+        return {k: _iso(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_iso(x) for x in v]
+    return v
+
+
+def test_schema_and_problems_agree_on_the_fixtures():
+    """references/t3-signoff.schema.json is the contract; signoff.problems() must accept and reject the same records.
+    jsonschema is not a runtime dependency, so the schema half runs only where it is installed."""
+    import yaml
+    from ctshowcase import signoff
+    fix = ROOT / "tests" / "fixtures" / "t3-signoff"
+    valid = yaml.safe_load((fix / "valid.yaml").read_text(encoding="utf-8"))
+    invalid = yaml.safe_load((fix / "invalid.yaml").read_text(encoding="utf-8"))
+    assert all(signoff.problems(r) == [] for r in valid["signoffs"]), [signoff.problems(r) for r in valid["signoffs"]]
+    assert all(len(signoff.problems(r)) == 1 for r in invalid["signoffs"]), [signoff.problems(r) for r in invalid["signoffs"]]
+    jsonschema = pytest.importorskip("jsonschema")
+    schema = json.loads((ROOT / "references" / "t3-signoff.schema.json").read_text(encoding="utf-8"))
+    jsonschema.Draft202012Validator.check_schema(schema)
+    jsonschema.validate(_iso(valid), schema)
+    for rec in invalid["signoffs"]:
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate({"signoffs": [_iso(rec)]}, schema)
+
+
+def test_topics_change_records_carry_the_signoff_id(tmp_path):
+    """#26: change records (records.record(), no `phase`) carry signoff_id, and no approval_id (not a writer job)."""
+    b = _bundle(tmp_path, [{"id": "t3s-cr"}])
+    out = tmp_path / "rec.jsonl"
+    r = _run(tmp_path, b, "--require-t3-signoff", "--allow-t3", "topics", "--records", str(out))
+    assert "t3-signoff" not in _out(r) and out.is_file(), _out(r)
+    recs = [json.loads(x) for x in out.read_text(encoding="utf-8").splitlines()]
+    assert recs and all(x["signoff_id"] == "t3s-cr" and "approval_id" not in x for x in recs), recs
+    plain = tmp_path / "plain.jsonl"
+    _run(tmp_path, b, "--allow-t3", "topics", "--records", str(plain))
+    assert all("signoff_id" not in json.loads(x) for x in plain.read_text(encoding="utf-8").splitlines())
+
+
+def test_adopt_json_output_stamps_change_records_and_jobs(tmp_path):
+    b = _bundle(tmp_path, [{"id": "t3s-ad"}])
+    r = _run(tmp_path, b, "--require-t3-signoff", "--allow-t3", "adopt", f"{OWNER}/northwind-synthetic")
+    obj = json.loads(r.stdout)
+    assert obj.get("records") and all(x.get("signoff_id") == "t3s-ad" for x in obj["records"]), obj.get("records")
+    assert all(x.get("signoff_id") == "t3s-ad" for x in obj.get("jobs") or []), obj.get("jobs")
+
+
+def test_child_context_grant_does_not_leak_into_parent(tmp_path, monkeypatch):
+    """An asyncio task inherits the parent's context. Before copy-on-write the inherited (granted, aliases) dicts were
+    shared, so a signed child's grant stayed in the unsigned parent and stamp() put the child's id on its jobs."""
+    import asyncio
+    from ctshowcase import signoff
+    monkeypatch.setenv("SHOWCASE_T3_SIGNOFF_FILE", str(_file(_bundle(tmp_path, [{"id": "t3s-child"}]))))
+
+    async def child():
+        signoff.require(OWNER)
+        signoff.register_aliases([OWNER, "Old-Login"])
+        return signoff.record_for(OWNER)["id"]
+
+    async def parent():
+        signoff.set_required(True)
+        signoff.reset()  # the parent's state exists before the child starts, so the child inherits it
+        got = await asyncio.create_task(child())
+        job = {"id": "j", "phase": "p", "kind": "k", "repo": f"{OWNER}/x", "argv": []}
+        signoff.stamp([job])
+        return got, signoff._granted(), signoff._aliases(), job
+
+    got, grants, aliases, job = asyncio.run(parent())
+    assert got == "t3s-child"
+    assert grants == {} and aliases == {} and "signoff_id" not in job and "approval_id" not in job
+
+
+def test_star_list_jobs_for_a_t3_org_carry_its_signoff(tmp_path, monkeypatch, brand):
+    """`org pins` for a T3 org plans its star-List jobs on the personal account (org=CompleteDotTech); the grant is the
+    org's, so target-based stamping missed them. star_list_plan now passes the gated owner explicitly."""
+    from ctshowcase import org as O, signoff
+    from ctshowcase.config import reset_t3_signed_off, set_t3_signed_off
+    from ctshowcase.resolver import Resolver
+    fix = ROOT / "tests" / "fixtures" / "org"
+    reg = {"orgs": {OWNER: {"star_list": {"name": "Pick Your AI: built on", "description": "x"}, "favorites": []}}}
+    est = O.Estate(brand, Resolver(brand, reg, {"rows": set(), "ids": set(), "answers": {}, "actions": [], "extra": []}))
+    lists = json.loads((fix / "star-lists.json").read_text(encoding="utf-8"))
+    monkeypatch.setenv("SHOWCASE_T3_SIGNOFF_FILE", str(_file(_bundle(tmp_path, [{"id": "t3s-sl"}]))))
+    t3 = set_t3_signed_off(True)
+    req = signoff.set_required(True)
+    run = signoff.reset()
+    try:
+        signoff.require(OWNER)
+        res = O.star_list_plan(est, OWNER, lists_capture=lists, allow_t3=True)
+        assert res["jobs"] and all(j["org"] == O.USER_LOGIN for j in res["jobs"]), res
+        assert all(j["signoff_id"] == "t3s-sl" and j["approval_id"] == "t3s-sl" for j in res["jobs"]), res["jobs"]
+    finally:
+        signoff.restore(run)
+        signoff.reset_required(req)
+        reset_t3_signed_off(t3)

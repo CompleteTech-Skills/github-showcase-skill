@@ -1525,6 +1525,17 @@ def _estate_list_targets(estate: Estate, nodes: list[dict], *, allow_t3: bool = 
 
 def star_list_plan(estate: Estate, org: str, *, lists_capture: dict | None = None, repo_ids: dict | None = None,
                    planned_new: int | None = None, allow_t3: bool = False) -> dict:
+    """See _star_list_plan. Its jobs target the personal account (USER_LOGIN), not the org, so under
+    --require-t3-signoff the org's grant is carried onto them explicitly (target-based stamping would miss it)."""
+    from . import signoff
+    out = _star_list_plan(estate, org, lists_capture=lists_capture, repo_ids=repo_ids, planned_new=planned_new,
+                          allow_t3=allow_t3)
+    signoff.stamp(out.get("jobs"), owner=estate.resolver.canonical(org))
+    return out
+
+
+def _star_list_plan(estate: Estate, org: str, *, lists_capture: dict | None = None, repo_ids: dict | None = None,
+                    planned_new: int | None = None, allow_t3: bool = False) -> dict:
     """Per-org star List (decision 14, SOC-01): read the existing lists first, reuse a same-named list, keep the 32-list
     cap, and add each favorite with the **union** of its current lists, this one and every other estate org's star List
     that also takes it (never only the new id). A capture whose lists or List items are cut short proves nothing about

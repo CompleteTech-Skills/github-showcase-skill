@@ -66,7 +66,7 @@ def test_help_text_matches_docs():
     assert result.returncode == 0, result.stderr
     assert "--allow-t3" in result.stdout
     # issue 23 adds the opt-in --require-t3-signoff right after --allow-t3; the synopsis must keep up with --help
-    fragment = "[--quiet] [--allow-t3] [--require-t3-signoff] [--version]"
+    fragment = "[--quiet] [--allow-t3] [--require-t3-signoff] [--t3-signoff-file PATH] [--version]"
     help_usage = " ".join(result.stdout.split())
     skill = _read("SKILL.md")
     ref = skill[skill.index("## Command Reference"):]
