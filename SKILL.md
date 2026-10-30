@@ -134,6 +134,18 @@ The four command groups follow the same rules as the repository commands: read-o
 | `enterprise` | `enterprise snapshot-query --slug S` or `snapshot --slug S --out F`, then `doctor`, `seat-check`, `plan --jobs J`; `diff` after the run | [references/enterprise.md](references/enterprise.md) |
 | `content` | `content links --base-ref origin/main`, `linguist`, `actions`, `images`, `sidebar --facts F`, `icon prompt`, `icon normalize`, `icon check`, `social --job` | [references/content.md](references/content.md) |
 
+`content icon` defaults to the installed skill's `references/art-direction.md`,
+including a repository glyph template for option A and the illustration template
+for option B. Palette values come from `references/brand.yaml`; documented family
+seeds are used when available, otherwise the prompt uses the tool's default seed. Use
+`--art-direction FILE` to select another file; relative paths use the current
+directory, and missing files report `needs-input:art-direction` with the selected path.
+Older custom configs without `icon_ink`/`icon_spark` keep normalization and checks
+available (family-ink QA is skipped with `needs-input:icon-palette`). The bundled
+option A glyph prompt names the missing tokens with exit 4; add them or pass an
+explicit palette through `--art-direction`. Option B illustration prompts do not
+require these glyph tokens.
+
 ```bash
 S=<skill-dir>/scripts/showcase.py
 SHOWCASE_ESTATE_ROOT=<skill-dir>/examples/estate python3 $S org profile Northwind-Trading-Co --meta-dir <skill-dir>/examples/estate/meta
