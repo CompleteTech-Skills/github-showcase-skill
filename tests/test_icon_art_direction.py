@@ -1,5 +1,6 @@
 """The installed skill's icon defaults work without the private estate bundle."""
 import json
+import re
 from pathlib import Path
 import copy
 import os
@@ -221,3 +222,16 @@ def test_previous_bundled_template_via_override_still_asks_for_one_image(option,
     assert "four candidates" not in result["prompt"].lower()
     assert "Produce one image." in result["prompt"]
     assert "- Requested: 1 image; seed: not supported." in C.prompt_markdown(result)
+
+
+def test_explicit_seed_is_requested_even_when_a_custom_template_has_no_seed_placeholder(brand, make_ctx):
+    """A custom --art-direction without {SEED}/{SEED_INSTRUCTION} must still carry a seed that provenance records."""
+    from ctshowcase.resolver import Resolver
+
+    art = C.load_art_direction()
+    art = re.sub(r"[^\n]*\{SEED(?:_INSTRUCTION)?\}[^\n]*", "", art)
+    result = C.icon_prompt(make_ctx(owner="CompleteTech-Skills"), Resolver(brand, {}, {}), art, GLYPH, "A", seed=4242)
+    assert "seed 4242" in result["prompt"].lower()
+    assert "- Requested: 1 image; seed: 4242." in C.prompt_markdown(result)
+    plain = C.icon_prompt(make_ctx(owner="CompleteTech-Skills"), Resolver(brand, {}, {}), art, GLYPH, "A")
+    assert "seed" not in plain["prompt"].lower()

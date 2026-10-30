@@ -1989,6 +1989,9 @@ def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = Non
         for k, v in slots.items():
             if v is not None:
                 prompt = prompt.replace("{" + k + "}", str(v))
+        if seed is not None and f"seed {seed}" not in prompt.lower() and f"seed: {seed}" not in prompt.lower():
+            # a custom --art-direction template without a seed placeholder: the recorded seed must still be requested
+            prompt = prompt.rstrip() + "\n\n" + seed_instruction.strip()
     # older art-direction files (including the previous bundled one, via --art-direction) say "Produce four
     # candidates" / "4 candidates"; the request is one image, so the prompt and the provenance must agree
     prompt = re.sub(r"\bProduce (?:four|4) candidates\.", "Produce one image.", prompt, flags=re.I)
