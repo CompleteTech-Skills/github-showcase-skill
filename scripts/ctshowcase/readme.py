@@ -18,6 +18,8 @@ from .mdcode import code_spans, find_blocks, masked  # noqa: F401  (code_spans: 
 MARK = re.compile(r"<!-- showcase:([a-z-]+):start -->\n?(.*?)\n?<!-- showcase:\1:end -->", re.S)
 EMOJI = re.compile("[\U0001F000-\U0001FAFF☀-➿⬀-⯿️‍]")
 SHIELDS = "https://img.shields.io/badge/"
+GENERATED_BADGES = re.compile(r"<!-- showcase:badges:generated sha256=([0-9a-f]{64})"
+                              r"(?: replaces=([0-9a-f]{64}))? -->\n(.*)", re.S)
 BOM = "\ufeff"
 
 
@@ -172,8 +174,10 @@ def badges(ctx: RepoContext) -> list[tuple[str, str, str | None]]:
         topics = set(ctx.meta.get("topics") or [])
         rt = [n for t, n in (("claude-skill", "Claude"), ("codex-skill", "Codex")) if t in topics] or ["Claude", "Codex"]
         out.append(("Agent skill", f"{SHIELDS}agent%20skill-{shield(' | '.join(rt))}-{b['brand']}", None))
-    elif ctx.det.get("category"):
-        out.append((f"Type {ctx.det['category']}", f"{SHIELDS}type-{shield(ctx.det['category'])}-{b['brand']}{extra}", None))
+    else:
+        category = standard("types")["types"][ctx.det["type"]].get("badge_category", ctx.det.get("category"))
+        if category:
+            out.append((f"Type {category}", f"{SHIELDS}type-{shield(category)}-{b['brand']}{extra}", None))
     lic = ctx.meta.get("license")
     if not ctx.public:
         out.append(("License proprietary", f"{SHIELDS}license-proprietary-{b['neutral']}", None))
@@ -226,6 +230,94 @@ def badges_html(ctx) -> str:
     return '<p align="center">\n' + "\n".join(parts) + "\n</p>"
 
 
+def badge_body(ctx: RepoContext, existing: str | None = None) -> str:
+    """Refresh owned rows; a missing or changed digest makes a J block authored."""
+    if ctx.det["variant"] != "J":
+        return badges_html(ctx) if ctx.det["variant"] == "F" else badges_md(ctx)
+    is_legacy = (legacy_profile_badges(ctx.brand, existing or "")
+                 or (existing or "").strip() == template_badge_body(ctx.brand))
+    has_license_row = "![License " in (existing or "") or "![AGPL-3.0 or commercial license]" in (existing or "")
+    if is_legacy and has_license_row and ctx.public and (ctx.meta.get("license") or "").upper() in ("", "NOASSERTION", "OTHER"):
+        return existing  # missing metadata cannot disprove an authored license claim
+    if existing and existing.strip() and not generated_badges(existing) and not is_legacy:
+        return existing
+    body = badges_md(ctx)
+    previous = GENERATED_BADGES.fullmatch(existing or "")
+    replaced_digest = body_sha(existing) if is_legacy else previous.group(2) if previous else None
+    replaces = f" replaces={replaced_digest}" if replaced_digest else ""
+    return f"<!-- showcase:badges:generated sha256={body_sha(body)}{replaces} -->\n{body}"
+
+
+def template_badge_body(brand) -> str:
+    """The exact inherited type row from the repository template, independent of body state."""
+    category = standard("types")["types"]["template"]["category"]
+    return f"![Type {category}]({SHIELDS}type-{shield(category)}-{brand.raw['badges']['brand']})"
+
+
+def legacy_profile_badges(brand, body: str) -> bool:
+    """Recognize the old generator's ordered language/license/CI rows without today's metadata.
+
+    A type row, custom markup, altered alt/URL pair or duplicate kind makes the block authored.
+    Both historical remote and local badge paths are accepted.
+    """
+    lines = body.splitlines()
+    if not 1 <= len(lines) <= 3:
+        return False
+    kinds = []
+    colors = brand.raw["badges"]
+    for line in lines:
+        linked = re.fullmatch(r"\[!\[([^\]]+)\]\((.+)\)\]\((.+)\)", line)
+        plain = re.fullmatch(r"!\[([^\]]+)\]\((.+)\)", line)
+        if linked:
+            alt, url, link = linked.groups()
+        elif plain:
+            alt, url = plain.groups()
+            link = None
+        else:
+            return False
+        suffixes = ["", "?labelColor=1E1E1E"]
+        links = {None}
+        if alt.startswith("License ") and alt[8:]:
+            kind, label, message, color = 1, "license", alt[8:], colors["neutral"]
+        elif alt == "AGPL-3.0 or commercial license":
+            kind, label, message, color = 1, "license", "AGPL-3.0 | commercial", colors["neutral"]
+            links.add("LICENSING.md")
+            suffixes = [""]
+        elif alt.startswith("Language ") and alt[9:]:
+            kind, label, message, color = 0, "language", alt[9:], colors["accent"]
+        elif alt.startswith("Python ") and alt.endswith("+"):
+            kind, label, message, color = 0, "python", alt[7:], colors["accent"]
+            suffixes = ["?logo=python&logoColor=white"]
+        elif alt.startswith("Node ") and alt.endswith("+"):
+            kind, label, message, color = 0, "node", alt[5:], colors["accent"]
+            suffixes = ["?logo=nodedotjs&logoColor=white"]
+        elif alt in ("CI", "Tests"):
+            ci = re.fullmatch(r"https://github\.com/[A-Za-z0-9-]+/\.github/actions/workflows/([^/?#]+\.ya?ml)/badge\.svg", url)
+            if not ci or link != url.removesuffix("/badge.svg"):
+                return False
+            name = ci.group(1)
+            expected = "Tests" if "test" in name else "CI" if "ci" in name else None
+            if alt != expected:
+                return False
+            kinds.append(2)
+            continue
+        else:
+            return False
+        urls = {f"{SHIELDS}{label}-{shield(message)}-{color}{suffix}" for suffix in suffixes}
+        slug = re.sub(r"[^a-z0-9]+", "-", f"{label}-{message}".lower()).strip("-")
+        urls.add(f"docs/images/badges/{slug}.svg")
+        if url not in urls or link not in links:
+            return False
+        kinds.append(kind)
+    return kinds == sorted(set(kinds))
+
+
+def generated_badges(body: str) -> bool:
+    """The digest proves that the generated badge rows have not been edited."""
+    match = GENERATED_BADGES.fullmatch(body)
+    return bool(match and match.group(1) == body_sha(match.group(3)))
+
+
 def nav_first(ctx: RepoContext) -> bool:
     """§7.1 order: hero banner, then the nav line (review q57 `nav` default); brand.yaml `readme.nav_first` restores
     the nav-first order only if the user answers "Nav line first"."""
@@ -263,16 +355,16 @@ def tagline_body(ctx: RepoContext, existing: str | None = None, text: str = "") 
 
 
 def header(ctx: RepoContext, keep_banner: str | None = None, title: str | None = None,
-           tagline: str | None = None) -> str:
+           tagline: str | None = None, existing_badges: str | None = None) -> str:
     """The §7.2 header. `tagline` is the tagline block body a caller already decided with tagline_body() (the body it
     carries over from the header it replaces); None writes the description's tagline, or an empty block."""
     tag = wrap("tagline", tagline_body(ctx) if tagline is None else tagline)
     banner = keep_banner if keep_banner is not None else wrap("banner", banner_html(ctx))
     if ctx.det["variant"] == "F":
-        parts = [*lead(ctx, banner, wrap("nav", nav_line(ctx))), wrap("badges", badges_html(ctx)), tag, "---"]
+        parts = [*lead(ctx, banner, wrap("nav", nav_line(ctx))), wrap("badges", badge_body(ctx, existing_badges)), tag, "---"]
         return "\n\n".join(p for p in parts if p)
     parts = [*lead(ctx, banner, wrap("nav", nav_line(ctx))), '<div align="center">', f"# {title or product_name(ctx)}",
-             wrap("badges", badges_md(ctx)), tag, "</div>", "---"]
+             wrap("badges", badge_body(ctx, existing_badges)), tag, "</div>", "---"]
     return "\n\n".join(p for p in parts if p)
 
 
@@ -610,12 +702,17 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
         ctx.log("exempt:preserve-banner" if ctx.preserve_unchanged() else "preserve-banner:kept-below-hero")
     desc = (ctx.meta.get("description") or "").strip()
     old_tag = blocks.get("tagline")
-    if preserve and old_tag is not None:
+    if preserve and (old_tag is not None or (variant == "J" and "badges" in blocks)):
         # additive only, so the tagline block stays where it is, its body decided by the header rule (tagline_body)
-        tag = tagline_body(ctx, old_tag, text)
-        if old_tag.strip() and not tag:  # an inherited tagline, emptied on purpose (not a lost line)
-            removed += [ln for ln in old_tag.splitlines() if ln.strip()]
-        body, _ = _strip_markers(text, keep={"tagline": tag})
+        keep = {}
+        if old_tag is not None:
+            tag = tagline_body(ctx, old_tag, text)
+            if old_tag.strip() and not tag:  # an inherited tagline, emptied on purpose (not a lost line)
+                removed += [ln for ln in old_tag.splitlines() if ln.strip()]
+            keep["tagline"] = tag
+        if variant == "J" and "badges" in blocks:
+            keep["badges"] = badge_body(ctx, blocks["badges"])
+        body, _ = _strip_markers(text, keep=keep)
         if want_footer:
             body, _ = drop_old_footer(body, ctx.brand)  # its lines are already in `removed`
         pre, sections = split_sections(body)
@@ -731,7 +828,7 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
             # an inherited tagline is emptied (header mode does the same): its lines are dropped on purpose, so the
             # never-delete check must not report them as lost
             removed += [ln for ln in old_tag.splitlines() if ln.strip()]
-        out.append(header(ctx, tagline=new_tag))
+        out.append(header(ctx, tagline=new_tag, existing_badges=blocks.get("badges")))
         co = callout(ctx)
         if co and co not in intro:
             out.append(co)
@@ -776,10 +873,11 @@ def header_only(ctx: RepoContext, text: str) -> str:
     if ctx.repo_dir is not None and not (ctx.repo_dir / "docs" / "images" / "banner.png").is_file():
         gen["banner"] = ""  # no image yet (for example no description): an empty block, never a broken image
         ctx.log("needs-input:banner")
-    gen["badges"] = badges_html(ctx) if ctx.det["variant"] == "F" else badges_md(ctx)
 
     def sub(m):
         b, body = m.group(1), m.group(2)
+        if b == "badges":
+            return wrap(b, badge_body(ctx, body))
         if b == "checklist":
             if re.search(r"- \[ \]", body):
                 return m.group(0)
@@ -922,8 +1020,10 @@ def bootstrap(ctx: RepoContext, text: str) -> str:
         if not h1 or h1.group(1).strip() in (TEMPLATE_H1, auto, slug_title(ctx.repo)):
             # the tagline block carries over (tagline_body), so a line the owner wrote survives the rebuild and only an
             # inherited one is emptied, exactly as header_only decides it
-            old = next((m.group(2) for m in find_blocks(MARK, hm.group(0)) if m.group(1) == "tagline"), None)
-            new_header = header(ctx, title=auto, tagline=tagline_body(ctx, old, text))
+            blocks = {m.group(1): m.group(2) for m in find_blocks(MARK, hm.group(0))}
+            old = blocks.get("tagline")
+            new_header = header(ctx, title=auto, tagline=tagline_body(ctx, old, text),
+                                existing_badges=blocks.get("badges"))
             text = new_header + "\n\n" + text[hm.end():].lstrip("\n")
     return header_only(ctx, text)
 
@@ -953,6 +1053,20 @@ def nonws(s: str) -> int:
 
 def preservation(before: str, after: str, removed: list[str]) -> list[str]:
     """Every original non-header line survives (heading lines may be renamed); size drop <= 10%."""
+    # A new generated block can explicitly identify the legacy body it replaced. This binds the
+    # one-time migration exemption to exact old content, not arbitrary authored rows elsewhere.
+    replacements = set()
+    for block in find_blocks(MARK, after):
+        if block.group(1) == "badges" and generated_badges(block.group(2)):
+            match = GENERATED_BADGES.fullmatch(block.group(2))
+            if match.group(2):
+                replacements.add(match.group(2))
+
+    def omit_owned_badges(m):
+        owned = generated_badges(m.group(2)) or body_sha(m.group(2)) in replacements
+        return wrap("badges", "") if m.group(1) == "badges" and owned else m.group(0)
+
+    before = _sub_blocks(before, omit_owned_badges)
     problems = []
     b_lines = Counter(ln.strip() for ln in before.splitlines() if ln.strip() and not ln.strip().startswith("<!-- showcase:"))
     for r in removed:

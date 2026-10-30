@@ -1,7 +1,9 @@
 """README lint: R7 + decision 13 (banner first, plain <img>) + decision 18 (footer last, exact) (spec A6.11)."""
 from __future__ import annotations
 
+import html
 import re
+from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -13,14 +15,180 @@ from .readme import BANNER_BLOCK, EMOJI, MARK, is_footer_like, masked, normalize
 IMG_MD = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)[^)]*\)")
 IMG_HTML = re.compile(r"<img\b([^>]*)>", re.I)
 PALETTE = {"1E3A8A", "005ADD", "067647", "64748B", "E551BA", "F386A1", "1E1E1E"}
+REF_DEFINITION = re.compile(
+    r"^ {0,3}\[((?:\\.|[^\]\\\n])+)\]:[ \t]*(?:\n[ \t]*)?(?:<([^<>\n]+)>|(\S+?))"
+    r"(?:[ \t]+(?:\"[^\"\n]*\"|'[^'\n]*'|\([^\)\n]*\)))?[ \t]*$", re.M)
+
+
+class _HTMLTokens(HTMLParser):
+    """HTML spans let Markdown parsing respect attribute and destination boundaries."""
+    def __init__(self, text):
+        super().__init__(convert_charrefs=True)
+        self.text = text
+        self.tags = []
+        self.images = []
+        self.line_starts = [0, *(m.end() for m in re.finditer("\n", text))]
+        self.feed(text)
+        self.close()
+
+    def handle_starttag(self, tag, attrs):
+        line, column = self.getpos()
+        start = self.line_starts[line - 1] + column
+        before = start - 1
+        while before >= 0 and self.text[before] == "\\":
+            before -= 1
+        if (start - before - 1) % 2:
+            return
+        end = start + len(self.get_starttag_text())
+        self.tags.append((start, end))
+        if tag == "img":
+            first = {}
+            for name, value in attrs:
+                first.setdefault(name, value)
+            self.images.append((first.get("alt") or "", first.get("src") or "", start, end))
 
 
 def _outside_code(text: str) -> str:
-    """The text without fenced code (``` and ~~~), inline code and HTML comments."""
-    text = re.sub(r"(?ms)^ {0,3}(`{3,}(?=[^`\n]*$)|~{3,}).*?^ {0,3}\1", "", text)  # no backtick in a ``` info string
-    text = re.sub(r"```.*?```", "", text, flags=re.S)
-    text = re.sub(r"`[^`\n]*`", "", text)
-    return re.sub(r"<!--.*?-->", "", text, flags=re.S)
+    """Mask Markdown code without interpreting literal backticks in HTML attributes as code."""
+    out, replacements, pos = [], [], 0
+    for index, (start, end) in enumerate(_HTMLTokens(text).tags):
+        raw = text[start:end]
+        key = f"\x01showcase-html-{index}\x02"
+        while key in text:
+            key += "x"
+        key += "\n" * raw.count("\n")
+        out.extend((text[pos:start], key))
+        replacements.append((key, raw))
+        pos = end
+    out.append(text[pos:])
+    protected = re.sub(r"<!--.*?-->", "", "".join(out), flags=re.S)
+    protected = masked(protected)
+    for key, raw in replacements:
+        protected = protected.replace(key, raw)
+    return protected.replace("\x00", " ")
+
+
+def _closing_bracket(text: str, start: int) -> int | None:
+    """Find a balanced closing bracket, respecting escaped and nested brackets."""
+    depth, pos = 1, start + 1
+    while pos < len(text):
+        char = text[pos]
+        if char == "\\":
+            pos += 2
+            continue
+        if char == "[":
+            depth += 1
+        elif char == "]":
+            depth -= 1
+            if not depth:
+                return pos
+        pos += 1
+    return None
+
+
+def _inline_image_target(text: str, start: int) -> tuple[str, int] | None:
+    """Read a Markdown destination and optional title after its opening parenthesis."""
+    pos = start + 1
+    while pos < len(text) and text[pos].isspace():
+        pos += 1
+    begin = pos
+    if pos < len(text) and text[pos] == "<":
+        begin = pos = pos + 1
+        while pos < len(text) and text[pos] != ">":
+            if text[pos] in "\n<":
+                return None
+            pos += 2 if text[pos] == "\\" else 1
+        if pos >= len(text):
+            return None
+        target = text[begin:pos]
+        pos += 1
+    else:
+        depth = 0
+        while pos < len(text):
+            char = text[pos]
+            if char == "\\":
+                pos += 2
+                continue
+            if char.isspace() or char == ")" and depth == 0:
+                break
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+            pos += 1
+        if depth:
+            return None
+        target = text[begin:pos]
+    while pos < len(text) and text[pos].isspace():
+        pos += 1
+    if pos < len(text) and text[pos] in "\"'(":
+        end = ")" if text[pos] == "(" else text[pos]
+        pos += 1
+        while pos < len(text) and text[pos] != end:
+            pos += 2 if text[pos] == "\\" else 1
+        if pos >= len(text):
+            return None
+        pos += 1
+        while pos < len(text) and text[pos].isspace():
+            pos += 1
+    if pos >= len(text) or text[pos] != ")":
+        return None
+    return html.unescape(re.sub(r"\\([^\w\s])", r"\1", target)), pos + 1
+
+
+def _markdown_images(text: str, document: str) -> list[tuple[str, str, int, int]]:
+    """Read inline and reference images with balanced alt text; definitions use first-wins labels."""
+    def label(value):
+        value = html.unescape(re.sub(r"\\([^\w\s])", r"\1", value))
+        return " ".join(value.split()).casefold()
+
+    definitions = {}
+    for match in REF_DEFINITION.finditer(_outside_code(document)):
+        definitions.setdefault(label(match.group(1)), html.unescape(match.group(2) or match.group(3)))
+    sources = []
+    consumed = 0
+    for match in re.finditer(r"!\[", text):
+        if match.start() < consumed:
+            continue
+        pos = match.start() - 1
+        while pos >= 0 and text[pos] == "\\":
+            pos -= 1
+        if (match.start() - pos - 1) % 2:
+            continue  # an escaped exclamation mark is text, not an image
+        close = _closing_bracket(text, match.start() + 1)
+        if close is None:
+            continue
+        alt = text[match.end():close]
+        consumed = close + 1
+        if consumed < len(text) and text[consumed] == "(":
+            target = _inline_image_target(text, consumed)
+            if target:
+                source, consumed = target
+                sources.append((alt, source, match.start(), consumed))
+            continue
+        key = label(alt)
+        if consumed < len(text) and text[consumed] == "[":
+            ref_close = _closing_bracket(text, consumed)
+            if ref_close is not None:
+                key = label(text[consumed + 1:ref_close]) or key
+                consumed = ref_close + 1
+        if key in definitions:
+            sources.append((alt, definitions[key], match.start(), consumed))
+    return sources
+
+
+def _images(text: str, document: str) -> list[tuple[str, str]]:
+    """Read HTML and Markdown images, excluding Markdown-looking text in HTML attributes."""
+    parser = _HTMLTokens(text)
+    markdown = _markdown_images(text, document)
+    # Angle-delimited destinations (and HTML in alt text) belong to their Markdown image,
+    # while a Markdown-looking string wholly inside a real HTML tag is attribute text.
+    tags = [(start, end) for start, end in parser.tags
+            if not any(mstart <= start and end <= mend for _, _, mstart, mend in markdown)]
+    result = [(alt, source) for alt, source, start, end in markdown
+              if not any(tstart <= start and end <= tend for tstart, tend in tags)]
+    result += [(alt, source) for alt, source, start, end in parser.images if (start, end) in tags]
+    return result
 
 
 def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
@@ -95,8 +263,11 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
     # badges 2-4, palette tokens only
     shields = re.findall(r"img\.shields\.io/badge/([^)\"\s]+)", plain)
     header_part = plain.split("\n---\n", 1)[0]
-    hb = re.findall(r"img\.shields\.io/badge/([^)\"\s]+)", header_part)
-    nbadges = len(hb) + len(re.findall(r"badge\.svg", header_part))
+    badge_header = _outside_code(header_part)
+    image_sources = [source for _, source in _images(badge_header, plain)]
+    nbadges = sum(bool(src.startswith("https://img.shields.io/badge/")
+                       or re.fullmatch(r"(?:\./)?docs/images/badges/[^/?#]+\.svg(?:[?#].*)?", unquote(src))
+                       or re.search(r"(?:^|/)badge\.svg(?:[?#].*)?$", src)) for src in image_sources)
     if not preserve:
         from .readme import badges as derivable
         floor = min(2, len(derivable(ctx)))  # a public repo with no licence and no language derives fewer than two
@@ -154,17 +325,12 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
         elif _extra_footer(text):
             fails.append("D18 footer fail:duplicate")
     # alt text, local images
-    for m in IMG_MD.finditer(plain):
-        if not m.group(1).strip():
-            fails.append(f"R7 image without alt text: {m.group(2)[:40]}")
-        _local(path, m.group(2), fails)
-    for m in IMG_HTML.finditer(plain):
-        a = re.search(r'alt="([^"]*)"', m.group(1))
-        if not a or not a.group(1).strip():
-            fails.append("R7 <img> without alt text")
-        src = re.search(r'src="([^"]+)"', m.group(1))
-        if src:
-            _local(path, src.group(1), fails, example="examples" in src.group(1))
+    visible = _outside_code(plain)
+    for alt, source in _images(visible, plain):
+        if not alt.strip():
+            fails.append(f"R7 image without alt text: {source[:40]}")
+        if source:
+            _local(path, source, fails, example="examples" in source)
     body = _outside_code(plain)
     ph = re.search(rv["placeholder_regex"], body)
     if ph or re.search(r"<…>|<\.\.\.>", body):
