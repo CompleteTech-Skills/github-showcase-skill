@@ -195,6 +195,8 @@ def test_long_subtitle_wraps_without_description(tmp_path):
 
 
 def test_whitespace_only_subtitle_is_absent(tmp_path):
+    """Regression guard, passes on the pre-#99 base by design: a whitespace-only subtitle is absent, so the
+    empty-description case still refuses with exit 4 and writes no file. It must not fail on base."""
     meta = _empty_description_meta(tmp_path, description="   ")
     p, out = _render(tmp_path, meta, "--subtitle", "   ", "--chip", "Python", "--chip", "MIT")
     assert p.returncode == 4 and not out.exists()
@@ -208,7 +210,9 @@ def test_whitespace_only_description_counts_as_empty(tmp_path):
 
 
 def test_description_present_no_warning(tmp_path):
-    """A present description keeps the old path: no description-missing log, and a CLI subtitle still wins."""
+    """A present description keeps the old path: no description-missing log, and a CLI subtitle still wins.
+    Regression guard, passes on the pre-#99 base by design (the base never logged description-missing); it
+    protects the unchanged output for repositories that have a description. It must not fail on base."""
     p, out = _render(tmp_path, FIX / "CompleTetech-Security__php2shell-check.json", "--icon", LOGO,
                      repo_dir=EX / "repos" / "php2shell-check")
     info = json.loads(p.stdout)
@@ -220,7 +224,9 @@ def test_description_present_no_warning(tmp_path):
 
 
 def test_scoped_override_does_not_satisfy_banner(tmp_path):
-    """An override written for another repository is emptied by RepoContext, so it does not supply the subtitle."""
+    """An override written for another repository is emptied by RepoContext, so it does not supply the subtitle.
+    Regression guard, passes on the pre-#99 base by design (the base refused every empty description); it pins
+    that the scoped-override rule still holds after the change. It must not fail on base."""
     meta = _empty_description_meta(tmp_path)
     repo = tmp_path / "repo"
     (repo / ".github").mkdir(parents=True)
