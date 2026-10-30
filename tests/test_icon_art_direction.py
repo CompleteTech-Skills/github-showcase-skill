@@ -111,3 +111,16 @@ def test_explicit_missing_template_reports_the_required_sections(brand, make_ctx
     ctx = make_ctx()
     with pytest.raises(NeedsInput, match="Shared prompt template.*Repository glyph prompt template"):
         C.icon_prompt(ctx, Resolver(brand, {}, {}), "# Empty custom art direction\n")
+
+
+@pytest.mark.parametrize(("owner", "seed"), [
+    ("CompleteTech-Skills", "1025"), ("AI-Ascension", None), ("Jev-Engineering", "3001"),
+    ("jevplay-games", "3101"), ("LibreEvolve", "4001"), ("TouchedByAnAgent", "5001"),
+    ("romgenie-archive-repostiory", "6001")])
+def test_bundled_prompt_has_a_valid_seed_instruction(owner, seed, brand, make_ctx):
+    from ctshowcase.resolver import Resolver
+
+    result = C.icon_prompt(make_ctx(owner=owner), Resolver(brand, {}, {}), C.load_art_direction())
+    expected = f"Use seed {seed} when supported." if seed else "Use the tool's default seed."
+    assert expected in result["prompt"]
+    assert "seed not set" not in result["prompt"]

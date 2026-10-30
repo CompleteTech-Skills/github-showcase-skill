@@ -6,7 +6,7 @@ All notable changes to `github-showcase-skill` are recorded here. Versions follo
 
 ### Fixed
 
-- `content icon` uses the bundled `references/art-direction.md` in every working directory. The option A glyph template uses dedicated, contrasting `icon_ink` and `icon_spark` brand tokens without requiring private estate files; explicit art-direction overrides remain supported and missing paths are named in the error.
+- `content icon` uses the bundled `references/art-direction.md` in every working directory. The option A glyph template uses dedicated, contrasting `icon_ink` and `icon_spark` brand tokens and the documented family seed (or the tool's default when absent) without requiring private estate files; explicit art-direction overrides remain supported and missing paths are named in the error.
 - CLI stdout and stderr are configured as UTF-8 before argument parsing, preserving their existing error handlers, so redirected Windows output preserves Unicode in label plans, raw footer markup, help and diagnostics without `UnicodeEncodeError`, and undecodable filenames still use the stream's original escape policy.
 - The Action summary and quality validator decode CLI results explicitly as UTF-8, preserving non-ASCII descriptions on Windows rather than corrupting them or failing with `UnicodeDecodeError`.
 

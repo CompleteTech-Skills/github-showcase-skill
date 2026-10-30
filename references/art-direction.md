@@ -80,7 +80,9 @@ Starred values are approximate until the estate planner re-measures them and pub
 palette slots and flat render inks come from the selected family's `icon_ink`
 and `icon_spark` tokens in `brand.yaml`. Both are chosen to meet the icon QA's
 3:1 contrast threshold on that family's card, with a distinct outline and spark.
-The writer supplies the four glyph fields with `--glyph`. It does
+The writer supplies the four glyph fields with `--glyph`. Documented family seeds
+above are used when available; otherwise the prompt explicitly uses the tool's
+default seed. It does
 not require the estate's avatar tables or reference images. An explicit
 `--art-direction FILE` may instead supply the estate-format `(b) Family palette`
 and `(d) Shared prompt template` sections.
@@ -101,7 +103,7 @@ glyph outline in {LINE_HEX} so the spark remains distinct at small sizes.
 
 No text, letters, numbers, words, logos, brand marks, human figures or third-party IP.
 {EXTRA_NEGATIVES}
-Produce four candidates. Use seed {SEED} when supported.
+Produce four candidates. {SEED_INSTRUCTION}
 The lock pass renders assets/icon.png as a flat glyph in the family's light-surface
 inks, without a tile or glow. Do not render the repository name in the image.
 ```

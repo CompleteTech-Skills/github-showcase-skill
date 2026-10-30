@@ -1847,7 +1847,7 @@ def seed_for(text: str, owner: str | list[str], family: str) -> str | None:
     m = re.search(r"seeds \(([^)]*)\)", text)
     if not m:
         return None
-    seeds = dict((k.strip(), v) for k, v in re.findall(r"([A-Za-z][\w-]*)\s+(\d{3,5})", m.group(1)))
+    seeds = dict((k.strip(), v) for k, v in re.findall(r"([A-Za-z][\w-]*)\s+`?(\d{3,5})`?", m.group(1)))
     for key in (*([owner] if isinstance(owner, str) else owner), {"completetech": "CompleteTech"}.get(family), family):
         for k, v in seeds.items():
             if key and k.lower() == str(key).lower():
@@ -1922,13 +1922,15 @@ def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = Non
         if not tpl:
             raise NeedsInput("art-direction", "selected art direction has no (d) Shared prompt template "
                              "or Repository glyph prompt template")
+        seed = seed_for(art_text, logins, family)
         slots = {k: colours.get(k) for k in ("LINE_NAME", "LINE_HEX", "CORE_HEX", "GLOW_HEX", "SPARK_NAME", "SPARK_HEX",
                                               "SPARK_CORE_HEX", "SPARK_BLOOM_HEX")}
         slots.update(ACCOUNT=f"{org['current']}/{repo}", KIND="repository", CIRCLE_CLAUSE="",
                      CROP="repository icon, shown inside the light card of the README hero banner, the repo card and the "
                           "social preview", SECONDARY_LIGHT="", SECONDARY_LINE="", SPARK_D="94", SPARK_CORE_D="37",
                      TEXT_RULE="Any text, letters, numbers or words",
-                     SEED=seed_for(art_text, logins, family) or "not set",
+                     SEED=seed or "not set",
+                     SEED_INSTRUCTION=f"Use seed {seed} when supported." if seed else "Use the tool's default seed.",
                      STYLE_REFERENCES="the three approved pilot renders from art/golden/neon-night/.",
                      BRAND_REFERENCE=f"Org avatar art/reference/avatars/{org['canonical']}.png for family consistency "
                                      "only: do not copy its glyph; this repository's silhouette must differ from it at "

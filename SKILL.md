@@ -136,7 +136,8 @@ The four command groups follow the same rules as the repository commands: read-o
 
 `content icon` defaults to the installed skill's `references/art-direction.md`,
 including a repository glyph template for option A and the illustration template
-for option B. Palette values come from `references/brand.yaml`. Use
+for option B. Palette values come from `references/brand.yaml`; documented family
+seeds are used when available, otherwise the prompt uses the tool's default seed. Use
 `--art-direction FILE` to select another file; relative paths use the current
 directory, and missing files report `needs-input:art-direction` with the selected path.
 
