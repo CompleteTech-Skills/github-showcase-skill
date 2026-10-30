@@ -682,6 +682,22 @@ def test_icon_keep_ground_and_failures(brand):
         C.normalize_icon(noisy, "auto", card)
 
 
+@pytest.mark.parametrize("ground,card,mode,reason", [
+    ("#F8FAFC", "#0F172A", "transparent", "uniform-ground"),  # pale tile on a dark card: keyed out (#54)
+    ("#E6EDF5", "#0F172A", "transparent", "uniform-ground"),
+    ("#171D28", "#F8FAFC", "keep", "night-tile"),
+    ("#0F172A", "#0F172A", "transparent", "near-card"),
+    # The brief expected transparent (dE < 12); measured dE(#000000, #0F172A) is 16.5 > CONTENT_DE 12, so it is a night tile.
+    ("#000000", "#0F172A", "keep", "night-tile"),
+    ("#171D28", None, "keep", "night-tile"),  # no card colour: the luminance rule decides
+])
+def test_icon_auto_ground_rule(ground, card, mode, reason):
+    img = _candidate(ground, ink=(70, 184, 255), size=1000, box=(250, 250, 750, 750))
+    info = C.normalize_icon(img, "auto", card)[1]
+    assert info["mode"] == mode
+    assert info["auto_reason"] == reason
+
+
 def test_icon_not_the_org_glyph(brand, tmp_path):
     card = brand.style(NW)["tokens"]["card_fill"]
     img = C.normalize_icon(_candidate(card), "auto", card)[0]
