@@ -284,8 +284,16 @@ class Resolver:
                 return st
         return None
 
-    def check_owner(self, login: str, *, allow_t3: bool = False, allow_hold: bool = False) -> str | None:
-        """Refuse excluded, hold and (unless signed off) T3 orgs under any of their logins; return the status."""
+    def require_identity(self, login: str) -> None:
+        """Issue 40: raise NeedsInput(org-family / org-row) when `login` has no brand identity of its own (config.py)."""
+        if self.brand is not None:
+            self.brand.require_identity(self.brand_key(login) or login)
+
+    def check_owner(self, login: str, *, allow_t3: bool = False, allow_hold: bool = False,
+                    identity: bool = True) -> str | None:
+        """Refuse excluded, hold and (unless signed off) T3 orgs under any of their logins; return the status. With
+        `identity` (the default: generators that render brand text) an owner without its own brand identity is
+        needs-input (issue 40); planners that render no brand text, such as content sidebar, pass identity=False."""
         from .config import t3_signed_off
         from .errors import Refused
         st = self.owner_status(login)
@@ -295,8 +303,8 @@ class Resolver:
             raise Refused(f"{login} is on HOLD", log="hold")
         if st == "t3" and not (allow_t3 or t3_signed_off()):
             raise Refused(f"{login} is T3; needs co-owner sign-off", log="t3-signoff")
-        if self.brand is not None:  # issue 40: an owner without its own brand identity fails loudly (config.py)
-            self.brand.require_identity(self.brand_key(login) or login)
+        if identity:  # issue 40: an owner without its own brand identity fails loudly (config.py)
+            self.require_identity(login)
         return st
 
     def family_hold(self, login: str) -> bool:

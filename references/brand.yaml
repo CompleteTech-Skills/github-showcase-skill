@@ -695,7 +695,8 @@ orgs:
     footer: false
   Jevelopers-neatHack-2026:
     # TicketStub has no family of its own yet (needs an owner-supplied palette and mark). Under `completetech` every
-    # generator and planner refuses it with needs-input:org-family (Brand.identity_gap, issue 40), so no CompleteTech
+    # brand-rendering generator and planner (not content sidebar, which renders no brand text) refuses it with
+    # needs-input:org-family (Brand.identity_gap, issue 40), so no CompleteTech
     # eyebrow, palette or badge colour reaches it. Give it its own family here to lift the refusal.
     family: completetech
     former_slugs: []

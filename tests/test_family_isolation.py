@@ -9,8 +9,8 @@ from __future__ import annotations
 # loudly)". TicketStub (Jevelopers-neatHack-2026) has no owner-supplied palette or mark, so inventing a family
 # for it would fabricate brand data; it takes the "fail loudly" branch instead: Brand.identity_gap reports
 # `org-family` for any known row filed under `completetech` whose display name is not a CompleteTech brand, and
-# Brand.check_owner / Resolver.check_owner (every generator and planner gate) refuse it with
-# needs-input:org-family. No test here is an expected failure: a mismatched row must REFUSE, and every other
+# Brand.check_owner / Resolver.check_owner (every brand-rendering generator and planner gate, project boards
+# included) refuse it with needs-input:org-family. content sidebar renders no brand text and passes identity=False. No test here is an expected failure: a mismatched row must REFUSE, and every other
 # row must render without CompleteTech text, Type badges included (each family now carries badge_brand).
 # On the epic base the refusal tests below fail (the card renders with exit 0 and 005ADD) and the Type badge
 # scan fails for LibreEvolve (type-...-005ADD); both pass with this change.
@@ -288,3 +288,116 @@ def test_render_audit_catches_a_completetech_license_wording(brand, tmp_path):
     raw['orgs']['Pick-Your-AI']['license_wording'] = 'CompleteTech LLC'
     leaks = rendered_leaks(Brand(raw, brand.path), 'Pick-Your-AI', tmp_path)
     assert 'readme scaffold' in leaks, leaks
+
+
+# --- epic 35 review round 2: which planners take the identity gate ---------------------------------------------------
+# content sidebar plans the Releases / Packages / Deployments checkboxes and renders no brand text, so it does not take
+# the gate; a batch must still never abort on one owner (on the pre-fix HEAD a TicketStub row in a mixed batch turned
+# the whole result into needs-input:org-family and the Northwind job was lost). Project boards (copy-plan, readme) DO
+# take it: on the pre-fix HEAD `--allow-t3 project copy-plan --target Jevelopers-neatHack-2026` exited 0 with a
+# create-project job.
+CFIX = ROOT / 'tests' / 'fixtures' / 'content'
+NO_ESTATE = ('--registry', CFIX / 'registry.min.yaml', '--approved', CFIX / 'approved.empty.txt', '--approved-yaml',
+             CFIX / 'approved.empty.yaml', '--actions', CFIX / 'estate-actions.json')
+
+
+def _strict_config(tmp_path):
+    import yaml
+    raw = yaml.safe_load((ROOT / 'references' / 'brand.yaml').read_text(encoding='utf-8'))
+    raw['isolation'] = {'unknown_org': 'refuse'}
+    cfg = tmp_path / 'brand.yaml'
+    cfg.write_text(yaml.safe_dump(raw), encoding='utf-8')
+    return cfg
+
+
+def test_sidebar_mixed_batch_keeps_every_repo(tmp_path):
+    from conftest import run_cli
+    facts = tmp_path / 'facts.json'
+    facts.write_text(json.dumps({
+        'Northwind-Trading-Co/support-triage-agent': {'releases': [{'id': 1}], 'deployments': [], 'packages': 0,
+                                                      'visibility': 'public'},
+        'Jevelopers-neatHack-2026/tickets': {'releases': [{'id': 1}], 'deployments': [], 'packages': 0,
+                                             'visibility': 'public'}}), encoding='utf-8')
+    r = run_cli('--no-repo-dir', '--allow-t3', '--format', 'json', 'content', 'sidebar', '--facts', facts, *NO_ESTATE)
+    out = json.loads(r.stdout)
+    assert r.returncode == 0 and out['result'] == 'proposal', (r.stdout, r.stderr)
+    assert out['repos'] == 2 and not out['skipped'], out
+    assert {j['repo'] for j in out['jobs']} >= {'Northwind-Trading-Co/support-triage-agent'}
+
+
+def test_sidebar_batch_with_unknown_owner_under_refuse_config_skips_nothing_else(tmp_path):
+    from conftest import run_cli
+    facts = tmp_path / 'facts.json'
+    facts.write_text(json.dumps({
+        'Northwind-Trading-Co/support-triage-agent': {'releases': [{'id': 1}], 'deployments': [], 'packages': 0,
+                                                      'visibility': 'public'},
+        'Some-New-Org/thing': {'releases': [{'id': 1}], 'deployments': [], 'packages': 0,
+                               'visibility': 'public'}}), encoding='utf-8')
+    r = run_cli('--config', _strict_config(tmp_path), '--no-repo-dir', '--format', 'json', 'content', 'sidebar',
+                '--facts', facts, *NO_ESTATE)
+    out = json.loads(r.stdout)
+    assert r.returncode == 0 and out['result'] == 'proposal', (r.stdout, r.stderr)
+    assert 'Northwind-Trading-Co/support-triage-agent' in {j['repo'] for j in out['jobs']}
+
+
+def test_sidebar_batch_skips_a_gated_owner_instead_of_aborting(tmp_path, monkeypatch, capsys):
+    """Defence in depth: if any owner gate raises NeedsInput inside the batch, only that repository is skipped."""
+    from ctshowcase import content as C
+    from ctshowcase.errors import NeedsInput
+    from ctshowcase.resolver import Resolver
+    real = Resolver.check_owner
+
+    def gate(self, login, **kw):
+        if login == 'Jevelopers-neatHack-2026':
+            raise NeedsInput('org-family')
+        return real(self, login, **kw)
+    monkeypatch.setattr(Resolver, 'check_owner', gate)
+    facts = tmp_path / 'facts.json'
+    facts.write_text(json.dumps({
+        'Northwind-Trading-Co/support-triage-agent': {'releases': [{'id': 1}], 'deployments': [], 'packages': 0,
+                                                      'visibility': 'public'},
+        'Jevelopers-neatHack-2026/tickets': {'releases': [], 'deployments': [], 'packages': 0}}), encoding='utf-8')
+    code = C.main(list(map(str, ('--no-repo-dir', 'content', 'sidebar', '--facts', facts, *NO_ESTATE))))
+    out = json.loads(capsys.readouterr().out)
+    assert code == 0 and out['result'] == 'proposal', out
+    assert out['skipped'] == [{'repo': 'Jevelopers-neatHack-2026/tickets', 'why': 'needs-input:org-family'}]
+
+
+def test_project_copy_plan_refuses_ticketstub(tmp_path):
+    from conftest import run_cli
+    r = run_cli('--allow-t3', '--format', 'json', 'project', 'copy-plan', '--target', 'Jevelopers-neatHack-2026',
+                *NO_ESTATE)
+    assert r.returncode == 4 and 'needs-input:org-family' in r.stdout + r.stderr, (r.stdout, r.stderr)
+    assert '"create-project"' not in r.stdout
+
+
+def test_project_copy_plan_refuses_unknown_owner_under_refuse_config(tmp_path):
+    from conftest import run_cli
+    r = run_cli('--config', _strict_config(tmp_path), '--format', 'json', 'project', 'copy-plan', '--target',
+                'Some-New-Org', '--display-name', 'Some New Org', *NO_ESTATE)
+    assert r.returncode == 4 and 'needs-input:org-row' in r.stdout + r.stderr, (r.stdout, r.stderr)
+    # the default config keeps the historical behaviour (behaviour-changing defaults stay off)
+    ok = run_cli('--format', 'json', 'project', 'copy-plan', '--target', 'Some-New-Org', '--display-name',
+                 'Some New Org', *NO_ESTATE)
+    assert ok.returncode == 0, (ok.stdout, ok.stderr)
+
+
+def test_project_copy_plan_gate_order(brand):
+    """The T3 approval gate still answers first (Refused); with --allow-t3 the identity gate answers (NeedsInput)."""
+    from ctshowcase import project as PJ
+    from ctshowcase.errors import NeedsInput, Refused
+    from ctshowcase.resolver import Resolver
+    with pytest.raises(Refused):
+        PJ.copy_plan('Jevelopers-neatHack-2026', resolver=Resolver(brand))
+    with pytest.raises(NeedsInput) as e:
+        PJ.copy_plan('Jevelopers-neatHack-2026', resolver=Resolver(brand), allow_t3=True)
+    assert e.value.detail == 'org-family'
+    assert PJ.copy_plan('Northwind-Trading-Co', resolver=Resolver(brand))['jobs']  # an owned identity still plans
+
+
+def test_project_readme_refuses_ticketstub(tmp_path):
+    from conftest import run_cli
+    cap = ROOT / 'tests' / 'fixtures' / 'project' / 'copy-capture.json'
+    r = run_cli('--allow-t3', '--format', 'json', 'project', 'readme', '--capture', cap, '--owner',
+                'Jevelopers-neatHack-2026', '--display-name', 'TicketStub', *NO_ESTATE)
+    assert r.returncode == 4 and 'needs-input:org-family' in r.stdout + r.stderr, (r.stdout, r.stderr)

@@ -384,6 +384,19 @@ def _license_paragraphs(body: str) -> list[tuple[str, bool]]:
     return out
 
 
+# A line that starts a new Markdown block and so ends a paragraph without a blank line (CommonMark interruptions):
+# ATX heading, fence, block quote, list item, thematic break, HTML (including the next `<!-- showcase:` marker).
+BLOCK_START = re.compile(r"^ {0,3}(?:#{1,6}(?:[ \t]|$)|`{3,}|~{3,}|>|[-*+][ \t]|\d{1,9}[.)][ \t]|(?:[-*_][ \t]*){3,}$|<)")
+
+
+def _paragraph_len(lines: list[str]) -> int:
+    """How many leading `lines` belong to one generated paragraph: up to a blank line or a block-starting line."""
+    for n, ln in enumerate(lines):
+        if not ln.strip() or BLOCK_START.match(ln):
+            return n
+    return len(lines)
+
+
 def split_generated_license(body: str, unmarked_private: bool = True) -> tuple[list[str], str]:
     """Split a License section body into (lines this tool generated, authored remainder). Generated: the one paragraph
     after a `showcase:license` mark (the mark goes too), and any paragraph that is exactly a row the tool wrote (private
@@ -405,12 +418,22 @@ def split_generated_license(body: str, unmarked_private: bool = True) -> tuple[l
             after_mark = True
             continue
         marked = p.startswith(LICENSE_MARK + "\n")
-        if marked or after_mark or (unmarked_private and GENERATED_PRIVATE.fullmatch(p)) or any(x.fullmatch(p) for x in pubs):
+        if marked or after_mark:
+            # the generated row ends at the first Markdown block boundary (a heading, list, quote, fence, HTML or
+            # thematic break line): `### Additional terms` written right under the row, with no blank line, is
+            # authored and stays verbatim (epic 35 review)
+            lines = p.split("\n")[1:] if marked else p.split("\n")
+            cut = _paragraph_len(lines)
             if marked:
                 gen.append(LICENSE_MARK)
-                p = p[len(LICENSE_MARK):].strip()
-            gen += [ln for ln in p.splitlines() if ln.strip()]
+            gen += [ln.strip() for ln in lines[:cut] if ln.strip()]
+            tail = "\n".join(lines[cut:])
+            if tail.strip():
+                keep.append(tail)
             after_mark = False
+            continue
+        if (unmarked_private and GENERATED_PRIVATE.fullmatch(p)) or any(x.fullmatch(p) for x in pubs):
+            gen += [ln for ln in p.splitlines() if ln.strip()]
             continue
         keep.append(raw)
     return gen, "\n\n".join(keep)
@@ -1015,9 +1038,24 @@ SECTION_STOP = re.compile(r"(?m)^(?: {0,3}#{1,6}[ \t]|" + re.escape("<!-- showca
 def _managed_license_span(text: str, i: int) -> tuple[int, int, int | None]:
     """(start, end, heading start or None) of the managed License text at mark offset `i`: the H2 right above the
     mark (when there is one), the mark and the one paragraph after it. Nothing outside this span is generated."""
-    m = re.compile(re.escape(LICENSE_MARK) + r"\n.*?(?:\n\n|\n?$)", re.S).match(text, i)
+    para = _managed_paragraph(text, i)
     head = LICENSE_H2_BEFORE_MARK.search(text[:i])
-    return (head.start() if head else i), (m.end() if m else i), (head.start() if head else None)
+    return (head.start() if head else i), (para[2] if para else i), (head.start() if head else None)
+
+
+def _managed_paragraph(text: str, i: int) -> tuple[int, str, int] | None:
+    """For the mark at offset `i`: (end of the generated paragraph, the separator after it, end of the separator), or
+    None when the mark is not followed by a newline. The paragraph ends at a blank line, at the end of the text or at a
+    Markdown block boundary (`BLOCK_START`), so a heading or list written right under the row is never part of it."""
+    if not text.startswith(LICENSE_MARK + "\n", i):
+        return None
+    nl = i + len(LICENSE_MARK)
+    lines = text[nl + 1:].split("\n")
+    n = _paragraph_len(lines)
+    body_end = nl + sum(len(ln) + 1 for ln in lines[:n])  # the newline that ends the last generated line (or the mark)
+    body_end = min(body_end, len(text))
+    sep = "\n\n" if text.startswith("\n\n", body_end) else ("\n" if text.startswith("\n", body_end) else "")
+    return body_end, sep, body_end + len(sep)
 
 
 def _authored_section_rest(text: str, pos: int) -> str:
@@ -1043,9 +1081,10 @@ def license_block(ctx: RepoContext, text: str) -> str:
         return text[:head if head is not None else i] + text[end:]
     if not lic:
         return text
-    m = re.compile(re.escape(LICENSE_MARK) + r"\n(.*?)(\n\n|\n?$)", re.S).match(text, i)
-    if m:
-        text = text[:i] + LICENSE_MARK + "\n" + lic[1] + m.group(2) + text[m.end():]
+    para = _managed_paragraph(text, i)  # ends at a blank line or a block boundary (epic 35 review)
+    if para:
+        sep = para[1] or ("\n" if para[2] < len(text) else "")
+        text = text[:i] + LICENSE_MARK + "\n" + lic[1] + sep + text[para[2]:]
     h = re.search(r"(?m)^## (?:License|Licensing|Licence)[ \t]*\n(\n?)\Z", text[:i])
     return text[:h.start()] + f"## {lic[0]}\n" + h.group(1) + text[i:] if h else text
 

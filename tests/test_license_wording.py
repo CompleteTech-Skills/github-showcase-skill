@@ -395,3 +395,54 @@ def test_header_refresh_still_drops_heading_when_nothing_authored_remains(make_c
     text += "\n## Next\n\nMore.\n"
     out = readme.header_only(ctx, text)
     assert "## License" not in out and "## Next\n\nMore." in out
+
+
+# --- epic 35 review round 2: the generated row ends at a Markdown block boundary, not only at a blank line ---
+# On the pre-fix HEAD `readme --mode upgrade --write` deleted `### Additional terms` and the attribution written right
+# under the managed row (no blank line) and recorded them as intentionally removed; the epic base kept both lines.
+TIGHT_TERMS = "### Additional terms\nPreserve this mandatory attribution."
+
+
+def test_upgrade_cli_keeps_subsection_right_under_managed_row(tmp_path):
+    import json
+    from conftest import meta_dict, run_cli
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "LICENSE").write_text("MIT", encoding="utf-8")
+    (repo / "README.md").write_text(
+        _readme_with_license("<!-- showcase:license -->\n" + FACTUAL_MIT + "\n" + TIGHT_TERMS), encoding="utf-8")
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict(owner="LibreEvolve", repo="thing", license="MIT", description="A thing.")),
+                    encoding="utf-8")
+    p = run_cli("--meta", meta, "--repo-dir", repo, "readme", "--mode", "upgrade", "--write")
+    after = (repo / "README.md").read_text(encoding="utf-8")
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert TIGHT_TERMS in after and FACTUAL_MIT in after, after
+
+
+def test_upgrade_keeps_subsection_under_generated_rights_row(make_ctx, tmp_path):
+    ctx = make_ctx(repo_dir=tmp_path, owner="LibreEvolve", repo="thing", license="MIT")
+    old = "<!-- showcase:license -->\n" + RV["t2_mit"].replace("<Brand>", "LibreEvolve") + "\n" + TIGHT_TERMS
+    text = _readme_with_license(old)
+    out, removed = readme.upgrade(ctx, text)
+    assert TIGHT_TERMS in out and "reserved" not in out
+    assert not any("attribution" in r or "Additional terms" in r for r in removed)
+    assert readme.preservation(text, out, removed) == []
+
+
+def test_private_omission_keeps_subsection_under_managed_row(make_ctx, tmp_path):
+    ctx = _libre(make_ctx, tmp_path, description="A thing.")
+    text = _readme_with_license("<!-- showcase:license -->\nProprietary. Copyright (c) 2025 X. All rights reserved.\n"
+                                + TIGHT_TERMS)
+    out = readme.header_only(ctx, text)  # license_block path (header refresh and bootstrap)
+    assert "All rights reserved" not in out and TIGHT_TERMS in out
+    up, removed = readme.upgrade(_libre(make_ctx, tmp_path, description="A thing."), text)
+    assert TIGHT_TERMS in up and "All rights reserved" not in up
+    assert readme.preservation(text, up, removed) == []
+
+
+def test_header_refresh_rewrite_keeps_subsection_under_managed_row(make_ctx, tmp_path):
+    ctx = make_ctx(repo_dir=tmp_path, owner="CompleteTech-LLC", repo="thing", license="MIT", description="A thing.")
+    text = _readme_with_license("<!-- showcase:license -->\n" + FACTUAL_MIT + "\n" + TIGHT_TERMS)
+    out = readme.header_only(ctx, text)
+    assert "<!-- showcase:license -->\n" + RV["t1_mit"] + "\n" + TIGHT_TERMS in out
