@@ -1834,11 +1834,11 @@ def icon_colours(ctx, text: str, org: dict, resolver: Resolver) -> dict:
     colours = family_colours(text, org["brand_key"], family, resolver.aliases(ctx.owner))
     if _section(text, "Repository glyph prompt template") and not _section(text, "(b) Family palette"):
         tokens = ctx.style["tokens"]
-        colours.update(family_label=family, LINE_NAME="family primary", LINE_HEX=tokens["accent"],
+        colours.update(family_label=family, LINE_NAME="family icon ink", LINE_HEX=tokens["icon_ink"],
                        CORE_HEX=tokens["title"], GLOW_HEX=tokens["accent_mid"],
-                       SPARK_NAME="family accent", SPARK_HEX=tokens["chip_key"]["bg"],
-                       SPARK_CORE_HEX=tokens["title"], SPARK_BLOOM_HEX=tokens["chip_key"]["bg"],
-                       INK=[tokens["chip_attr"]["bg"], tokens["chip_key"]["bg"]])
+                       SPARK_NAME="family icon spark", SPARK_HEX=tokens["icon_spark"],
+                       SPARK_CORE_HEX=tokens["title"], SPARK_BLOOM_HEX=tokens["icon_spark"],
+                       INK=[tokens["icon_ink"], tokens["icon_spark"]])
     return colours
 
 

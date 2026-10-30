@@ -628,7 +628,7 @@ def test_icon_prompt_parses_the_bundled_art_direction(brand, fixture_meta):
     res = C.icon_prompt(ctx, resolver(brand), C.load_art_direction())
     assert res["missing"] == ["GLYPH_DESCRIPTION", "GLYPH_NAME", "SIZE_CLASS", "SPARK_PLACEMENT"]
     assert res["facts"]["org_glyph"] is None  # bundled defaults do not require the estate's avatar inventory
-    assert res["render"]["ink"] == brand.style("CompleteTech-Skills")["tokens"]["chip_attr"]["bg"]
+    assert res["render"]["ink"] == brand.style("CompleteTech-Skills")["tokens"]["icon_ink"]
 
 
 def test_icon_normalize_keys_trims_and_passes_qa(brand):

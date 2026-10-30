@@ -1,11 +1,68 @@
 """The installed skill's icon defaults work without the private estate bundle."""
 import json
+import os
+import subprocess
+import sys
 
 import pytest
 from conftest import ROOT, meta_dict
 
 from ctshowcase import content as C
 from ctshowcase.errors import NeedsInput
+
+FAMILIES = ["CompleteTech-Skills", "AI-Ascension", "Jev-Engineering", "jevplay-games",
+            "LibreEvolve", "TouchedByAnAgent", "romgenie-archive-repostiory"]
+
+
+def glyph_image(colour):
+    from PIL import Image, ImageDraw
+
+    image = Image.new("RGBA", (1024, 1024))
+    ImageDraw.Draw(image).rectangle((250, 250, 750, 750), outline=colour, width=40)
+    return image
+
+
+@pytest.mark.parametrize("owner", FAMILIES)
+def test_bundled_inks_survive_normalization_and_qa(owner, brand, make_ctx):
+    from ctshowcase.resolver import Resolver
+
+    ctx = make_ctx(owner=owner)
+    result = C.icon_prompt(ctx, Resolver(brand, {}, {}), C.load_art_direction())
+    card = ctx.style["tokens"]["card_fill"]
+    for role in ("ink", "spark"):
+        colour = result["render"][role]
+        normalized, _ = C.normalize_icon(glyph_image(colour), "transparent", card)
+        qa = C.icon_qa(C.icon_bytes(normalized)[0], card=card, ink=[colour])
+        assert qa["result"] == "pass", (owner, role, qa)
+    assert result["render"]["ink"] != result["render"]["spark"]
+
+
+@pytest.mark.parametrize("owner", FAMILIES)
+def test_bundled_prompt_distinguishes_outline_and_spark(owner, brand, make_ctx):
+    from ctshowcase.resolver import Resolver
+
+    ctx = make_ctx(owner=owner)
+    result = C.icon_prompt(ctx, Resolver(brand, {}, {}), C.load_art_direction())
+    assert result["render"]["ink"] != result["render"]["spark"]
+    assert f'outline {result["render"]["ink"]}' in result["prompt"]
+    assert f'one spark in {result["render"]["spark"]}' in result["prompt"]
+    assert "only filled shape" in result["prompt"]
+
+
+def test_bundled_normalize_and_check_are_utf8_safe(tmp_path, brand):
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    source = tmp_path / "candidate.png"
+    glyph_image(brand.style("Northwind-Trading-Co")["tokens"]["chip_attr"]["bg"]).save(source)
+    output = tmp_path / "icon.png"
+    env = dict(os.environ, PYTHONIOENCODING="cp1252", PYTHONUTF8="0")
+    for action, extra in (("normalize", ["--in", str(source)]), ("check", [])):
+        proc = subprocess.run([sys.executable, str(ROOT / "scripts/showcase.py"), "--meta", str(meta),
+                               "--no-repo-dir", "content", "icon", action, "--out", str(output), *extra],
+                              capture_output=True, env=env)
+        assert proc.returncode == 0, proc.stderr.decode("utf-8", errors="replace")
+        result = json.loads(proc.stdout.decode("utf-8"))
+        assert any("ΔE" in cell["detail"] for cell in result["qa"]["checks"] if cell["check"] == "family-ink")
 
 
 def test_default_is_the_bundled_art_direction(monkeypatch, tmp_path):

@@ -77,8 +77,10 @@ Starred values are approximate until the estate planner re-measures them and pub
 ## Repository glyph prompt template
 
 `content icon prompt` uses this self-contained option A template by default. Its
-palette slots and flat render inks come from the selected family's tokens in
-`brand.yaml`; the writer supplies the four glyph fields with `--glyph`. It does
+palette slots and flat render inks come from the selected family's `icon_ink`
+and `icon_spark` tokens in `brand.yaml`. Both are chosen to meet the icon QA's
+3:1 contrast threshold on that family's card, with a distinct outline and spark.
+The writer supplies the four glyph fields with `--glyph`. It does
 not require the estate's avatar tables or reference images. An explicit
 `--art-direction FILE` may instead supply the estate-format `(b) Family palette`
 and `(d) Shared prompt template` sections.
@@ -94,6 +96,8 @@ Size class {SIZE_CLASS}.
 GLYPH: {GLYPH_NAME}. {GLYPH_DESCRIPTION}
 SPARK PLACEMENT: {SPARK_PLACEMENT}
 PALETTE: outline {LINE_HEX}, core {CORE_HEX}, glow {GLOW_HEX}; one spark in {SPARK_HEX}.
+The spark is the only filled shape and the only element in {SPARK_HEX}; keep the
+glyph outline in {LINE_HEX} so the spark remains distinct at small sizes.
 
 No text, letters, numbers, words, logos, brand marks, human figures or third-party IP.
 {EXTRA_NEGATIVES}
