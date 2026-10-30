@@ -234,7 +234,8 @@ def badge_body(ctx: RepoContext, existing: str | None = None) -> str:
     """Refresh owned rows; a missing or changed digest makes a J block authored."""
     if ctx.det["variant"] != "J":
         return badges_html(ctx) if ctx.det["variant"] == "F" else badges_md(ctx)
-    is_legacy = legacy_profile_badges(ctx.brand, existing or "")
+    is_legacy = (legacy_profile_badges(ctx.brand, existing or "")
+                 or (existing or "").strip() == template_badge_body(ctx.brand))
     has_license_row = "![License " in (existing or "") or "![AGPL-3.0 or commercial license]" in (existing or "")
     if is_legacy and has_license_row and ctx.public and (ctx.meta.get("license") or "").upper() in ("", "NOASSERTION", "OTHER"):
         return existing  # missing metadata cannot disprove an authored license claim
@@ -245,6 +246,12 @@ def badge_body(ctx: RepoContext, existing: str | None = None) -> str:
     replaced_digest = body_sha(existing) if is_legacy else previous.group(2) if previous else None
     replaces = f" replaces={replaced_digest}" if replaced_digest else ""
     return f"<!-- showcase:badges:generated sha256={body_sha(body)}{replaces} -->\n{body}"
+
+
+def template_badge_body(brand) -> str:
+    """The exact inherited type row from the repository template, independent of body state."""
+    category = standard("types")["types"]["template"]["category"]
+    return f"![Type {category}]({SHIELDS}type-{shield(category)}-{brand.raw['badges']['brand']})"
 
 
 def legacy_profile_badges(brand, body: str) -> bool:
@@ -1015,15 +1022,8 @@ def bootstrap(ctx: RepoContext, text: str) -> str:
             # inherited one is emptied, exactly as header_only decides it
             blocks = {m.group(1): m.group(2) for m in find_blocks(MARK, hm.group(0))}
             old = blocks.get("tagline")
-            existing_badges = blocks.get("badges")
-            category = standard("types")["types"]["template"]["category"]
-            template_badge = (f"![Type {category}]({SHIELDS}type-{shield(category)}-"
-                              f"{ctx.brand.raw['badges']['brand']})")
-            if (h1 and h1.group(1).strip() == TEMPLATE_H1
-                    and (existing_badges or "").strip() == template_badge):
-                existing_badges = None  # this exact badge belongs to the pristine source template
             new_header = header(ctx, title=auto, tagline=tagline_body(ctx, old, text),
-                                existing_badges=existing_badges)
+                                existing_badges=blocks.get("badges"))
             text = new_header + "\n\n" + text[hm.end():].lstrip("\n")
     return header_only(ctx, text)
 

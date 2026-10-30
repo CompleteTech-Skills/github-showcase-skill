@@ -324,3 +324,42 @@ def test_cli_unknown_license_does_not_erase_authored_badge(make_ctx, tmp_path, l
     (tmp_path / "README.md").write_text(text.replace(badge_block(text), authored), encoding="utf-8")
     profile_cli(ctx, tmp_path, "readme", "--write")
     assert badge_block((tmp_path / "README.md").read_text(encoding="utf-8")) == authored
+
+
+@pytest.mark.parametrize("state", ["pristine", "edited", "unmarked"])
+@pytest.mark.parametrize("mode", ["bootstrap", "upgrade", "header"])
+@pytest.mark.parametrize("custom", [False, True])
+def test_template_badges_across_body_states_and_cli_modes(make_ctx, tmp_path, state, mode, custom):
+    ctx = profile_context(make_ctx, tmp_path)
+    text = (ROOT / "tests/fixtures/template-README.md").read_text(encoding="utf-8")
+    authored = ('<img src="https://img.shields.io/badge/type-community-005ADD" alt="Community">\n'
+                '<img src="https://img.shields.io/badge/license-MIT-64748B" alt="MIT">')
+    if custom:
+        text = text.replace(badge_block(text), authored)
+    if state != "pristine":
+        text = text.replace("<!-- showcase:template-body:end -->",
+                            "A user-written body note.\n<!-- showcase:template-body:end -->")
+    if state == "unmarked":
+        text = readme.drop_pristine(text).replace("<!-- showcase:template-body:start -->", "")
+        text = text.replace("<!-- showcase:template-body:end -->", "")
+    if mode == "upgrade":
+        # The base also rejects unrelated template identity changes through its shrink guard.
+        # Align those generated fields to isolate the badge migration in a real CLI upgrade.
+        identity = {"banner": readme.banner_html(ctx), "nav": readme.nav_line(ctx),
+                    "tagline": readme.tagline_body(ctx)}
+        text = readme._sub_blocks(text, lambda m: readme.wrap(m.group(1), identity[m.group(1)])
+                                  if m.group(1) in identity else m.group(0))
+    path = tmp_path / "README.md"
+    path.write_text(text, encoding="utf-8")
+    options = ["--bootstrap"] if mode == "bootstrap" else ["--mode", mode]
+    profile_cli(ctx, tmp_path, "readme", *options, "--write")
+    actual = path.read_text(encoding="utf-8")
+    if custom:
+        assert badge_block(actual) == authored
+    else:
+        assert "type-Template-" not in badge_block(actual)
+        assert "type-GitHub%20profile-" in badge_block(actual)
+        assert "license-MIT-" in badge_block(actual)
+        assert not any("badge" in f for f in readmelint.lint(ctx, path)["fails"])
+    if state != "pristine":
+        assert "A user-written body note." in actual
