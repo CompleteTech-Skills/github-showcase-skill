@@ -4,6 +4,10 @@ All notable changes to `github-showcase-skill` are recorded here. Versions follo
 
 ## Unreleased
 
+### Added
+
+- `org labels ORG --repos-from-gh` plans labels across accessible repositories without the private estate registry, with paginated read-only GitHub capture, optional verified local checkouts, unchanged reference guards, and a documented org-default-forms-first workflow.
+
 ### Fixed
 
 - `doctor` reports disabled-Issues label checks, inapplicable social previews and archived community health as `n/a`, while preserving label coverage during approved archived polishing and unknown captured values on applicable surfaces. Social upload plans share the R10 applicability rule and include the personal-profile capstone.
