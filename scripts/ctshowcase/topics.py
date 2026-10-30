@@ -82,8 +82,13 @@ def membership_topics(ctx: RepoContext, also_in: list[str]) -> tuple[list[str], 
 
 
 def _org_extra(ctx: RepoContext) -> set[str]:
-    """Topics the org has approved as extras (task 92). Until that lands, no topic is approved."""
-    return set()
+    """Org-approved topics from the org row's `topics_extra` (task 92). Only lowercase strings matching the standard's
+    drop_valid pattern count; anything else is ignored. An approved topic is only ever one already on the repo."""
+    pattern = re.compile(standard("topics")["drop_valid"])
+    raw = ctx.org.get("topics_extra") or []
+    if not isinstance(raw, list):
+        return set()
+    return {x.lower() for x in raw if isinstance(x, str) and pattern.match(x.lower())}
 
 
 def merge(ctx: RepoContext, also_in: list[str] | None = None, prune: bool = False) -> dict:
@@ -97,8 +102,9 @@ def merge(ctx: RepoContext, also_in: list[str] | None = None, prune: bool = Fals
     typ = ctx.det["type"]
     logs: list[str] = []
     current = list(meta.get("topics") or [])
+    extra = _org_extra(ctx)
     vocab = set(t["brand_topics"]) | set(t["family_topics"]) | set(t["type_topics"]) | set(t["featured"]) | \
-        set(t["allowed"]) | set(t["domain"])
+        set(t["allowed"]) | set(t["domain"]) | extra
     private = meta.get("visibility") == "private"
     # owner identity through the shared resolver (CQ-03): an approved org rename (CompleTetech-Security ->
     # CompleteTech-Security) or a re-cased login must not change the repository's required topics
@@ -193,7 +199,7 @@ def merge(ctx: RepoContext, also_in: list[str] | None = None, prune: bool = Fals
         if fw:
             tech.append(fw)
             break
-    tech_vocab = set(t["featured"]) | set(t["allowed"])
+    tech_vocab = set(t["featured"]) | set(t["allowed"]) | extra
     tech += [x for x in surviving if x in tech_vocab]
     tech = [x for x in dict.fromkeys(tech) if x not in proposed][:3]
     proposed += tech
@@ -206,13 +212,14 @@ def merge(ctx: RepoContext, also_in: list[str] | None = None, prune: bool = Fals
         # appended after `core`, in `current` order, deduplicated, and logged review-remove:TOPIC; an extra beyond `room`
         # is only in `remove`; `topics-short` counts the retained extras. Dedicated regression tests for this path are
         # tracked by task 93 and are not part of this change.
-        extras = [x for x in extras_kept if x not in core]
+        # an org-approved topic that is on the repo but beyond the tech cap joins the extras here, without a log
+        pool = set(extras_kept) | {x for x in surviving if x in extra}
+        extras = [x for x in dict.fromkeys(alias(c) for c in current) if x in pool and x not in core]
         room = limit - len(core)
         kept = extras[:max(room, 0)]
         proposed = core + kept
-        approved = _org_extra(ctx)
         for x in extras:
-            if x not in approved:
+            if x not in extra:
                 logs.append(f"review-remove:{x}")
     minimum = t["min_private"] if private else t["min_public"]
     if len(proposed) < minimum:
