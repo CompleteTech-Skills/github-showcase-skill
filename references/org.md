@@ -81,7 +81,7 @@ These partial checks never certify the full org standard or a public profile's f
 python3 $S lint public-leak FILE... --denylist DENY.txt
 ```
 
-`DENY.txt` is a UTF-8 text file with one entry per line: `owner/repo` for a private slug (the owner login is matched exactly as listed), or a bare name. `#` comments and blank lines are ignored. An invalid entry (whitespace inside it, a leading or trailing `/`, or more than one `/`) exits 2 and names its line. A missing or empty file exits 4 with `needs-input:denylist`. Without `--registry`, the run reads no estate registry, decisions or metadata; `--meta-dir`, `--decisions`, `--org`, `--approved`, `--approved-yaml` and `--actions` are then ignored and each is logged `ignored-in-denylist-mode:FLAG`. Each result is `mode: denylist`, with the log `coverage:denylist-entries-only`.
+`DENY.txt` is a UTF-8 text file with one entry per line: `owner/repo` for a private slug (matched case-insensitively; no other login of that owner is inferred), or a bare name. `#` comments and blank lines are ignored. An invalid entry (whitespace inside it, a leading or trailing `/`, or more than one `/`) exits 2 and names its line. A missing or empty file exits 4 with `needs-input:denylist`. Without `--registry`, the run reads no estate registry, decisions or metadata; `--meta-dir`, `--decisions`, `--org`, `--approved`, `--approved-yaml` and `--actions` are then ignored and each is logged `ignored-in-denylist-mode:FLAG`. Each result is `mode: denylist`, with the log `coverage:denylist-entries-only`.
 
 | Check | Registry-free with `--denylist` | Needs the registry |
 |---|---|---|
