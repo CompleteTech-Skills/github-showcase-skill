@@ -2683,7 +2683,7 @@ def _cmd_icon(args, cli, resolver, head):
             CHECK_FAILED
     qa = icon_qa(path.read_bytes(), card=card, ink=ink, org_mark=mark, siblings=siblings, strict=strict,
                  min_contrast=floor, ocr=ocr)
-    return dict(head, result=qa["result"], file=str(path), qa=qa, logs=ctx.logs + qa.get("logs", [])),         _code(qa["result"])
+    return dict(head, result=qa["result"], file=str(path), qa=qa, logs=ctx.logs + qa.get("logs", [])), _code(qa["result"])
 
 
 def _hex_rgba(value: str) -> tuple[int, int, int, int]:
