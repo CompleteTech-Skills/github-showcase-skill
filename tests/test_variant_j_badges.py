@@ -187,14 +187,14 @@ def test_bootstrap_keeps_authored_badges_outside_pristine_body(make_ctx, tmp_pat
     assert badge_block(after) == authored
 
 
-def profile_cli(ctx, tmp_path, *args):
+def profile_cli(ctx, tmp_path, *args, expected_code=0):
     meta = tmp_path / "meta.json"
     meta.write_text(json.dumps(ctx.meta), encoding="utf-8")
     # Isolate these regressions from the separately tracked Windows stdout-encoding defect.
     env = dict(os.environ, PYTHONIOENCODING="utf-8")
     result = subprocess.run([sys.executable, str(ROOT / "scripts/showcase.py"), "--meta", str(meta),
                              "--repo-dir", str(tmp_path), *args], capture_output=True, encoding="utf-8", env=env)
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.returncode == expected_code, result.stdout + result.stderr
     return json.loads(result.stdout)
 
 
@@ -363,3 +363,24 @@ def test_template_badges_across_body_states_and_cli_modes(make_ctx, tmp_path, st
         assert not any("badge" in f for f in readmelint.lint(ctx, path)["fails"])
     if state != "pristine":
         assert "A user-written body note." in actual
+
+
+@pytest.mark.parametrize("exists", [False, True])
+def test_cli_angle_image_destinations_check_file_existence(make_ctx, tmp_path, exists):
+    ctx = profile_context(make_ctx, tmp_path)
+    if exists:
+        (tmp_path / "docs/images/screenshot.png").write_bytes(b"image")
+    text = readme.scaffold(ctx).replace("\n---\n", "\n---\n\n![Screenshot](<docs/images/screenshot.png>)\n")
+    (tmp_path / "README.md").write_text(text, encoding="utf-8")
+    result = profile_cli(ctx, tmp_path, "lint", "readme", expected_code=0 if exists else 1)
+    assert any("local image does not resolve" in failure for failure in result["fails"]) is not exists
+
+
+def test_cli_html_alt_backticks_remain_literal(make_ctx, tmp_path):
+    ctx = profile_context(make_ctx, tmp_path)
+    text = readme.scaffold(ctx)
+    body = ('<img src="https://img.shields.io/badge/type-GitHub%20profile-005ADD" alt="`showcase.py --help`">\n'
+            '<img src="https://img.shields.io/badge/license-MIT-64748B" alt="License">')
+    (tmp_path / "README.md").write_text(text.replace(badge_block(text), body), encoding="utf-8")
+    result = profile_cli(ctx, tmp_path, "lint", "readme")
+    assert not any("without alt" in failure for failure in result["fails"])

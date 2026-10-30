@@ -20,12 +20,52 @@ REF_DEFINITION = re.compile(
     r"(?:[ \t]+(?:\"[^\"\n]*\"|'[^'\n]*'|\([^\)\n]*\)))?[ \t]*$", re.M)
 
 
+class _HTMLTokens(HTMLParser):
+    """HTML spans let Markdown parsing respect attribute and destination boundaries."""
+    def __init__(self, text):
+        super().__init__(convert_charrefs=True)
+        self.text = text
+        self.tags = []
+        self.images = []
+        self.line_starts = [0, *(m.end() for m in re.finditer("\n", text))]
+        self.feed(text)
+        self.close()
+
+    def handle_starttag(self, tag, attrs):
+        line, column = self.getpos()
+        start = self.line_starts[line - 1] + column
+        before = start - 1
+        while before >= 0 and self.text[before] == "\\":
+            before -= 1
+        if (start - before - 1) % 2:
+            return
+        end = start + len(self.get_starttag_text())
+        self.tags.append((start, end))
+        if tag == "img":
+            first = {}
+            for name, value in attrs:
+                first.setdefault(name, value)
+            self.images.append((first.get("alt") or "", first.get("src") or "", start, end))
+
+
 def _outside_code(text: str) -> str:
-    """The text without fenced code (``` and ~~~), inline code and HTML comments."""
-    text = re.sub(r"(?ms)^ {0,3}(`{3,}(?=[^`\n]*$)|~{3,}).*?^ {0,3}\1", "", text)  # no backtick in a ``` info string
-    text = re.sub(r"```.*?```", "", text, flags=re.S)
-    text = re.sub(r"`[^`\n]*`", "", text)
-    return re.sub(r"<!--.*?-->", "", text, flags=re.S)
+    """Mask Markdown code without interpreting literal backticks in HTML attributes as code."""
+    out, replacements, pos = [], [], 0
+    for index, (start, end) in enumerate(_HTMLTokens(text).tags):
+        raw = text[start:end]
+        key = f"\x01showcase-html-{index}\x02"
+        while key in text:
+            key += "x"
+        key += "\n" * raw.count("\n")
+        out.extend((text[pos:start], key))
+        replacements.append((key, raw))
+        pos = end
+    out.append(text[pos:])
+    protected = re.sub(r"<!--.*?-->", "", "".join(out), flags=re.S)
+    protected = masked(protected)
+    for key, raw in replacements:
+        protected = protected.replace(key, raw)
+    return protected.replace("\x00", " ")
 
 
 def _closing_bracket(text: str, start: int) -> int | None:
@@ -96,7 +136,7 @@ def _inline_image_target(text: str, start: int) -> tuple[str, int] | None:
     return html.unescape(re.sub(r"\\([^\w\s])", r"\1", target)), pos + 1
 
 
-def _markdown_images(text: str, document: str) -> list[tuple[str, str]]:
+def _markdown_images(text: str, document: str) -> list[tuple[str, str, int, int]]:
     """Read inline and reference images with balanced alt text; definitions use first-wins labels."""
     def label(value):
         value = html.unescape(re.sub(r"\\([^\w\s])", r"\1", value))
@@ -124,7 +164,7 @@ def _markdown_images(text: str, document: str) -> list[tuple[str, str]]:
             target = _inline_image_target(text, consumed)
             if target:
                 source, consumed = target
-                sources.append((alt, source))
+                sources.append((alt, source, match.start(), consumed))
             continue
         key = label(alt)
         if consumed < len(text) and text[consumed] == "[":
@@ -133,38 +173,22 @@ def _markdown_images(text: str, document: str) -> list[tuple[str, str]]:
                 key = label(text[consumed + 1:ref_close]) or key
                 consumed = ref_close + 1
         if key in definitions:
-            sources.append((alt, definitions[key]))
+            sources.append((alt, definitions[key], match.start(), consumed))
     return sources
 
 
 def _images(text: str, document: str) -> list[tuple[str, str]]:
     """Read HTML and Markdown images, excluding Markdown-looking text in HTML attributes."""
-    class Images(HTMLParser):
-        def __init__(self):
-            super().__init__(convert_charrefs=True)
-            self.images = []
-            self.tags = []
-            self.line_starts = [0, *(m.end() for m in re.finditer("\n", text))]
-
-        def handle_starttag(self, tag, attrs):
-            line, column = self.getpos()
-            start = self.line_starts[line - 1] + column
-            self.tags.append((start, start + len(self.get_starttag_text())))
-            if tag == "img":
-                first = {}
-                for name, value in attrs:
-                    first.setdefault(name, value)
-                self.images.append((first.get("alt") or "", first.get("src") or ""))
-
-    parser = Images()
-    parser.feed(text)
-    parser.close()
-    outside_tags = list(text)
-    for start, end in parser.tags:
-        for pos in range(start, end):
-            if outside_tags[pos] != "\n":
-                outside_tags[pos] = " "
-    return parser.images + _markdown_images("".join(outside_tags), document)
+    parser = _HTMLTokens(text)
+    markdown = _markdown_images(text, document)
+    # Angle-delimited destinations (and HTML in alt text) belong to their Markdown image,
+    # while a Markdown-looking string wholly inside a real HTML tag is attribute text.
+    tags = [(start, end) for start, end in parser.tags
+            if not any(mstart <= start and end <= mend for _, _, mstart, mend in markdown)]
+    result = [(alt, source) for alt, source, start, end in markdown
+              if not any(tstart <= start and end <= tend for tstart, tend in tags)]
+    result += [(alt, source) for alt, source, start, end in parser.images if (start, end) in tags]
+    return result
 
 
 def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:

@@ -6,11 +6,13 @@ from ctshowcase import readme, readmelint
 URL = "https://github.com/Northwind-Trading-Co/sample-library/actions/workflows/ci.yml/badge.svg"
 
 
-def lint_reference(make_ctx, tmp_path, usage, definitions):
+def lint_reference(make_ctx, tmp_path, usage, definitions, files=None):
     (tmp_path / ".github/workflows").mkdir(parents=True)
     (tmp_path / ".github/workflows/ci.yml").write_text("name: CI\n", encoding="utf-8")
     (tmp_path / "docs/images").mkdir(parents=True)
     (tmp_path / "docs/images/banner.png").write_bytes(b"banner")
+    for name in files or []:
+        (tmp_path / name).write_bytes(b"image")
     ctx = make_ctx(repo_dir=tmp_path, repo="sample-library", language=None, license=None)
     ctx.det.update(type="library", variant="C", category="Library")
     text = readme.scaffold(ctx)
@@ -93,3 +95,32 @@ def test_nonrendered_html_and_markdown_badges_do_not_count(make_ctx, tmp_path, u
 
 def test_unfinished_html_at_end_has_no_image():
     assert readmelint._images(f'<img src="{URL}"', "") == []
+
+
+def test_angle_markdown_destination_missing_file_is_reported(make_ctx, tmp_path):
+    result = lint_reference(make_ctx, tmp_path,
+                            '![CI][ci]\n![Screenshot](<docs/images/missing.png>)', f"[ci]: {URL}")
+    assert "R7 local image does not resolve: docs/images/missing.png" in result["fails"]
+
+
+def test_angle_markdown_destination_existing_file_passes(make_ctx, tmp_path):
+    result = lint_reference(make_ctx, tmp_path,
+                            '![CI][ci]\n![Screenshot](<docs/images/good shot.png>)', f"[ci]: {URL}",
+                            files=["docs/images/good shot.png"])
+    assert result["fails"] == [], result
+
+
+@pytest.mark.parametrize("attribute", ['alt="`showcase.py --help`"', "ALT='`showcase.py --help`'"])
+def test_html_attribute_backticks_are_literal_text(make_ctx, tmp_path, attribute):
+    result = lint_reference(make_ctx, tmp_path, f'<img src="{URL}" {attribute}>', "")
+    assert result["fails"] == [], result
+
+
+@pytest.mark.parametrize("usage", [
+    '`![Screenshot](<docs/images/missing.png>)`',
+    f'``<img src="{URL}" alt="`showcase.py --help`">``',
+])
+def test_angle_destinations_and_html_inside_code_are_excluded(make_ctx, tmp_path, usage):
+    result = lint_reference(make_ctx, tmp_path, usage, "")
+    assert "R7 2-4 header badges required (found 1)" in result["fails"]
+    assert not any("local image" in failure or "without alt" in failure for failure in result["fails"])

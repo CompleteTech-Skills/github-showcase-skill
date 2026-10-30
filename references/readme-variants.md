@@ -68,6 +68,8 @@ Variant J (`.github`) uses the `GitHub profile` type badge from `references/stan
 
 The source template's exact type badge is replaced with the target repository's badges during upgrade, header refresh and bootstrap, even after its body is edited or its template marker is removed. Custom authored replacements remain protected. Locally rendered badges under `docs/images/badges/*.svg` count toward R7 when referenced as Markdown or HTML images; merely mentioning an SVG path does not count. Markdown reference images (full, collapsed and shortcut) resolve their definitions anywhere in the document, with case-insensitive labels and the first definition winning. Inline and reference image alt text may contain nested or escaped brackets. HTML images accept quoted or unquoted attributes and case-insensitive attribute names. Only rendered header images count, not unused definitions, links, escaped syntax, HTML attribute text or code examples. All recognized images retain the alt-text and local-file checks.
 
+Markdown angle-delimited destinations such as `![Screenshot](<docs/images/screenshot.png>)` retain their local-file check. Backticks inside HTML attribute values are literal text, while Markdown code spans and fences remain excluded from image counting and validation.
+
 Each label and message segment doubles `-` and `_` (shields.io's escapes) and is then percent-encoded, so `C#` reads `language-C%23-1E3A8A` and `#`, `?`, `/` or `%` never end the path early.
 
 | Token | Hex | Use |
