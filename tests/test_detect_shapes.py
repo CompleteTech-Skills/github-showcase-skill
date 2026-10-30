@@ -12,6 +12,7 @@ A failure here means default detection changed, which needs a decision-record re
 expected values are updated.
 """
 import json
+import sys
 from pathlib import Path
 
 from ctshowcase.detect import detect_type, variant_for
@@ -146,3 +147,58 @@ def test_schema_accepts_detect_tuned():
 def test_schema_rejects_non_boolean_detect_tuned():
     with pytest.raises(ConfigError):
         config.parse_repo_override(".github/showcase.yml", "detect_tuned: maybe\n")
+
+
+# Review follow-ups for detect_tuned (E4.4.2): the fingerprint, the explicit selectors and the private callout.
+def test_fingerprint_type_follows_detect_tuned(tmp_path):
+    # Tuned: planning JSON is ignored, so the tree is workspace. Adding a.csv (1500 of 2500 data bytes) makes it dataset.
+    # The fingerprint must follow the tuned type, or the Action would skip a README regeneration.
+    from ctshowcase import fingerprint  # noqa: E402
+
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github" / "showcase.yml").write_text("detect_tuned: true\n", encoding="utf-8")
+    base = {"owner": "Northwind-Trading-Co", "repo": "field-data", "files": ["planning/plan.json", "src/build.py"],
+            "file_sizes": {"planning/plan.json": 9000, "src/build.py": 1000}}
+    grown = dict(base, files=base["files"] + ["a.csv"], file_sizes=dict(base["file_sizes"], **{"a.csv": 1500}))
+    assert fingerprint.inputs(base, tmp_path)["type"] == "workspace"
+    assert fingerprint.inputs(grown, tmp_path)["type"] == "dataset"
+    assert fingerprint.fingerprint(fingerprint.inputs(base, tmp_path), "cfg") != \
+        fingerprint.fingerprint(fingerprint.inputs(grown, tmp_path), "cfg")
+
+
+def test_fingerprint_type_untouched_without_flag(tmp_path):
+    from ctshowcase import fingerprint  # noqa: E402
+
+    base = {"owner": "Northwind-Trading-Co", "repo": "field-data", "files": ["planning/plan.json", "src/build.py"],
+            "file_sizes": {"planning/plan.json": 9000, "src/build.py": 1000}}
+    assert fingerprint.inputs(base, tmp_path)["type"] == "dataset"
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github" / "showcase.yml").write_text("detect_tuned: false\n", encoding="utf-8")
+    assert fingerprint.inputs(base, tmp_path)["type"] == "dataset"
+
+
+@pytest.mark.parametrize("text,want", [
+    ("detect_tuned: true\n", True),
+    ("detect_tuned: false\n", False),
+    ("icon: assets/x.png\ndetect_tuned: yes  # comment\n", True),
+    ("", False),
+])
+def test_override_tuned_with_and_without_pyyaml(text, want, monkeypatch):
+    # yaml is None in sys.modules makes `import yaml` raise ImportError: the stdlib-only Action path.
+    from ctshowcase import fingerprint  # noqa: E402
+
+    assert fingerprint.override_tuned(text) is want
+    monkeypatch.setitem(sys.modules, "yaml", None)
+    assert fingerprint.override_tuned(text) is want
+
+
+def test_explicit_variant_k_is_accepted():
+    assert config.parse_repo_override(".github/showcase.yml", "variant: K\n") == {"variant": "K"}
+
+
+def test_readme_cli_accepts_variant_k():
+    # run_cli lives in conftest (shared helper); the choices string shows K as the last variant
+    from conftest import run_cli  # noqa: E402
+
+    out = run_cli("readme", "--help")
+    assert out.returncode == 0 and "J,K}" in out.stdout

@@ -44,9 +44,27 @@ def override_icon(text: str) -> str | None:
     return None
 
 
+def override_tuned(text: str) -> bool:
+    """The override's `detect_tuned:` flag as detect() reads it (YAML via config.load_repo_override). Without PyYAML a
+    top-level `detect_tuned:` line set to a YAML 1.1 true (true, yes, on) is read; anything else is off."""
+    try:
+        import yaml
+    except ImportError:  # pragma: no cover - the Action's fingerprint step runs before pip install
+        yaml = None
+    if yaml is not None:
+        try:
+            obj = yaml.safe_load(text)
+        except yaml.YAMLError:
+            return False
+        return isinstance(obj, dict) and obj.get("detect_tuned") is True
+    return any(re.match(r"""^(?:detect_tuned|"detect_tuned"|'detect_tuned')\s*:\s*(?:true|yes|on)\s*(?:#.*)?$""", line,
+                        re.IGNORECASE) for line in text.splitlines())
+
+
 def inputs(meta: dict, repo_dir: str | Path | None) -> dict:
     rd = Path(repo_dir) if repo_dir else None
     override = None
+    override_text = ""
     icon = None
     if rd is not None:
         for n in (".github/showcase.yml", ".github/showcase.yaml"):
@@ -55,13 +73,15 @@ def inputs(meta: dict, repo_dir: str | Path | None) -> dict:
                 break
         icon = rd / "assets" / "icon.png"
         if override is not None:
-            v = override_icon(override.read_text(encoding="utf-8"))
+            override_text = override.read_text(encoding="utf-8")
+            v = override_icon(override_text)
             if v:
                 icon = rd / v
     try:  # the detected type picks the README variant and the eyebrow: a new type (code landed) regenerates
         from .detect import detect
         from .facts import RepoFacts
-        type_ = detect(meta, RepoFacts(meta, rd))["type"]
+        # the tuned flag changes the type (rules 24-25), so a tuned repository's fingerprint follows the tuned type
+        type_ = detect(meta, RepoFacts(meta, rd), {"detect_tuned": override_tuned(override_text)})["type"]
     except Exception:  # noqa: BLE001 - the fingerprint must never fail the stdlib-only Action step
         type_ = None
     return {"owner": meta.get("owner"), "repo": meta.get("repo"), "type": type_, "description": meta.get("description") or "",

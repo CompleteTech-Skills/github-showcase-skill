@@ -70,3 +70,11 @@ def test_badges_local(tmp_path):
     for f in files:
         s = f.read_text()
         assert f"docs/images/badges/{f.name}" in text and "<text" not in s and 'role="img"' in s
+
+
+def test_private_tuned_mobile_keeps_internal_callout(make_ctx, tmp_path):
+    # Variant K (detect_tuned mobile-app) is a private scaffold too: the internal-use notice must survive tuning.
+    ctx = make_ctx(repo_dir=tmp_path, owner="CompleteTech-LLC", repo="field-app", visibility="private", license="MIT")
+    ctx.det["variant"] = "K"
+    assert readme.callout(ctx) and "Not for distribution" in readme.callout(ctx)
+    assert "Not for distribution" in readme.scaffold(ctx)
