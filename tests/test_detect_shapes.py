@@ -318,6 +318,17 @@ def test_all_planning_suggests_workspace():
     assert "suggestion" not in tuned
 
 
+def test_tuned_zero_byte_retained_file_still_suggests():
+    # Review finding (E4.4.3): tuned detection keeps README.md (0 bytes), so the kept total is 0 and the tuned type stays
+    # dataset (0 * 2 >= 0). The planning-excluded share is then 0%, so case (a) still applies and must suggest workspace.
+    m = dict(NORTHWIND_SHAPE, files=["planning/a.json", "README.md"],
+             file_sizes={"planning/a.json": 900, "README.md": 0})
+    tuned = detect(m, RepoFacts(m), {"detect_tuned": True})
+    assert (tuned["type"], tuned["rule"]) == ("dataset", 24)
+    assert tuned["suggestion"]["type"] == "workspace"
+    assert tuned["suggestion"]["reason"] == "planning-json-share"
+
+
 def test_suggestion_edge_cases_without_sizes():
     # Empty file sizes, or a zero total, never divide: no suggestion and no exception.
     assert "suggestion" not in detect(dict(NORTHWIND_SHAPE, files=["README.md"]), RepoFacts(dict(NORTHWIND_SHAPE)))

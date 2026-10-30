@@ -145,7 +145,9 @@ def suggestion(meta: dict, type_: str, rule: int, tuned: bool = False) -> dict |
     kept_total = sum(v for _, v in kept)
     # An all-planning tree keeps no bytes: its planning-excluded data share is 0%, which is below 50% (case (a)).
     kept_share = data_bytes(kept) / kept_total if kept_total > 0 else 0.0
-    if raw_share >= 0.5 and kept_share < 0.5 and not tuned:
+    # `tuned` needs no guard here: a tuned detection that moved the repo to workspace is rule 25 and returned above.
+    # A tuned detection that stayed rule 24 (e.g. only a zero-byte README is kept) still gets case (a) evidence.
+    if raw_share >= 0.5 and kept_share < 0.5:
         reason = "planning-json-share"
     elif raw_share < 0.75:
         reason = "narrow-dataset-share"
