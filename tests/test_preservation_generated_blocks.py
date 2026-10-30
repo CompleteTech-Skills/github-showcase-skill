@@ -1,6 +1,14 @@
 """preservation() (the never-drop-a-line check) ignores the body of generated marker blocks that still exist in the
 output: a refreshed tagline is a regenerated value, not a lost line. Lines outside generated blocks, a generated block
-that disappears, and unknown or template blocks stay guarded."""
+that disappears, and unknown or template blocks stay guarded.
+
+Test kinds (verified by reverting scripts/ctshowcase/readme.py to the pre-change base, commit 2be04ac, and running this
+file there: 3 failed, 3 passed):
+- Fail on base, pass on HEAD (the behaviour change itself): test_refreshed_tagline_is_not_a_lost_line,
+  test_line_outside_generated_block_is_still_guarded, test_crlf_input_is_handled.
+- Pass on base and on HEAD by design (regression guards that the change must NOT relax the check): the other three.
+  They pin the existing behaviour for the boundary cases, so a future over-broad exclusion turns them red. They are
+  not expected to fail on the base."""
 from ctshowcase import readme as R
 
 OLD = "**Route Northwind support tickets to the right queue.**"
