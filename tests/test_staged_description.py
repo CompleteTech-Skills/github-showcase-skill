@@ -150,6 +150,17 @@ def test_exempt_without_description_is_unchanged(tmp_path, monkeypatch, capsys):
 # ---------------------------------------------------------------------------------------------------
 # E5.2.3: `doctor` logs drift between the artifacts and the live About text (logs only; cells, COLUMNS, TSV and
 # the exit code are unchanged). Every fixture is a synthetic Northwind copy in tmp_path.
+#
+# Base-vs-HEAD evidence (the new tests run against base 9de238f, which has no drift logging): 8 fail there, proving
+# the feature: test_doctor_no_drift_when_equal, test_doctor_flags_tagline_drift,
+# test_doctor_applied_description_clears_drift, test_tagline_text_normalises_markup,
+# test_tagline_in_fenced_code_is_ignored, test_doctor_sidecar_drift_without_readme,
+# test_tagline_inline_markup_has_no_gap and test_staged_record_stores_digest_and_keeps_inputs_text.
+# The other new tests pass on the base BY DESIGN: they are regression guards for "no drift code / row unchanged"
+# (test_doctor_ignores_whitespace_difference, test_doctor_no_readme_or_no_tagline_block_is_silent,
+# test_doctor_missing_live_description_is_silent, test_doctor_tsv_unchanged, test_doctor_inline_markup_is_not_drift,
+# test_doctor_unreadable_sidecar_keeps_row, test_doctor_denied_sidecar_stat_keeps_row). They assert the absence of
+# a log or a changed row, which the base also satisfies; they fail if the feature over-reports or alters the row.
 # ---------------------------------------------------------------------------------------------------
 import json as _jsonmod  # noqa: E402
 
