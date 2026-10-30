@@ -229,3 +229,34 @@ def test_upgrade_public_managed_rights_sentence_becomes_factual_line(make_ctx, t
         out, removed = readme.upgrade(c, text)
         assert FACTUAL_MIT in out and "reserved" not in out
         assert "needs-input:license-wording" in c.logs
+
+
+# --- review round 2: unmarked generated public rows, and mixed managed + authored License content (issue 36) ---
+def test_upgrade_public_unmarked_generated_rights_sentence_becomes_factual(make_ctx, tmp_path):
+    ctx = make_ctx(repo_dir=tmp_path, owner="LibreEvolve", repo="thing", license="MIT")
+    old = RV["t2_mit"].replace("<Brand>", "LibreEvolve")
+    out, removed = readme.upgrade(ctx, _readme_with_license(old))
+    assert FACTUAL_MIT in out and "reserved" not in out
+    assert "needs-input:license-wording" in ctx.logs
+    assert any("reserved" in r for r in removed)
+
+
+def test_upgrade_public_authored_after_generated_row_survives(make_ctx, tmp_path):
+    ctx = make_ctx(repo_dir=tmp_path, owner="LibreEvolve", repo="thing", license="MIT")
+    old = RV["t2_mit"].replace("<Brand>", "LibreEvolve")
+    text = _readme_with_license(old + "\n\n" + AUTHORED)
+    out, removed = readme.upgrade(ctx, text)
+    assert AUTHORED in out and AUTHORED not in removed and "reserved" not in out
+    assert readme.preservation(text, out, removed) == []
+
+
+def test_upgrade_private_marked_section_keeps_authored_paragraph(make_ctx, tmp_path):
+    ctx = make_ctx(repo_dir=tmp_path, owner="LibreEvolve", repo="thing", license=None, visibility="private",
+                   created_at="2025-01-01T00:00:00Z")
+    managed = "<!-- showcase:license -->\nProprietary. Copyright (c) 2025 X. All rights reserved."
+    text = _readme_with_license(managed + "\n\n" + AUTHORED)
+    out, removed = readme.upgrade(ctx, text)
+    assert AUTHORED in out and AUTHORED not in removed
+    assert "All rights reserved" not in out
+    assert readme.preservation(text, out, removed) == []
+    assert "needs-input:license-wording" in ctx.logs

@@ -339,11 +339,42 @@ def license_omitted(ctx: RepoContext) -> bool:
 GENERATED_PRIVATE = re.compile(r"Proprietary\.(?: Copyright \(c\) \d{4} .+?\.)? All rights reserved\.")
 
 
-def generated_license_body(body: str) -> bool:
-    """True when a License section body is text this tool wrote (marked, or exactly a private license row), so
-    dropping it for an org without `license_wording` removes no authored words (issue 36)."""
-    paras = [p.strip() for p in re.split(r"\n\s*\n", body.replace(LICENSE_MARK, "\n\n")) if p.strip()]
-    return LICENSE_MARK in body or bool(paras) and all(GENERATED_PRIVATE.fullmatch(p) for p in paras)
+def _generated_public() -> list[re.Pattern]:
+    """One pattern per public rights-sentence row this tool has written (any holder or brand)."""
+    rv = standard("readme-variants")["license_rows"]
+    pats = []
+    for k in ("t1_mit", "t2_mit", "skills_mit", "other"):
+        esc = re.escape(rv[k])
+        for ph in ("CompleteTech LLC", "<Brand>", "<license>", "<path>"):
+            esc = esc.replace(re.escape(ph), ".+?")
+        pats.append(re.compile(esc))
+    return pats
+
+
+def split_generated_license(body: str) -> tuple[list[str], str]:
+    """Split a License section body into (lines this tool generated, authored remainder). Generated: the one paragraph
+    after a `showcase:license` mark (the mark goes too), and any paragraph that is exactly a row the tool wrote (private
+    "Proprietary..." or a public rights-sentence row). Every other paragraph is authored and survives (issue 36)."""
+    paras = [p.strip() for p in re.split(r"\n\s*\n", body) if p.strip()]
+    gen: list[str] = []
+    keep: list[str] = []
+    after_mark = False
+    pubs = _generated_public()
+    for p in paras:
+        if p == LICENSE_MARK:
+            gen.append(p)
+            after_mark = True
+            continue
+        marked = p.startswith(LICENSE_MARK + "\n")
+        if marked or after_mark or GENERATED_PRIVATE.fullmatch(p) or any(x.fullmatch(p) for x in pubs):
+            if marked:
+                gen.append(LICENSE_MARK)
+                p = p[len(LICENSE_MARK):].strip()
+            gen += [ln for ln in p.splitlines() if ln.strip()]
+            after_mark = False
+            continue
+        keep.append(p)
+    return gen, "\n\n".join(keep)
 
 
 def gate_managed_license(ctx: RepoContext, text: str, removed: list[str]) -> str:
@@ -806,9 +837,18 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
     if existing_notes or notes:
         nb = "\n\n".join(x for x in ([existing_notes] if existing_notes else []) + notes)
         out.append(f"## Notes\n\n{nb}")
-    if license_body and license_omitted(ctx) and generated_license_body(license_body[1]):
-        removed += [ln for ln in license_body[1].splitlines() if ln.strip()]
+    gen_lines, authored = split_generated_license(license_body[1]) if license_body else ([], "")
+    no_wording = not (ctx.org.get("license_wording") or "").strip()
+    if license_body and no_wording and gen_lines and license_omitted(ctx):
+        removed += gen_lines  # generated private rights text goes; authored paragraphs stay under their heading
         ctx.log("needs-input:license-wording")
+        if authored:
+            out.append(f"## {license_body[0]}\n\n{authored}")
+    elif license_body and no_wording and gen_lines and ctx.public and (lic := license_section(ctx)):
+        # a rights sentence this tool wrote earlier becomes the factual line; authored paragraphs stay (issue 36)
+        new_body = "\n\n".join(x for x in [lic[1], authored] if x)
+        removed += [ln for ln in gen_lines if ln not in new_body]
+        out.append(f"## {lic[0]}\n\n{new_body}")
     elif license_body:
         if license_omitted(ctx):  # authored text is never dropped: keep it and flag the missing wording (issue 36)
             ctx.log("needs-input:license-wording")
