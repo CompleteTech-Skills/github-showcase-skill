@@ -5,6 +5,8 @@ import os
 import subprocess
 import sys
 
+import pytest
+
 from conftest import ROOT, meta_dict
 
 import showcase
@@ -74,3 +76,47 @@ def test_quality_gate_decodes_cli_utf8_under_legacy_locale():
         cwd=ROOT, env=dict(os.environ, PYTHONIOENCODING="cp1252:strict", PYTHONUTF8="0"), capture_output=True)
     assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
     assert b"labels.yml ok" in result.stdout
+
+
+def test_stderr_escapes_surrogate_filename(monkeypatch):
+    """An undecodable filesystem byte must not crash the error-reporting path."""
+    raw = io.BytesIO()
+    error = io.TextIOWrapper(raw, encoding="utf-8", errors="backslashreplace", write_through=True)
+    monkeypatch.setattr(sys, "stderr", error)
+    assert showcase.main(["--format", "text", "--meta", "missing-\udcff.json",
+                          "--no-repo-dir", "describe"]) == 2
+    assert b"missing-\\udcff.json" in raw.getvalue()
+    assert b"UnicodeEncodeError" not in raw.getvalue()
+
+
+def test_stdout_keeps_surrogateescape_filename(monkeypatch):
+    """POSIX stdout's filesystem-byte handling survives UTF-8 configuration."""
+    raw = io.BytesIO()
+    output = io.TextIOWrapper(raw, encoding="utf-8", errors="surrogateescape", write_through=True)
+    monkeypatch.setattr(sys, "stdout", output)
+    assert showcase.main(["--meta", "missing-\udcff.json", "--no-repo-dir", "describe"]) == 2
+    payload = json.loads(raw.getvalue().decode("utf-8", errors="surrogateescape"))
+    assert "missing-\udcff.json" in payload["error"]
+
+
+@pytest.mark.parametrize("name", ["Íris", "café"])
+@pytest.mark.parametrize("write_summary", [True, False])
+def test_action_summary_decodes_cli_utf8_under_legacy_locale(tmp_path, name, write_summary):
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict(description=f"Run Northwind {name} exports")), encoding="utf-8")
+    summary = tmp_path / "summary.md"
+    # Simulate the Windows consumer's locale on every platform. The CLI runs
+    # in its own process and must still emit UTF-8; stdout encoding alone does
+    # not control subprocess text decoding in the Action helper.
+    launcher = ("import locale, runpy, sys; locale.getencoding = lambda: 'cp1252'; "
+                "sys.argv = sys.argv[1:]; runpy.run_path(sys.argv[0], run_name='__main__')")
+    env = dict(os.environ, PYTHONUTF8="0", PYTHONIOENCODING="cp1252:strict")
+    env.pop("GITHUB_STEP_SUMMARY", None)
+    if write_summary:
+        env["GITHUB_STEP_SUMMARY"] = str(summary)
+    result = subprocess.run([sys.executable, "-c", launcher, str(ROOT / "scripts" / "action_prepare.py"),
+                             "summary", str(meta)], cwd=tmp_path, capture_output=True,
+                            env=env)
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    text = summary.read_text(encoding="utf-8") if write_summary else result.stdout.decode("utf-8")
+    assert f"Run Northwind {name} exports." in text

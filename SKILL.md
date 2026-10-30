@@ -115,7 +115,9 @@ Checks (`describe`, `topics`, `labels`, `readme`, `footer`, `meta`, `fingerprint
 
 CLI stdout and stderr use UTF-8, including redirected Windows output, raw footer markup,
 JSON, help and errors. Decode captured CLI output as UTF-8; JSON keeps Unicode characters
-without ASCII escaping. No `PYTHONIOENCODING` workaround is needed.
+without ASCII escaping. Existing stream error handlers are preserved, so diagnostics
+can still escape undecodable filenames. No `PYTHONIOENCODING` workaround is needed.
+The Action summary and quality validator also decode CLI results as UTF-8.
 
 Contributor tests also decode CLI captures and Markdown fixtures as UTF-8. Action
 shell tests use Git Bash on Windows and an explicit `requires_bash` dependency marker;

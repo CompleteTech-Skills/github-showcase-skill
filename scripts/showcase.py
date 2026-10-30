@@ -1195,7 +1195,10 @@ def main(argv=None) -> int:
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is not None:
-            reconfigure(encoding="utf-8")
+            # Supplying encoding alone resets errors to strict. Keep stderr's
+            # backslashreplace and POSIX stdout's surrogateescape for paths
+            # containing undecodable filesystem bytes.
+            reconfigure(encoding="utf-8", errors=stream.errors)
     cli = parser()
     args, remaining = cli.parse_known_args(argv)
     # Older Python 3.12 argparse stops a '*' positional after an intervening
