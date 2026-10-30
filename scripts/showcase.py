@@ -24,7 +24,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from ctshowcase import STANDARD, __version__  # noqa: E402
-from ctshowcase.errors import CHECK_FAILED, NEEDS_INPUT, OK, USAGE, ShowcaseError  # noqa: E402
+from ctshowcase.errors import CHECK_FAILED, NEEDS_INPUT, OK, USAGE, Refused, ShowcaseError  # noqa: E402
 
 GENERATORS = {"banner", "card", "org-tile", "intro", "contact-sheet", "social-preview", "org-banner"}
 # `enterprise` contract names (org/project/enterprise/content groups) that map onto the original action names
@@ -75,6 +75,30 @@ def _same_slug(args, a: str, b: str) -> bool:
         return False
 
 
+def _gate_origin_owner(args, have: str) -> None:
+    """--assume-repo must never launder an excluded/hold/T3 origin owner past the approval gate: the owner the checkout
+    actually belongs to is checked exactly as it would be without the override (Refused, exit 2)."""
+    try:
+        brand(args, prefer_lock=True).check_owner(have.split("/")[0], allow_t3=getattr(args, "allow_t3", False))
+    except Refused:
+        raise
+    except ShowcaseError:  # no brand data to gate against: nothing further to refuse here
+        pass
+
+
+def assume_meta(args, rd, meta: dict) -> dict:
+    """Without --meta, apply --assume-repo to the identity read from a stale origin (only when an origin slug exists),
+    after the origin owner passes the normal owner gate. Shared by context, meta and fingerprint. Read-only."""
+    assumed = getattr(args, "assume_repo", None)
+    have = _origin_slug(rd) if rd else None
+    if assumed and not args.meta and have:
+        _gate_origin_owner(args, have)
+        owner, _, repo = assumed.partition("/")
+        meta = dict(meta, owner=owner, repo=repo)
+        args._assume_note = f"assume-repo:{assumed} (origin names {have}; the remote is unchanged)"
+    return meta
+
+
 def repo_dir(args) -> Path | None:
     """The target checkout. A missing --repo-dir is a usage error (exit 2). With --meta, the checkout must be the
     repository the metadata describes: run from inside it, or pass --repo-dir DIR / --no-repo-dir explicitly; a checkout
@@ -97,6 +121,7 @@ def repo_dir(args) -> Path | None:
             if assumed and _same_slug(args, want, assumed):
                 # Explicit operator override for a renamed repository whose origin still has the old slug. Read-only:
                 # the skill never rewrites the remote and makes no network call to follow GitHub's rename redirect.
+                _gate_origin_owner(args, have)
                 args._assume_note = f"assume-repo:{assumed} (origin names {have}; the remote is unchanged)"
             else:
                 why = (f"--assume-repo {assumed} does not match the metadata's {want}" if assumed else
@@ -111,6 +136,10 @@ def repo_dir(args) -> Path | None:
                                 "--repo-dir DIR or --no-repo-dir", log="usage")
     args._rd_checked = rd
     return rd
+
+
+def _assume_logs(args) -> list:
+    return [args._assume_note] if getattr(args, "_assume_note", None) else []
 
 
 def default_out(args, rel: str) -> Path:
@@ -132,10 +161,7 @@ def context(args, b=None):
     b = b or brand(args)
     rd = repo_dir(args)
     meta = merged(args.meta, str(rd) if rd else None)
-    assumed = getattr(args, "assume_repo", None)
-    if assumed and not args.meta:  # no metadata to compare: the stale origin slug is replaced by the stated one
-        meta = dict(meta, owner=assumed.split("/")[0], repo=assumed.split("/")[1])
-        args._assume_note = f"assume-repo:{assumed} (origin names {_origin_slug(rd) if rd else None}; the remote is unchanged)"
+    meta = assume_meta(args, rd, meta)
     ctx = RepoContext(b, meta, rd, type_override=getattr(args, "type_override", None))
     if getattr(args, "_assume_note", None):
         ctx.log(args._assume_note)
@@ -617,7 +643,7 @@ def cmd_meta(args):
         m = M.from_gh(args.from_gh)
     else:
         rd = repo_dir(args)
-        m = M.merged(args.meta, str(rd) if rd else None)
+        m = assume_meta(args, rd, M.merged(args.meta, str(rd) if rd else None))
     m["detected"] = detect(m, RepoFacts(m, None if args.from_gh else repo_dir(args)))
     try:
         b = brand(args, prefer_lock=True)
@@ -629,7 +655,9 @@ def cmd_meta(args):
     if args.out:
         Path(args.out).write_text(text, encoding="utf-8")
         return {"command": "meta", "owner": m["owner"], "repo": m["repo"], "result": "ok", "out": args.out,
-                "detected": m["detected"], "logs": []}, OK
+                "detected": m["detected"], "logs": _assume_logs(args)}, OK
+    if getattr(args, "_assume_note", None):
+        sys.stderr.write(args._assume_note + "\n")
     sys.stdout.write(text)
     return None, OK
 
@@ -638,7 +666,7 @@ def cmd_fingerprint(args):
     from ctshowcase import fingerprint as fp
     from ctshowcase.meta import merged
     rd = repo_dir(args)
-    m = merged(args.meta, str(rd) if rd else None)
+    m = assume_meta(args, rd, merged(args.meta, str(rd) if rd else None))
     out_dir = (rd or Path(".")) / args.out_dir if not Path(args.out_dir).is_absolute() else Path(args.out_dir)
     inp = fp.inputs(m, rd)
     f = fp.fingerprint(inp, fp.config_sha256())
@@ -648,7 +676,7 @@ def cmd_fingerprint(args):
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
             fh.write(f"changed={'true' if changed else 'false'}\nfingerprint={f}\n")
     return {"command": "fingerprint", "owner": m.get("owner"), "repo": m.get("repo"), "result": "ok", "fingerprint": f,
-            "changed": changed, "logs": []}, OK
+            "changed": changed, "logs": _assume_logs(args)}, OK
 
 
 def cmd_fonts(args):

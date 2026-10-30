@@ -68,3 +68,40 @@ def test_assume_repo_must_be_owner_slash_repo(tmp_path):
         assert r.returncode == 2, (bad, out)
         assert "--assume-repo expects OWNER/REPO" in out, (bad, out)
         assert "unrecognized arguments" not in out, (bad, out)
+
+
+def _run_cmd(rd, *args, meta=None):
+    pre = ["--meta", str(meta)] if meta else []
+    return subprocess.run([*SHOWCASE, *pre, "--repo-dir", str(rd), *args], cwd=ROOT, capture_output=True, text=True,
+                          encoding="utf-8")
+
+
+def test_fingerprint_and_meta_log_the_override_and_use_the_assumed_identity(tmp_path):
+    rd, meta = _checkout(tmp_path)
+    flag = ("--assume-repo", "northwind-synthetic/new-name")
+    # with --meta: fingerprint exits 0 and carries the note in its logs
+    r = _run_cmd(rd, *flag, "fingerprint", meta=meta)
+    assert r.returncode == 0, (r.stdout, r.stderr)
+    assert any(l.startswith("assume-repo:northwind-synthetic/new-name") for l in json.loads(r.stdout)["logs"])
+    # without --meta: the stale origin slug is replaced for fingerprint and meta alike, and the note is emitted
+    r = _run_cmd(rd, *flag, "--format", "json", "fingerprint")
+    assert json.loads(r.stdout)["repo"] == "new-name", (r.stdout, r.stderr)
+    assert "assume-repo:" in r.stdout
+    r = _run_cmd(rd, *flag, "meta")
+    assert json.loads(r.stdout)["repo"] == "new-name", (r.stdout, r.stderr)
+    assert "assume-repo:northwind-synthetic/new-name" in r.stderr
+    r = _run_cmd(rd, "meta")  # default unchanged: the stale slug stands
+    assert json.loads(r.stdout)["repo"] == "old-name"
+    assert _origin(rd) == OLD
+
+
+def test_assume_repo_does_not_launder_an_excluded_origin_owner(tmp_path):
+    rd, meta = _checkout(tmp_path)
+    excluded = "https://github.com/BunsDev/new-name.git"
+    subprocess.run(["git", "-C", str(rd), "remote", "set-url", "origin", excluded], check=True)
+    base = _run(rd, meta)
+    assert base.returncode == 2, (base.stdout, base.stderr)
+    r = _run(rd, meta, "--assume-repo", "northwind-synthetic/new-name")  # --meta path
+    assert r.returncode == 2 and "excluded owner" in r.stdout + r.stderr, (r.stdout, r.stderr)
+    r = _run_cmd(rd, "--assume-repo", "northwind-synthetic/new-name", "describe")  # no-meta path
+    assert r.returncode == 2 and "excluded owner" in r.stdout + r.stderr, (r.stdout, r.stderr)
