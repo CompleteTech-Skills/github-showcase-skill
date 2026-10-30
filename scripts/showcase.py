@@ -83,33 +83,68 @@ def _parse_slug(s) -> tuple[str, str]:
     return owner, repo
 
 
+UNSPECIFIED_IDENTITY = ("", "unknown")  # load_file() fills a missing owner or repo with this placeholder
+
+
+def _mismatch_error(rd: Path, want: str, have: str) -> ShowcaseError:
+    """The origin-mismatch refusal (default behaviour; the wording is unchanged, the helper is shared)."""
+    return ShowcaseError(f"metadata describes {want} but {rd.resolve()} is a checkout of {have}; pass the right "
+                         "--repo-dir, or --no-repo-dir to use the metadata alone. If "
+                         f"{have} is the old name of {want} (a renamed repository), fix the checkout with "
+                         f"`git remote set-url origin https://github.com/{want}.git` or pass "
+                         f"--assume-repo {want}", log="usage")
+
+
 def _check_assume(args) -> None:
     """Every --assume-repo is checked before any command runs (usage, exit 2): its format, and, when --meta names a
-    repository, that it is the same one. This runs even for commands that never reach repo_dir() (fonts, config, or
-    --no-repo-dir), so a malformed or other-repository override cannot be silently accepted."""
+    repository, that it is the same one. When a checkout is consulted and its origin names a different repository, the
+    origin-mismatch diagnostic is raised (the one repo_dir() would raise), so the checkout and the repair are named.
+    `content links` and `content images` take their slug from --meta or the origin, so they accept the override only
+    with --meta (the accepted run is logged by main())."""
     assumed = getattr(args, "assume_repo", None)
     if assumed is None:
         return
     _parse_slug(assumed)
+    if getattr(args, "command", None) == "content" and getattr(args, "content_action", None) in ("links", "images") \
+            and not getattr(args, "meta", None):
+        raise ShowcaseError("--assume-repo does not apply to content links/images without --meta: their slug comes from "
+                            "the checkout's origin. Pass --meta naming the repository (the run is then logged), or fix the "
+                            f"remote with `git remote set-url origin https://github.com/{assumed}.git`", log="usage")
     if not getattr(args, "meta", None) or getattr(args, "from_gh", None):
         return
     from ctshowcase.meta import load_file
     m = load_file(args.meta)
-    if not (m.get("owner") and m.get("repo")):
-        return  # the checkout's origin supplies the slug; repo_dir() checks it
+    if m.get("owner") in UNSPECIFIED_IDENTITY or m.get("repo") in UNSPECIFIED_IDENTITY:
+        return  # the metadata does not name a repository: the override supplies the identity, nothing to compare
     want = f"{m['owner']}/{m['repo']}"
     if not _same_slug(args, want, assumed):
-        # No checkout is needed for this refusal, so the original origin-mismatch wording (which names a checkout) does
-        # not apply here; the usage error still names both repositories.
+        if not args.no_repo_dir:
+            rd = Path(args.repo_dir if args.repo_dir is not None else ".")
+            have = _origin_slug(rd) if rd.is_dir() else None
+            if have and not _same_slug(args, want, have):
+                raise _mismatch_error(rd, want, have)  # the checkout's own diagnostic, as repo_dir() would raise it
+        # An override naming another repository than --meta never relabels the metadata: the usage error names both.
         raise ShowcaseError(f"--assume-repo {assumed} names another repository than --meta {want}; pass the matching "
                             "--meta, or drop --assume-repo", log="usage")
+
+
+def _assume_line(args, rd, owner, repo) -> str | None:
+    """origin-renamed:OLD->OWNER/REPO when --assume-repo changed the slug a run describes from a checkout (else None).
+    OLD is the checkout's origin slug (or 'unknown' when it has none). Metadata-only runs (no checkout) log nothing."""
+    if not getattr(args, "assume_repo", None) or rd is None or not owner or not repo:
+        return None
+    old = getattr(args, "_assumed_from", None) or _origin_slug(rd) or "unknown"
+    if _same_slug(args, old, f"{owner}/{repo}"):
+        return None
+    return f"origin-renamed:{old}->{owner}/{repo}"
 
 
 def _apply_assume(args, meta: dict) -> dict:
     """--assume-repo (off by default): the run describes the named repository whatever the checkout's origin says. It
     overrides the metadata's slug only; the remote is never changed. Honoured by every command that resolves the
     repository through context(), cmd_meta and cmd_fingerprint. `content links` and `content images` read their slug
-    from --meta or the checkout's origin (content._owner_repo) and ignore the flag; see tests/test_renamed_origin.py."""
+    from --meta (content._owner_repo): with --meta naming the same repository the override is accepted and logged by
+    main(); without --meta _check_assume() refuses it. See tests/test_renamed_origin.py."""
     if not getattr(args, "assume_repo", None):
         return meta
     owner, repo = _parse_slug(args.assume_repo)
@@ -140,11 +175,7 @@ def repo_dir(args) -> Path | None:
             if assumed and _same_slug(args, want, assumed):
                 args._assumed_from = have  # a renamed repository whose origin was not updated: logged by context()
             else:
-                raise ShowcaseError(f"metadata describes {want} but {rd.resolve()} is a checkout of {have}; pass the right "
-                                    "--repo-dir, or --no-repo-dir to use the metadata alone. If "
-                                    f"{have} is the old name of {want} (a renamed repository), fix the checkout with "
-                                    f"`git remote set-url origin https://github.com/{want}.git` or pass "
-                                    f"--assume-repo {want}", log="usage")
+                raise _mismatch_error(rd, want, have)
         # A different --assume-repo than --meta is refused in _check_assume(), before any command runs.
         if not explicit and have is None:
             raise ShowcaseError(f"--meta {want} without --repo-dir: run from inside that repository's checkout, or pass "
@@ -173,10 +204,9 @@ def context(args, b=None):
     rd = repo_dir(args)
     meta = _apply_assume(args, merged(args.meta, str(rd) if rd else None))
     ctx = RepoContext(b, meta, rd, type_override=getattr(args, "type_override", None))
-    if getattr(args, "assume_repo", None) and rd is not None:
-        old = getattr(args, "_assumed_from", None) or _origin_slug(rd) or "unknown"
-        if not _same_slug(args, old, f"{meta['owner']}/{meta['repo']}"):
-            ctx.log(f"origin-renamed:{old}->{meta['owner']}/{meta['repo']}")
+    line = _assume_line(args, rd, meta.get("owner"), meta.get("repo"))
+    if line:
+        ctx.log(line)
     return ctx
 
 
@@ -646,6 +676,7 @@ def cmd_meta(args):
     from ctshowcase import meta as M
     from ctshowcase.detect import detect
     from ctshowcase.facts import RepoFacts
+    assume_log = None
     if args.from_gh:
         owner = args.from_gh.split("/")[0]
         status = brand(args, prefer_lock=True).owner_status(owner)
@@ -656,6 +687,7 @@ def cmd_meta(args):
     else:
         rd = repo_dir(args)
         m = _apply_assume(args, M.merged(args.meta, str(rd) if rd else None))
+        assume_log = _assume_line(args, rd, m.get("owner"), m.get("repo"))
     m["detected"] = detect(m, RepoFacts(m, None if args.from_gh else repo_dir(args)))
     try:
         b = brand(args, prefer_lock=True)
@@ -667,7 +699,9 @@ def cmd_meta(args):
     if args.out:
         Path(args.out).write_text(text, encoding="utf-8")
         return {"command": "meta", "owner": m["owner"], "repo": m["repo"], "result": "ok", "out": args.out,
-                "detected": m["detected"], "logs": []}, OK
+                "detected": m["detected"], "logs": [assume_log] if assume_log else []}, OK
+    if assume_log and not args.quiet:  # stdout carries the bare metadata JSON, so the audit line goes to stderr
+        print(f"meta: {assume_log}", file=sys.stderr)
     sys.stdout.write(text)
     return None, OK
 
@@ -677,6 +711,7 @@ def cmd_fingerprint(args):
     from ctshowcase.meta import merged
     rd = repo_dir(args)
     m = _apply_assume(args, merged(args.meta, str(rd) if rd else None))
+    assume_log = _assume_line(args, rd, m.get("owner"), m.get("repo"))
     out_dir = (rd or Path(".")) / args.out_dir if not Path(args.out_dir).is_absolute() else Path(args.out_dir)
     inp = fp.inputs(m, rd)
     f = fp.fingerprint(inp, fp.config_sha256())
@@ -686,7 +721,7 @@ def cmd_fingerprint(args):
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
             fh.write(f"changed={'true' if changed else 'false'}\nfingerprint={f}\n")
     return {"command": "fingerprint", "owner": m.get("owner"), "repo": m.get("repo"), "result": "ok", "fingerprint": f,
-            "changed": changed, "logs": []}, OK
+            "changed": changed, "logs": [assume_log] if assume_log else []}, OK
 
 
 def cmd_fonts(args):
@@ -1285,6 +1320,10 @@ def _main(argv=None) -> int:
     try:
         _check_assume(args)
         obj, code = args.func(args)
+        if getattr(args, "content_action", None) in ("links", "images") and isinstance(obj, dict):
+            line = _assume_line(args, getattr(args, "_rd_checked", None), obj.get("owner"), obj.get("repo"))
+            if line:
+                obj["logs"] = list(obj.get("logs") or []) + [line]
     except ShowcaseError as exc:
         obj = {"command": args.command, "result": "refused" if exc.code == USAGE and exc.log in ("hold", "t3-signoff", "exempt")
                else exc.log.split(":")[0], "error": str(exc), "logs": [exc.log]}

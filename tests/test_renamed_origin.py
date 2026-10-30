@@ -12,6 +12,9 @@ Two groups of tests live here:
 - The `--assume-repo` tests (E6.3.2) cover the explicit override in `scripts/showcase.py` (`_parse_slug`,
   `_check_assume`, `_apply_assume`, `repo_dir`). They depend on that change and fail on the base commit 2be04ac, as
   intended. The override is off by default; without the flag the guards above still apply.
+- The content tests pin `content links` / `content images`: accepted and logged with `--meta` naming the override's
+  repository, refused without `--meta` (their slug comes from the origin). The fingerprint, meta and stderr tests pin
+  the `origin-renamed` audit line for the other commands.
 """
 from __future__ import annotations
 
@@ -160,14 +163,101 @@ def test_assume_repo_is_not_silently_ignored_for_meta_only_commands(tmp_path):
     assert "must be OWNER/REPO" in r.stdout, (r.stdout, r.stderr)
 
 
-def test_content_links_ignore_assume_repo_documented_limitation(tmp_path):
-    """`content links` takes its slug from --meta or the checkout's origin (content._owner_repo), not from the
-    override. This pins the limitation that SKILL.md states (review A1): the run reports the origin slug and logs no
-    origin-renamed entry. Operators who need the new slug pass --meta with it."""
+def _readme(co):
+    (co / "README.md").write_text("# new-name\n\nSee [docs](https://example.com/x).\n", encoding="utf-8")
+
+
+def test_content_links_with_meta_and_assume_is_logged(tmp_path):
+    """`content links` takes its slug from --meta (content._owner_repo). With --meta naming the override's repository
+    the run is accepted, reports that slug, and logs the rename (main() adds it to the content result)."""
+    _need_git()
+    meta, co = _fixture(tmp_path)
+    _readme(co)
+    r = _run(["--meta", str(meta), "--repo-dir", str(co), "--assume-repo", "example-org/new-name", "content", "links"])
+    assert r.returncode != 2, (r.stdout, r.stderr)
+    assert '"repo": "new-name"' in r.stdout, r.stdout
+    assert "origin-renamed:example-org/old-name->example-org/new-name" in r.stdout, r.stdout
+
+
+def test_content_links_without_meta_refuses_assume(tmp_path):
+    """Without --meta the content slug can only come from the origin, which the override cannot change. The flag is
+    therefore refused (usage, exit 2) instead of being silently ignored (review A1, B3)."""
     _need_git()
     _meta, co = _fixture(tmp_path)
-    (co / "README.md").write_text("# new-name\n\nSee [docs](https://example.com/x).\n", encoding="utf-8")
+    _readme(co)
     r = _run(["--repo-dir", str(co), "--assume-repo", "example-org/new-name", "content", "links"])
+    assert r.returncode == 2, (r.stdout, r.stderr)
+    assert '"result": "usage"' in r.stdout, r.stdout
+    assert "without --meta" in r.stdout and "git remote set-url origin" in r.stdout, r.stdout
+
+
+def test_content_images_with_meta_and_assume_is_logged(tmp_path):
+    _need_git()
+    meta, co = _fixture(tmp_path)
+    _readme(co)
+    r = _run(["--meta", str(meta), "--repo-dir", str(co), "--assume-repo", "example-org/new-name", "content", "images"])
     assert r.returncode != 2, (r.stdout, r.stderr)
-    assert '"repo": "old-name"' in r.stdout, r.stdout
+    assert "origin-renamed:example-org/old-name->example-org/new-name" in r.stdout, r.stdout
+
+
+def test_fingerprint_logs_origin_renamed(tmp_path):
+    _need_git()
+    meta, co = _fixture(tmp_path)
+    r = _run(["--meta", str(meta), "--repo-dir", str(co), "--assume-repo", "example-org/new-name", "fingerprint",
+              "--out-dir", "OUT"])
+    assert r.returncode != 2, (r.stdout, r.stderr)
+    assert '"logs": ["origin-renamed:example-org/old-name->example-org/new-name"]' in r.stdout, r.stdout
+
+
+def test_meta_out_logs_origin_renamed(tmp_path):
+    _need_git()
+    meta, co = _fixture(tmp_path)
+    out = tmp_path / "out.json"
+    r = _run(["--meta", str(meta), "--repo-dir", str(co), "--assume-repo", "example-org/new-name", "meta", "--out", str(out)])
+    assert r.returncode != 2, (r.stdout, r.stderr)
+    assert '"logs": ["origin-renamed:example-org/old-name->example-org/new-name"]' in r.stdout, r.stdout
+
+
+def test_meta_stdout_logs_origin_renamed_on_stderr(tmp_path):
+    """Bare metadata JSON on stdout stays clean; the audit line goes to stderr."""
+    _need_git()
+    meta, co = _fixture(tmp_path)
+    r = _run(["--meta", str(meta), "--repo-dir", str(co), "--assume-repo", "example-org/new-name", "meta"])
+    assert r.returncode != 2, (r.stdout, r.stderr)
+    assert "origin-renamed:example-org/old-name->example-org/new-name" in r.stderr, r.stderr
     assert "origin-renamed" not in r.stdout, r.stdout
+
+
+def test_default_run_logs_no_origin_renamed(tmp_path):
+    """Without the flag no origin-renamed line is ever written (a matching origin logs nothing either)."""
+    _need_git()
+    meta, co = _fixture(tmp_path)
+    subprocess.run(["git", "-C", str(co), "remote", "set-url", "origin", "https://github.com/example-org/new-name.git"],
+                   check=True)
+    r = _run(["--meta", str(meta), "--repo-dir", str(co), "--assume-repo", "example-org/new-name", "fingerprint",
+              "--out-dir", "OUT"])
+    assert r.returncode != 2, (r.stdout, r.stderr)
+    assert '"logs": []' in r.stdout, r.stdout
+
+
+def test_other_repo_names_the_checkout_diagnostic(tmp_path):
+    """An override naming another repository than --meta, with a checkout present, raises the checkout's own mismatch
+    diagnostic (the checkout, its origin and the repair), not a bare usage message (review B3)."""
+    _need_git()
+    meta, co = _fixture(tmp_path)
+    r = _run(["--meta", str(meta), "--repo-dir", str(co), "--assume-repo", "example-org/something-else", "describe"])
+    assert r.returncode == 2, (r.stdout, r.stderr)
+    assert "is a checkout of example-org/old-name" in r.stdout, r.stdout
+    assert "git remote set-url origin" in r.stdout, r.stdout
+
+
+def test_partial_metadata_takes_identity_from_override_without_checkout(tmp_path):
+    """Metadata that names no owner or repo (load_file fills 'unknown') is not a conflicting repository: the override
+    supplies the identity (review B2)."""
+    partial = tmp_path / "partial.json"
+    partial.write_text(json.dumps({"description": "A synthetic example repository for tests.",
+                                   "visibility": "public"}), encoding="utf-8")
+    r = _run(["--meta", str(partial), "--no-repo-dir", "--assume-repo", "example-org/new-name", "meta"])
+    assert r.returncode != 2, (r.stdout, r.stderr)
+    assert '"owner": "example-org"' in r.stdout and '"repo": "new-name"' in r.stdout, r.stdout
+    assert "names another repository" not in r.stdout, r.stdout
