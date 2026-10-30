@@ -187,6 +187,7 @@ org profile|about|pins|labels|health|doctor ORG [--registry FILE] [--meta-dir DI
     [--approved FILE] [--approved-yaml FILE] [--actions FILE] [--allow-t3] [--jobs FILE]
     profile: [--out-dir DIR] [--render] [--banner PATH] [--lists FILE] [--email-approved] [--allow-unmeasured]
     pins: [--lists FILE] [--repo-ids FILE]      health/doctor: [--dot-github DIR]
+    labels: [--repos-from-gh] [--checkouts DIR] [--dot-github DIR]
     doctor: [--snapshot FILE] [--avatar PATH] [--doctor-format tsv|json|md] [--header]
 org profile --user CompleteDotTech [--registry FILE] [--meta-dir DIR] [--out-dir DIR] [--render] [--allow-t3]
 project capture-query --owner OWNER --number N
