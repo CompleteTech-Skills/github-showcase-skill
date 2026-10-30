@@ -95,7 +95,7 @@ Size class {SIZE_CLASS}.
 
 GLYPH: {GLYPH_NAME}. {GLYPH_DESCRIPTION}
 SPARK PLACEMENT: {SPARK_PLACEMENT}
-PALETTE: outline {LINE_HEX}, core {CORE_HEX}, glow {GLOW_HEX}; one spark in {SPARK_HEX}.
+PALETTE: outline {LINE_HEX}, glow {GLOW_HEX}; one spark in {SPARK_HEX}.
 The spark is the only filled shape and the only element in {SPARK_HEX}; keep the
 glyph outline in {LINE_HEX} so the spark remains distinct at small sizes.
 

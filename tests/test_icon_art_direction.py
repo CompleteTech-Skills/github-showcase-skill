@@ -46,6 +46,7 @@ def test_bundled_prompt_distinguishes_outline_and_spark(owner, brand, make_ctx):
     assert result["render"]["ink"] != result["render"]["spark"]
     assert f'outline {result["render"]["ink"]}' in result["prompt"]
     assert f'one spark in {result["render"]["spark"]}' in result["prompt"]
+    assert f'core {result["render"]["spark"]}' not in result["prompt"]
     assert "only filled shape" in result["prompt"]
 
 
