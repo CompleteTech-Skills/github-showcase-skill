@@ -365,7 +365,10 @@ def cmd_footer(args):
             b.check_owner(owner)  # raises Refused (exit 2) for excluded, hold and unsigned T3 owners
             if b.owner_status(owner) == "watching":
                 # only the watching org's verdict depends on the repository (fork, `.github`): ask the context
-                why = RepoContext(b, m, None).footer_status()
+                # a fork (GitHub's flag or a `-fork` slug, detect.is_fork rule 1) is exempt from metadata alone, before
+                # any captured rendering config is parsed; only the rest needs the context
+                from ctshowcase.detect import is_fork
+                why = "exempt:watching-fork" if is_fork(m) else RepoContext(b, m, None).footer_status()
             else:
                 # no RepoContext: building one parses the captured rendering config, which this check must not
                 # depend on (a malformed `.github/showcase.yml` in the metadata is not a footer verdict)

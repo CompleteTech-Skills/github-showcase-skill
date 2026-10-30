@@ -1,8 +1,9 @@
 """`footer --check README.md --meta FILE` takes the owner from the metadata and answers like `--org` (E2.3.1).
 
-Every test here fails on the base commit 2be04ac (verified: 7 failed on base, see the commit message). The tests
+Every test here fails on the base commit 2be04ac (verified: 7 failed on base; two more detectors, the org-row tests,
+live in tests/test_footer_meta_guards.py and fail on base too). The tests
 that pin behaviour which must NOT change (default paths, unknown owner, `.github` of the watching org) live in
-tests/test_footer_meta_guards.py: they pass on base by design.
+tests/test_footer_meta_guards.py: they pass on base by design (apart from the org-row detectors noted above).
 
 Synthetic metadata only: owners are public org rows of references/brand.yaml; repository names are invented.
 """
