@@ -81,6 +81,10 @@ def membership_topics(ctx: RepoContext, also_in: list[str]) -> tuple[list[str], 
     return orgs, topics_, logs
 
 
+# Test scope: this unit (task 92) is limited by its acceptance criteria to topics.py and doctor.py. The regression tests
+# for approved topics (vocabulary pass, tech-slot ranking, cap overflow without review-remove, fork on-repo rule, hard
+# drops not overridden, non-string entries ignored) belong to the separately scoped test task and were moved out of this
+# diff on purpose (commit 6f93640, review B3). Absence of tests here is therefore a scoping decision, not an omission.
 def _org_extra(ctx: RepoContext) -> set[str]:
     """Org-approved topics from the org row's `topics_extra` (task 92). Only lowercase strings matching the standard's
     drop_valid pattern count; non-string entries and a non-list value are ignored, and an org without the key gets an
