@@ -1760,7 +1760,14 @@ SIZE_CLASSES = {
     "TALL": "spans close to the full 688 px height and is about 400 to 600 px wide",
     "SQUARE": "a squarish glyph about 600 to 660 px on each side",
     "DIAGONAL": "the mass runs corner to corner inside a 656 × 656 px box"}
-HEX = r"`(#[0-9A-Fa-f]{6})`"
+
+
+def size_class_help() -> str:
+    return "size_class must be one of: " + "; ".join(f"{k} ({v})" for k, v in SIZE_CLASSES.items()) + \
+        " (case-insensitive)"
+
+
+HEX =r"`(#[0-9A-Fa-f]{6})`"
 
 
 def load_art_direction(path=None) -> str:
@@ -1873,6 +1880,7 @@ def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = Non
     B: the illustration template on the light card). The tool fills every mechanical slot from the art direction and
     the repository's facts; the glyph itself is the writer's (needs-writer until `glyph` supplies it)."""
     glyph = {k.upper(): v for k, v in (glyph or {}).items() if v}
+    invalid: dict = {}
     owner, repo = ctx.owner, ctx.repo
     org = org_row(resolver, ctx.brand, owner, require=True)
     org["canonical"], org["current"] = org["brand_key"], current_login(resolver, owner)
@@ -1950,6 +1958,8 @@ def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = Non
         size = str(glyph.get("SIZE_CLASS") or "").upper()
         if size in SIZE_CLASSES:
             slots["SIZE_CLASS"] = f"{size}: {SIZE_CLASSES[size]}"
+        elif size:
+            invalid["SIZE_CLASS"] = f"{glyph['SIZE_CLASS']!r} is not a valid size_class. " + size_class_help()
         for k in ("GLYPH_NAME", "GLYPH_DESCRIPTION", "SPARK_PLACEMENT"):
             if glyph.get(k):
                 slots[k] = glyph[k]
@@ -1975,7 +1985,7 @@ def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = Non
                 prompt = prompt.replace("{" + k + "}", str(v))
     missing = sorted(set(re.findall(r"\{([A-Z_]+)\}", prompt)))
     ink = colours.get("INK") or []
-    return {"prompt": prompt, "missing": missing, "facts": facts, "option": option.upper(),
+    return {"prompt": prompt, "missing": missing, "invalid": invalid, "facts": facts, "option": option.upper(),
             "render": {"ink": ink[0] if ink else None, "spark": ink[1] if len(ink) > 1 else None,
                        "size": [ICON_PX, ICON_PX], "live_area": [LIVE_MARGIN, LIVE_MARGIN, ICON_PX - LIVE_MARGIN,
                                                                  ICON_PX - LIVE_MARGIN], "budget": ICON_BUDGET}}
@@ -2248,7 +2258,7 @@ def add_parser(sub, cli=None):
     a.add_argument("icon_action", choices=("prompt", "normalize", "check"))
     a.add_argument("--option", choices=("A", "B"), default="A", help="q59 option: A Neon Night glyph, B isometric")
     a.add_argument("--glyph", help="YAML/JSON with the writer's glyph_name, glyph_description, spark_placement, "
-                                   "size_class (option B: subject, objects)")
+                                   "size_class (WIDE|TALL|SQUARE|DIAGONAL; option B: subject, objects)")
     a.add_argument("--art-direction", help="art direction file (default: the skill's references/art-direction.md)")
     a.add_argument("--in", dest="src", help="normalize: the returned candidate PNG")
     a.add_argument("--ground", choices=("auto", "transparent", "keep"), default="auto")
@@ -2564,10 +2574,18 @@ def _cmd_icon(args, cli, resolver, head):
             out.parent.mkdir(parents=True, exist_ok=True)
             out.write_text(md, encoding="utf-8")
         logs = ctx.logs + ([f"needs-writer:{s}" for s in res["missing"]])
-        obj = dict(head, result=result, out=str(out) if out else None, missing=res["missing"], facts=res["facts"],
-                   render=res["render"], prompt=res["prompt"], markdown=None if out else md, logs=logs,
-                   note="The glyph is the writer's: fill glyph_name, glyph_description, spark_placement and size_class "
-                        "(--glyph FILE) and re-run until the result is ok; nothing is written before then.")
+        invalid = res["invalid"]
+        if invalid:
+            logs = logs + ["needs-writer:SIZE_CLASS:invalid"]
+        note = ("The glyph is the writer's: fill glyph_name, glyph_description, spark_placement and size_class "
+                "(--glyph FILE) and re-run until the result is ok; nothing is written before then.")
+        if invalid:
+            note += " " + invalid["SIZE_CLASS"]
+        elif "SIZE_CLASS" in res["missing"]:
+            note += " " + size_class_help()
+        obj = dict(head, result=result, out=str(out) if out else None, missing=res["missing"], invalid=invalid,
+                   facts=res["facts"], render=res["render"], prompt=res["prompt"], markdown=None if out else md,
+                   logs=logs, note=note)
         return obj, _code(result)
     ink = []
     try:

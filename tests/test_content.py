@@ -754,3 +754,53 @@ def test_add_parser_registers_every_action():
     content = sub.choices["content"]
     acts = next(a for a in content._actions if isinstance(a, argparse._SubParsersAction))
     assert set(acts.choices) == set(C.ACTIONS)
+
+
+# ---------------------------------------------------------------------------------------------------
+# icon prompt: unrecognised size_class names the allowed values (task #62, E3.3.1)
+# ---------------------------------------------------------------------------------------------------
+def _glyph_with_size(size):
+    return {"glyph_name": "Inbox Tray", "glyph_description": "An open tray seen front-on.",
+            "spark_placement": "held inside the tray", "size_class": size}
+
+
+def test_icon_prompt_invalid_size_class_lists_allowed_values(brand, icon_ctx):
+    res = C.icon_prompt(icon_ctx, resolver(brand), ART, _glyph_with_size("medium"))
+    assert res["missing"] == ["SIZE_CLASS"]
+    text = res["invalid"]["SIZE_CLASS"]
+    assert "medium" in text
+    for allowed in ("WIDE", "TALL", "SQUARE", "DIAGONAL"):
+        assert allowed in text
+
+
+def test_icon_prompt_valid_size_class_has_no_invalid(brand, icon_ctx):
+    res = C.icon_prompt(icon_ctx, resolver(brand), ART, _glyph_with_size("wide"))
+    assert res["invalid"] == {}
+    assert res["missing"] == []
+
+
+def test_icon_prompt_cli_note_names_size_classes(monkeypatch, tmp_path, capsys):
+    monkeypatch.chdir(tmp_path)
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    glyph = tmp_path / "glyph.json"
+    glyph.write_text(json.dumps({"glyph_name": "Inbox", "glyph_description": "An open tray.",
+                                 "spark_placement": "inside the tray", "size_class": "medium"}), encoding="utf-8")
+    out = tmp_path / "prompt.md"
+    args = ["--meta", str(meta), "--no-repo-dir", "content", "icon", "prompt", "--option", "A",
+            "--glyph", str(glyph)]
+    assert C.main(args) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["result"] == "needs-writer"
+    assert "SIZE_CLASS" in result["invalid"]
+    assert "DIAGONAL" in result["note"]
+    assert not out.exists()
+    assert not list(tmp_path.glob("*.md"))
+
+
+def test_size_class_help_lists_every_key():
+    text = C.size_class_help()
+    assert text.startswith("size_class must be one of: ")
+    assert text.endswith("(case-insensitive)")
+    for key in C.SIZE_CLASSES:
+        assert key in text
