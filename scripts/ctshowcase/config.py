@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+from contextvars import ContextVar, Token
 from pathlib import Path
 
 from . import REFERENCES, ROOT
@@ -40,19 +41,23 @@ def canonical(obj) -> str:
     return json.dumps(obj, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
 
 
-_T3_SIGNED_OFF = False
+_T3_SIGNED_OFF: ContextVar[bool] = ContextVar("ctshowcase_t3_signed_off", default=False)
 
 
-def set_t3_signed_off(value: bool) -> None:
+def set_t3_signed_off(value: bool) -> Token:
     """Record the run's `--allow-t3`: set once by the CLI, read by every owner gate (check_owner, art_status,
     footer_status). Off by default, so a T3 owner is refused unless the caller passes the flag after an approved
-    t3-metadata or t3-signoff row."""
-    global _T3_SIGNED_OFF
-    _T3_SIGNED_OFF = bool(value)
+    t3-metadata or t3-signoff row. Context-local (contextvars): threads and asyncio tasks do not see each other's
+    sign-off. Returns a token for reset_t3_signed_off."""
+    return _T3_SIGNED_OFF.set(bool(value))
+
+
+def reset_t3_signed_off(token: Token) -> None:
+    _T3_SIGNED_OFF.reset(token)
 
 
 def t3_signed_off() -> bool:
-    return _T3_SIGNED_OFF
+    return _T3_SIGNED_OFF.get()
 
 
 class Brand:

@@ -1191,13 +1191,13 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main(argv=None) -> int:
-    """Run one invocation. `--allow-t3` holds only for this call: the previous value is restored on every exit."""
-    from ctshowcase.config import set_t3_signed_off, t3_signed_off
-    previous = t3_signed_off()
+    """Run one invocation. `--allow-t3` holds only for this call (and this context): the prior value is restored on every exit."""
+    from ctshowcase.config import reset_t3_signed_off, set_t3_signed_off, t3_signed_off
+    token = set_t3_signed_off(t3_signed_off())
     try:
         return _main(argv)
     finally:
-        set_t3_signed_off(previous)
+        reset_t3_signed_off(token)
 
 
 def _main(argv=None) -> int:

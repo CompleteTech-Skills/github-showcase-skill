@@ -80,3 +80,111 @@ def test_signed_off_t3_org_joins_also_in_and_star_lists(brand):
         assert _star_held(est, "BunsDev") == "excluded"  # sign-off never lifts an excluded owner
     finally:
         set_t3_signed_off(False)
+
+
+# Evidence note for reviewers: the seven tests above this line predate the ContextVar change
+# (they exist at 2be04ac, before be5cb14) and are regression guards for the CLI contract that
+# must keep passing. The five tests from here down are the discriminating ones: run against the
+# tree before be5cb14 they fail with ImportError on `reset_t3_signed_off`.
+
+
+def test_token_reset_restores_each_prior_value():
+    """set_t3_signed_off returns a token; reset_t3_signed_off restores exactly the value before that set."""
+    from ctshowcase.config import reset_t3_signed_off, set_t3_signed_off, t3_signed_off
+    assert t3_signed_off() is False
+    outer = set_t3_signed_off(True)
+    inner = set_t3_signed_off(False)
+    assert t3_signed_off() is False
+    reset_t3_signed_off(inner)
+    assert t3_signed_off() is True
+    reset_t3_signed_off(outer)
+    assert t3_signed_off() is False
+
+
+def test_sign_off_is_invisible_to_a_separate_context():
+    """Sign-off is context-local: code run in a fresh copy of the context (as an embedding host would) stays unsigned."""
+    import contextvars
+    from ctshowcase.config import reset_t3_signed_off, set_t3_signed_off, t3_signed_off
+    seen = []
+    token = set_t3_signed_off(True)
+    try:
+        assert t3_signed_off() is True
+        contextvars.Context().run(lambda: seen.append(t3_signed_off()))
+        assert seen == [False]
+        contextvars.copy_context().run(lambda: seen.append(t3_signed_off()))
+        assert seen == [False, True]
+    finally:
+        reset_t3_signed_off(token)
+    assert t3_signed_off() is False
+
+
+def test_sign_off_does_not_leak_to_a_thread_started_with_an_empty_context():
+    """A thread started while signed off must not see the sign-off on interpreters that do not inherit context."""
+    import sys
+    import threading
+    import pytest
+    if getattr(sys.flags, "thread_inherit_context", False):
+        pytest.skip("this interpreter's threads inherit the caller's context")
+    from ctshowcase.config import reset_t3_signed_off, set_t3_signed_off, t3_signed_off
+    seen = []
+    token = set_t3_signed_off(True)
+    try:
+        worker = threading.Thread(target=lambda: seen.append(t3_signed_off()))
+        worker.start()
+        worker.join()
+    finally:
+        reset_t3_signed_off(token)
+    assert seen == [False]
+
+
+def test_main_restores_the_caller_sign_off_value(capsys):
+    """main() wraps one call in a token: whatever --allow-t3 set inside it is undone, and the caller's value is kept."""
+    import sys
+    from ctshowcase.config import reset_t3_signed_off, set_t3_signed_off, t3_signed_off
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import showcase
+    assert showcase.main(["--allow-t3", "config"]) in (0, 1)
+    capsys.readouterr()
+    assert t3_signed_off() is False
+    token = set_t3_signed_off(True)
+    try:
+        assert showcase.main(["config"]) in (0, 1)
+        capsys.readouterr()
+        assert t3_signed_off() is True
+    finally:
+        reset_t3_signed_off(token)
+
+
+def test_two_concurrent_threads_have_independent_sign_off_at_the_owner_gate(brand):
+    """Acceptance: one thread signed off and one not behave independently; the unsigned one is refused for a T3 owner.
+
+    Each thread sets its own state explicitly, so this also runs where threads inherit the caller's context. The barrier
+    makes both threads hold their state at the same time before either calls the gate."""
+    import threading
+    from ctshowcase.config import reset_t3_signed_off, set_t3_signed_off, t3_signed_off
+    from ctshowcase.errors import Refused
+    barrier = threading.Barrier(2, timeout=10)
+    out: dict[str, tuple] = {}
+
+    def worker(name, signed):
+        token = set_t3_signed_off(signed)
+        try:
+            barrier.wait()  # both states are live at once
+            try:
+                result = ("passed", brand.check_owner("Pick-Your-AI"))
+            except Refused as exc:
+                result = ("refused", exc.log)
+            barrier.wait()  # neither resets until both have checked
+            out[name] = (*result, t3_signed_off())
+        finally:
+            reset_t3_signed_off(token)
+
+    threads = [threading.Thread(target=worker, args=("signed", True)),
+               threading.Thread(target=worker, args=("unsigned", False))]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert out["signed"] == ("passed", "t3", True), out
+    assert out["unsigned"] == ("refused", "t3-signoff", False), out
+    assert t3_signed_off() is False
