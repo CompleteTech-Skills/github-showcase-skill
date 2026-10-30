@@ -16,6 +16,7 @@
 ![Language Python](https://img.shields.io/badge/language-Python-1E3A8A)
 ![Agent skill](https://img.shields.io/badge/agent%20skill-Claude%20%7C%20Codex-005ADD)
 ![License MIT](https://img.shields.io/badge/license-MIT-64748B)
+[![Tests](https://github.com/CompleteTech-Skills/github-showcase-skill/actions/workflows/test-portability.yml/badge.svg)](https://github.com/CompleteTech-Skills/github-showcase-skill/actions/workflows/test-portability.yml)
 <!-- showcase:badges:end -->
 
 <!-- showcase:tagline:start -->
