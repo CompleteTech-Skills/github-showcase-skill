@@ -842,7 +842,14 @@ def cmd_doctor(args):
                                    template_dir=args.template_dir, checkouts=args.checkouts, out=args.out)
         return res, OK
     ctx = context(args)
-    ctx.brand.check_owner(ctx.owner, allow_t3=True)
+    if getattr(args, "strict_owner", False):
+        from ctshowcase.errors import Refused
+        ctx.brand.check_owner(ctx.owner)  # honours the global --allow-t3 via t3_signed_off()
+        if not ctx.brand.org(ctx.owner)["known"]:
+            raise Refused(f"{ctx.owner} is not in brand.yaml; run `showcase.py brand add-org` (dry run by default)",
+                          log="unknown-org")
+    else:
+        ctx.brand.check_owner(ctx.owner, allow_t3=True)
     r = doctor.row(ctx, skill_verdict=args.skill_verdict)
     fmt = args.doctor_format
     if fmt == "tsv":
@@ -1135,6 +1142,9 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--template-dir", help="--estate: checkout of the current template repository")
     s.add_argument("--checkouts", help="--estate: directory of repository checkouts to diff against the template")
     s.add_argument("--out", help="--estate: merge the proposals into this NEW_PROPOSALS.yaml")
+    s.add_argument("--strict-owner", action="store_true", default=False,
+                   help="apply the same owner gate as banner/card/social: refuse a T3 owner without the global --allow-t3 "
+                        "and an owner missing from brand.yaml; off by default")
     _resolver_flags(s, "--estate: ")
     s.set_defaults(func=cmd_doctor)
 
@@ -1230,7 +1240,7 @@ def _main(argv=None) -> int:
     try:
         obj, code = args.func(args)
     except ShowcaseError as exc:
-        obj = {"command": args.command, "result": "refused" if exc.code == USAGE and exc.log in ("hold", "t3-signoff", "exempt")
+        obj = {"command": args.command, "result": "refused" if exc.code == USAGE and exc.log in ("hold", "t3-signoff", "exempt", "unknown-org")
                else exc.log.split(":")[0], "error": str(exc), "logs": [exc.log]}
         code = exc.code
         if args.format == "text" and not args.quiet:
