@@ -1196,7 +1196,8 @@ def parser() -> argparse.ArgumentParser:
 
     # command groups (decisions 5, 14, 15, 18, 21, 23 and 24; COVERAGE gaps): each module registers its own parser, and
     # every org lookup inside them goes through ctshowcase.resolver (old and new logins resolve alike, CQ-03)
-    from ctshowcase import content, org, project
+    from ctshowcase import brand_onboard, content, org, project
+    brand_onboard.register(sub)  # brand add-family / add-org (E6.1.5): dry run by default
     org.register(sub)
     project.register(sub)
     content.add_parser(sub, sys.modules.get(__name__))  # None when loaded by path: content finds showcase.py itself
