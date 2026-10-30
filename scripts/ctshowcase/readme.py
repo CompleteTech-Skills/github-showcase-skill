@@ -235,6 +235,9 @@ def badge_body(ctx: RepoContext, existing: str | None = None) -> str:
     if ctx.det["variant"] != "J":
         return badges_html(ctx) if ctx.det["variant"] == "F" else badges_md(ctx)
     is_legacy = legacy_profile_badges(ctx.brand, existing or "")
+    has_license_row = "![License " in (existing or "") or "![AGPL-3.0 or commercial license]" in (existing or "")
+    if is_legacy and has_license_row and ctx.public and (ctx.meta.get("license") or "").upper() in ("", "NOASSERTION", "OTHER"):
+        return existing  # missing metadata cannot disprove an authored license claim
     if existing and existing.strip() and not generated_badges(existing) and not is_legacy:
         return existing
     body = badges_md(ctx)

@@ -299,3 +299,28 @@ def test_cli_legacy_remote_license_migrates_to_local_without_shrink(make_ctx, tm
     assert "docs/images/badges/type-github-profile.svg" in actual
     assert "docs/images/badges/license-mit.svg" in actual
     assert not any("badge" in f for f in profile_cli(ctx, tmp_path, "lint", "readme")["fails"])
+
+
+@pytest.mark.parametrize("license", [None, "NOASSERTION", "other"])
+@pytest.mark.parametrize("mode", ["upgrade", "header"])
+def test_unknown_license_keeps_authored_legacy_shaped_badge(make_ctx, tmp_path, license, mode):
+    ctx = profile_context(make_ctx, tmp_path, license=license)
+    authored = "![License MIT](https://img.shields.io/badge/license-MIT-64748B)"
+    text = readme.scaffold(ctx)
+    text = text.replace(badge_block(text), authored)
+    if mode == "upgrade":
+        after, removed = readme.upgrade(ctx, text)
+    else:
+        after, removed = readme.header_only(ctx, text), []
+    assert badge_block(after) == authored
+    assert readme.preservation(text, after, removed) == []
+
+
+@pytest.mark.parametrize("license", [None, "NOASSERTION", "other"])
+def test_cli_unknown_license_does_not_erase_authored_badge(make_ctx, tmp_path, license):
+    ctx = profile_context(make_ctx, tmp_path, license=license)
+    authored = "![License MIT](https://img.shields.io/badge/license-MIT-64748B)"
+    text = readme.scaffold(ctx)
+    (tmp_path / "README.md").write_text(text.replace(badge_block(text), authored), encoding="utf-8")
+    profile_cli(ctx, tmp_path, "readme", "--write")
+    assert badge_block((tmp_path / "README.md").read_text(encoding="utf-8")) == authored
