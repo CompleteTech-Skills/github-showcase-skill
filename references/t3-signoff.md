@@ -33,7 +33,7 @@ signoffs:
 | `expires` | yes | date `YYYY-MM-DD`, or a timestamp with `Z` or `+HH:MM`; a timestamp without an offset is invalid |
 | `note` | no | string |
 
-No other fields are allowed.
+No other fields are allowed. The file itself is an object with the one key `signoffs`, a list of record objects; a top-level list, any other top-level key or a non-object entry makes the whole file authorize nothing (`t3-signoff:missing`), as the schema refuses it.
 
 ## Refusals
 
@@ -42,9 +42,11 @@ Each refusal exits 2 with result `refused`.
 | Log | Meaning |
 |---|---|
 | `t3-signoff:no-file` | the flag is on but no record file was given |
-| `t3-signoff:missing` | no approved record for the owner (also an unreadable or non-YAML file) |
+| `t3-signoff:missing` | no approved record for the owner (also an unreadable or non-YAML file, or a file whose envelope breaks the schema) |
 | `t3-signoff:invalid` | the owner has records but every one breaks the schema; the error names the record id and the first problem |
 | `t3-signoff:scope` | the owner has valid approved records but none covers the repository |
 | `t3-signoff:expired` | every covering record is past `expires` |
 
 Excluded owners (`exempt`) and HOLD owners (`hold`) are refused before the record is read. Repository `doctor` stays read-only: it reports R7 `hold` instead of refusing, and under the flag shows the granting record as `signoff_id`.
+
+The owner checked is the one that holds the repository today: a repository named under one org whose approved pending transfer resolves to a T3 org is gated as that T3 org's (org label jobs, favorites and star-List items). A `topics --also-in` association with a signed-off T3 org carries that org's record id on the topics change record (`signoff_id`; `signoff_ids` lists every id when more than one record applies).

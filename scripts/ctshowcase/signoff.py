@@ -144,10 +144,25 @@ def load_records(path: str | Path | None = None) -> list[dict]:
         data = load_yaml_text(path.read_text(encoding="utf-8"))
     except Exception:  # invalid YAML or unreadable file: no usable records, so the gate refuses (t3-signoff:missing)
         return []
-    items = data.get("signoffs") if isinstance(data, dict) else data
-    if not isinstance(items, list):  # `signoffs: 7` and similar: fail closed instead of raising TypeError
-        return []
-    return [r for r in items if isinstance(r, dict)]
+    # the envelope is checked before any record is read (a top-level list or an extra key never authorizes)
+    return list(_envelope(data))
+
+
+def _envelope(data) -> tuple[dict, ...]:
+    """The records of a file whose envelope conforms to references/t3-signoff.schema.json, else none at all.
+
+    The schema's root is an object with exactly one property, `signoffs`, an array of record objects
+    (additionalProperties false). Anything else (a top-level list, an extra top-level key, `signoffs: 7`, a scalar
+    or a list entry in `signoffs`) is a file an external validator of the estate bundle refuses, so the whole file
+    authorizes nothing and the gate refuses t3-signoff:missing, as for unparsable YAML. Records that break the schema
+    one by one are still judged per record (problems(), t3-signoff:invalid).
+    (tests/test_t3_signoff_require.py::test_file_envelope_follows_the_schema)"""
+    if not isinstance(data, dict) or set(data) != {"signoffs"}:
+        return ()
+    items = data["signoffs"]
+    if not isinstance(items, list) or not all(isinstance(r, dict) for r in items):
+        return ()
+    return tuple(items)
 
 
 # The string forms references/t3-signoff.schema.json permits ($defs.date and $defs.awareTimestamp), checked before

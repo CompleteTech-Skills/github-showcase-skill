@@ -366,9 +366,19 @@ def public_favorites(estate: Estate, reg: dict, *, allow_t3: bool = False) -> tu
 
 
 def _t3_held(estate: Estate, full: str, allow_t3: bool) -> bool:
-    """A repository of a T3 org (any of its logins) before co-owner sign-off: never named on a public profile."""
-    return "/" in (full or "") and estate.resolver.owner_status(full.split("/")[0]) == "t3" \
-        and not (allow_t3 and _t3_granted(full.split("/")[0], full.split("/")[1]))
+    """A repository of a T3 org (any of its logins) before co-owner sign-off: never named on a public profile.
+    Both the slug as named and the slug it has today (estate.current: an approved pending transfer) are checked, so a
+    favorite named under a T1 org but held by a T3 org today is still held, and under --require-t3-signoff it needs
+    a record for the T3 org that holds it (tests/test_t3_signoff_require.py
+    ::test_favorite_transferred_to_a_t3_org_is_held_without_its_record)."""
+    if "/" not in (full or ""):
+        return False
+    r = estate.resolver
+    for slug in dict.fromkeys([full, estate.current(r.slug(full))]):
+        owner, _, name = slug.partition("/")
+        if r.owner_status(owner) == "t3" and not (allow_t3 and _t3_granted(owner, name)):
+            return True
+    return False
 
 
 def public_slice(estate: Estate, org: str, lists_capture: dict | None = None, *,
@@ -1799,6 +1809,18 @@ def labels_plan(estate: Estate, org: str, *, allow_t3: bool = False, checkouts: 
         m = estate.meta(f"{login}/{n}")
         full = estate.current(f"{login}/{n}")  # labels are written where the repository is today
         current_owner, current_name = full.split("/", 1)
+        if not estate.resolver.same(current_owner, login) and estate.resolver.owner_status(current_owner) == "t3":
+            # An approved pending transfer: the label jobs target the T3 org that holds the repository today, so it
+            # passes that org's gate (--allow-t3 and, under --require-t3-signoff, its record; check_owner also
+            # registers the grant that stamps signoff_id on these jobs). The org gate above only saw LOGIN.
+            # (tests/test_t3_signoff_require.py::test_org_labels_gate_the_t3_owner_a_transfer_resolves_to)
+            from .errors import Refused
+            try:
+                estate.resolver.check_owner(current_owner, allow_t3=allow_t3, repo=current_name)
+            except Refused as exc:
+                repos.append({"repo": full, "result": "held", "log": exc.log})
+                logs.append(f"{exc.log}:{full}")
+                continue
         if m is None or m.get("error") and "labels" not in m:
             repos.append({"repo": full, "result": "unknown", "log": "needs-input:metadata"})
             continue
@@ -1885,7 +1907,7 @@ def labels_plan(estate: Estate, org: str, *, allow_t3: bool = False, checkouts: 
     if unknown:
         logs.append(f"needs-input:metadata:{len(unknown)}")
     # a rename rule 0 could not check, or labels that were not captured, is never a pass
-    held = any(x.get("held") or x.get("log") == "needs-input:labels" for x in repos)
+    held = any(x.get("held") or x.get("result") == "held" or x.get("log") == "needs-input:labels" for x in repos)
     return {"command": "org", "action": "labels", "owner": login, "result": "incomplete" if held else "plan" if jobs else "pass",
             "repos": repos, "jobs": jobs, "logs": sorted(set(logs))}, OK
 

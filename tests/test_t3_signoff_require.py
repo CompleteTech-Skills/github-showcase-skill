@@ -664,3 +664,144 @@ def test_t1_star_list_item_for_a_t3_favorite_carries_the_favorites_signoff(tmp_p
         signoff.restore(run)
         signoff.reset_required(req)
         reset_t3_signed_off(t3)
+
+
+# --- review round 4: evidence for each fixed finding (synthetic records and slugs only) ---
+
+T1 = "CompleteTech-Skills"  # a brand.yaml T1 org; the transfer below is synthetic
+
+
+def _transfer_estate(brand, favorites=()):
+    """A synthetic approved pending transfer: the registry homes northwind-member in T1, but the repository is still
+    held by the T3 org (Pick-Your-AI) and its metadata was captured there, so estate.current() resolves to the T3 org."""
+    from ctshowcase import labels as L, org as O
+    from ctshowcase.resolver import Resolver
+    approvals = {"rows": set(), "ids": {"mv-synthetic"}, "answers": {}, "extra": [], "actions": [
+        {"id": "mv-synthetic", "action": "transfer", "owner": OWNER, "repo": "northwind-member", "target_owner": T1}]}
+    labels = [dict(lb) for lb in L.standard_labels()][:-2]  # two standard labels missing: create jobs are planned
+    reg = {"orgs": {T1: {"final_repos": ["northwind-member"], "favorites": [{"full_name": f} for f in favorites],
+                         "star_list": {"name": "Misc", "description": ""}}}}
+    est = O.Estate(brand, Resolver(brand, reg, approvals), {"m": {
+        "owner": OWNER, "repo": "northwind-member", "visibility": "public", "labels": labels, "has_issues": True,
+        "files": [], "files_complete": True}})
+    assert est.current(f"{T1}/northwind-member") == f"{OWNER}/northwind-member"
+    return est, reg
+
+
+class _Strict:
+    """`--allow-t3` (unless allow_t3=False) plus `--require-t3-signoff` in this context, reading the given file."""
+
+    def __init__(self, monkeypatch, path, allow_t3=True):
+        self.monkeypatch, self.path, self.allow_t3 = monkeypatch, path, allow_t3
+
+    def __enter__(self):
+        from ctshowcase import signoff
+        from ctshowcase.config import set_t3_signed_off
+        self.monkeypatch.setenv("SHOWCASE_T3_SIGNOFF_FILE", str(self.path))
+        self.tokens = (set_t3_signed_off(self.allow_t3), signoff.set_required(True), signoff.reset())
+        return self
+
+    def __exit__(self, *exc):
+        from ctshowcase import signoff
+        from ctshowcase.config import reset_t3_signed_off
+        t3, req, run = self.tokens
+        signoff.restore(run)
+        signoff.reset_required(req)
+        reset_t3_signed_off(t3)
+
+
+def test_org_labels_gate_the_t3_owner_a_transfer_resolves_to(tmp_path, monkeypatch, brand):
+    """`org labels CompleteTech-Skills` with a member whose approved pending transfer resolves to Pick-Your-AI: the
+    label jobs target the T3 org, so they need its record. Before, the org gate only saw the T1 org, and an empty
+    record file still produced `gh label create ... -R Pick-Your-AI/northwind-member` jobs with no signoff_id."""
+    from ctshowcase import org as O, signoff
+    est, _ = _transfer_estate(brand)
+    with _Strict(monkeypatch, _file(_bundle(tmp_path / "none", []))):
+        res, _ = O.labels_plan(est, T1, allow_t3=True)
+        assert not [j for j in res["jobs"] if f"{OWNER}/northwind-member" in j.get("argv", [])], res["jobs"]
+        assert res["repos"] == [{"repo": f"{OWNER}/northwind-member", "result": "held", "log": "t3-signoff:missing"}]
+        assert res["result"] == "incomplete", res
+    with _Strict(monkeypatch, _file(_bundle(tmp_path / "ok", [{"id": "t3s-lbl", "repos": ["northwind-member"]}]))):
+        res, _ = O.labels_plan(est, T1, allow_t3=True)
+        jobs = [j for j in res["jobs"] if f"{OWNER}/northwind-member" in j.get("argv", [])]
+        assert jobs, res
+        signoff.stamp(jobs)  # showcase.main stamps every emitted job list the same way
+        assert all(j["signoff_id"] == "t3s-lbl" for j in jobs), jobs
+    # no --allow-t3: the T3 org that holds the repository today is held like any T3 org (decision 12)
+    with _Strict(monkeypatch, _file(_bundle(tmp_path / "noflag", [{"id": "t3s-x"}])), allow_t3=False):
+        res, _ = O.labels_plan(est, T1, allow_t3=False)
+        assert res["repos"][0]["result"] == "held" and res["repos"][0]["log"] == "t3-signoff", res
+
+
+def test_favorite_transferred_to_a_t3_org_is_held_without_its_record(tmp_path, monkeypatch, brand):
+    """A favorite named CompleteTech-Skills/northwind-member resolves to Pick-Your-AI/northwind-member. _t3_held
+    checked only the named (T1) owner, so with an empty record file the favorite went public and `org pins` planned
+    updateUserListsForItem for it, unstamped."""
+    from ctshowcase import org as O
+    fav = f"{T1}/northwind-member"
+    est, reg = _transfer_estate(brand, favorites=[fav])
+    lists = json.loads((ROOT / "tests" / "fixtures" / "org" / "star-lists.json").read_text(encoding="utf-8"))
+    ids = {f"{OWNER}/northwind-member": "R_synthetic"}
+    with _Strict(monkeypatch, _file(_bundle(tmp_path / "none", []))):
+        favs, logs = O.public_favorites(est, reg["orgs"][T1], allow_t3=True)
+        assert favs == [] and logs == [f"t3-signoff:{fav}"], (favs, logs)
+        plan = O.star_list_plan(est, T1, lists_capture=lists, allow_t3=True, repo_ids=ids)
+        assert not [j for j in plan["jobs"] if "list-item" in j["id"]], plan["jobs"]
+    with _Strict(monkeypatch, _file(_bundle(tmp_path / "ok", [{"id": "t3s-fv", "repos": ["northwind-member"]}]))):
+        favs, _ = O.public_favorites(est, reg["orgs"][T1], allow_t3=True)
+        assert favs == [f"{OWNER}/northwind-member"], favs
+        plan = O.star_list_plan(est, T1, lists_capture=lists, allow_t3=True, repo_ids=ids)
+        items = [j for j in plan["jobs"] if "list-item" in j["id"]]
+        assert len(items) == 1 and items[0]["signoff_id"] == "t3s-fv", plan["jobs"]
+
+
+def test_t3_also_in_association_carries_its_signoff_id(tmp_path):
+    """`topics --also-in Pick-Your-AI --records` on a T1 repository: the record that let the T3 membership topic in
+    is named on the change record. Before, granted() verified it without keeping it and stamp() looked only at the T1
+    target owner, so the change record that adds the T3 topic had no signoff_id."""
+    from ctshowcase.config import load_brand
+    from ctshowcase.topics import org_topic
+    topic = org_topic(load_brand(), OWNER)[1]
+    assert topic
+    b = _bundle(tmp_path, [{"id": "t3s-assoc"}])
+    out = tmp_path / "rec.jsonl"
+    r = _run(tmp_path, b, "--require-t3-signoff", "--allow-t3", "topics", "--also-in", OWNER, "--records", str(out),
+             owner=T1)
+    obj = json.loads(r.stdout)
+    assert topic in obj["proposed"] and obj.get("signoff_ids") == ["t3s-assoc"], _out(r)
+    recs = [json.loads(x) for x in out.read_text(encoding="utf-8").splitlines()]
+    assert len(recs) == 1 and recs[0]["owner"] == T1 and topic in recs[0]["after"], recs
+    assert recs[0]["signoff_id"] == "t3s-assoc" and "approval_id" not in recs[0], recs
+    plain = tmp_path / "plain.jsonl"  # without the flag: no key, behaviour unchanged
+    r = _run(tmp_path, b, "--allow-t3", "topics", "--also-in", OWNER, "--records", str(plain), owner=T1)
+    assert "signoff_ids" not in json.loads(r.stdout), r.stdout
+    assert all("signoff_id" not in json.loads(x) for x in plain.read_text(encoding="utf-8").splitlines())
+
+
+_GOOD = {"id": "t3s-env", "owner": OWNER, "repos": ["*"], "approved": True, "approver": "synthetic-co-owner",
+         "approved_on": "2026-01-15", "expires": "2099-12-31"}
+
+
+@pytest.mark.parametrize("doc,ok", [
+    ({"signoffs": [_GOOD]}, True),
+    ([_GOOD], False),                                # top-level list (schema: type object)
+    ({"signoffs": [_GOOD], "extra": True}, False),    # unsupported top-level key (additionalProperties false)
+    ({"signoffs": [_GOOD, "t3s-scalar"]}, False),     # a non-object entry (items: record)
+    ({"signoffs": _GOOD}, False),                     # signoffs not an array
+    ({}, False),                                      # signoffs missing (required)
+])
+def test_file_envelope_follows_the_schema(tmp_path, doc, ok):
+    """The record file's envelope is checked before any record is read: a structure the published schema refuses
+    authorizes nothing (t3-signoff:missing, like unparsable YAML). Before, a top-level list or an extra top-level key
+    still granted --allow-t3 (exit 0)."""
+    d = tmp_path / "bundle" / "decisions"
+    d.mkdir(parents=True)
+    (d / "t3-signoffs.yaml").write_text(json.dumps(doc), encoding="utf-8")  # JSON is YAML
+    r = _run(tmp_path, tmp_path / "bundle", "--require-t3-signoff", "--allow-t3", "describe")
+    if ok:
+        assert r.returncode != 2 and "t3-signoff" not in _out(r), _out(r)
+    else:
+        assert r.returncode == 2 and "t3-signoff:missing" in _out(r) and "Traceback" not in _out(r), _out(r)
+    jsonschema = pytest.importorskip("jsonschema")
+    schema = json.loads((ROOT / "references" / "t3-signoff.schema.json").read_text(encoding="utf-8"))
+    assert jsonschema.Draft202012Validator(schema).is_valid(doc) is ok
