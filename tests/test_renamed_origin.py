@@ -1,5 +1,10 @@
 """A checkout whose `origin` still names the old repository name is refused by default (usage, exit 2); a case-only
-difference in the same name is accepted. Synthetic names only: example-org, old-name, new-name."""
+difference in the same name is accepted. Synthetic names only: example-org, old-name, new-name.
+
+These are regression guards, not a reproduction of a defect. The refusal is the existing check in
+`scripts/showcase.py::repo_dir` (review A4, via `_same_slug`), and both tests already pass on the base commit 2be04ac
+(verified by exporting that commit to a scratch directory and running this file there: 2 passed). No source change is
+needed, and none should be made to satisfy this file. Do not mark them xfail: the behaviour they pin is correct."""
 from __future__ import annotations
 
 import json
