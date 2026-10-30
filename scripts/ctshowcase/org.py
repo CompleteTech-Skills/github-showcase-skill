@@ -662,6 +662,9 @@ def load_denylist(path: str) -> tuple[set[str], set[str]]:
     return set(slugs.values()), set(names.values())
 
 
+_GH_HOST = r"((?:[a-z0-9]+\.)?(?:github\.com|githubusercontent\.com))"
+
+
 def denylist_leaks(text: str, slugs: set[str], names: set[str]) -> list[str]:
     """`lint public-leak --denylist` for one file. Hits name only the kind and the scanned file's line number
     (`denied-slug:L3`, `denied-name:L5`, `private-name:L3`): the denylist is private, so its entries are never echoed.
@@ -670,7 +673,7 @@ def denylist_leaks(text: str, slugs: set[str], names: set[str]) -> list[str]:
     hits: set[str] = set()
 
     def rx(x: str, lead: str) -> "re.Pattern[str]":
-        return re.compile(rf"(?<!{lead}){re.escape(x.lower())}(?:\.git)?(?![a-z0-9_-])(?!\.[a-z0-9_-])")
+        return re.compile(rf"(?<!{lead}){re.escape(x.lower())}(?:\.git)?(?![a-z0-9_-])(?!\.+[a-z0-9_-])")
 
     slug_res = [rx(x, "[a-z0-9_.-]") for x in slugs]
     name_res = [rx(x, "[a-z0-9._-]") for x in names]
@@ -684,7 +687,11 @@ def denylist_leaks(text: str, slugs: set[str], names: set[str]) -> list[str]:
         # not a name; `\1` keeps the matched host so a dotted repository name such as `mirror-github.com` survives; the host must start at a hostname boundary, so
         # a custom mirror host such as `mirror-github.com/<name>` is not masked,
         # and `github.com` inside another host's path (`mirror.example/github.com/<name>`) is a path segment, not an authority: only `://` or a bare host start counts.
-        bare = re.sub(r"(?:(?<=://)|(?<![a-z0-9_./-]))((?:[a-z0-9]+\.)?(?:github\.com|githubusercontent\.com))[/:][a-z0-9-]+", r"\1/_", low)
+        # Scheme URLs may carry userinfo and a port (`https://u@github.com:443/<owner>`); a bare host or SCP remote may
+        # carry `user@` only at a token start, so `@` after a path slash (`mirror.example/@github.com/<name>`) never
+        # makes the host an authority.
+        bare = re.sub(rf"(?<=://)(?:[^\s/@]+@)?{_GH_HOST}(?::\d+)?/[a-z0-9-]+", r"\1/_", low)
+        bare = re.sub(rf"(?<![a-z0-9_./@:-])(?:[a-z0-9_.-]+@)?{_GH_HOST}[/:][a-z0-9-]+", r"\1/_", bare)
         slug_hit = any(r.search(low) for r in slug_res)
         if slug_hit:
             hits.add(f"denied-slug:L{n}")

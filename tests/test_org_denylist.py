@@ -258,3 +258,17 @@ def test_denylist_leaks_dot_underscore_hyphen_suffix_is_a_different_repository()
         assert O.denylist_leaks(other, set(), {"app"}) == [], other
     for hit in ("https://github.com/northwind/app.", "https://github.com/northwind/app.git", "northwind/app,"):
         assert O.denylist_leaks(hit, {"northwind/app"}, set()) == ["denied-slug:L1"], hit
+
+
+def test_denylist_owner_mask_review_b_round_three():
+    # `@` after a path slash of another host does not make github.com an authority: the name still hits.
+    assert _hits("https://mirror.example/@github.com/ledger", names=["ledger"]) == ["denied-name:L1"]
+    # an explicit port belongs to the authority; the owner position stays exempt, the repository is clean.
+    assert _hits("https://github.com:443/ledger/public-project", names=["ledger"]) == []
+    # userinfo and SCP `git@` owners stay exempt
+    assert _hits("https://u@github.com/ledger/x", names=["ledger"]) == []
+    assert _hits("git@github.com:ledger/x", names=["ledger"]) == []
+    # `app..public` is a different repository from `app`; terminal punctuation and `.git` still count
+    assert _hits("https://github.com/northwind/app..public", slugs=["northwind/app"]) == []
+    assert _hits("https://github.com/northwind/app.git", slugs=["northwind/app"]) == ["denied-slug:L1"]
+    assert _hits("see northwind/app.", slugs=["northwind/app"]) == ["denied-slug:L1"]
