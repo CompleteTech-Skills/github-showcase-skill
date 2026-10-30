@@ -25,7 +25,7 @@ types:
   discord-bot:      {variant: C, category: Discord bot}
   bot:              {variant: C, category: Bot}
   game:             {variant: E, category: Game}
-  mobile-app:       {variant: B, category: Mobile app}
+  mobile-app:       {variant: B, variant_tuned: K, category: Mobile app}
   infrastructure:   {variant: C, variant_private: I, category: Infrastructure}
   website:          {variant: B, category: Website}
   hardware:         {variant: C, variant_private: I, category: Hardware}

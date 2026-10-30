@@ -44,9 +44,20 @@ def override_icon(text: str) -> str | None:
     return None
 
 
+def _manifest_override_text(meta: dict) -> str:
+    """The override text `meta --from-gh` captured, the metadata-only path's override (config.override_from_manifests)."""
+    from .config import REPO_CONFIG_NAMES
+    for name in REPO_CONFIG_NAMES:
+        text = (meta.get("manifests") or {}).get(name)
+        if isinstance(text, str) and text.strip():
+            return text
+    return ""
+
+
 def inputs(meta: dict, repo_dir: str | Path | None) -> dict:
     rd = Path(repo_dir) if repo_dir else None
     override = None
+    override_text = ""
     icon = None
     if rd is not None:
         for n in (".github/showcase.yml", ".github/showcase.yaml"):
@@ -55,19 +66,32 @@ def inputs(meta: dict, repo_dir: str | Path | None) -> dict:
                 break
         icon = rd / "assets" / "icon.png"
         if override is not None:
-            v = override_icon(override.read_text(encoding="utf-8"))
+            override_text = override.read_text(encoding="utf-8")
+            v = override_icon(override_text)
             if v:
                 icon = rd / v
+    # The detected type picks the README variant and the eyebrow: a new type (code landed) regenerates. The override's
+    # detect_tuned flag changes the type (rules 24-25), but this stdlib-only step cannot tell whether the renderer honours
+    # it (a `for:` written for another repository is dropped; flow-style YAML needs PyYAML). So when the override names
+    # the key at all, both the untuned and the tuned type are recorded: a change to either regenerates, whichever one the
+    # renderer uses. An override that never names the key records only `type`, exactly as before.
+    flag_text = override_text if rd is not None else _manifest_override_text(meta)
+    names_flag = "detect_tuned" in flag_text
     try:  # the detected type picks the README variant and the eyebrow: a new type (code landed) regenerates
         from .detect import detect
         from .facts import RepoFacts
-        type_ = detect(meta, RepoFacts(meta, rd))["type"]
+        facts = RepoFacts(meta, rd)
+        type_ = detect(meta, facts)["type"]
+        tuned_type = detect(meta, facts, {"detect_tuned": True})["type"] if names_flag else None
     except Exception:  # noqa: BLE001 - the fingerprint must never fail the stdlib-only Action step
-        type_ = None
-    return {"owner": meta.get("owner"), "repo": meta.get("repo"), "type": type_, "description": meta.get("description") or "",
-            "topics": sorted(meta.get("topics") or []), "visibility": meta.get("visibility"),
-            "license": meta.get("license"), "language": meta.get("language"),
-            "icon_sha256": _sha(icon), "override_sha256": _sha(override)}
+        type_ = tuned_type = None
+    out = {"owner": meta.get("owner"), "repo": meta.get("repo"), "type": type_, "description": meta.get("description") or "",
+           "topics": sorted(meta.get("topics") or []), "visibility": meta.get("visibility"),
+           "license": meta.get("license"), "language": meta.get("language"),
+           "icon_sha256": _sha(icon), "override_sha256": _sha(override)}
+    if names_flag:
+        out["type_tuned"] = tuned_type
+    return out
 
 
 def fingerprint(inp: dict, cfg_sha: str) -> str:

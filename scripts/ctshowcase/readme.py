@@ -373,7 +373,7 @@ def footer_wanted(ctx) -> bool:
 
 
 def callout(ctx) -> str | None:
-    if ctx.det["variant"] == "I" or (not ctx.public and ctx.det["variant"] in "ABCDE"):
+    if ctx.det["variant"] == "I" or (not ctx.public and ctx.det["variant"] in "ABCDEK"):
         who = "Touched By An Agent" if ctx.same_owner("TouchedByAnAgent") else ctx.company
         return f"> [!IMPORTANT]\n> Internal {who} repository. Not for distribution."
     return None

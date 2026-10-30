@@ -10,6 +10,6 @@ category: null            # replaces the eyebrow category (rare; logged)
 chips:                    # 1-2 key chips and up to 3 attribute chips; replaces the derived chips (logged rule "override")
   key: ["CVE-2026-109618", "CVE-2026-109619"]
   attrs: ["No exploit payloads"]
-variant: null             # README variant A-J; else detected from the repository type
+variant: null             # README variant A-K; else detected from the repository type
 readme: {header: true, footer: true}   # false only together with a reason; doctor then reports n/a(reason)
 reason: null

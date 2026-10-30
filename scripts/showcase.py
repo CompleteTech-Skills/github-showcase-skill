@@ -1024,7 +1024,7 @@ def parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("readme", help="scaffold or upgrade README.md to its §7 variant (dry run by default)")
     s.add_argument("--mode", choices=("auto", "scaffold", "upgrade", "header"), default="auto")
-    s.add_argument("--variant", default="auto", choices=("auto", *"ABCDEFGHIJ"))
+    s.add_argument("--variant", default="auto", choices=("auto", *"ABCDEFGHIJK"))
     s.add_argument("--write", action="store_true")
     s.add_argument("--diff", action="store_true")
     s.add_argument("--records")

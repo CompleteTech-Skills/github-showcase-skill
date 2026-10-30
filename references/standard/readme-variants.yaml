@@ -17,6 +17,7 @@ variants:
   H: []
   I: [[About, R], [Setup, R], [Usage, R], [Runbook, O], [Ownership, R], [License, R]]
   J: [[About, R], [Files, R], [License, R]]
+  K: [[About, R], [Features, R], [Tech Stack, R], [Install, R], [Build and Run, O], [Status, O], [License, R]]
 aliases_for_status: {D: {Findings: [Status]}}
 renames:
   installation: Install

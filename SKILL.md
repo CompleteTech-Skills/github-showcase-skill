@@ -182,7 +182,7 @@ org-tile --org OWNER [--avatar PATH] [--illustration PATH] [--out PATH] [--png P
 intro (--profile CompleteDotTech | --org OWNER) [--name TEXT] [--eyebrow TEXT] [--tagline TEXT]
       [--chip key:TEXT] [--chip attr:TEXT]... [--mark PATH] [--height 320|360] [--static] [--out assets/intro.svg]
 footer [--check README.md [--online]] [--org OWNER] [--raw]
-readme [--mode auto|scaffold|upgrade|header] [--variant auto|A|B|C|D|E|F|G|H|I|J]
+readme [--mode auto|scaffold|upgrade|header] [--variant auto|A|B|C|D|E|F|G|H|I|J|K]
        [--write] [--diff] [--records FILE] [--bootstrap]
 lint svg --kind intro|card|tile|plate|divider FILE...
 lint readme [README.md] [--variant auto]
@@ -285,6 +285,7 @@ These user decisions outrank `STANDARD.md` (`ct-std-v1`). Full text: [references
 - Icon on the banner card and the card tile, first match wins: `--icon`, `.github/showcase.yml` `icon`, then `assets/icon.png`, then the org mark (`assets/orgs/<Org>/mark.png`), then a family fallback: the light CompleteTech logo for CompleteTech orgs (its cloud-and-bulb crop, `mark_light`, in icon boxes under 200 px), and for every other family (AI-Ascension, Jev-Engineering, jevplay-games, LibreEvolve, TouchedByAnAgent, romgenie, T3) its display name typeset in the family font on the family plate. A T2 surface never carries the CompleteTech logo.
 - An icon that brings its own opaque ground (four corners alike) fills the card with that ground and is drawn full-bleed, so there is never a plate inside a plate; dark plates get a 2 px accent edge. jevplay-games icons are scaled nearest-neighbour at an integer factor.
 - `.github/showcase.yml` may carry `type:` (a §5.4 type for a repository whose code has not landed) and `for: OWNER/REPO` (any login of the org, the name in any case, or the slug an approved rename or transfer gives it; the overrides apply only to that repository, so a template's own chips and subtitle never reach the repositories created from it).
+- `.github/showcase.yml` `detect_tuned: true` opts in to tuned type detection, default `false` (today's detection). Rule 24 then ignores planning and generated issue JSON (`planning/`, `.github/ISSUE_TEMPLATE/`, `issues/`, and a basename `issue<N>.json`), and a `mobile-app` uses README variant K instead of B; K is the Features, Tech Stack, Install, Build and Run (optional), Status (optional) and License layout; a private repository keeps its internal-use notice under K. An explicit `type:` or `variant:` still wins, and `variant: K` (or `readme --variant K`) selects K directly without the flag.
 - Navy surfaces (intro, org tile) use the selected dark master or `mark-dark.png` when committed. Marks are never cropped, masked or recoloured.
 - `readme:` holds the review-page answers that shape README scaffolding, at their defaults: `nav_first: false` (q57 `nav`: hero banner, then nav line), `preserve_banner: above` (q57 `pres`: the hero goes above a preserve-list README's own banner; `unchanged` leaves those READMEs without one) and `fork_readme: note` (q27: forks outside the watching org keep the upstream README under the hero banner and the §7.4 G note; `full` gives them their §5.4 variant). Change a value only after the user's answer, then `config --write-lock`.
 
@@ -296,7 +297,7 @@ These user decisions outrank `STANDARD.md` (`ct-std-v1`). Full text: [references
 | [references/descriptions.md](references/descriptions.md) | Description checks D1–D8, V1, P1, B1, X1, keep-or-edit order, templates by type. |
 | [references/topics.md](references/topics.md) | Topic layers, type detection rules 1–25, vocabulary, aliases, merge algorithm, safety. |
 | [references/labels.md](references/labels.md) | The 23-label set, migration map, apply algorithm and `labels.yml`. |
-| [references/readme-variants.md](references/readme-variants.md) | Header block with banner and footer, variants A–J, H2 order, license rows, preserve list. |
+| [references/readme-variants.md](references/readme-variants.md) | Header block with banner and footer, variants A–K, H2 order, license rows, preserve list. |
 | [references/banner-layout.md](references/banner-layout.md) | Banner and card geometry measured from the golden, chip rules, eyebrow rules. |
 | [references/art-direction.md](references/art-direction.md) | Family palettes, motifs, asset sizes, prompt template for illustrations, art QA. |
 | [references/svg-rules.md](references/svg-rules.md) | GitHub-safe SVG rules with decision 21 applied, and what `lint svg` checks. |

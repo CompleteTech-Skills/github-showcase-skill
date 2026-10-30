@@ -458,6 +458,36 @@
      "License",
      "R"
     ]
+   ],
+   "K": [
+    [
+     "About",
+     "R"
+    ],
+    [
+     "Features",
+     "R"
+    ],
+    [
+     "Tech Stack",
+     "R"
+    ],
+    [
+     "Install",
+     "R"
+    ],
+    [
+     "Build and Run",
+     "O"
+    ],
+    [
+     "Status",
+     "O"
+    ],
+    [
+     "License",
+     "R"
+    ]
    ]
   }
  },
@@ -864,7 +894,8 @@
    },
    "mobile-app": {
     "category": "Mobile app",
-    "variant": "B"
+    "variant": "B",
+    "variant_tuned": "K"
    },
    "plugin": {
     "category": "Plugin",

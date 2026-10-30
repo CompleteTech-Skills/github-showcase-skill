@@ -1,0 +1,19 @@
+{
+  "owner": "Northwind-Trading-Co",
+  "repo": "catalog-pipeline",
+  "visibility": "public",
+  "files": [
+    "planning/plan.json",
+    "planning/issues/001.json",
+    "planning/issues/002.json",
+    "src/build.py",
+    "README.md"
+  ],
+  "file_sizes": {
+    "planning/plan.json": 3000,
+    "planning/issues/001.json": 3000,
+    "planning/issues/002.json": 3000,
+    "src/build.py": 900,
+    "README.md": 600
+  }
+}
