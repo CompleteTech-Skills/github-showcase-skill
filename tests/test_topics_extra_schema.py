@@ -1,6 +1,6 @@
 """Schema contract for the per-org `topics_extra` key (E5.1.2).
 
-Length and charset are enforced by the schema only; merge() ignores invalid entries defensively (task 92).
+Length and charset are enforced by the schema only; merge() ignores invalid entries defensively (see test_topics_additive.py).
 """
 import json
 from pathlib import Path
@@ -53,3 +53,10 @@ def test_more_than_20_entries_is_rejected(schema):
 def test_topics_extra_is_optional(schema):
     row = {"family": "CompleteTech-Skills", "tier": "T1", "display_name": "CompleteTech Skills"}
     assert validate(row, schema["$defs"]["org"], schema, "$") == []
+
+
+def test_trailing_newline_is_rejected(schema):
+    # Python's `$` matches before a final newline; the schema uses (?![\s\S]) so the charset check is strict
+    assert _org_errors(schema, ["leaderboard\n"])
+    assert _org_errors(schema, ["a" * 50 + "\n"])
+    assert _org_errors(schema, [""])

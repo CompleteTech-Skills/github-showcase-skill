@@ -81,9 +81,30 @@ def membership_topics(ctx: RepoContext, also_in: list[str]) -> tuple[list[str], 
     return orgs, topics_, logs
 
 
+GITHUB_MAX_TOPICS = 20  # GitHub's hard limit; the curated 10/8 maximums apply to the generated set only
+
+
 def _org_extra(ctx: RepoContext) -> set[str]:
-    """Topics the org has approved as extras (task 92). Until that lands, no topic is approved."""
-    return set()
+    """Topics the org approved as extras: valid (fullmatch drop_valid) strings of the resolved org row's `topics_extra`.
+    The row is resolved through the shared resolver (ctx.org), so any spelling of the owner login finds it."""
+    pat = standard("topics")["drop_valid"]
+    raw = ctx.org.get("topics_extra")
+    if not isinstance(raw, list):
+        return set()
+    return {x for x in raw if isinstance(x, str) and re.fullmatch(pat, x)}
+
+
+def _retain(core: list[str], extras_kept: list[str], approved: set[str], logs: list[str]) -> tuple[list[str], list[str]]:
+    """Additive finalization shared by every type. Clean existing extras are appended after `core` in `current` order,
+    up to GitHub's 20-topic limit (never the curated maximum), and logged review-remove:TOPIC unless the org approved
+    them. An extra that cannot fit is returned as `held`: logged, never listed in `remove`. -> (proposed, held)."""
+    extras = [x for x in extras_kept if x not in core]
+    kept = extras[:max(GITHUB_MAX_TOPICS - len(core), 0)]
+    held = extras[len(kept):]
+    for x in extras:
+        if x not in approved or x in held:
+            logs.append(f"review-remove:{x}")
+    return core + kept, held
 
 
 def merge(ctx: RepoContext, also_in: list[str] | None = None, prune: bool = False) -> dict:
@@ -97,6 +118,7 @@ def merge(ctx: RepoContext, also_in: list[str] | None = None, prune: bool = Fals
     typ = ctx.det["type"]
     logs: list[str] = []
     current = list(meta.get("topics") or [])
+    approved = _org_extra(ctx)
     vocab = set(t["brand_topics"]) | set(t["family_topics"]) | set(t["type_topics"]) | set(t["featured"]) | \
         set(t["allowed"]) | set(t["domain"])
     private = meta.get("visibility") == "private"
@@ -124,7 +146,11 @@ def merge(ctx: RepoContext, also_in: list[str] | None = None, prune: bool = Fals
             continue
         if private and a in t["private_banned"]:
             continue
+        if a in approved and a not in extras_kept:
+            extras_kept.append(a)  # org-approved: part of the org's vocabulary, kept in both modes with no log
         if a not in vocab and a != cve_vendor:
+            if a in approved:
+                continue
             # additive default: an out-of-vocabulary topic is kept as an extra (never in `surviving`, so the domain and
             # tech ranking is unchanged). `$` in drop_valid also matches before a trailing newline, so an extra must
             # pass fullmatch; "custom-topic\n" was removed by the vocabulary check on base and stays removed.
@@ -147,10 +173,12 @@ def merge(ctx: RepoContext, also_in: list[str] | None = None, prune: bool = Fals
         tech = [alias(x) for x in parent if alias(x) in set(t["featured"]) | set(t["allowed"])]
         # a fork listed in also_in also carries that org membership topic (§5.1), counted toward the maximum
         proposed = list(dict.fromkeys(["fork"] + m_topics + list(dict.fromkeys(tech))[:4]))[:limit]
-        return _result(current, proposed, logs)
+        proposed, held = _retain(proposed, extras_kept, approved, logs)
+        return _result(current, proposed, logs, held)
     if typ == "github-profile":
         proposed = [org.get("brand_topic") or "completetech", "github-profile"]
-        return _result(current, proposed, logs)
+        proposed, held = _retain(proposed, extras_kept, approved, logs)
+        return _result(current, proposed, logs, held)
 
     brand = org.get("brand_topic")
     proposed: list[str] = [brand] if brand else []
@@ -198,31 +226,16 @@ def merge(ctx: RepoContext, also_in: list[str] | None = None, prune: bool = Fals
     tech = [x for x in dict.fromkeys(tech) if x not in proposed][:3]
     proposed += tech
     proposed = list(dict.fromkeys(proposed))
-    core = proposed[:limit]
-    proposed = core
-    if not prune:
-        # additive default: existing out-of-vocabulary topics fill the room left by the required set; they never
-        # displace a required topic and never affect the domain/tech ranking above. Contract: a retained extra is
-        # appended after `core`, in `current` order, deduplicated, and logged review-remove:TOPIC; an extra beyond `room`
-        # is only in `remove`; `topics-short` counts the retained extras. Dedicated regression tests for this path are
-        # tracked by task 93 and are not part of this change.
-        extras = [x for x in extras_kept if x not in core]
-        room = limit - len(core)
-        kept = extras[:max(room, 0)]
-        proposed = core + kept
-        approved = _org_extra(ctx)
-        for x in extras:
-            if x not in approved:
-                logs.append(f"review-remove:{x}")
+    proposed, held = _retain(proposed[:limit], extras_kept, approved, logs)
     minimum = t["min_private"] if private else t["min_public"]
     if len(proposed) < minimum:
         logs.append("topics-short")
-    return _result(current, proposed, logs)
+    return _result(current, proposed, logs, held)
 
 
-def _result(current, proposed, logs):
+def _result(current, proposed, logs, held=()):
     return {"current": current, "proposed": proposed, "equal_as_set": set(current) == set(proposed),
-            "add": [x for x in proposed if x not in current], "remove": [x for x in current if x not in proposed],
+            "add": [x for x in proposed if x not in current], "remove": [x for x in current if x not in proposed and x not in held],
             "logs": logs}
 
 

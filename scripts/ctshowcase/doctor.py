@@ -51,7 +51,9 @@ def row(ctx: RepoContext) -> dict:
                           owner=ctx.owner)
     cells["R2"] = "fail" if any(c["result"] == "fail" for c in chk) else "pass"
     tp = topicsmod.merge(ctx)
-    cells["R3"] = ("warn" if "topics-short" in tp["logs"] else "pass") if tp["equal_as_set"] else "fail"
+    # org-approved topics_extra are kept without a log; an unreviewed out-of-vocabulary topic is a warn, not a pass
+    review = any(x.startswith("review-remove:") for x in tp["logs"])
+    cells["R3"] = ("warn" if "topics-short" in tp["logs"] or review else "pass") if tp["equal_as_set"] else "fail"
     hp = ctx.meta.get("homepage") or ""
     cells["R4"] = "pass" if not hp or ctx.meta.get("homepage_status") == 200 else (
         "unknown" if ctx.meta.get("homepage_status") is None else "warn")
