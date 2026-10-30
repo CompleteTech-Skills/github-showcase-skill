@@ -2,6 +2,7 @@
 import locale
 import json
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -28,6 +29,28 @@ def test_windows_bash_comes_from_git_not_the_wsl_launcher(tmp_path, monkeypatch)
     assert Path(conftest.find_bash(windows=True)) == bash
     bash.unlink()
     assert conftest.find_bash(windows=True) is None
+
+
+def test_windows_bash_follows_git_exec_path_through_scoop_shim(tmp_path, monkeypatch):
+    scoop = tmp_path / "scoop with spaces"
+    shim = scoop / "shims" / "git.exe"
+    installation = scoop / "apps" / "git" / "current"
+    bash = installation / "bin" / "bash.exe"
+    shim.parent.mkdir(parents=True)
+    shim.touch()
+    bash.parent.mkdir(parents=True)
+    bash.touch()
+    monkeypatch.setattr(conftest.shutil, "which", lambda name: str(shim) if name == "git" else "C:/Windows/bash.exe")
+    calls = []
+
+    def git_exec_path(argv, **kwargs):
+        calls.append(argv)
+        assert kwargs["timeout"] == 10
+        return subprocess.CompletedProcess(argv, 0, str(installation / "mingw64/libexec/git-core") + "\n", "")
+
+    monkeypatch.setattr(conftest.subprocess, "run", git_exec_path)
+    assert Path(conftest.find_bash(windows=True)) == bash
+    assert calls == [[str(shim), "--exec-path"]]
 
 
 @pytest.mark.requires_bash

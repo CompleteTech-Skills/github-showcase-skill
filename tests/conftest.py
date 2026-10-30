@@ -28,11 +28,28 @@ def find_bash(*, windows=None):
         return shutil.which("bash")
     git = shutil.which("git")
     if git:
-        installation = Path(git).resolve().parent.parent
-        for relative in ("bin/bash.exe", "usr/bin/bash.exe"):
-            candidate = installation / relative
-            if candidate.is_file():
-                return str(candidate)
+        def bundled_bash(installation):
+            for relative in ("bin/bash.exe", "usr/bin/bash.exe"):
+                candidate = installation / relative
+                if candidate.is_file():
+                    return str(candidate)
+            return None
+
+        direct = bundled_bash(Path(git).resolve().parent.parent)
+        if direct:
+            return direct
+        # A package-manager shim need not be a symlink. Ask Git where its own
+        # binaries live rather than accidentally falling back to WSL's bash.
+        try:
+            result = subprocess.run([git, "--exec-path"], capture_output=True, text=True,
+                                    encoding="utf-8", timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if result.returncode == 0 and result.stdout.strip():
+            for installation in Path(result.stdout.strip()).resolve().parents:
+                candidate = bundled_bash(installation)
+                if candidate:
+                    return candidate
     return None
 
 

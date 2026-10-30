@@ -7,7 +7,8 @@ as UTF-8. This avoids depending on a developer's Windows ANSI code page.
 
 Action shell tests carry the `requires_bash` marker. On Windows the helper locates
 `bin/bash.exe` or `usr/bin/bash.exe` beside the Git for Windows installation, rather
-than invoking Windows' `bash.exe` WSL launcher. On POSIX it uses `bash` from `PATH`.
+than invoking Windows' `bash.exe` WSL launcher. When `git` is a package-manager shim,
+the helper uses read-only `git --exec-path` to find the actual installation. On POSIX it uses `bash` from `PATH`.
 It sends shell source over stdin, so Windows command-line parsing cannot expand or
 strip the script's quotes. Action paths use forward slashes, including paths with
 spaces. Tests execute the real Action shell code and use `SHOWCASE_DRY_RUN=1` when
