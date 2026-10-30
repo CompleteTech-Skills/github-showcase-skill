@@ -1,8 +1,15 @@
 """Issue 36: License rows write a rights sentence only when the org row sets `license_wording` (synthetic owners only)."""
+import copy
+
 import pytest
 
 from ctshowcase import readme
+from ctshowcase.config import Brand, schema_errors
+from ctshowcase.context import RepoContext
 from ctshowcase.detect import standard
+from ctshowcase.meta import normalize
+
+from conftest import meta_dict
 
 FACTUAL_MIT = "Code and documentation are licensed under the MIT License; see `LICENSE`."
 FACTUAL_MIT_SKILLS = "Code, templates, and documentation are licensed under the MIT License. See `LICENSE` and `BRAND_ASSETS.md`."
@@ -154,3 +161,132 @@ def test_wording_log_is_recorded_once_per_context(make_ctx, tmp_path):
     readme.license_section(ctx)
     readme.license_section(ctx)
     assert ctx.logs.count("needs-input:license-wording") == 1
+
+
+# ------------------------------------------------------------------------------------------------
+# Spec E2.1.3: synthetic owners and a brand copy with a test-only license_wording holder
+# ------------------------------------------------------------------------------------------------
+NO_CLAIM_WORDS = ("reserved", "names and logos", "Copyright", "rights")
+
+
+def brand_copy(brand, mutate):
+    """A copy of the loaded brand with `mutate(raw)` applied; the real references/brand.yaml is never edited."""
+    raw = copy.deepcopy(brand.raw)
+    mutate(raw)
+    return Brand(raw, brand.path)
+
+
+def wording_brand(brand, owner, value):
+    return brand_copy(brand, lambda raw: raw["orgs"][owner].__setitem__("license_wording", value))
+
+
+def ctx_for(b, repo_dir, **kw):
+    return RepoContext(b, normalize(meta_dict(**kw)), repo_dir)
+
+
+def test_org_without_wording_gets_no_claim_public_mit(make_ctx, tmp_path):
+    ctx = make_ctx(repo_dir=tmp_path, owner="Pick-Your-AI", repo="thing", license="MIT")
+    result = readme.license_section(ctx)
+    assert result == ("License", "Code and documentation are licensed under the MIT License; see `LICENSE`.")
+    assert not any(word in result[1] for word in NO_CLAIM_WORDS)
+    assert "needs-input:license-wording" in ctx.logs
+
+
+def test_org_without_wording_gets_no_claim_other_license(make_ctx, tmp_path):
+    ctx = make_ctx(repo_dir=tmp_path, owner="LibreEvolve", repo="thing", license="Apache-2.0")
+    result = readme.license_section(ctx)
+    assert result == ("License", "Licensed under the Apache-2.0; see `LICENSE`.")
+    assert not any(word in result[1] for word in NO_CLAIM_WORDS)
+    assert "needs-input:license-wording" in ctx.logs
+
+
+def test_org_without_wording_skills_mit_keeps_factual_brand_assets_pointer(make_ctx, tmp_path):
+    (tmp_path / "BRAND_ASSETS.md").write_text("x", encoding="utf-8")
+    ctx = make_ctx(repo_dir=tmp_path, owner="AI-Ascension", repo="thing", license="MIT")
+    result = readme.license_section(ctx)
+    assert result == ("License", "Code, templates, and documentation are licensed under the MIT License. "
+                                 "See `LICENSE` and `BRAND_ASSETS.md`.")
+    assert "reserved" not in result[1]
+
+
+def test_private_repo_without_wording_gets_no_copyright_line(make_ctx, tmp_path):
+    ctx = make_ctx(repo_dir=tmp_path, owner="Pick-Your-AI", repo="thing", visibility="private", license=None,
+                   created_at="2025-01-01T00:00:00Z")
+    assert readme.license_section(ctx) is None
+    assert "needs-input:license-wording" in ctx.logs
+    out = readme.scaffold(ctx)
+    assert "Copyright" not in out and "## License" not in out
+
+
+def test_private_repo_with_wording_gets_copyright_line(brand, tmp_path):
+    b = wording_brand(brand, "Pick-Your-AI", "Example Holder LLC")
+    ctx = ctx_for(b, tmp_path, owner="Pick-Your-AI", repo="thing", visibility="private", license=None,
+                  created_at="2025-01-01T00:00:00Z")
+    assert readme.license_section(ctx) == ("License", "Proprietary. Copyright (c) 2025 Example Holder LLC. All rights reserved.")
+
+
+def test_public_mit_with_wording_names_the_configured_holder(brand, tmp_path):
+    b = wording_brand(brand, "Pick-Your-AI", "Example Holder LLC")
+    ctx = ctx_for(b, tmp_path, owner="Pick-Your-AI", repo="thing", license="MIT")
+    result = readme.license_section(ctx)
+    assert result == ("License", "Code and documentation are licensed under the MIT License; see `LICENSE`. "
+                                 "Example Holder LLC names and logos are reserved and are not licensed for reuse except to "
+                                 "identify this project.")
+    assert "Pick Your AI" not in result[1]
+    assert "needs-input:license-wording" not in ctx.logs
+
+
+def test_blank_wording_counts_as_absent(brand, tmp_path):
+    b = wording_brand(brand, "Pick-Your-AI", "   ")
+    ctx = ctx_for(b, tmp_path, owner="Pick-Your-AI", repo="thing", license="MIT")
+    assert readme.license_section(ctx) == ("License", "Code and documentation are licensed under the MIT License; see `LICENSE`.")
+    assert "needs-input:license-wording" in ctx.logs
+
+
+@pytest.mark.parametrize("owner,files,heading,row", [
+    ("CompleteTech-LLC", (), "License", "t1_mit"),
+    # base behaviour: CompleteTech-Security is the F (security) layout, so even a public MIT repo takes the security row
+    ("CompleteTech-Security", (), "Licensing", "security"),
+    ("CompleteTech-Skills", ("BRAND_ASSETS.md",), "License", "skills_mit"),
+])
+def test_completetech_output_unchanged(make_ctx, tmp_path, owner, files, heading, row):
+    for name in files:
+        (tmp_path / name).write_text("x", encoding="utf-8")
+    ctx = make_ctx(repo_dir=tmp_path, owner=owner, repo="thing", license="MIT")
+    assert readme.license_section(ctx) == (heading, RV[row])
+    assert "needs-input:license-wording" not in ctx.logs
+
+
+@pytest.mark.parametrize("owner", ["CompleteTech-LLC", "CompleTetech-Security"])
+def test_completetech_private_output_unchanged(make_ctx, tmp_path, owner):
+    ctx = make_ctx(repo_dir=tmp_path, owner=owner, repo="thing", license=None, visibility="private",
+                   created_at="2025-01-01T00:00:00Z")
+    assert readme.license_section(ctx) == ("License", RV["private"].replace("<year>", "2025"))
+
+
+def test_security_agpl_row_unchanged_without_wording(brand, tmp_path):
+    b = brand_copy(brand, lambda raw: raw["orgs"]["CompleteTech-Security"].pop("license_wording"))
+    ctx = ctx_for(b, tmp_path, owner="CompleteTech-Security", repo="thing", license="AGPL-3.0")
+    assert readme.license_section(ctx) == ("Licensing", RV["security"])
+
+
+@pytest.mark.parametrize("value,accepted", [("Example Holder LLC", True), ("", False), (123, False)])
+def test_schema_accepts_and_rejects_license_wording(brand, value, accepted):
+    # schema_errors is the repository's own validator (the same entry point test_config.py uses); no new dependency
+    raw = copy.deepcopy(brand.raw)
+    raw["orgs"]["Pick-Your-AI"]["license_wording"] = value
+    errors = schema_errors(raw)
+    assert (errors == []) is accepted
+    if not accepted:
+        assert any("license_wording" in e for e in errors)
+
+
+def test_brand_yaml_sets_wording_only_on_completetech_t1_rows(brand):
+    orgs = brand.raw["orgs"]
+    for name, row in orgs.items():
+        if "license_wording" in row:
+            assert row["family"] == "completetech", name
+            assert row["tier"] in ("T1", "T1-user"), name
+            assert row["license_wording"] == "CompleteTech LLC", name
+    for name in ("Pick-Your-AI", "LibreEvolve", "AI-Ascension", "TouchedByAnAgent"):
+        assert "license_wording" not in orgs[name], name
