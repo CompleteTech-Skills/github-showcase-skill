@@ -84,11 +84,13 @@ def test_env_var_is_equivalent_to_the_flag(tmp_path):
     assert r.returncode == 2 and "t3-signoff:missing" in _out(r), _out(r)
 
 
+# Guard test: passes on base 2be04ac by design (verified: 28 of 30 tests in this file fail on base, only the two guards pass). It pins the unchanged default.
 def test_flag_without_allow_t3_still_refuses_as_before(tmp_path):
     r = _run(tmp_path, _bundle(tmp_path, [{"id": "t3s-4"}]), "--require-t3-signoff", "describe")
     assert r.returncode == 2 and "t3-signoff" in _out(r)
 
 
+# Guard test: passes on base 2be04ac by design (verified: 28 of 30 tests in this file fail on base, only the two guards pass). It pins the unchanged default.
 def test_default_is_unchanged_without_the_new_flag(tmp_path):
     """No flag and no records at all: `--allow-t3` alone still lifts the refusal (byte-for-byte old behaviour)."""
     r = _run(tmp_path, _bundle(tmp_path, []), "--allow-t3", "describe")
