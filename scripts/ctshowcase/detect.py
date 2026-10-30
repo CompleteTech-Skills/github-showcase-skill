@@ -143,7 +143,9 @@ def suggestion(meta: dict, type_: str, rule: int, tuned: bool = False) -> dict |
     raw_share = data_bytes(sizes.items()) / total
     kept = [(k, v) for k, v in sizes.items() if not _is_planning(k)]
     kept_total = sum(v for _, v in kept)
-    if kept_total > 0 and raw_share >= 0.5 and data_bytes(kept) / kept_total < 0.5 and not tuned:
+    # An all-planning tree keeps no bytes: its planning-excluded data share is 0%, which is below 50% (case (a)).
+    kept_share = data_bytes(kept) / kept_total if kept_total > 0 else 0.0
+    if raw_share >= 0.5 and kept_share < 0.5 and not tuned:
         reason = "planning-json-share"
     elif raw_share < 0.75:
         reason = "narrow-dataset-share"

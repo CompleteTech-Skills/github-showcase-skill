@@ -304,6 +304,20 @@ def test_docs_only_no_suggestion():
     assert out["type"] == "workspace" and "suggestion" not in out
 
 
+def test_all_planning_suggests_workspace():
+    # Every byte is planning JSON: the planning-excluded data share is 0% (no kept bytes), so case (a) applies.
+    # Tuned detection moves this repo to workspace (rule 25), so it needs no suggestion.
+    m = dict(NORTHWIND_SHAPE, files=["planning/a.json", "issues/issue1.json"],
+             file_sizes={"planning/a.json": 900, "issues/issue1.json": 100})
+    out = detect(m, RepoFacts(m))
+    assert (out["type"], out["rule"]) == ("dataset", 24)
+    assert out["suggestion"]["type"] == "workspace"
+    assert out["suggestion"]["reason"] == "planning-json-share"
+    tuned = detect(m, RepoFacts(m), {"detect_tuned": True})
+    assert (tuned["type"], tuned["rule"]) == ("workspace", 25)
+    assert "suggestion" not in tuned
+
+
 def test_suggestion_edge_cases_without_sizes():
     # Empty file sizes, or a zero total, never divide: no suggestion and no exception.
     assert "suggestion" not in detect(dict(NORTHWIND_SHAPE, files=["README.md"]), RepoFacts(dict(NORTHWIND_SHAPE)))
