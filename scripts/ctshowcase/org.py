@@ -633,6 +633,47 @@ def public_leaks(text: str, scope: dict) -> list[str]:
                                  scope["public_texts"])))
 
 
+def load_denylist(path: str) -> tuple[set[str], set[str]]:
+    """`lint public-leak --denylist FILE`: (slugs, bare names) listed by hand, one per line, `#` comments.
+
+    `owner/repo` lines are slugs; lines without a slash are bare names. Entries keep the spelling of their first
+    line; duplicates differ only by case and are dropped. A missing file or an empty list is needs-input (exit 4),
+    so an empty list can never pass as a clean scan."""
+    p = Path(path)
+    if not p.is_file():
+        raise NeedsInput("denylist", f"denylist not found: {path}")
+    slugs: dict[str, str] = {}
+    names: dict[str, str] = {}
+    entries = 0
+    text = p.read_text(encoding="utf-8-sig", errors="replace")
+    for n, raw in enumerate(text.splitlines(), 1):
+        line = re.split(r"\s#", raw.strip(), maxsplit=1)[0].strip()
+        if not line or line.startswith("#"):
+            continue
+        if any(ch.isspace() for ch in line) or line.startswith("/") or line.endswith("/") or line.count("/") > 1:
+            raise ShowcaseError(f"denylist line {n}: invalid entry", log="usage")
+        entries += 1
+        if "/" in line:
+            slugs.setdefault(line.lower(), line)
+        else:
+            names.setdefault(line.lower(), line)
+    if not entries:
+        raise NeedsInput("denylist", "denylist is empty")
+    return set(slugs.values()), set(names.values())
+
+
+def denylist_leaks(text: str, slugs: set[str], names: set[str]) -> list[str]:
+    """`lint public-leak --denylist` for one file: the listed slugs (leak_check's private-slug and private-name hits)
+    and the listed bare names (`denied-name:NAME`, no distinctiveness test: the operator listed them explicitly)."""
+    hits = list(leak_check(text, slugs, [], set(), frozenset(), ()))
+    low = text.lower()
+    bare = re.sub(r"(github\.com|githubusercontent\.com)/[a-z0-9-]+", r"\1/_", low)
+    for name in names:
+        if re.search(rf"(?<![a-z0-9._-]){re.escape(name.lower())}(?![a-z0-9_-]|\.[a-z0-9])", bare):
+            hits.append(f"denied-name:{name}")
+    return sorted(set(hits))
+
+
 def _badge_colour(brand, style: dict) -> str:
     from .color import contrast
     text = brand.raw["badges"]["local_text"]
