@@ -233,7 +233,17 @@ def badge_body(ctx: RepoContext, existing: str | None = None) -> str:
     """Refresh owned rows; a missing or changed digest makes a J block authored."""
     if ctx.det["variant"] != "J":
         return badges_html(ctx) if ctx.det["variant"] == "F" else badges_md(ctx)
-    if existing and existing.strip() and not generated_badges(existing):
+    # Before the profile type existed, the generator emitted only the remaining derived rows.
+    # Recognize that exact output so an old one-badge profile can acquire its missing type badge.
+    profile_type = standard("types")["types"]["github-profile"]["badge_category"]
+    legacy = []
+    for alt, url, link in badges(ctx):
+        if alt == f"Type {profile_type}":
+            continue
+        img = f"![{alt}]({url})"
+        legacy.append(f"[{img}]({link})" if link else img)
+    is_legacy = bool(legacy) and existing == "\n".join(legacy)
+    if existing and existing.strip() and not generated_badges(existing) and not is_legacy:
         return existing
     body = badges_md(ctx)
     return f"<!-- showcase:badges:generated sha256={body_sha(body)} -->\n{body}"
@@ -629,13 +639,15 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
         ctx.log("exempt:preserve-banner" if ctx.preserve_unchanged() else "preserve-banner:kept-below-hero")
     desc = (ctx.meta.get("description") or "").strip()
     old_tag = blocks.get("tagline")
-    if preserve and old_tag is not None:
+    if preserve and (old_tag is not None or (variant == "J" and "badges" in blocks)):
         # additive only, so the tagline block stays where it is, its body decided by the header rule (tagline_body)
-        tag = tagline_body(ctx, old_tag, text)
-        if old_tag.strip() and not tag:  # an inherited tagline, emptied on purpose (not a lost line)
-            removed += [ln for ln in old_tag.splitlines() if ln.strip()]
-        keep = {"tagline": tag}
-        if variant == "J" and blocks.get("badges", "").strip():
+        keep = {}
+        if old_tag is not None:
+            tag = tagline_body(ctx, old_tag, text)
+            if old_tag.strip() and not tag:  # an inherited tagline, emptied on purpose (not a lost line)
+                removed += [ln for ln in old_tag.splitlines() if ln.strip()]
+            keep["tagline"] = tag
+        if variant == "J" and "badges" in blocks:
             keep["badges"] = badge_body(ctx, blocks["badges"])
         body, _ = _strip_markers(text, keep=keep)
         if want_footer:
@@ -945,8 +957,10 @@ def bootstrap(ctx: RepoContext, text: str) -> str:
         if not h1 or h1.group(1).strip() in (TEMPLATE_H1, auto, slug_title(ctx.repo)):
             # the tagline block carries over (tagline_body), so a line the owner wrote survives the rebuild and only an
             # inherited one is emptied, exactly as header_only decides it
-            old = next((m.group(2) for m in find_blocks(MARK, hm.group(0)) if m.group(1) == "tagline"), None)
-            new_header = header(ctx, title=auto, tagline=tagline_body(ctx, old, text))
+            blocks = {m.group(1): m.group(2) for m in find_blocks(MARK, hm.group(0))}
+            old = blocks.get("tagline")
+            new_header = header(ctx, title=auto, tagline=tagline_body(ctx, old, text),
+                                existing_badges=blocks.get("badges"))
             text = new_header + "\n\n" + text[hm.end():].lstrip("\n")
     return header_only(ctx, text)
 
@@ -976,13 +990,12 @@ def nonws(s: str) -> int:
 
 def preservation(before: str, after: str, removed: list[str]) -> list[str]:
     """Every original non-header line survives (heading lines may be renamed); size drop <= 10%."""
-    # Digest-verified generated badge rows are owned output, like their markers. Exclude them on both
-    # sides, so a metadata-driven refresh/removal does not hide loss of unrelated authored content.
+    # Digest-verified generated badge rows are owned output, like their markers. They may be replaced;
+    # unmarked legacy rows remain protected and must actually survive in the refreshed output.
     def omit_owned_badges(m):
         return wrap("badges", "") if m.group(1) == "badges" and generated_badges(m.group(2)) else m.group(0)
 
     before = _sub_blocks(before, omit_owned_badges)
-    after = _sub_blocks(after, omit_owned_badges)
     problems = []
     b_lines = Counter(ln.strip() for ln in before.splitlines() if ln.strip() and not ln.strip().startswith("<!-- showcase:"))
     for r in removed:

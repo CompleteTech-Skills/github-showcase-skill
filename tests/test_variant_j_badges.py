@@ -140,3 +140,43 @@ def test_generated_badges_do_not_exempt_authored_content_from_shrink_guard(make_
     before = readme.scaffold(ctx) + "\nNever discard this authored sentence.\n"
     after = before.replace("Never discard this authored sentence.", "")
     assert any("Never discard" in p for p in readme.preservation(before, after, []))
+
+
+@pytest.mark.parametrize("mode", ["upgrade", "header"])
+def test_legacy_generated_profile_badges_gain_the_type_badge(make_ctx, tmp_path, mode):
+    ctx = profile_context(make_ctx, tmp_path)
+    text = readme.scaffold(ctx)
+    legacy = f'![License MIT](https://img.shields.io/badge/license-MIT-{ctx.brand.raw["badges"]["neutral"]})'
+    text = text.replace(badge_block(text), legacy)
+    if mode == "upgrade":
+        after, removed = readme.upgrade(ctx, text)
+    else:
+        after, removed = readme.header_only(ctx, text), []
+    assert "type-GitHub%20profile-" in badge_block(after)
+    assert legacy in badge_block(after)
+    assert readme.preservation(text, after, removed) == []
+
+
+def test_large_profile_without_tagline_keeps_authored_badges(make_ctx, tmp_path):
+    ctx = profile_context(make_ctx, tmp_path)
+    text = readme.scaffold(ctx)
+    authored = ('<img src="https://img.shields.io/badge/type-community-005ADD" alt="Community">\n'
+                '<img src="https://img.shields.io/badge/license-MIT-64748B" alt="MIT">')
+    text = text.replace(badge_block(text), authored)
+    text = readme._sub_blocks(text, lambda m: "" if m.group(1) == "tagline" else m.group(0))
+    text = text.replace("\n---\n", "\n---\n\n" + "Community resources. " * 1000 + "\n")
+    assert len(text.encode()) > 15000
+    after, removed = readme.upgrade(ctx, text)
+    assert badge_block(after) == authored
+    assert readme.preservation(text, after, removed) == []
+
+
+def test_bootstrap_keeps_authored_badges_outside_pristine_body(make_ctx, tmp_path):
+    ctx = profile_context(make_ctx, tmp_path)
+    text = readme.header(ctx, title=readme.TEMPLATE_H1) + "\n\n" + readme.pristine_block("## About\n\nTemplate.")
+    authored = ('<img src="https://img.shields.io/badge/type-community-005ADD" alt="Community">\n'
+                '<img src="https://img.shields.io/badge/license-MIT-64748B" alt="MIT">')
+    text = text.replace(badge_block(text), authored)
+    assert readme.bootstrap_state(text) == "pristine"
+    after = readme.bootstrap(ctx, text)
+    assert badge_block(after) == authored
