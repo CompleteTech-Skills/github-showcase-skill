@@ -215,8 +215,49 @@ def test_upgrade_private_no_wording_keeps_authored_license_section(make_ctx, tmp
 def test_upgrade_private_no_wording_drops_only_generated_license_text(make_ctx, tmp_path):
     ctx = make_ctx(repo_dir=tmp_path, owner="LibreEvolve", repo="thing", license=None, visibility="private",
                    created_at="2025-01-01T00:00:00Z")
-    out, _ = readme.upgrade(ctx, _readme_with_license("Proprietary. Copyright (c) 2025 X. All rights reserved."))
+    out, _ = readme.upgrade(ctx, _readme_with_license("<!-- showcase:license -->\nProprietary. Copyright (c) 2025 X. All rights reserved."))
     assert "All rights reserved" not in out and "## License" not in out
+
+
+def test_upgrade_private_no_wording_keeps_unmarked_owner_rights_notice(make_ctx, tmp_path):
+    # no showcase marker means the owner wrote it: never deleted silently (review of issue 36)
+    ctx = make_ctx(repo_dir=tmp_path, owner="LibreEvolve", repo="thing", license=None, visibility="private",
+                   created_at="2025-01-01T00:00:00Z")
+    out, removed = readme.upgrade(ctx, _readme_with_license("Proprietary. All rights reserved."))
+    assert "Proprietary. All rights reserved." in out and not any("Proprietary" in r or "Custom" in r or "Copyright" in r or "showcase:license" in r for r in removed)
+    assert "needs-input:license-wording" in ctx.logs
+
+
+def test_upgrade_public_managed_row_keeps_marker_so_wording_applies_later(make_ctx, tmp_path):
+    text = _readme_with_license("<!-- showcase:license -->\n" + RV["t2_mit"].replace("<Brand>", "LibreEvolve"))
+    for preserve in (False, True):
+        c = make_ctx(repo_dir=tmp_path, owner="LibreEvolve", repo="thing", license="MIT")
+        if preserve:
+            c.org = dict(c.org, readme_preserve=["thing"])
+        out, _ = readme.upgrade(c, text)
+        assert "<!-- showcase:license -->\n" + FACTUAL_MIT in out
+
+
+def test_upgrade_public_factual_line_logs_missing_wording_every_run(make_ctx, tmp_path):
+    c = make_ctx(repo_dir=tmp_path, owner="LibreEvolve", repo="thing", license="MIT")
+    out, _ = readme.upgrade(c, _readme_with_license(FACTUAL_MIT))
+    assert FACTUAL_MIT in out and "needs-input:license-wording" in c.logs
+
+
+def test_upgrade_private_keeps_literal_copyright_in_fence_after_prose(make_ctx, tmp_path):
+    ctx = make_ctx(repo_dir=tmp_path, owner="LibreEvolve", repo="thing", license=None, visibility="private",
+                   created_at="2025-01-01T00:00:00Z")
+    body = "Example:\n```text\n\nProprietary. Copyright (c) 2025 Example. All rights reserved.\n\n```"
+    out, removed = readme.upgrade(ctx, _readme_with_license(body))
+    assert body in out and not any("Proprietary" in r or "Custom" in r or "Copyright" in r or "showcase:license" in r for r in removed)
+
+
+def test_upgrade_private_keeps_indented_marker_example(make_ctx, tmp_path):
+    ctx = make_ctx(repo_dir=tmp_path, owner="LibreEvolve", repo="thing", license=None, visibility="private",
+                   created_at="2025-01-01T00:00:00Z")
+    body = "Example:\n\n    <!-- showcase:license -->\n    Custom license example.\n\nEnd of example."
+    out, removed = readme.upgrade(ctx, _readme_with_license(body))
+    assert body in out and not any("Proprietary" in r or "Custom" in r or "Copyright" in r or "showcase:license" in r for r in removed)
 
 
 def test_upgrade_public_managed_rights_sentence_becomes_factual_line(make_ctx, tmp_path):
@@ -292,5 +333,6 @@ def test_preserve_mode_gates_unmarked_generated_license_row(make_ctx, tmp_path):
     text = _readme_with_license("Proprietary. Copyright (c) 2025 Example. All rights reserved.")
     text = text.replace("Run it.", "Run it. " + "x" * 16000)  # over 15,000 bytes: preserve mode
     out, removed = readme.upgrade(ctx, text)
-    assert "All rights reserved" not in out and "needs-input:license-wording" in ctx.logs
+    # an unmarked private "Proprietary..." paragraph cannot be told from an owner's notice: kept and flagged, never deleted
+    assert "All rights reserved" in out and "needs-input:license-wording" in ctx.logs
     assert "Run it. xxx" in out
