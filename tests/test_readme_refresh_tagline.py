@@ -5,6 +5,15 @@ description changed, because the old tagline line inside the generated block was
 ignores the contents of the generated `banner`, `nav`, `tagline`, `badges` and `footer` blocks while the same block still
 exists in the output. Every line outside those blocks, every line in another block (`template-body`), and every line of
 a block that vanishes from the output is still guarded.
+
+Which tests reproduce the bug and which are guards (checked against the base commit 2be04ac, where the fix is absent):
+- Reproduce the bug (FAIL on the base with `lost line: **Research home for the old thing.**`):
+  test_description_change_refreshes_tagline_without_readme_shrink and test_cli_default_mode_writes_new_tagline.
+- Regression guards (PASS on the base by design; the base already guarded these lines, so the fix must not widen the
+  exemption to them): test_user_line_outside_blocks_still_guarded, test_generated_block_removed_from_output_still_guarded,
+  test_template_body_block_is_never_excluded, test_marker_example_in_code_fence_stays_guarded and
+  test_header_mode_unchanged (the documented `--mode header` fallback, which never runs the shrink check).
+A guard failing on the new code means the exemption is too broad; a guard passing on the base is expected.
 """
 import json
 import re
