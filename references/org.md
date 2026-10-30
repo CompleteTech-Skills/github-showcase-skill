@@ -75,6 +75,35 @@ For an org known to `brand.yaml`, `org health ORG --dot-github CHECKOUT` checks 
 
 These partial checks never certify the full org standard or a public profile's full privacy review. With a registry row, the existing full assessment and pin-order checks remain in effect. A supplied or automatically discovered registry that lacks the requested org still exits 4 with `needs-input:org`; it does not trigger registry-free mode. Every command remains read-only; `health` and `doctor` emit no writer jobs.
 
+### Registry-free public-leak (--denylist)
+
+```bash
+python3 $S lint public-leak FILE... --denylist DENY.txt
+```
+
+`DENY.txt` is a UTF-8 text file with one entry per line: `owner/repo` for a private slug (the owner login is matched exactly as listed), or a bare name. `#` comments and blank lines are ignored. An invalid entry (whitespace inside it, a leading or trailing `/`, or more than one `/`) exits 2 and names its line. A missing or empty file exits 4 with `needs-input:denylist`. Without `--registry`, the run reads no estate registry, decisions or metadata; `--meta-dir`, `--decisions`, `--org`, `--approved`, `--approved-yaml` and `--actions` are then ignored and each is logged `ignored-in-denylist-mode:FLAG`. Each result is `mode: denylist`, with the log `coverage:denylist-entries-only`.
+
+| Check | Registry-free with `--denylist` | Needs the registry |
+|---|---|---|
+| Private slugs and distinctive private names | Covered only for the entries you list, under the exact owner login you list; former or renamed logins are not inferred | Every private repository of every registry org, under every login the resolver knows |
+| Bare denied names | Covered: exact-word match, with no distinctiveness test | The registry check flags only distinctive names (six or more characters, with a `-`, `_`, `.` or digit) |
+| Internal notes from org rows `why`, `notes` and `evidence` | Not covered | Covered |
+| Registry top-level `notes` and `judge_changes`, and profile internal keys | Not covered | Covered |
+| Members-only pins | Not covered | Covered |
+| Public-names and public-description masking | Not covered: a listed bare name that a public repository also states WILL hit, so the operator curates the list | Covered: public names and verbatim public descriptions are masked before the bare-name scan |
+| Repository visibility from `--meta-dir` | Not used: the denylist is the private set | Used: a repository of unknown visibility counts as private |
+| Org alias resolution through the resolver | Not covered | Covered (former logins, placeholders and approved renames) |
+
+Owner positions in `github.com/<login>` links are masked in both modes, so a link to a public owner is not a hit.
+
+A pass here means only that none of the listed names appear. It never certifies the full OPS-03 privacy review.
+
+The denylist is an operator-supplied file; keep it outside the repository and never commit it. Fixtures use synthetic names only.
+
+Giving `--registry` together with `--denylist` runs the registry check and adds the denylist hits; the registry is still required then.
+
+Without `--denylist` nothing changes: the registry stays required.
+
 **The registry is private data.** It names private repositories, members-only pins and internal notes. Read it; never copy it, or any part of it other than the public slice, into a repository. `org profile` renders only the public slice (public, non-HOLD, non-exposure repositories; no `pins_members`, no `why` or `notes` text) and fails (exit 1, nothing written) when the README or `data.json` names a private slug, a members-only pin or a sentence from an internal note. A `favorites` entry owned by an estate org (any login the resolver knows from the registry or `brand.yaml`, the steward account, a registry placeholder or merge-source org, or an excluded, HOLD, T3 or watching owner), and any favorite whose metadata was captured, passes the same public-slice test: a private, HOLD, excluded-owner or exposure one is dropped and logged `favorite-dropped:private-or-unknown` (never named), and an estate one with no metadata is left out and logged `needs-input:favorite-visibility:OWNER/REPO` (result `incomplete`, as for any repository of unknown visibility, until its metadata is captured); only favorites outside the estate with no captured metadata (other people's public projects) are listed as given. The org's star List (`org pins`) takes its items from the same rule, so it never adds a favorite the profile would not name. A T3 org's repository waits for co-owner sign-off (decision 12) wherever it would be named: personal pins and more projects, another org's `also_in` cross-listing, favorites and star List items are left out and logged `t3-signoff:OWNER/REPO` unless `--allow-t3`. The leak check's private set covers every captured repository, in any org and whoever the owner, whose metadata says it is not public, as well as the dropped favorites, each under every login the resolver knows for its owner (a link under a former org login is still a hit, CQ-03). Its internal notes are every org row's `why`/`notes`/`evidence` text plus the registry's top-level `notes` and `judge_changes` and the personal `profile` block's internal keys (`notes`, `romgenie` and the `why` of its pins); public profile fields (bio, intro, who and what, socials) are not notes.
 
 ## Org logins after renames (CQ-03)
@@ -110,4 +139,4 @@ Excluded owners and T3 orgs without `--allow-t3` (co-owner sign-off) exit 2 in e
 - Never call `PATCH /user` from the skill. The personal profile is redone in its entirety as the Phase 8 capstone (decisions 9 and 20: About, avatar, public org memberships, contribution settings, profile README and repository, pins, star Lists, gist review). Its About fields follow review q92: the browser by default (Settings → Public profile, screenshots before and after); `PATCH user` only as a writer job under an approved `user-about` row, after `snapshot.py --user CompleteDotTech`; social links only through `POST /user/social_accounts` (add only, at most 4).
 - Never pin before everything else in the org is final; pins are browser steps.
 - Never create `.github-private`, and never list a private repository on a public profile.
-- Never commit a public file the run wrote without `showcase.py lint public-leak FILE... --meta-dir DIR`: the same leak check `profile` runs, against every registry org's private set (or `--org ORG[,ORG]`); without metadata every repository counts as private, so it fails closed.
+- Never commit a public file the run wrote without `showcase.py lint public-leak FILE... --meta-dir DIR`: the same leak check `profile` runs, against every registry org's private set (or `--org ORG[,ORG]`); without metadata every repository counts as private, so it fails closed. Without the registry, use `--denylist` for partial coverage.
