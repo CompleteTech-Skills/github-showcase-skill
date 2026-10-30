@@ -104,15 +104,16 @@ Rules that apply to every step:
    python scripts/showcase.py config
    ```
 
-6. **Check the owner gate.** `--strict-owner` applies the same owner gate as the banner, card and social preview, and refuses an owner that `brand.yaml` does not know. The owner comes from metadata, not from the directory you run in. Create `acme-meta.json` in a temporary folder outside the repository, as a copy of `examples/meta/northwind-support-triage-agent.json` with `"owner": "Acme-Widgets"` and a synthetic `"repo"`, then run:
+6. **Check the owner gate.** `--strict-owner` applies the same owner gate as the banner, card and social preview, and refuses an owner that `brand.yaml` does not know. The owner comes from metadata, not from the directory you run in. Create the metadata file in a temporary folder outside the repository (below, `$ACME_META` is its absolute path, for example `/tmp/acme-meta.json`), as a copy of `examples/meta/northwind-support-triage-agent.json` with `"owner": "Acme-Widgets"` and a synthetic `"repo"`, then run:
 
    ```bash
-   python scripts/showcase.py --meta acme-meta.json --no-repo-dir doctor --strict-owner
+   ACME_META=/tmp/acme-meta.json   # the absolute path of the file you created
+   python scripts/showcase.py --meta "$ACME_META" --no-repo-dir doctor --strict-owner
    ```
 
    Without `--meta`, the owner is read from the current checkout's git remote, which is this skill's own repository. Outside a git checkout the owner is `unknown` and the gate refuses it with exit 2 and `"logs": ["unknown-org"]`, so the check must always name the new org. Exit 2 with `"result": "refused"` is a gate refusal. Any other exit code is the ordinary doctor verdict for the synthetic metadata, which has no file tree.
 
-**T3 organizations are co-owned.** `add-org --tier T3` refuses unless the org's login is already listed under `owners.t3` in `brand.yaml`. Adding that entry is a hand edit made after co-owner sign-off (an approved `t3-signoff` row in the approvals file); `add-org` never adds it. Each run that touches a T3 owner also needs the global `--allow-t3` flag, and the flag goes **before** the subcommand, for example `python scripts/showcase.py --allow-t3 --meta acme-meta.json --no-repo-dir doctor --strict-owner`, not after it.
+**T3 organizations are co-owned.** `add-org --tier T3` refuses unless the org's login is already listed under `owners.t3` in `brand.yaml`. Adding that entry is a hand edit made after co-owner sign-off (an approved `t3-signoff` row in the approvals file); `add-org` never adds it. Each run that touches a T3 owner also needs the global `--allow-t3` flag, and the flag goes **before** the subcommand, for example `python scripts/showcase.py --allow-t3 --meta "$ACME_META" --no-repo-dir doctor --strict-owner`, not after it.
 
 ## Branding and handoff
 

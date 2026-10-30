@@ -10,6 +10,7 @@ from __future__ import annotations
 import difflib
 import json
 import re
+from pathlib import Path
 
 from .color import contrast, hexstr, luminance, mix
 from .config import DEFAULT_CONFIG, LOCK, Brand, load_brand, load_yaml_text, lock_text, schema_errors
@@ -113,7 +114,7 @@ def _apply(args, action: str, section: str, anchor: str, block: list[str], check
     if args.write:
         with open(path, "w", encoding="utf-8", newline="") as fh:
             fh.write(new)
-        if path == DEFAULT_CONFIG:  # the lock copy is the default config's only; an explicit --config leaves it alone
+        if Path(path).resolve() == Path(DEFAULT_CONFIG).resolve():  # resolved: a relative --config to the default counts; the lock copy is the default config's only; another file leaves it alone
             LOCK.write_text(lock_text(raw), encoding="utf-8")
             out["lock"] = str(LOCK)
         else:
@@ -165,6 +166,8 @@ def cmd_add_org(args):
     if args.tier == "T3" and brand.owner_status(args.name) != "t3":
         raise ShowcaseError(f"{args.name} is T3 (co-owned): add it to owners.t3 by hand after co-owner sign-off, then rerun; "
                             "add-org never edits owners:", log="t3-signoff")
+    if args.tier == "T3":  # the global --allow-t3 gate (or an approved t3-signoff row) applies to writes like any T3 command
+        brand.check_owner(args.name, allow_t3=getattr(args, "allow_t3", False))
     block = _block_org(args.name, args.family, args.tier, args.display_name.strip())
 
     def check(brand: Brand):

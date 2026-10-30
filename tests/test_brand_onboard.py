@@ -21,8 +21,8 @@ ADD_ORG = ["brand", "add-org", "Acme-Widgets", "--family", "acme-widgets", "--di
            "--tier", "T2"]
 
 
-def _cli(config, *argv, meta=None):
-    cmd = [sys.executable, str(ROOT / "scripts" / "showcase.py"), "--config", str(config)]
+def _cli(config, *argv, meta=None, pre=()):
+    cmd = [sys.executable, str(ROOT / "scripts" / "showcase.py"), *pre, "--config", str(config)]
     if meta is not None:
         cmd += ["--meta", str(meta), "--no-repo-dir"]
     return subprocess.run([*cmd, *map(str, argv)], cwd=ROOT, capture_output=True, text=True, encoding="utf-8",
@@ -146,6 +146,11 @@ def test_t3_org_is_accepted_after_owner_signoff_and_owners_stay_unchanged(cfg):
     owners_before = _raw(cfg)["owners"]
     r = _cli(cfg, "brand", "add-org", "Acme-Widgets", "--family", "acme-widgets", "--display-name", "Acme Widgets",
              "--tier", "T3", "--write")
+    # the sign-off row alone is not enough: the global --allow-t3 gate must also be given (before the subcommand)
+    assert r.returncode == 2 and "t3-signoff" in json.loads(r.stdout)["logs"], r.stdout
+    assert "Acme-Widgets" not in _raw(cfg)["orgs"]
+    r = _cli(cfg, "brand", "add-org", "Acme-Widgets", "--family", "acme-widgets", "--display-name", "Acme Widgets",
+             "--tier", "T3", "--write", pre=("--allow-t3",))
     assert r.returncode == 0, r.stdout
     raw = _raw(cfg)
     assert raw["orgs"]["Acme-Widgets"]["tier"] == "T3" and raw["owners"] == owners_before
@@ -163,3 +168,23 @@ def test_former_slug_alias_of_an_existing_org_is_refused(cfg):
     r = _cli(cfg, "brand", "add-org", "Acme-Legacy", "--family", "acme-widgets", "--display-name", "Legacy", "--write")
     assert r.returncode != 0 and "already exists" in json.loads(r.stdout)["error"], r.stdout
     assert cfg.read_bytes() == before
+
+
+def test_relative_path_to_default_config_still_regenerates_the_lock(tmp_path, monkeypatch):
+    """A relative --config naming the default file is the default file: the lock copy must be regenerated (review fix).
+    The default config and lock are redirected to temporary copies so the committed files are untouched."""
+    from ctshowcase import brand_onboard as B
+    (tmp_path / "references").mkdir()
+    default = tmp_path / "references" / "brand.yaml"
+    default.write_bytes(SRC.read_bytes())
+    lock = tmp_path / "references" / "brand.lock.json"
+    monkeypatch.setattr(B, "DEFAULT_CONFIG", default)
+    monkeypatch.setattr(B, "LOCK", lock)
+    monkeypatch.chdir(tmp_path)
+
+    class A:
+        name, company_label, accent, background = "acme-widgets", "Acme Widgets", "#22D3EE", "#0B1020"
+        config, write = "references/brand.yaml", True
+
+    obj, code = B.cmd_add_family(A)
+    assert code == 0 and lock.exists() and obj["lock"] == str(lock)
