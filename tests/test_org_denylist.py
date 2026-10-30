@@ -170,7 +170,8 @@ def test_cli_denylist_unions_with_explicit_registry(tmp_path):
     row = _rows(p)[0]
     assert p.returncode == CHECK_FAILED and row["result"] == "fail" and row["mode"] == "registry+denylist"
     assert "denied-name:L1" in row["hits"]  # the denylist hit is redacted
-    assert any("private-pricing-engine" in h for h in row["hits"])  # the registry hit keeps its legacy form
+    assert any(h.startswith("private-") and h.endswith(":L1") for h in row["hits"])  # registry hits are redacted too
+    assert "private-pricing-engine" not in " ".join(row["hits"])
     assert "widget-quotes-v9" not in " ".join(row["hits"])
     assert row["hits"] == sorted(set(row["hits"]))
 
@@ -201,3 +202,33 @@ def test_denylist_slug_needs_whole_owner_token():
     assert _hits("https://github.com/notnorthwind/app", ["northwind/app"]) == []
     assert _hits("https://github.com/northwind/app", ["northwind/app"]) == ["denied-slug:L1"]
     assert _hits("https://github.com/x.northwind/app", ["northwind/app"]) == []
+
+
+def test_cli_registry_plus_denylist_never_echoes_overlapping_entries(tmp_path):
+    from conftest import ROOT
+    estate = ROOT / "examples" / "estate"
+    deny = _write(tmp_path, "deny.txt", "private-pricing-engine\n")
+    leak = _write(tmp_path, "leak.md", "Ships with private-pricing-engine.\n")
+    p = run_cli("lint", "public-leak", leak, "--registry", estate / "registry" / "estate.yaml",
+                "--meta-dir", estate / "meta", "--denylist", deny)
+    assert p.returncode == CHECK_FAILED
+    assert "private-pricing-engine" not in p.stdout.replace("Ships with", "")
+    assert all(h.rsplit(":", 1)[1].startswith("L") for h in _rows(p)[0]["hits"])
+
+
+def test_denylist_repo_name_next_to_lookalike_owner_and_git_clone():
+    s = ["northwind/secret-tool-2"]
+    assert _hits("git clone secret-tool-2.git", s) == ["private-name:L1"]
+    assert _hits("See https://github.com/notnorthwind/secret-tool-2 and secret-tool-2.", s) == ["private-name:L1"]
+
+
+def test_denylist_dotted_name_survives_host_masking():
+    # the owner mask must keep the matched host (backreference), not delete it from `mirror-github.com`
+    assert _hits("https://github.com/northwind/mirror-github.com/tree/main", names=["mirror-github.com"]) == ["denied-name:L1"]
+
+
+def test_denylist_scp_remote_owner_is_not_a_name():
+    assert _hits("git@github.com:ledger/public-project.git", names=["ledger"]) == []
+    assert _hits("https://github.com/ledger/public-project.git", names=["ledger"]) == []
+    assert _hits("git@github.com:acme/ledger.git", names=["ledger"]) == ["denied-name:L1"]
+    assert _hits("git@github.com:northwind/hidden-tool.git", ["northwind/hidden-tool"]) == ["denied-slug:L1"]

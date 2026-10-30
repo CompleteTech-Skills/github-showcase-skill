@@ -668,17 +668,27 @@ def denylist_leaks(text: str, slugs: set[str], names: set[str]) -> list[str]:
     Matching is denylist-specific (the legacy leak_check is untouched): a slug needs a whole owner token, a terminal
     `.git` clone suffix still counts, and bare names have no distinctiveness test (the operator listed them)."""
     hits: set[str] = set()
-    slug_res = [re.compile(rf"(?<![a-z0-9_.-]){re.escape(x.lower())}(?:\.git)?(?![a-z0-9_-])(?!\.[a-z0-9])") for x in slugs]
-    name_res = [re.compile(rf"(?<![a-z0-9._-]){re.escape(x.lower())}(?:\.git)?(?![a-z0-9_-])(?!\.[a-z0-9])")
-                for x in names]
+
+    def rx(x: str, lead: str) -> "re.Pattern[str]":
+        return re.compile(rf"(?<!{lead}){re.escape(x.lower())}(?:\.git)?(?![a-z0-9_-])(?!\.[a-z0-9])")
+
+    slug_res = [rx(x, "[a-z0-9_.-]") for x in slugs]
+    name_res = [rx(x, "[a-z0-9._-]") for x in names]
+    # A distinctive repository name of a listed slug is matched on its own (not through the legacy leak_check, whose
+    # substring-slug shortcut would hide a bare `secret-tool-2` next to a look-alike owner) with the same boundaries.
+    repo_res = [rx(x.split("/", 1)[1], "[a-z0-9._-]") for x in slugs
+                if len(x.split("/", 1)[1]) >= 6 and re.search(r"[-_.0-9]", x.split("/", 1)[1])]
     for n, line in enumerate(text.splitlines(), 1):
         low = line.lower()
-        bare = re.sub(r"(github\.com|githubusercontent\.com)/[a-z0-9-]+", r"/_", low)
-        if any(r.search(low) for r in slug_res):
+        # The owner position of a GitHub URL or SCP-style remote (`github.com/<owner>`, `git@github.com:<owner>`) is
+        # not a name; `\1` keeps the matched host so a dotted repository name such as `mirror-github.com` survives.
+        bare = re.sub(r"(github\.com|githubusercontent\.com)[/:][a-z0-9-]+", r"\1/_", low)
+        slug_hit = any(r.search(low) for r in slug_res)
+        if slug_hit:
             hits.add(f"denied-slug:L{n}")
         if any(r.search(bare) for r in name_res):
             hits.add(f"denied-name:L{n}")
-        if slugs and any(h.startswith("private-name:") for h in leak_check(line, slugs, [], set(), frozenset(), ())):
+        if not slug_hit and any(r.search(bare) for r in repo_res):  # a full slug hit already names the line
             hits.add(f"private-name:L{n}")
     return sorted(hits, key=lambda h: (int(h.rsplit("L", 1)[1]), h))
 

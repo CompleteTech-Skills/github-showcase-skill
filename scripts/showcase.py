@@ -684,6 +684,14 @@ def cmd_lint(args):
     return None, CHECK_FAILED if bad else OK
 
 
+def _redact_hit(hit: str, text: str) -> list[str]:
+    """`kind:payload` -> `kind:L<line>` for every line naming the payload (L0 when none does, e.g. a wrapped note)."""
+    kind, _, payload = hit.partition(":")
+    needle = (payload.split("/", 1)[-1] if kind == "private-name" else payload).lower()
+    lines = [n for n, line in enumerate(text.splitlines(), 1) if needle in line.lower()]
+    return [f"{kind}:L{n}" for n in lines or [0]]
+
+
 def lint_public_leak(args) -> list[dict]:
     """OPS-03: no private slug, distinctive private name, members-only pin or internal note in any public file the run
     writes. Wraps the `org profile` leak check with the whole estate's private set (or --org ORG[,ORG]); needs the
@@ -733,7 +741,10 @@ def lint_public_leak(args) -> list[dict]:
         text = p.read_text(encoding="utf-8", errors="replace")
         hits = public_leaks(text, scope)
         if den:  # --denylist unions with the registry result; it never narrows an explicit --registry
-            hits = sorted(set(hits) | set(denylist_leaks(text, *den)))
+            # Registry hits carry slugs and names, which may also be denylist entries: with --denylist active every
+            # payload is redacted to `kind:L<line>`, the same no-echo form the denylist hits use.
+            hits = sorted({r for h in hits for r in _redact_hit(h, text)} | set(denylist_leaks(text, *den)),
+                          key=lambda h: (int(h.rsplit("L", 1)[1]), h))
             out.append({"file": f, "result": "fail" if hits else "pass", "hits": hits, "logs": logs,
                         "mode": "registry+denylist"})
             continue

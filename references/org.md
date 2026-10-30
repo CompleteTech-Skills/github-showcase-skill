@@ -113,7 +113,7 @@ Excluded owners and T3 orgs without `--allow-t3` (co-owner sign-off) exit 2 in e
 - Never commit a public file the run wrote without `showcase.py lint public-leak FILE... --meta-dir DIR`: the same leak check `profile` runs, against every registry org's private set (or `--org ORG[,ORG]`); without metadata every repository counts as private, so it fails closed.
 
 
-`lint public-leak` has two modes. `--denylist FILE` (one `owner/repo` slug or bare name per line, `#` comments) runs with no registry, estate bundle or `--meta-dir`; those flags are ignored and logged `ignored-in-denylist-mode:FLAG`. Hits name only the kind and the scanned file's line (`denied-slug:L3`, `denied-name:L5`, `private-name:L3`), never the denylist entry. Without `--denylist` the command is unchanged and exits 4 (`needs-input:registry`) with no registry. An exit 0 in denylist mode is not an OPS-03 pass.
+`lint public-leak` has two modes. `--denylist FILE` (one `owner/repo` slug or bare name per line, `#` comments) runs with no registry, estate bundle or `--meta-dir`; those flags are ignored and logged `ignored-in-denylist-mode:FLAG`. Hits name only the kind and the scanned file's line (`denied-slug:L3`, `denied-name:L5`, `private-name:L3`), never the denylist entry. Without `--denylist` the command is unchanged and exits 4 (`needs-input:registry`) with no registry. With `--registry` and `--denylist` together the results are unioned and every hit, registry hits included, is reduced to `kind:L<line>`. Owner positions in `github.com/<owner>` and SCP-style `git@github.com:<owner>` remotes are not names. An exit 0 in denylist mode is not an OPS-03 pass.
 
 | Check | Registry mode | `--denylist` mode |
 |---|---|---|
