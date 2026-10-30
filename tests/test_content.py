@@ -754,3 +754,72 @@ def test_add_parser_registers_every_action():
     content = sub.choices["content"]
     acts = next(a for a in content._actions if isinstance(a, argparse._SubParsersAction))
     assert set(acts.choices) == set(C.ACTIONS)
+
+
+# ---------------------------------------------------------------------------------------------------
+# icon family ink: warn by default, fail with --strict or the family key icon_strict_family_ink (E3.2.1)
+# ---------------------------------------------------------------------------------------------------
+def _check_result(qa, name):
+    return next((c["result"] for c in qa["checks"] if c["check"] == name), None)
+
+
+def test_icon_family_ink_warns_by_default_and_fails_when_strict(brand):
+    card = brand.style(NW)["tokens"]["card_fill"]
+    img = C.normalize_icon(_candidate(card, ink=(0, 90, 221)), "transparent", card)[0]
+    data = C.icon_bytes(img)[0]
+    qa = C.icon_qa(data, card=card, ink=["#8B5CF6", "#22D3EE"])
+    assert _check_result(qa, "family-ink") == "warn" and qa["result"] == "warn", qa
+    qa = C.icon_qa(data, card=card, ink=["#8B5CF6", "#22D3EE"], strict=True)
+    assert _check_result(qa, "family-ink") == "fail" and qa["result"] == "fail", qa
+    assert "dominant ink" in next(c for c in qa["checks"] if c["check"] == "family-ink")["detail"]
+    qa = C.icon_qa(data, card=card, ink=["#0858D8"], strict=True)
+    assert _check_result(qa, "family-ink") == "pass", qa
+    # without a family palette the check is not emitted at all, so strict changes nothing
+    qa = C.icon_qa(data, card=card, strict=True)
+    assert _check_result(qa, "family-ink") is None
+
+
+def test_icon_strict_flag_and_family_key(capsys, tmp_path, brand):
+    import copy
+    import yaml
+    card = brand.style(NW)["tokens"]["card_fill"]
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    old = tmp_path / "old-blue" / "assets" / "icon.png"
+    old.parent.mkdir(parents=True)
+    old.write_bytes(C.icon_bytes(C.normalize_icon(_candidate(card, ink=(0, 90, 221)), "transparent", card)[0])[0])
+    other = tmp_path / "other" / "assets" / "icon.png"
+    other.parent.mkdir(parents=True)
+    other.write_bytes(C.icon_bytes(C.normalize_icon(_candidate(card, ink=(139, 92, 246)), "transparent", card)[0])[0])
+    check = ("--meta", meta, "--no-repo-dir", "content", "icon", "check")
+    art = ("--art-direction", FIX / "ART_DIRECTION.min.md")
+
+    # the old Northwind blue is the family ink: pass with or without --strict
+    code, res = run_content(capsys, *check, "--out", old, *art, *NO_ESTATE)
+    assert code == 0 and res["result"] == "pass", res
+    code, res = run_content(capsys, *check, "--out", old, "--strict", *art, *NO_ESTATE)
+    assert code == 0 and res["result"] == "pass", res
+
+    # a non-family ink: warn by default (exit 0), fail with --strict (exit 1)
+    code, res = run_content(capsys, *check, "--out", other, *art, *NO_ESTATE)
+    assert code == 0 and res["result"] == "warn" and _check_result(res["qa"], "family-ink") == "warn", res
+    code, res = run_content(capsys, *check, "--out", other, "--strict", *art, *NO_ESTATE)
+    assert code == 1 and res["result"] == "fail" and _check_result(res["qa"], "family-ink") == "fail", res
+
+    # the family key turns the strict behaviour on for the Northwind family, without the flag
+    raw = copy.deepcopy(brand.raw)
+    raw["families"]["completetech"]["icon_strict_family_ink"] = True
+    cfg = tmp_path / "brand-strict.yaml"
+    cfg.write_text(yaml.safe_dump(raw, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    code, res = run_content(capsys, "--config", cfg, *check, "--out", other, *art, *NO_ESTATE)
+    assert code == 1 and res["result"] == "fail" and _check_result(res["qa"], "family-ink") == "fail", res
+
+
+def test_schema_accepts_icon_strict_family_ink(brand):
+    import copy
+    from ctshowcase.config import schema_errors
+    raw = copy.deepcopy(brand.raw)
+    raw["families"]["completetech"]["icon_strict_family_ink"] = True
+    assert schema_errors(raw) == []
+    raw["families"]["completetech"]["icon_strict_family_ink"] = "yes"
+    assert schema_errors(raw) != []
