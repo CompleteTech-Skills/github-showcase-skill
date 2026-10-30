@@ -120,3 +120,26 @@ def test_cli_prune_flag_is_wired(monkeypatch):
     assert "prune=args.prune" in src
     # parser construction lives in main(); check the flag is declared
     assert '"--prune"' in inspect.getsource(showcase)
+
+
+def test_approved_vocabulary_topics_cut_by_caps_are_not_duplicated(brand):
+    """Reviewer A/B: a topics_extra entry that is also in the vocabulary and cut by the tech cap appeared twice."""
+    topics = ["python", "javascript", "typescript", "rust", "go", "finance"]
+    r = merge(_ctx(brand, extra=topics[:4], topics=topics))
+    assert len(r["proposed"]) == len(set(r["proposed"])) and r["remove"] == []
+    assert not any(x.startswith("review-remove:") for x in r["logs"])
+
+
+def test_approved_topics_fill_all_twenty_slots_without_review_remove(brand):
+    """Reviewer B: approved topics are never logged review-remove nor dropped; new generated topics are deferred."""
+    topics = [f"custom-{i}" for i in range(20)]
+    r = merge(_ctx(brand, extra=topics, topics=topics))
+    assert set(topics) <= set(r["proposed"]) and len(r["proposed"]) == 20
+    assert r["remove"] == [] and not any(x.startswith("review-remove:") for x in r["logs"])
+    assert r["held"] and "needs-input:topics-over-limit" in r["logs"]  # the PUT stays blocked
+
+
+def test_internal_repo_still_drops_private_banned_topics(brand):
+    """Reviewer B: internal is non-public; the private-banned rule must apply to it as it did on base."""
+    r = merge(_ctx(brand, topics=["nintendo"], visibility="internal"))
+    assert "nintendo" not in r["proposed"]

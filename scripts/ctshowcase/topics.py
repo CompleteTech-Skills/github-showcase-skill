@@ -94,18 +94,34 @@ def _org_extra(ctx: RepoContext) -> set[str]:
     return {x for x in raw if isinstance(x, str) and re.fullmatch(pat, x)}
 
 
-def _retain(core: list[str], extras_kept: list[str], approved: set[str], logs: list[str]) -> tuple[list[str], list[str]]:
-    """Additive finalization shared by every type. Clean existing extras are appended after `core` in `current` order,
-    up to GitHub's 20-topic limit (never the curated maximum), and logged review-remove:TOPIC unless the org approved
-    them. An extra that cannot fit is returned as `held`: logged, never listed in `remove`; because the topics PUT
-    replaces the whole set, a non-empty `held` blocks every mutation (see merge's `held` key). -> (proposed, held)."""
-    extras = [x for x in extras_kept if x not in core]
+def _retain(core: list[str], extras_kept: list[str], approved: set[str], logs: list[str],
+            current: list[str] = ()) -> tuple[list[str], list[str]]:
+    """Additive finalization shared by every type. Clean existing extras are appended after `core` in `current` order
+    (deduplicated: an approved topic may also be in the vocabulary and the caps' cut list), up to GitHub's 20-topic
+    limit (never the curated maximum), and logged review-remove:TOPIC unless the org approved them. Approved extras
+    take priority for room: when they would not fit, generated core topics that are not already on the repository are
+    deferred from the end (a clean existing topic is never dropped for a new one). Whatever cannot fit is returned as
+    `held`: logged, never listed in `remove`; because the topics PUT replaces the whole set, a non-empty `held`
+    blocks every mutation (see merge's `held` key). -> (proposed, held)."""
+    core = list(core)
+    extras = [x for x in dict.fromkeys(extras_kept) if x not in core]
+    held: list[str] = []
+    sure = [x for x in extras if x in approved]
+    over = len(core) + len(sure) - GITHUB_MAX_TOPICS
+    for x in reversed(list(core)):
+        if over <= 0:
+            break
+        if x not in current:
+            core.remove(x)
+            held.append(x)  # a deferred addition, not an existing topic: never logged review-remove
+            over -= 1
+    extras = sure + [x for x in extras if x not in approved]
     kept = extras[:max(GITHUB_MAX_TOPICS - len(core), 0)]
-    held = extras[len(kept):]
+    held_extras = [x for x in extras[len(kept):]]
     for x in extras:
-        if x not in approved or x in held:
+        if x not in approved or x in held_extras:
             logs.append(f"review-remove:{x}")
-    return core + kept, held
+    return core + kept, held + held_extras
 
 
 def merge(ctx: RepoContext, also_in: list[str] | None = None, prune: bool = False) -> dict:
@@ -123,6 +139,7 @@ def merge(ctx: RepoContext, also_in: list[str] | None = None, prune: bool = Fals
     vocab = set(t["brand_topics"]) | set(t["family_topics"]) | set(t["type_topics"]) | set(t["featured"]) | \
         set(t["allowed"]) | set(t["domain"])
     private = meta.get("visibility") == "private"
+    nonpublic = not ctx.public  # private AND internal: the non-public topic safety rule applies to both
     # owner identity through the shared resolver (CQ-03): an approved org rename (CompleTetech-Security ->
     # CompleteTech-Security) or a re-cased login must not change the repository's required topics
     res = ctx.brand.resolver()
@@ -145,7 +162,7 @@ def merge(ctx: RepoContext, also_in: list[str] | None = None, prune: bool = Fals
             continue
         if a in t["type_topics"] and a != typ:
             continue
-        if private and a in t["private_banned"]:
+        if nonpublic and a in t["private_banned"]:
             continue
         if a in approved and a not in extras_kept:
             extras_kept.append(a)  # org-approved: part of the org's vocabulary, kept in both modes with no log
@@ -174,7 +191,7 @@ def merge(ctx: RepoContext, also_in: list[str] | None = None, prune: bool = Fals
         clean and accurate, so they are kept silently; out-of-vocabulary extras keep the review-remove log. Without
         `prune`, nothing clean is ever listed in `remove`; what cannot fit GitHub's 20 is `held` (blocks the PUT)."""
         cut = [] if prune else [x for x in surviving if x not in core]
-        out, held = _retain(core, cut + extras_kept, approved | set(cut), logs)
+        out, held = _retain(core, cut + extras_kept, approved | set(cut), logs, current)
         if held:
             logs.append("needs-input:topics-over-limit")
         return out, held
