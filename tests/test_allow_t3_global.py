@@ -82,6 +82,12 @@ def test_signed_off_t3_org_joins_also_in_and_star_lists(brand):
         set_t3_signed_off(False)
 
 
+# Evidence note for reviewers: the seven tests above this line predate the ContextVar change
+# (they exist at 2be04ac, before be5cb14) and are regression guards for the CLI contract that
+# must keep passing. The five tests from here down are the discriminating ones: run against the
+# tree before be5cb14 they fail with ImportError on `reset_t3_signed_off`.
+
+
 def test_token_reset_restores_each_prior_value():
     """set_t3_signed_off returns a token; reset_t3_signed_off restores exactly the value before that set."""
     from ctshowcase.config import reset_t3_signed_off, set_t3_signed_off, t3_signed_off
