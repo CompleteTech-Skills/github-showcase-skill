@@ -129,14 +129,26 @@ The four command groups follow the same rules as the repository commands: read-o
 
 - **Writer jobs.** Every planned GitHub change is a `scripts/writer.py` job `{id, phase, kind, repo|org, approval_id?, group?, argv, note}`; `--jobs FILE` appends them as JSON lines. Label jobs carry `group: labels:OWNER/REPO` for the writer's half-completed-group reconciliation unless the orchestrator passes its own group. UI-only steps are `kind: "browser"` jobs with `url`, `ui_action` and the exact click path in `steps`. A job that needs an approval carries the id `scripts/writer.py` looks up in `decisions/APPROVED_ACTIONS.yaml` (`ent-001`/`ent-002` for the Enterprise, `q41.orgs`/`q41.estate` for a project copy, the ids you pass with `--approval-id` or `--approval`). Mutations are always inline in `argv`; only read queries load from a file. The skill never runs a job: the orchestrator's writer does, after its guard and approval checks, or, used standalone, the user does after approving it.
 - **One org resolver (CQ-03).** Every org lookup (in `enterprise doctor` too) goes through `scripts/ctshowcase/resolver.py`, which maps old and new logins from `former_slugs` in `brand.yaml` or the registry, the registry's `placeholders`, and approved `org-rename`/`org-merge` items; repository slugs the registry writes after a pending `rename` or `transfer` resolve to today's slug the same way. After an approved rename (for example `CompleTetech-Security` to `CompleteTech-Security`) the brand row, the registry row, the watching-org exemption and every refusal still resolve, and jobs name the new login.
-- **The estate registry is private.** `org` reads `registry/estate.yaml` (`--registry FILE`, or the bundle beside the skill, or `$SHOWCASE_ESTATE_ROOT`) and renders public pages only from its public slice. Never copy the registry into a repository. Without it, `org` exits 4 (`needs-input:registry`); `project`, `enterprise` and `content` run on their input files alone. `examples/estate/` is a synthetic Northwind registry for trying every `org` action offline.
+- **The estate registry is private.** `org` reads `registry/estate.yaml` (`--registry FILE`, or the bundle beside the skill, or `$SHOWCASE_ESTATE_ROOT`) and renders public pages only from its public slice. Never copy the registry into a repository. Without it, `org health` checks a supplied `.github` checkout or captured files, and `org doctor` runs the checks supported by its snapshot, checkout and avatar; registry-dependent coverage is reported as `needs-input:registry`, with `done: no`. `org labels ORG --repos-from-gh` instead discovers accessible repositories with paginated read-only GitHub GETs and uses the committed brand identity without reading the registry or estate decisions. Remaining registry-backed `org` actions exit 4 without a registry; `project`, `enterprise` and `content` run on their input files alone. `examples/estate/` is a synthetic Northwind registry for trying every `org` action offline. See [the coverage table](references/org.md#registry-free-health-and-doctor) for partial O2/O3 checks.
 
 | Group | Typical sequence | Reference |
 |---|---|---|
-| `org` | `org about ORG --jobs J`, `org labels ORG --meta-dir M --jobs J`, `org profile ORG --meta-dir M --out-dir <ORG/.github checkout>`, `org pins ORG --jobs J`, then `org doctor ORG --snapshot S` | [references/org.md](references/org.md) |
+| `org` | `org about ORG --jobs J`, `org labels ORG --meta-dir M --jobs J` (or `org labels ORG --repos-from-gh --jobs J` without a registry), `org profile ORG --meta-dir M --out-dir <ORG/.github checkout>`, `org pins ORG --jobs J`, then `org doctor ORG --snapshot S` | [references/org.md](references/org.md) |
 | `project` | `project capture-query` (reference board), `normalize`, `copy-plan --target ORG` (stage 1), re-capture, `copy-plan --copied FILE --files-dir DIR --jobs J` (stage 2), `readme`, `lint` | [references/projects.md](references/projects.md) |
 | `enterprise` | `enterprise snapshot-query --slug S` or `snapshot --slug S --out F`, then `doctor`, `seat-check`, `plan --jobs J`; `diff` after the run | [references/enterprise.md](references/enterprise.md) |
 | `content` | `content links --base-ref origin/main`, `linguist`, `actions`, `images`, `sidebar --facts F`, `icon prompt`, `icon normalize`, `icon check`, `social --job` | [references/content.md](references/content.md) |
+
+`content icon` defaults to the installed skill's `references/art-direction.md`,
+including a repository glyph template for option A and the illustration template
+for option B. Palette values come from `references/brand.yaml`; documented family
+seeds are used when available, otherwise the prompt uses the tool's default seed. Use
+`--art-direction FILE` to select another file; relative paths use the current
+directory, and missing files report `needs-input:art-direction` with the selected path.
+Older custom configs without `icon_ink`/`icon_spark` keep normalization and checks
+available (family-ink QA is skipped with `needs-input:icon-palette`). The bundled
+option A glyph prompt names the missing tokens with exit 4; add them or pass an
+explicit palette through `--art-direction`. Option B illustration prompts do not
+require these glyph tokens.
 
 ```bash
 S=<skill-dir>/scripts/showcase.py
@@ -145,6 +157,8 @@ python3 $S project copy-plan --target CompleteTech-Skills --source CompleteTech-
 python3 $S enterprise plan --snapshot registry/enterprise.snapshot.json --jobs jobs.jsonl
 python3 $S --meta meta.json content links --base-ref origin/main --diff     # inside the target checkout
 ```
+
+**Registry-free labels.** Run `org labels ORG --repos-from-gh --jobs jobs.jsonl` to list all repositories visible to the authenticated GitHub account and capture their labels and file trees. It emits plans only. Rewrite the org `.github` default issue forms first, plan/apply that repository's label changes through the approved writer, then re-plan member repositories. Use `--checkouts DIR --dot-github DIR/ORG/.github` with verified GitHub-origin checkouts stored as `DIR/ORG/REPO` to release safe renames after those content changes; missing checkouts or unknown reference files keep renames held. Held renames make the plan `incomplete`; affected repository rows report `needs-input`, retain the held operation, and include `rewrite_first` file/line details when references must change. Forks, archived repositories and disabled-Issues members retain their existing exemptions. Do not combine this mode with registry, metadata or decision inputs. See [references/org.md](references/org.md) for the ordered workflow.
 
 ## Command Reference
 
@@ -195,6 +209,7 @@ org profile|about|pins|labels|health|doctor ORG [--registry FILE] [--meta-dir DI
     [--approved FILE] [--approved-yaml FILE] [--actions FILE] [--allow-t3] [--jobs FILE]
     profile: [--out-dir DIR] [--render] [--banner PATH] [--lists FILE] [--email-approved] [--allow-unmeasured]
     pins: [--lists FILE] [--repo-ids FILE]      health/doctor: [--dot-github DIR]
+    labels: [--repos-from-gh] [--checkouts DIR] [--dot-github DIR]
     doctor: [--snapshot FILE] [--avatar PATH] [--doctor-format tsv|json|md] [--header]
 org profile --user CompleteDotTech [--registry FILE] [--meta-dir DIR] [--out-dir DIR] [--render] [--allow-t3]
 project capture-query --owner OWNER --number N
@@ -306,7 +321,7 @@ These user decisions outrank `STANDARD.md` (`ct-std-v1`). Full text: [references
 | Execution | Runs the local Python entry point `scripts/showcase.py` (and `scripts/action_commit.sh`, `scripts/action_prepare.py` inside the Action only). |
 | Reads | The target repository directory (`--repo-dir`), a metadata JSON (`--meta`) or directory (`--meta-dir`), `references/` and `assets/`; for the `org`, `project` and `content` groups also the estate registry and the approval files (`--registry`, `--approved`, `--approved-yaml`, `--actions`, `--decisions`, or the bundle beside the skill), read only and never copied. |
 | Writes | Only paths given by `--out`, `--png`, `--records`, `--jobs`, `--report`, `--out-dir`, `--files-dir`, `--preview` or `--cache`; with `--write`, the README marker blocks and `docs/images/*`; with `--bootstrap`, `CONTRIBUTING.md` owner tokens; `content icon normalize` defaults to `assets/icon.png` in the target checkout. |
-| Network | None by default. `meta --from-gh`, and `labels --plan` and `adopt` without metadata, run read-only `gh api` GETs; `enterprise discover` and `enterprise snapshot` run read-only `gh api graphql` queries; `content links --online` and `content images --online` make cached, rate-limited HEAD/GET requests to the hosts the files link to and read-only `gh api` GETs; `fonts --fetch` downloads the pinned fonts over HTTPS; `footer --check --online` sends one HEAD to each of the two decision 18 logo URLs on raw.githubusercontent.com. `org`, `project`, `enterprise snapshot-query`, `plan` and every other command only print the commands they plan. |
+| Network | None by default. `meta --from-gh`, `labels --plan` and `adopt` without metadata, and opt-in `org labels --repos-from-gh` run read-only `gh api` GETs; `enterprise discover` and `enterprise snapshot` run read-only `gh api graphql` queries; `content links --online` and `content images --online` make cached, rate-limited HEAD/GET requests to the hosts the files link to and read-only `gh api` GETs; `fonts --fetch` downloads the pinned fonts over HTTPS; `footer --check --online` sends one HEAD to each of the two decision 18 logo URLs on raw.githubusercontent.com. `org` without `--repos-from-gh`, `project`, `enterprise snapshot-query`, `plan` and every other command only print the commands they plan. |
 
 | Not Included | Boundary |
 |---|---|
@@ -316,4 +331,4 @@ These user decisions outrank `STANDARD.md` (`ct-std-v1`). Full text: [references
 
 ## Network Boundary
 
-Generation, checking and planning are local. The only network calls are the read-only `gh api` GETs of `meta --from-gh`, `labels --plan` and `adopt`, the read-only GraphQL queries of `enterprise discover` and `enterprise snapshot` (api.github.com), the opt-in link and image checks of `content links --online` and `content images --online` (the hosts the checked files link to, cached and rate-limited), the font download of `fonts --fetch`, and the two read-only HEAD requests of `footer --check --online` (raw.githubusercontent.com), each run only when asked. The skill posts no metadata or run data anywhere else. The composite Action is the only component that pushes, and only into the repository it runs in.
+Generation, checking and planning are local. The only network calls are the read-only `gh api` GETs of `meta --from-gh`, `labels --plan`, `adopt` and opt-in `org labels ORG --repos-from-gh` (paginated repository and label discovery, plus repository file trees), the read-only GraphQL queries of `enterprise discover` and `enterprise snapshot` (api.github.com), the opt-in link and image checks of `content links --online` and `content images --online` (the hosts the checked files link to, cached and rate-limited), the font download of `fonts --fetch`, and the two read-only HEAD requests of `footer --check --online` (raw.githubusercontent.com), each run only when asked. The skill posts no metadata or run data anywhere else. The composite Action is the only component that pushes, and only into the repository it runs in.

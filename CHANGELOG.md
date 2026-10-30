@@ -4,12 +4,19 @@ All notable changes to `github-showcase-skill` are recorded here. Versions follo
 
 ## Unreleased
 
+### Added
+
+- `org labels ORG --repos-from-gh` plans labels across accessible repositories without the private estate registry, with paginated read-only GitHub capture, optional verified local checkouts, unchanged reference guards, and a documented org-default-forms-first workflow. Registry-backed plans still require the org registry row, and checkout repository names match GitHub case-insensitively, including resolved pending renames. Registry-free runs also isolate lazy brand lookups from estate decision files, and held reference rewrites retain their file/line guidance with an incomplete result. Workflow/labeler/release/Renovate references remain final skips rather than unresolved input requests. Missing Windows device-named checkouts fall back to captured metadata instead of aborting the org plan.
+
 ### Fixed
 
 - Windows contributor tests now use explicit UTF-8, native path basenames, a platform-independent read-only metadata stub, and Git Bash with stdin-safe Action scripts. All 15 issue #9 failures are individually documented; the full suite now runs in Windows, Linux and macOS CI.
 - Lint accepts file operands after options on older Python 3.12 versions while continuing to reject unrecognized options.
 - The Action's optional render arguments support macOS Bash 3.2, including an empty argument array with `set -u`.
 
+- `org health` and `org doctor` run available checkout/snapshot checks without the private estate registry, retaining missing-org errors when a registry is supplied or discovered. Doctor combines available file and visibility evidence without inventing completeness or dropping explicit absence, normalizes REST/GraphQL privacy fields, distinguishes absent fields from explicitly cleared identity fields, checks private links under known renamed repository/owner paths and supported verification reason codes, and reports incomplete registry-dependent coverage instead of aborting or claiming the org is done.
+- Older valid custom brand configs without the optional icon palette tokens retain icon normalization, checking and option B illustration prompts; missing palette inputs are reported without a traceback, and the bundled option A glyph prompt explains which tokens to add or how to supply an explicit palette.
+- `content icon` uses the bundled `references/art-direction.md` in every working directory. The option A glyph template uses dedicated, contrasting `icon_ink` and `icon_spark` brand tokens and the documented family seed (or the tool's default when absent) without requiring private estate files; explicit art-direction overrides remain supported and missing paths are named in the error.
 - CLI stdout and stderr are configured as UTF-8 before argument parsing, preserving their existing error handlers, so redirected Windows output preserves Unicode in label plans, raw footer markup, help and diagnostics without `UnicodeEncodeError`, and undecodable filenames still use the stream's original escape policy.
 - The Action summary and quality validator decode CLI results explicitly as UTF-8, preserving non-ASCII descriptions on Windows rather than corrupting them or failing with `UnicodeDecodeError`.
 
