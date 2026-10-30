@@ -11,6 +11,8 @@ from .facts import RepoFacts
 STANDARD_DIR = REFERENCES / "standard"
 STANDARD_LOCK = STANDARD_DIR / "standard.lock.json"
 STANDARD_FILES = ("types", "topics", "descriptions", "readme-variants", "naming")
+# E4.4.2 (issue #81), tuned detection only (`detect_tuned: true`): planning and generated issue JSON is not project data.
+PLANNING_PREFIXES = ('planning/', '.github/ISSUE_TEMPLATE/', 'issues/')
 
 
 @lru_cache(maxsize=None)
@@ -32,12 +34,17 @@ def standard_lock_text() -> str:
     return json.dumps(data, sort_keys=True, indent=1, ensure_ascii=False) + "\n"
 
 
+def _is_planning(path: str) -> bool:
+    """Planning or generated issue JSON: a path under a planning prefix, or a basename `issue<N>.json`."""
+    return path.startswith(PLANNING_PREFIXES) or bool(re.search(r"^issue-?\d+\.json$", path.split("/")[-1]))
+
+
 def is_fork(meta: dict) -> bool:
     """Type rule 1: GitHub's fork flag or a `-fork` slug. RepoContext.is_fork adds the detected `fork` type."""
     return bool(meta.get("fork")) or (meta.get("repo") or "").endswith("-fork")
 
 
-def detect_type(meta: dict, facts: RepoFacts | None = None) -> tuple[str, int]:
+def detect_type(meta: dict, facts: RepoFacts | None = None, tuned: bool = False) -> tuple[str, int]:
     """Return (type, rule number). Rules that need files are skipped when the tree is unknown."""
     t = standard("types")
     facts = facts or RepoFacts(meta)
@@ -103,6 +110,8 @@ def detect_type(meta: dict, facts: RepoFacts | None = None) -> tuple[str, int]:
     if re.search(r"-in-\d+-steps$", slug):
         return "tutorial", 23
     sizes = meta.get("file_sizes") or {}
+    if tuned:
+        sizes = {k: v for k, v in sizes.items() if not _is_planning(k)}
     if sizes:
         data = sum(v for k, v in sizes.items() if k.endswith((".csv", ".json", ".parquet")))
         if data * 2 >= sum(sizes.values()):
@@ -114,7 +123,7 @@ def _same_login(a, b) -> bool:
     return bool(a and b) and str(a).lower() == str(b).lower()
 
 
-def variant_for(type_: str, meta: dict, same_owner=None) -> str:
+def variant_for(type_: str, meta: dict, same_owner=None, tuned: bool = False) -> str:
     """README variant for the type. `same_owner(a, b)` compares org logins (RepoContext passes the shared resolver's,
     CQ-03); without it the compare is case-insensitive, as GitHub logins are."""
     row = standard("types")["types"][type_]
@@ -123,6 +132,8 @@ def variant_for(type_: str, meta: dict, same_owner=None) -> str:
         return row.get("variant_elsewhere", "C")
     if meta.get("visibility") == "private" and row.get("variant_private"):
         return row["variant_private"]
+    if tuned and row.get("variant_tuned"):
+        return row["variant_tuned"]
     return row["variant"]
 
 
@@ -133,6 +144,7 @@ def card_category(type_: str) -> str | None:
 def detect(meta: dict, facts: RepoFacts | None = None, override: dict | None = None, type_override: str | None = None,
            same_owner=None) -> dict:
     facts = facts or RepoFacts(meta)
+    tuned = bool((override or {}).get("detect_tuned"))
     type_override = type_override or (override or {}).get("type")
     if type_override:
         if type_override not in standard("types")["types"]:
@@ -140,8 +152,8 @@ def detect(meta: dict, facts: RepoFacts | None = None, override: dict | None = N
             raise ShowcaseError(f"unknown type {type_override!r}", log="usage")
         type_, rule = type_override, 0
     else:
-        type_, rule = detect_type(meta, facts)
-    variant = (override or {}).get("variant") or variant_for(type_, meta, same_owner)
+        type_, rule = detect_type(meta, facts, tuned=tuned)
+    variant = (override or {}).get("variant") or variant_for(type_, meta, same_owner, tuned=tuned)
     out = {"type": type_, "rule": rule, "variant": variant, "category": card_category(type_)}
     if not facts.known and not type_override:
         # rules 5, 8-11 and 13-24 need the file tree; without it the type is provisional

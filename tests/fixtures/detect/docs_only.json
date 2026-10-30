@@ -1,0 +1,14 @@
+{
+  "owner": "Northwind-Trading-Co",
+  "repo": "handbook",
+  "files": [
+    "README.md",
+    "docs/guide.md",
+    "docs/faq.md"
+  ],
+  "file_sizes": {
+    "README.md": 1000,
+    "docs/guide.md": 2000,
+    "docs/faq.md": 2000
+  }
+}

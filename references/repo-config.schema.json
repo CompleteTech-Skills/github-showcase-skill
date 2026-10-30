@@ -136,6 +136,10 @@
         "null"
       ],
       "maxLength": 200
+    },
+    "detect_tuned": {
+      "type": "boolean",
+      "description": "Opt in to tuned type detection: rule 24 ignores planning/issue JSON and mobile-app uses README variant K. Default off."
     }
   }
 }

@@ -32,7 +32,7 @@ def test_license_rows(make_ctx, tmp_path, kw, heading, text):
         assert "## License" not in out and any(x.startswith("needs-input:") for x in ctx.logs)
 
 
-@pytest.mark.parametrize("variant", list("ABCDEFIJ"))
+@pytest.mark.parametrize("variant", list("ABCDEFIJK"))
 def test_variant_order_and_needs_input(make_ctx, tmp_path, variant):
     ctx = make_ctx(repo_dir=tmp_path, license="MIT")
     ctx.det["variant"] = variant
