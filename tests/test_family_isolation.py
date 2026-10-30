@@ -145,3 +145,24 @@ def test_data_audit_catches_a_family_regression(brand):
     raw = copy.deepcopy(brand.raw)
     raw['orgs']['Pick-Your-AI']['family'] = 'completetech'
     assert 'Pick-Your-AI' in family_mismatches(raw)
+
+
+# -- Epic #35 integration: issue 36's license_wording under issue 40's audit -----------------------------
+# Issue 36 added a per-org brand string (license_wording) that is written into README License rows. It is a
+# new place CompleteTech text could reach another org, so the issue 40 audit must cover it in data and render.
+
+def test_license_wording_mentions_completetech_only_on_owned_rows(brand):
+    leaks = {owner for owner, row in brand.raw['orgs'].items()
+             if FORBIDDEN.search(str(row.get('license_wording') or '')) and not _owned(brand.raw, owner)}
+    assert leaks == set()
+
+
+def test_render_audit_catches_a_completetech_license_wording(brand, tmp_path):
+    # Mutation evidence (in-memory copy; brand.yaml untouched): give a non-CompleteTech row the CompleteTech
+    # holder and the README scaffold scan must report it. On base 2be04ac (before issue 36) no rights
+    # sentence reads license_wording, so this assertion fails there and passes once issue 36 is merged.
+    from ctshowcase.config import Brand
+    raw = copy.deepcopy(brand.raw)
+    raw['orgs']['Pick-Your-AI']['license_wording'] = 'CompleteTech LLC'
+    leaks = rendered_leaks(Brand(raw, brand.path), 'Pick-Your-AI', tmp_path)
+    assert 'readme scaffold' in leaks, leaks
