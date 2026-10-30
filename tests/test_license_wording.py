@@ -1,10 +1,13 @@
 """Issue 36: License rows write a rights sentence only when the org row sets `license_wording` (synthetic owners only).
 
-The gating itself landed in a192d1f (issue 36), so this file is a characterization suite for that behaviour and
-is test-only (task 39). Evidence that it guards the gating: run against the pre-issue-36 readme.py
-(`git show 2be04ac:scripts/ctshowcase/readme.py`) with the current tests and brand.yaml, 23 tests fail (every
-no-holder, factual-line, blank-wording and holder-substitution case). The remaining 35 pass there because they
-pin unchanged CompleteTech output, which is the regression they are meant to catch.
+The gating itself landed in a192d1f (issue 36), which is already in the base 6dbeef6. This file is therefore a
+characterization suite: all 40 tests pass on base by design, and they cannot be red on base without a source change,
+which task 39 (test-only) does not make.
+
+Red evidence is taken from the pre-gating tree, reproduced for the t#39 review: `git archive 2be04ac` with this file
+and tests/test_readme_scaffold.py copied in gives 26 failed and 14 passed for this file. The 26 failures are every
+no-holder, factual-line, blank-wording, holder-substitution and schema-acceptance case. The 14 passes pin unchanged
+CompleteTech, CompleteTech-Security, fork and private-holder output, which is the regression they guard against.
 """
 import copy
 
