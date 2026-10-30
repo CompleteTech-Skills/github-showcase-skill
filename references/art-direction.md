@@ -74,6 +74,37 @@ Starred values are approximate until the estate planner re-measures them and pub
 | Screenshot (B, E) | `assets/screenshot.webp` | 1600×1000 viewport | WebP q80 ≤ 300 KB; captured from the live URL in a browser, never drawn by an image model |
 | Provenance | `assets/PROMPTS.md`, `.github/profile/assets/PROMPTS.md` | — | Markdown, one block per committed generated asset |
 
+## Codex image-generation recipe
+
+### Command
+
+The prompt comes from `content icon prompt` (written with `--out`, for example `art/prompts/ORG/REPO/icon.md`); give it to Codex non-interactively:
+
+```bash
+codex exec --skip-git-repo-check --json "$(cat art/prompts/ORG/REPO/icon.md)" > run.jsonl
+```
+
+- `exec` runs one non-interactive turn.
+- `--skip-git-repo-check` lets it run from a scratch directory.
+- `--json` prints one JSON event per line, so the run output can be parsed (the image path is read from it, see below).
+
+Use the same model and version for a whole family run (pipeline rule 4) and record it in `PROMPTS.md`. Flag names follow the Codex CLI at the time of writing; if one is rejected, run `codex exec --help` and change nothing else in the recipe.
+
+### Read the image path from the run output
+
+1. After the run, search the `run.jsonl` events (or the final message) for the image file path Codex reports for the generated image, and use exactly that path.
+2. Never pick the newest file in the generated-images folder. Parallel sessions write into the same place, so the newest file can belong to another run and the wrong image gets normalized.
+3. If the run output names no image path, treat the attempt as failed. Do not fall back to the newest file or to a directory listing.
+4. Pass the chosen path to `content icon normalize --in PATH`. In the `PROMPTS.md` provenance block, record the Codex session id and the path in the prose beside the record; the Provenance record fenced template itself does not change.
+5. Use one run per candidate set. Do not run candidates for several repositories in the same working directory at once unless you can tell their outputs apart.
+
+### Retry and attempt limits
+
+- A run that finishes with no image path is retried as a NEW run with the same prompt, at most 2 retries (3 attempts total) per candidate set. Parallel runs sometimes produce no path, and a retry has succeeded.
+- Retries never alter the prompt.
+- Attempts that produced a path count toward pipeline rule 7 (4 candidates, then 4 more once, then log `art-fail`). Empty attempts do not count as candidates but do count toward the 3-attempt cap.
+- After the cap, stop and log `art-fail` with a one-line reason. Do not loop.
+
 ## Repository glyph prompt template
 
 `content icon prompt` uses this self-contained option A template by default. Its
