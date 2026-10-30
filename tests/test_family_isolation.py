@@ -309,3 +309,14 @@ def test_card_text_scan_catches_a_planted_eyebrow(brand, fonts, monkeypatch):
     assert not FORBIDDEN.search(svg), 'the SVG check was expected to miss outlined text'
     assert any(FORBIDDEN.search(text) for text in scene_text(scene)), 'the scene text scan missed the planted eyebrow'
     assert card_leaks(ctx, fonts)
+
+
+def test_banner_style_and_org_row_scans_catch_planted_leaks(brand):
+    # Mutation evidence (the row test is a test-only change, so it passes on base source by design: every known leak
+    # is an xfail that must still reproduce). These plants prove the banner-input scans are live: a 005ADD style token
+    # and a CompleteTech org-row description are both seen by the same json.dumps + FORBIDDEN scan the row test runs.
+    ctx = synthetic_ctx(brand, 'Pick-Your-AI')
+    assert not FORBIDDEN.search(json.dumps(ctx.style, default=str))  # baseline: clean
+    assert not FORBIDDEN.search(json.dumps(dict(ctx.org), default=str))
+    assert FORBIDDEN.search(json.dumps({**ctx.style, 'accent_deep': '#005ADD'}, default=str))
+    assert FORBIDDEN.search(json.dumps({**ctx.org, 'description': 'Steward: CompleteTech LLC.'}, default=str))
