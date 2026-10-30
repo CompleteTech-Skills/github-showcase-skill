@@ -116,19 +116,30 @@
       ]
     },
     "readme": {
-      "type": [
-        "object",
-        "null"
-      ],
-      "additionalProperties": false,
-      "properties": {
-        "header": {
-          "type": "boolean"
+      "anyOf": [
+        {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "header": {
+              "type": "boolean"
+            },
+            "footer": {
+              "type": "boolean"
+            }
+          }
         },
-        "footer": {
-          "type": "boolean"
+        {
+          "type": "string",
+          "enum": [
+            "managed",
+            "authored"
+          ]
         }
-      }
+      ]
     },
     "reason": {
       "type": [

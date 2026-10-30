@@ -33,8 +33,11 @@ def detect(text: str) -> str | None:
             return "front-matter"
     # masked() blanks fenced code (a shorter fence inside a longer one does not close it) and inline code spans, so a
     # comment shown as an example is not a generated header.
-    for m in COMMENT_RE.finditer(masked("\n".join(lines))):
-        body = m.group(1).strip()
+    # The comment is located on the masked text but its body is read from the original (offsets are identical), so a
+    # warning wrapped in backticks inside a real comment (`<!-- `DO NOT EDIT` -->`) still counts.
+    joined = "\n".join(lines)
+    for m in COMMENT_RE.finditer(masked(joined)):
+        body = joined[m.start(1):m.end(1)].strip()
         if body.lower().startswith("showcase:"):
             continue
         if GEN_RE.search(body):

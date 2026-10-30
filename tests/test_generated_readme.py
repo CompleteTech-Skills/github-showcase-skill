@@ -139,3 +139,30 @@ def test_action_readme_step_skips_managed_refusal():
     body = text[text.index("readme_step() {"):]
     body = body[:body.index("bootstrapped=false")]
     assert body.index("needs-input:readme-managed") < body.index('return "$rc"')
+
+
+# -- review follow-ups: backticked warning inside a real comment; override strings through real config loading ------
+def test_detect_backticked_warning_inside_real_comment():
+    assert generated.detect("# Doc\n<!-- `DO NOT EDIT` -->\n\nBody.\n") == "header"
+
+
+@pytest.mark.parametrize("value", ["managed", "authored"])
+def test_repo_override_accepts_readme_string(value):
+    from ctshowcase import config
+    assert config.parse_repo_override("showcase.yml", f"readme: {value}\n") == {"readme": value}
+
+
+def test_repo_override_still_accepts_object_and_rejects_other_strings():
+    from ctshowcase import config
+    assert config.parse_repo_override("showcase.yml", "readme:\n  header: false\n") == {"readme": {"header": False}}
+    with pytest.raises(Exception):
+        config.parse_repo_override("showcase.yml", "readme: bogus\n")
+
+
+@pytest.mark.parametrize("value, rc", [("managed", 4), ("authored", 0)])
+def test_cli_write_honours_readme_override_file(tmp_path, value, rc):
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github" / "showcase.yml").write_text(f"readme: {value}\n", encoding="utf-8")
+    write_readme(tmp_path, GENERATED_HEADER if value == "authored" else "# Plain\n\nHand written.\n")
+    p = run_cli("--meta", META, "--repo-dir", tmp_path, "readme", "--write")
+    assert p.returncode == rc, p.stdout + p.stderr
