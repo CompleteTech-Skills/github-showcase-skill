@@ -12,8 +12,8 @@ Run from inside the target checkout, or pass the global `--repo-dir DIR` and `--
 S=<skill-dir>/scripts/showcase.py
 python3 $S --meta meta.json content social [--out assets/social-preview.png] [--job]          # alias of social-preview
 python3 $S --meta meta.json content icon prompt [--glyph glyph.yaml] [--option A|B] [--seed N] [--out art/prompts/ORG/REPO/icon.md]
-python3 $S --meta meta.json content icon normalize --in candidate.png [--ground auto|transparent|keep] [--ground-tolerance DE] [--out assets/icon.png] [--preview icon-48.png]
-python3 $S --meta meta.json content icon check [--out assets/icon.png]
+python3 $S --meta meta.json content icon normalize --in candidate.png [--ground auto|transparent|keep] [--ground-tolerance DE] [--strict] [--min-contrast X] [--ocr] [--out assets/icon.png] [--preview icon-48.png]
+python3 $S --meta meta.json content icon check [--strict] [--min-contrast X] [--ocr] [--out assets/icon.png]
 python3 $S content links [FILE ...] [--base-ref origin/main] [--online [--cache links.json]] [--strict] [--diff]
 python3 $S --meta meta.json content linguist [--min-share 0.02] [--language Python]
 python3 $S --meta meta.json content actions [--runs runs.json] [--workflows workflows.json] [--pages pages.json] [--approval WORKFLOW=ID]
@@ -41,6 +41,7 @@ Every action also takes `--report FILE` (the JSON result), `--jobs FILE` (append
 - A slightly vignetted ground with corner dE above 3.0 fails with `icon-ground` and a message naming the measured dE and `--ground-tolerance`; rerun with e.g. `--ground-tolerance 5` for corner dE 3.1-4.9. Larger spreads still fail, so ask for a flat ground (the option A prompt states the exact `card_fill` hex with no vignette, texture, gradient, shadow or glow).
 - A raised `--ground-tolerance` widens the key threshold only above the default 3.0 (explicit modes stay byte-identical at the default), and a kept night tile with such a vignette is flattened to one ground so `content icon check` passes it.
 - `--ground keep|transparent` behave as before; `--ground-tolerance` also sets how alike the corners must be for them.
+- `--ground-tolerance` must be a finite dE from 0 to 12 (the content threshold); NaN, a negative value or anything above 12 is a usage error (exit 2) and nothing is written.
 
 ## Results and exit codes
 
@@ -52,7 +53,7 @@ None by default. `links --online` and `images --online` make cached, rate-limite
 
 `--strict` (on `icon check` and `icon normalize`, also set by the family key `icon_strict_family_ink: true` in `references/brand.yaml`, which is off by default) makes the family-ink check fail instead of warn when the icon's dominant ink is not a family ink. Without the flag it stays a warning and the exit code is unchanged. With no family palette (`icon_ink` and `icon_spark` absent) the family-ink check is not emitted, so `--strict` has no effect there and `needs-input:icon-palette` is still logged.
 
-`--min-contrast` sets the contrast floor of the icon's dominant ink on the card plate (on `icon normalize` and `icon check`). The precedence is the CLI flag, then the family key `icon_min_contrast` in `references/brand.yaml`, then the default 3.0. The default stays 3:1 because a higher floor would change results that already pass. The recommended floor for the card plate is 4.5:1 (WCAG AA body text); set it with `--min-contrast 4.5` or `icon_min_contrast: 4.5` for a family. The valid range is 1 to 21; any other value, or a non-number, is a usage error (exit 2). A failing contrast check fails the icon (exit 1), as the other failing icon checks do.
+`--min-contrast` sets the contrast floor of the icon's dominant ink on the card plate (on `icon normalize` and `icon check`). The precedence is the CLI flag, then the family key `icon_min_contrast` in `references/brand.yaml`, then the default 3.0. The default stays 3:1 because a higher floor would change results that already pass. The recommended floor for the card plate is 4.5:1 (WCAG AA body text); set it with `--min-contrast 4.5` or `icon_min_contrast: 4.5` for a family. The valid range is 1 to 21; any other value, or a non-number, is a usage error (exit 2). When a floor is configured (flag or family key), the contrast is measured on the most common actual colour of the dominant ink, not the midpoint of its 16-level colour bucket, which can be up to 8 levels per channel off (a false pass or fail near the floor); without one, the default 3:1 check keeps the legacy midpoint measurement so existing results do not change. A failing contrast check fails the icon (exit 1), as the other failing icon checks do.
 
 `--ocr` (on `icon check` and `icon normalize`, off by default) adds an optional text check: when `tesseract` is on `PATH`, the icon is flattened on the family card colour (so white lettering on a dark card stays readable) and read with it, and words of 2 or more alphanumeric characters count as text. Found text warns (`no-text`, detail `OCR found text: ...`) and fails the icon with `--strict`; no text passes. Single characters and punctuation are ignored. Without `--ocr`, or without `tesseract`, nothing changes: `no-text` stays a manual review, and an absent tool logs `needs-input:ocr-unavailable` without changing the result or the exit code (a tool that fails to run logs `needs-input:ocr-failed`). The tool is never installed by this package. The 48 px set sheet stays manual.
 

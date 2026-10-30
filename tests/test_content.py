@@ -625,17 +625,36 @@ def test_icon_prompt_states_the_flat_ground(brand, icon_ctx):
     """The option-A prompt names the family card colour as one flat ground and forbids vignette and glow."""
     glyph = {"glyph_name": "Inbox Tray", "glyph_description": "An open tray seen front-on.",
              "spark_placement": "held inside the tray", "size_class": "wide"}
-    # the bundled art direction carries the template sentence the ground clause rewrites, so it is the
-    # format asserted here. KNOWN GAP (reproduced, deliberately not fixed): the synthetic estate-format fixture
-    # (tests/fixtures/content/ART_DIRECTION.min.md, passed as ART) has no such sentence, so its prompt gets no flat
-    # ground clause and still asks for "one very soft round pool ... about 880 px across" in its BACKGROUND line.
-    # Changing that needs a decision on estate templates; this test does not cover it.
+    # the bundled art direction carries the "Keep the background empty" sentence the ground clause rewrites; the
+    # estate-format (d) template's BACKGROUND section is covered by test_icon_prompt_estate_template_flat_ground.
     p = C.icon_prompt(icon_ctx, resolver(brand), C.load_art_direction(), glyph)["prompt"]
     assert "perfectly flat" in p
     assert brand.style(NW)["tokens"]["card_fill"].upper() in p
     assert "no vignette, texture, gradient, shadow or glow" in p
     assert "Keep the background empty" not in p
     assert "880 px" not in p  # the bundled template has no light pool to conflict with the flat ground
+
+
+def test_icon_prompt_estate_template_flat_ground(capsys, tmp_path, brand):
+    """Review B (epic #51, #52/#53): the estate-format (d) template's BACKGROUND section asked for the avatars'
+    880 px light pool and never stated the card_fill ground. Before the fix this CLI run exited 0 with
+    "pool of #0081ED light ... about 880 px across" and no flat-ground clause (reproduced on 65ab897)."""
+    glyph = tmp_path / "glyph.yaml"
+    glyph.write_text("glyph_name: Inbox Tray\nglyph_description: An open tray seen front-on.\n"
+                     "spark_placement: held inside the tray\nsize_class: wide\n", encoding="utf-8")
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    code, res = run_content(capsys, "--meta", meta, "--no-repo-dir", "content", "icon", "prompt", "--glyph", glyph,
+                            "--art-direction", FIX / "ART_DIRECTION.min.md", *NO_ESTATE)
+    assert code == 0 and res["result"] == "ok", res
+    p = res["prompt"]
+    card = brand.style(NW)["tokens"]["card_fill"].upper()
+    background = next(ln for ln in p.splitlines() if "BACKGROUND" in ln)
+    assert background == f"2 BACKGROUND. {C.ground_clause(card)}", background
+    assert "880 px" not in p and "pool of" not in p and "no vignette, texture, gradient, shadow or glow" in p
+    # the rest of the estate template is preserved
+    for kept in ("4 LIGHT. Bloom #0081ED", "5 THE SPARK.", "6 COMPOSITION.", "7 THE GLYPH: Inbox Tray.", "9 NEVER."):
+        assert kept in p, kept
 
 
 def test_icon_prompt_parses_the_bundled_art_direction(brand, fixture_meta):
@@ -1028,6 +1047,65 @@ def test_icon_min_contrast_cli(capsys, tmp_path, brand):
     assert code == 0 and res["result"] in ("pass", "warn"), res
     code, res = run_content(capsys, *check, "--min-contrast", "30")
     assert code == 2, res
+
+
+def _solid_icon(ink):
+    from PIL import Image, ImageDraw
+    im = Image.new("RGBA", (1024, 1024), (0, 0, 0, 0))
+    ImageDraw.Draw(im).rectangle((300, 300, 724, 724), fill=tuple(ink) + (255,))
+    return C.icon_bytes(im)[0]
+
+
+def test_icon_explicit_floor_measures_actual_ink_not_bucket_midpoint():
+    """Review B (epic #51): the dominant 16-level bucket's midpoint can be 8 levels per channel off the real ink.
+    Reproduced on 65ab897 with --min-contrast 4.5: #808080 on #032530 (actual 4.06:1) passed as #888888 4.52:1, and
+    #707070 on #F8FAFC (actual 4.73:1) failed as #787878 4.22:1. An explicitly configured floor now measures the
+    most common actual RGB; the unconfigured default keeps the legacy midpoint, so existing results do not move."""
+    from ctshowcase.color import contrast
+    assert contrast("#808080", "#032530") < 4.5 < contrast("#888888", "#032530")
+    assert contrast("#787878", "#F8FAFC") < 4.5 < contrast("#707070", "#F8FAFC")
+    false_pass = C.icon_qa(_solid_icon((0x80,) * 3), card="#032530", min_contrast=4.5, exact_contrast=True)
+    assert _check_result(false_pass, "contrast-on-card") == "fail", false_pass
+    assert "#808080" in next(c["detail"] for c in false_pass["checks"] if c["check"] == "contrast-on-card")
+    false_fail = C.icon_qa(_solid_icon((0x70,) * 3), card="#F8FAFC", min_contrast=4.5, exact_contrast=True)
+    assert _check_result(false_fail, "contrast-on-card") == "pass", false_fail
+    # legacy default (no exact_contrast): the midpoint measurement is unchanged
+    legacy = C.icon_qa(_solid_icon((0x70,) * 3), card="#F8FAFC", min_contrast=4.5)
+    assert _check_result(legacy, "contrast-on-card") == "fail" and legacy["dominant_ink"] == "#787878"
+
+
+def test_icon_min_contrast_cli_measures_actual_ink(capsys, tmp_path, brand):
+    """The CLI turns on the exact measurement only when a floor is configured (--min-contrast or the family key)."""
+    card = brand.style(NW)["tokens"]["card_fill"]
+    assert card.upper() == "#F8FAFC"
+    out = write(tmp_path, {"repo/assets/icon.png": _solid_icon((0x70,) * 3)}) / "repo" / "assets" / "icon.png"
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    check = ("--meta", meta, "--no-repo-dir", "content", "icon", "check", "--out", out,
+             "--art-direction", FIX / "ART_DIRECTION.min.md", *NO_ESTATE)
+    code, res = run_content(capsys, *check, "--min-contrast", "4.5")
+    assert _check_result(res["qa"], "contrast-on-card") == "pass", res
+
+
+def test_icon_ground_tolerance_is_range_checked(capsys, tmp_path, brand):
+    """Review A (epic #51): NaN made every `spread > tol` false (any opaque corners became one averaged ground) and
+    1000 widened the key to KEY_DE + 1000 (the whole image keyed); both now are usage errors (exit 2)."""
+    from ctshowcase.errors import ShowcaseError
+    assert C.icon_ground_tolerance(0) == 0.0 and C.icon_ground_tolerance(5) == 5.0 and C.icon_ground_tolerance(12) == 12.0
+    for bad in (float("nan"), float("inf"), -1, 12.5, 1000, True, "x"):
+        with pytest.raises(ShowcaseError) as exc:
+            C.icon_ground_tolerance(bad)
+        assert exc.value.log == "usage" and exc.value.code == 2, bad
+    src = tmp_path / "cand.png"
+    _candidate(brand.style(NW)["tokens"]["card_fill"]).save(src)
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    for bad in ("nan", "-1", "1000"):
+        out = tmp_path / f"icon-{bad}.png"
+        code, res = run_content(capsys, "--meta", meta, "--no-repo-dir", "content", "icon", "normalize", "--in", src,
+                                "--out", out, "--ground-tolerance", bad, "--art-direction",
+                                FIX / "ART_DIRECTION.min.md", *NO_ESTATE)
+        assert code == 2 and not out.exists(), (bad, res)
 
 
 def test_schema_icon_min_contrast(brand):
