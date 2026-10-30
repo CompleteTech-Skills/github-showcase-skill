@@ -46,6 +46,17 @@ python scripts/showcase.py lint banner output/onboarding-banner.png
 python scripts/showcase.py contact-sheet output/onboarding-banner.png --mode stack --out output/onboarding-sheet
 ```
 
+To onboard a new org, preview and then add its brand rows (both commands are dry runs until `--write`; the synthetic names are examples):
+
+```bash
+python scripts/showcase.py brand add-family acme-widgets --company-label "Acme Widgets" --canvas "#101820" --accent "#FEE715"
+python scripts/showcase.py brand add-org Acme-Widgets --family acme-widgets --tier T1 --display-name "Acme Widgets"
+# review the printed YAML block and diff, then repeat with --write (family first)
+python scripts/showcase.py doctor --strict-owner --meta M.json   # optional: refuse owners not in brand.yaml
+```
+
+`--write` edits `references/brand.yaml`, regenerates `references/brand.lock.json` and the standard lock, and validates the schema; on any `schema_errors` it restores `brand.yaml` byte for byte. A new family is `measured: false`, so a banner needs `--allow-unmeasured` until its layout is measured.
+
 `describe` and `topics` print JSON verdicts and proposals; nothing is written to GitHub. The banner and card are rendered from the fixture's description and topics. The synthetic checkout has no `assets/icon.png`, so the banner falls back to the brand logo and logs `needs-input:repo-icon`; that log is expected. Pass `--no-repo-dir` instead of `--repo-dir` to render from the metadata alone.
 
 The `org`, `project`, `enterprise` and `content` command groups print plans and `scripts/writer.py` jobs instead of art. Try them offline on the synthetic estate: `SHOWCASE_ESTATE_ROOT=examples/estate python scripts/showcase.py org profile Northwind-Trading-Co --meta-dir examples/estate/meta`, then `python scripts/showcase.py --meta $M --repo-dir $D content links`. [examples/README.md](examples/README.md) lists a first command for every group.

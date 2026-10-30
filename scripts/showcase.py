@@ -818,6 +818,22 @@ def cmd_new(args):
     return res, OK
 
 
+def strict_owner_gate(b, owner, allow_hold=False) -> None:
+    """`doctor --strict-owner`: the banner/card/social gate (gate_owner) plus the unregistered-owner refusal."""
+    from ctshowcase.errors import Refused
+    b.check_owner(owner)  # excluded/hold/T3; the global --allow-t3 is honoured via t3_signed_off()
+    if not b.org(owner)["known"]:
+        raise Refused(f"{owner} is not in brand.yaml; run `showcase.py brand add-org` (dry run by default)",
+                      log="unknown-org")
+    if b.style(owner).get("hold") and not allow_hold:
+        raise ShowcaseError(f"{owner} family is on hold; pass --allow-hold", log="hold")
+
+
+def cmd_brand(args):
+    from ctshowcase import brandedit
+    return brandedit.run(args, brand(args))
+
+
 def cmd_doctor(args):
     from ctshowcase import doctor
     if args.estate:
@@ -838,16 +854,17 @@ def cmd_doctor(args):
                     key = f"{o}/{x.get('repo') or x.get('name')}".lower() if o else f"#{len(seen)}"
                     seen[key] = x
         metas = list(seen.values())
+        if getattr(args, "strict_owner", False):  # every owner found must pass the same gate as a single repository
+            b = brand(args)
+            for o in sorted({(m.get("owner") or {}).get("login") if isinstance(m.get("owner"), dict) else m.get("owner")
+                             for m in metas} - {None, ""}):
+                strict_owner_gate(b, o, args.allow_hold)
         res = intake.estate_doctor(brand(args), _resolver_args(args, require_registry=True), metas,
                                    template_dir=args.template_dir, checkouts=args.checkouts, out=args.out)
         return res, OK
     ctx = context(args)
     if getattr(args, "strict_owner", False):
-        from ctshowcase.errors import Refused
-        ctx.brand.check_owner(ctx.owner)  # honours the global --allow-t3 via t3_signed_off()
-        if not ctx.brand.org(ctx.owner)["known"]:
-            raise Refused(f"{ctx.owner} is not in brand.yaml; run `showcase.py brand add-org` (dry run by default)",
-                          log="unknown-org")
+        strict_owner_gate(ctx.brand, ctx.owner, args.allow_hold)
     else:
         ctx.brand.check_owner(ctx.owner, allow_t3=True)
     r = doctor.row(ctx, skill_verdict=args.skill_verdict)
@@ -1144,7 +1161,10 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--out", help="--estate: merge the proposals into this NEW_PROPOSALS.yaml")
     s.add_argument("--strict-owner", action="store_true", default=False,
                    help="apply the same owner gate as banner/card/social: refuse a T3 owner without the global --allow-t3 "
-                        "and an owner missing from brand.yaml; off by default")
+                        "and an owner missing from brand.yaml (in --estate, every owner found), and a family on hold "
+                        "unless --allow-hold; off by default")
+    s.add_argument("--allow-hold", action="store_true",
+                   help="--strict-owner: allow a family on hold (as banner/card/social)")
     _resolver_flags(s, "--estate: ")
     s.set_defaults(func=cmd_doctor)
 
@@ -1193,6 +1213,9 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--crop", action="store_true",
                    help="write brand_assets mark_dark and bulb_dark from the measured brand_assets.crops boxes (Phase 0.12)")
     s.set_defaults(func=cmd_config)
+
+    from ctshowcase import brandedit
+    brandedit.register(sub, cmd_brand)
 
     # command groups (decisions 5, 14, 15, 18, 21, 23 and 24; COVERAGE gaps): each module registers its own parser, and
     # every org lookup inside them goes through ctshowcase.resolver (old and new logins resolve alike, CQ-03)

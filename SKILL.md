@@ -54,6 +54,7 @@ Every surface uses one **dark** design on both GitHub themes (decision 21): navy
 | A repository exists but never went through the standard (created by an agent, a pipeline or a transfer) | `adopt OWNER/REPO`; for the whole estate, `doctor --estate` (intake proposals and template drift) |
 | A set must be reviewed the way GitHub shows it | `contact-sheet` |
 | Coverage must be reported or a repository verified as done | `lint all`, then `doctor` |
+| An org or design family is missing from `references/brand.yaml` | `brand add-family NAME ...` then `brand add-org LOGIN --family NAME ...`: dry run by default (prints the YAML block and a unified diff, touches nothing); `--write` edits `brand.yaml`, regenerates `brand.lock.json` and the standard lock like `config --write-lock`, schema-validates, and restores `brand.yaml` byte for byte if `schema_errors` is not empty. Duplicates are refused. `doctor --strict-owner` (off by default) applies the banner/card/social owner gate (excluded, hold, T3 without `--allow-t3`, family on hold without `--allow-hold`) and refuses an owner missing from `brand.yaml`, also under `--estate` |
 
 Do not use it for accounts outside the estate. Excluded owners (BunsDev, GoZippy, h-mascot, lmvdz, GalaxyRuler, and per decisions 1 and 2 MetatronAngelAgent and PrompDev) and T3 owners before co-owner sign-off (Pick-Your-AI, Jevelopers-neatHack-2026) are refused with exit 2.
 
