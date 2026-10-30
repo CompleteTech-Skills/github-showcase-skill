@@ -74,6 +74,52 @@ Starred values are approximate until the estate planner re-measures them and pub
 | Screenshot (B, E) | `assets/screenshot.webp` | 1600×1000 viewport | WebP q80 ≤ 300 KB; captured from the live URL in a browser, never drawn by an image model |
 | Provenance | `assets/PROMPTS.md`, `.github/profile/assets/PROMPTS.md` | — | Markdown, one block per committed generated asset |
 
+## Codex image-generation recipe
+
+### Command
+
+The prompt comes from `content icon prompt` (written with `--out`, for example `art/prompts/ORG/REPO/icon.md`); give it to Codex non-interactively:
+
+```bash
+codex exec --skip-git-repo-check --json "$(cat art/prompts/ORG/REPO/icon.md)" > run.jsonl
+```
+
+- `exec` runs one non-interactive turn.
+- `--skip-git-repo-check` lets it run from a scratch directory.
+- `--json` prints one JSON event per line, so the run output can be parsed (the image path is read from it, see below).
+
+Use the same model and version for a whole family run (pipeline rule 4) and record it in `PROMPTS.md`. Flag names follow the Codex CLI at the time of writing; if one is rejected, run `codex exec --help` and change nothing else in the recipe.
+
+### Read the image path from the run output
+
+1. After the run, search the `run.jsonl` events (or the final message) for the image file path Codex reports for the generated image, and use exactly that path.
+2. Never pick the newest file in the generated-images folder. Parallel sessions write into the same place, so the newest file can belong to another run and the wrong image gets normalized.
+3. If the run output names no image path, treat the attempt as failed. Do not fall back to the newest file or to a directory listing.
+4. Pass the chosen path to `content icon normalize --in PATH`. In the `PROMPTS.md` provenance block, record the Codex session id and only the image file name, or the path written relative to `$CODEX_HOME` (for example `$CODEX_HOME/generated_images/<file>`), in the prose beside the record. Never record the absolute path: it contains the local user name. The Provenance record fenced template itself does not change.
+5. Use one run per candidate. Do not run candidates for several repositories in the same working directory at once unless you can tell their outputs apart.
+
+### Retry and attempt limits
+
+- The limit applies per candidate, not per candidate set. A run that finishes with no image path is retried as a NEW run with the same prompt, at most 2 retries (3 attempts total) for that candidate. Parallel runs can finish without a path, which is why a retry is allowed.
+- Retries never alter the prompt.
+- A run that returns a path produces one candidate and ends that candidate's attempts. Successful candidates never count toward the cap, so the four-candidate round of pipeline rule 7 (then 4 more once, then log `art-fail`) is still reachable. Only empty runs count toward the 3 attempts, and they are not candidates.
+- After the cap for any one candidate, stop and log `art-fail` with a one-line reason. Do not loop.
+
+### Privacy: only public facts go into prompts
+
+- (a) Prompts may contain only public facts: the public repository name, its public description and topics, the family palette and style lock, and the glyph fields supplied by the writer.
+- (b) Never paste private-repository content into a prompt: no private repo names, README or source text, issue text, customer or personal data, emails, tokens, or estate-registry rows.
+- (c) `content icon prompt` does not establish whether a fact is public. It writes repository metadata (name, description, topics) and fields derived from the local README, such as its heading, into the Markdown file that Codex receives, with no privacy filtering. Before running Codex, read the complete generated Markdown, including every README-derived field, and remove or replace anything that is not public. Use public-only inputs, or hold the task. The prompt leaves the machine.
+- (d) For a private repository, do not generate the icon with Codex from its contents. Use only the family glyph fields and a neutral name, or hold the task.
+- (e) Keep the prompt text in the provenance record verbatim, which makes this rule auditable.
+
+### Sandbox: read from the generated-images folder
+
+- (a) Codex stores generated images in its `generated_images` folder inside `$CODEX_HOME` (default: the `.codex` folder in the user's home, `~`). Read the image from the path named in the run output, which points there.
+- (b) Files that Codex writes into its own sandbox, for example a copy it saves into the working directory it was given, can be locked against the user account (access denied). Do not rely on them, and do not try to chmod or take ownership of them.
+- (c) If a path is unreadable, copy nothing from the sandbox. Re-take the image from the generated-images folder path in the run output, or retry the run under the retry limit above.
+- (d) Copy the chosen image to a scratch location outside the repository before `content icon normalize --in`, and commit only the normalized `assets/icon.png`. Never commit the raw candidate. Do not write any real absolute local path or user name; use `$CODEX_HOME` and `~` only.
+
 ## Repository glyph prompt template
 
 `content icon prompt` uses this self-contained option A template by default. Its
