@@ -391,10 +391,14 @@
  "footer": {
   "alt": "CompleteTech LLC",
   "href": "https://www.complete.tech",
+  "legacy_logo_urls": [
+   "https://raw.githubusercontent.com/CompleteTech-LLC/.github/main/brand/logo.png",
+   "https://raw.githubusercontent.com/CompleteTech-LLC/.github/main/brand/logo-dark.png"
+  ],
   "line_prefix": "Built by",
   "line_suffix": "· Innovation at Every Integration",
-  "logo_dark_url": "https://raw.githubusercontent.com/CompleteTech-LLC/.github/main/brand/logo-dark.png",
-  "logo_light_url": "https://raw.githubusercontent.com/CompleteTech-LLC/.github/main/brand/logo.png",
+  "logo_dark_url": "https://raw.githubusercontent.com/CompleteTech-Skills/github-showcase-skill/main/assets/brand/logo-dark.png",
+  "logo_light_url": "https://raw.githubusercontent.com/CompleteTech-Skills/github-showcase-skill/main/assets/brand/logo.png",
   "width": 200
  },
  "languages": {

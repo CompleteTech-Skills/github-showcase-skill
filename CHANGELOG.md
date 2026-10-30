@@ -6,6 +6,8 @@ All notable changes to `github-showcase-skill` are recorded here. Versions follo
 
 ### Fixed
 
+- Footer logo URLs now use the existing published masters in this skill instead of missing `.github/brand` files. README refresh safely migrates the former URLs without dropping authored partner credits; the decision 18 artwork, theme selection and credit remain unchanged.
+
 - `doctor` reports disabled-Issues label checks, inapplicable social previews and archived community health as `n/a`, while preserving label coverage during approved archived polishing and unknown captured values on applicable surfaces. Social upload plans share the R10 applicability rule and include the personal-profile capstone.
 - `doctor` reports R11 as `n/a` for archived repositories and outside T1/T2 organizations (personal-account, utility and co-owned repositories), matching the definition of done.
 - R5 preserves upstream defaults on forks (forks in the watching and archive orgs still need Issues off, as `adopt` plans) and accepts a captured user keep decision for other default branches without relaxing the merge or Issues checks. `adopt` and the `doctor --estate` proposals honour the same keep decision: `adopt` logs `default-branch kept (user)` instead of asking for a `rename-default-branch` proposal, and neither asks for one on a fork.

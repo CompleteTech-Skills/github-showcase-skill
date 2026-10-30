@@ -1,6 +1,6 @@
 # User decisions this skill implements
 
-Verbatim excerpt from `decisions/USER_DECISIONS.md` (Timothy Wayne Gregg, 2026-10-25) in the estate hand-off bundle. These decisions outrank the estate standard `ct-std-v1` (`STANDARD.md`), the art direction and every audit proposal. Where this skill's references paraphrase the standard, the decisions below have already been applied.
+Verbatim excerpt from `decisions/USER_DECISIONS.md` (Timothy Wayne Gregg, 2026-10-25) in the estate hand-off bundle, with the footer image publication URLs repaired at the user's request on 2026-10-29. These decisions outrank the estate standard `ct-std-v1` (`STANDARD.md`), the art direction and every audit proposal. Where this skill's references paraphrase the standard, the decisions below have already been applied.
 
 | Decision | Where the skill applies it |
 |---|---|
@@ -59,17 +59,19 @@ Verbatim excerpt from `decisions/USER_DECISIONS.md` (Timothy Wayne Gregg, 2026-1
 
 ## Footer and brand master
 
-18. **Every in-scope README ends with the CompleteTech LLC footer** (user screenshot, 2026-10-25):
+18. **Every in-scope README ends with the CompleteTech LLC footer** (user screenshot, 2026-10-25; publication-path repair requested 2026-10-29):
     - a centred logo about 200 px wide, linking to https://www.complete.tech
     - under it, the line `Built by [CompleteTech LLC](https://www.complete.tech) · Innovation at Every Integration`
+
+    The logo URLs point to the published, unchanged masters bundled with this skill; the former `CompleteTech-LLC/.github/main/brand/` URLs returned 404. The layout, credit, theme selection and artwork are unchanged.
 
     Use `<picture>` so **dark mode shows the transparent dark logo (no white box)** and light mode shows the light logo. Exact markup:
     ```html
     <p align="center">
       <a href="https://www.complete.tech">
         <picture>
-          <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/CompleteTech-LLC/.github/main/brand/logo-dark.png">
-          <img src="https://raw.githubusercontent.com/CompleteTech-LLC/.github/main/brand/logo.png" alt="CompleteTech LLC" width="200">
+          <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/CompleteTech-Skills/github-showcase-skill/main/assets/brand/logo-dark.png">
+          <img src="https://raw.githubusercontent.com/CompleteTech-Skills/github-showcase-skill/main/assets/brand/logo.png" alt="CompleteTech LLC" width="200">
         </picture>
       </a>
       <br>
