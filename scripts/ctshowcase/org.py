@@ -681,8 +681,9 @@ def denylist_leaks(text: str, slugs: set[str], names: set[str]) -> list[str]:
     for n, line in enumerate(text.splitlines(), 1):
         low = line.lower()
         # The owner position of a GitHub URL or SCP-style remote (`github.com/<owner>`, `git@github.com:<owner>`) is
-        # not a name; `\1` keeps the matched host so a dotted repository name such as `mirror-github.com` survives.
-        bare = re.sub(r"(github\.com|githubusercontent\.com)[/:][a-z0-9-]+", r"\1/_", low)
+        # not a name; `\1` keeps the matched host so a dotted repository name such as `mirror-github.com` survives; the host must start at a hostname boundary, so
+        # a custom mirror host such as `mirror-github.com/<name>` is not masked.
+        bare = re.sub(r"(?<![a-z0-9_-])((?:[a-z0-9]+\.)?(?:github\.com|githubusercontent\.com))[/:][a-z0-9-]+", r"\1/_", low)
         slug_hit = any(r.search(low) for r in slug_res)
         if slug_hit:
             hits.add(f"denied-slug:L{n}")

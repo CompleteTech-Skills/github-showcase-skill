@@ -232,3 +232,12 @@ def test_denylist_scp_remote_owner_is_not_a_name():
     assert _hits("https://github.com/ledger/public-project.git", names=["ledger"]) == []
     assert _hits("git@github.com:acme/ledger.git", names=["ledger"]) == ["denied-name:L1"]
     assert _hits("git@github.com:northwind/hidden-tool.git", ["northwind/hidden-tool"]) == ["denied-slug:L1"]
+
+
+def test_denylist_owner_mask_needs_a_github_host_boundary():
+    # a custom mirror host ends in `github.com` but is not GitHub: its first path segment is a name, not an owner
+    assert _hits("https://mirror-github.com/ledger", names=["ledger"]) == ["denied-name:L1"]
+    assert _hits("https://evil-githubusercontent.com/ledger", names=["ledger"]) == ["denied-name:L1"]
+    # real GitHub hosts (bare, www, raw, SCP) still mask the owner position
+    assert _hits("https://www.github.com/ledger/x", names=["ledger"]) == []
+    assert _hits("https://raw.githubusercontent.com/ledger/x/main/a", names=["ledger"]) == []
