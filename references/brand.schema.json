@@ -292,6 +292,10 @@
     "flagship": {
      "type": "boolean"
     },
+    "license_wording": {
+     "type": "string",
+     "minLength": 1
+    },
     "mark": {
      "type": [
       "string",

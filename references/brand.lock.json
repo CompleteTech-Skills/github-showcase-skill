@@ -522,6 +522,7 @@
    "flagship": true,
    "footer": true,
    "former_slugs": [],
+   "license_wording": "CompleteTech LLC",
    "nav_name": "CompleteTech LLC",
    "profile": {
     "chips": [
@@ -543,6 +544,7 @@
    "family_topics": [],
    "footer": true,
    "former_slugs": [],
+   "license_wording": "CompleteTech LLC",
    "mark": "assets/orgs/CompleteTech-Career-Toolkit/mark.png",
    "nav_name": "CompleteTech Career Toolkit",
    "tier": "T1"
@@ -556,6 +558,7 @@
    "family_topics": [],
    "footer": true,
    "former_slugs": [],
+   "license_wording": "CompleteTech LLC",
    "mark": "assets/orgs/CompleteTech-Commerce/mark.png",
    "nav_name": "CompleteTech Commerce",
    "tier": "T1"
@@ -569,6 +572,7 @@
    "family_topics": [],
    "footer": true,
    "former_slugs": [],
+   "license_wording": "CompleteTech LLC",
    "mark": "assets/orgs/CompleteTech-Creative/mark.png",
    "nav_name": "CompleteTech Creative",
    "tier": "T1"
@@ -582,6 +586,7 @@
    "family_topics": [],
    "footer": true,
    "former_slugs": [],
+   "license_wording": "CompleteTech LLC",
    "mark": "assets/orgs/CompleteTech-Data/mark.png",
    "nav_name": "CompleteTech Data",
    "tier": "T1"
@@ -595,6 +600,7 @@
    "family_topics": [],
    "footer": true,
    "former_slugs": [],
+   "license_wording": "CompleteTech LLC",
    "mark": "assets/orgs/CompleteTech-Directories/mark.png",
    "nav_name": "CompleteTech Directories",
    "tier": "T1"
@@ -608,6 +614,7 @@
    "family_topics": [],
    "footer": true,
    "former_slugs": [],
+   "license_wording": "CompleteTech LLC",
    "mark": "assets/orgs/CompleteTech-DiscordApps/mark.png",
    "nav_name": "CompleteTech Discord Apps",
    "tier": "T1"
@@ -621,6 +628,7 @@
    "family_topics": [],
    "footer": true,
    "former_slugs": [],
+   "license_wording": "CompleteTech LLC",
    "mark": "assets/orgs/CompleteTech-Games/mark.png",
    "nav_name": "CompleteTech Games",
    "tier": "T1"
@@ -634,6 +642,7 @@
    "family_topics": [],
    "footer": true,
    "former_slugs": [],
+   "license_wording": "CompleteTech LLC",
    "mark": "assets/orgs/CompleteTech-Hardware/mark.png",
    "nav_name": "CompleteTech Hardware",
    "tier": "T1"
@@ -649,6 +658,7 @@
    ],
    "footer": true,
    "former_slugs": [],
+   "license_wording": "CompleteTech LLC",
    "mark": "assets/orgs/CompleteTech-Infrastructure/mark.png",
    "nav_name": "CompleteTech Infrastructure",
    "tier": "T1"
@@ -664,6 +674,7 @@
    "flagship": true,
    "footer": true,
    "former_slugs": [],
+   "license_wording": "CompleteTech LLC",
    "nav_name": "CompleteTech LLC",
    "tier": "T1"
   },
@@ -678,6 +689,7 @@
    ],
    "footer": true,
    "former_slugs": [],
+   "license_wording": "CompleteTech LLC",
    "mark": "assets/orgs/CompleteTech-LLC-AI-Research/mark.png",
    "nav_name": "CompleteTech AI Research",
    "tier": "T1"
@@ -691,6 +703,7 @@
    "family_topics": [],
    "footer": true,
    "former_slugs": [],
+   "license_wording": "CompleteTech LLC",
    "mark": "assets/orgs/CompleteTech-ManageEngine/mark.png",
    "nav_name": "CompleteTech ManageEngine Tools",
    "tier": "T1"
@@ -704,6 +717,7 @@
    "family_topics": [],
    "footer": true,
    "former_slugs": [],
+   "license_wording": "CompleteTech LLC",
    "mark": "assets/orgs/CompleteTech-Patent-IP/mark.png",
    "nav_name": "CompleteTech Patent and IP",
    "tier": "T1"
@@ -718,6 +732,7 @@
    "family_topics": [],
    "footer": true,
    "former_slugs": [],
+   "license_wording": "CompleteTech LLC",
    "mark": "assets/orgs/CompleteTech-Pokemon/mark.png",
    "nav_name": "CompleteTech TCG",
    "tier": "T1"
@@ -739,6 +754,7 @@
     "CompleTetech-Security"
    ],
    "license_chip": "AGPL-3.0 or commercial",
+   "license_wording": "CompleteTech LLC",
    "mark": "assets/orgs/CompleteTech-Security/mark.png",
    "nav_name": "CompleteTech Security",
    "tier": "T1"
@@ -765,6 +781,7 @@
    "footer": true,
    "former_slugs": [],
    "hub_url": "https://www.complete.tech",
+   "license_wording": "CompleteTech LLC",
    "mark": "assets/orgs/CompleteTech-Skills/mark.png",
    "nav_name": "CompleteTech LLC Skills",
    "readme_preserve": [
@@ -781,6 +798,7 @@
    "family_topics": [],
    "footer": true,
    "former_slugs": [],
+   "license_wording": "CompleteTech LLC",
    "mark": "assets/orgs/CompleteTechDiscord-Games/mark.png",
    "nav_name": "CompleteTech Discord Games",
    "tier": "T1"
@@ -830,6 +848,7 @@
    "family_topics": [],
    "footer": true,
    "former_slugs": [],
+   "license_wording": "CompleteTech LLC",
    "nav_name": "Northwind Trading Co.",
    "tier": "T1"
   },
