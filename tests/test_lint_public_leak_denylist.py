@@ -10,6 +10,12 @@ E6.2.1), and this file lands with no production change (E6.2.3). These are chara
 existing behaviour, so they are expected to PASS on the base 8373122 too. Verified by exporting 8373122 to a temp
 directory, copying this file in and running it: 13 passed. A regression in the denylist path is what they catch;
 they do not demonstrate a new feature.
+
+Non-vacuity evidence (E6.2.3 review, check 3): 051c559 is an ancestor of base 8373122, so the feature is already on
+the base. To confirm these tests are not vacuous, three mutations of ctshowcase/org.py were each run against a scratch
+copy of HEAD and each made this file fail (1 failed, 12 passed): dropping the bare-name word boundary in
+denylist_leaks, dropping the `#` comment stripping in load_denylist, and returning an empty list instead of
+needs-input for an empty denylist.
 """
 import json
 import os
