@@ -145,6 +145,9 @@ def base(cmd, ctx=None, **kw) -> dict:
         d.setdefault("logs", ctx.logs)
     d.setdefault("logs", [])
     if ctx is not None and getattr(ctx, "staged_description", None) is not None:
+        # exempt paths pass their own `logs=`, which replaces ctx.logs; keep the staged code so the object and the log agree
+        if "staged-description" not in d["logs"]:
+            d["logs"] = list(d["logs"]) + ["staged-description"]
         d.setdefault("staged_description", {
             "text": ctx.staged_description,
             "live_differs": ctx.staged_description != (ctx.live_description or "").strip(),

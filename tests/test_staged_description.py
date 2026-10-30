@@ -94,3 +94,54 @@ def test_live_description_reported_and_meta_untouched(tmp_path):
     staged = _json(p)["staged_description"]
     assert staged["live_differs"] is (live.strip() != "A different sentence.")
     assert META.read_text(encoding="utf-8") == before_meta
+
+
+def _watching_fork(tmp_path, monkeypatch):
+    """Synthetic watching-fork case: the fixture owner is marked `watching` and the repo is a fork, so the
+    generators take their `exempt:watching-fork` branch. Only the owner lookup is patched; no real owner is named."""
+    import showcase
+    from ctshowcase import config
+    orig = config.Brand.owner_status
+    monkeypatch.setattr(config.Brand, "owner_status",
+                        lambda self, owner: "watching" if owner == "Northwind-Trading-Co" else orig(self, owner))
+    meta = tmp_path / "fork-meta.json"
+    data = json.loads(META.read_text(encoding="utf-8"))
+    data["fork"] = True
+    meta.write_text(json.dumps(data), encoding="utf-8")
+    rd = tmp_path / "repo"
+    shutil.copytree(REPO, rd)
+    return showcase, meta, rd
+
+
+def test_exempt_readme_keeps_staged_log(tmp_path, monkeypatch, capsys):
+    # regression: the exempt branch passes its own logs=, which used to drop staged-description while the
+    # staged_description object was still written
+    showcase, meta, rd = _watching_fork(tmp_path, monkeypatch)
+    rc = showcase.main(["--meta", str(meta), "--repo-dir", str(rd), "--format", "json", "readme",
+                        "--mode", "scaffold", "--description", "  Staged sentence.  "])
+    r = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert r["result"] == "exempt"
+    assert "staged-description" in r["logs"] and "exempt" in r["logs"]
+    assert r["staged_description"]["text"] == "Staged sentence."
+
+
+def test_exempt_banner_keeps_staged_log(tmp_path, monkeypatch, capsys):
+    showcase, meta, rd = _watching_fork(tmp_path, monkeypatch)
+    rc = showcase.main(["--meta", str(meta), "--repo-dir", str(rd), "--format", "json", "banner",
+                        "--out", str(rd / "docs/images/banner.png"), "--description", "Staged sentence."])
+    r = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert r["result"] == "exempt"
+    assert "staged-description" in r["logs"]
+    assert r["staged_description"]["text"] == "Staged sentence."
+
+
+def test_exempt_without_description_is_unchanged(tmp_path, monkeypatch, capsys):
+    showcase, meta, rd = _watching_fork(tmp_path, monkeypatch)
+    rc = showcase.main(["--meta", str(meta), "--repo-dir", str(rd), "--format", "json", "readme",
+                        "--mode", "scaffold"])
+    r = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert r["logs"] == ["exempt"]
+    assert "staged_description" not in r
