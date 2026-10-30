@@ -58,6 +58,13 @@ readme:
                               #           unchanged = "Leave them unchanged" (no hero; banner n/a, `preserve-list`)
   fork_readme: note           # q27: note = upstream README kept under the hero banner and the §7.4 G note, then the
                               #       footer; full = "Full CompleteTech treatment" (the repo's §5.4 variant via --variant)
+# Brand-family isolation (issue 40, epic 35). unknown_org: what an owner with no `orgs` row gets. `completetech` (the
+# default, historical behaviour) renders it with the completetech family and logs needs-input:org-row; `refuse` makes
+# every generator and planner stop with needs-input:org-row until the row exists. A known row filed under
+# `completetech` whose display name is not a CompleteTech brand, and whose license_wording is not CompleteTech LLC,
+# always refuses (needs-input:org-family).
+isolation:
+  unknown_org: completetech
 # q57 aia ("Own palette in the same layout", the default) needs no switch: AI-Ascension keeps its `ai-ascension`
 # family palette and gets the hero above its existing <picture> banner. "CompleteTech palette" = set the AI-Ascension
 # org row's `family: completetech`.
@@ -162,6 +169,7 @@ families:
     measured: true
     banner: keep-existing
     company_label: AI Ascension
+    badge_brand: "8A591C"          # README Type badge (shields.io hex, no #): icon_spark dark amber, 5.96:1 with white text
     eyebrow_case: asis
     canvas: {kind: flat, color: "#15120E"}
     tokens:
@@ -189,6 +197,7 @@ families:
   jev-engineering:
     measured: false
     company_label: Jev Engineering
+    badge_brand: "0C075C"          # plate_low navy (8B5CF6 is 4.23:1, under 4.5 with white badge text)
     eyebrow_case: asis
     canvas: {kind: flat-grid, color: "#010104", grid: "#22D3EE", grid_opacity: 0.07}
     tokens:
@@ -212,6 +221,7 @@ families:
     # pink/magenta accents from §9.3 and the art-direction night tile. The pink-ground variant is not used.
     measured: true
     company_label: jevplay.games
+    badge_brand: "6B214F"          # icon_spark deep magenta, 10.74:1 (E551BA is 3.38:1)
     eyebrow_case: asis
     icon_pixel_art: true            # §9.5 avatar rule: icons are scaled nearest-neighbour at an integer factor
     canvas: {kind: halftone, color: "#1E1E1E", dot: "#E551BA", dot_opacity: 0.16, pitch: 12, radius: 2}
@@ -271,6 +281,7 @@ families:
   libreevolve:
     measured: false
     company_label: LibreEvolve
+    badge_brand: "065F46"          # accent_deep green, 7.68:1
     eyebrow_case: asis
     canvas: {kind: flat-grid, color: "#021527", grid: "#10B981", grid_opacity: 0.07}
     tokens:
@@ -293,6 +304,7 @@ families:
     measured: false
     hold: true
     company_label: Touched By An Agent
+    badge_brand: "E11D74"          # accent_mid pink, 4.54:1
     eyebrow_case: asis
     canvas: {kind: flat-grid, color: "#1D1116", grid: "#F59E0B", grid_opacity: 0.07}
     tokens:
@@ -314,6 +326,7 @@ families:
   romgenie:
     measured: false
     company_label: romgenie
+    badge_brand: "183B31"          # card_fill green, 12.29:1 (B8860B is 3.25:1)
     eyebrow_case: asis
     canvas: {kind: flat-grid, color: "#002C31", grid: "#F4C430", grid_opacity: 0.07}
     tokens:
@@ -681,6 +694,9 @@ orgs:
     hub_url: https://pickyour.ai
     footer: false
   Jevelopers-neatHack-2026:
+    # TicketStub has no family of its own yet (needs an owner-supplied palette and mark). Under `completetech` every
+    # generator and planner refuses it with needs-input:org-family (Brand.identity_gap, issue 40), so no CompleteTech
+    # eyebrow, palette or badge colour reaches it. Give it its own family here to lift the refusal.
     family: completetech
     former_slugs: []
     tier: T3

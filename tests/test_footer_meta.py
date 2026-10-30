@@ -5,6 +5,10 @@ live in tests/test_footer_meta_guards.py and fail on base too). The tests
 that pin behaviour which must NOT change (default paths, unknown owner, `.github` of the watching org) live in
 tests/test_footer_meta_guards.py: they pass on base by design (apart from the org-row detectors noted above).
 
+The checkout tests at the end (issue 44 without --meta) were added in the epic 35 review: three fail on the epic base
+(checkout owner with --repo-dir, from the cwd, unsigned T3 refusal); test_no_repo_dir_keeps_checking_the_readme and
+test_checkout_of_a_footer_owner_still_checks_the_readme pass there by design (behaviour that must not change).
+
 Synthetic metadata only: owners are public org rows of references/brand.yaml; repository names are invented.
 """
 import json
@@ -104,3 +108,58 @@ def test_type_override_agrees_with_repocontext(tmp_path):
     out = json.loads(p.stdout)
     assert p.returncode == 0, out
     assert out["result"] == "exempt" and out["logs"] == [want]
+
+
+# -- issue 44, no --meta: the owner comes from the checkout `doctor` reads (--repo-dir, else cwd) -------------------
+# Fails on the epic base: there `footer --check` without --meta/--org never resolved an owner and answered fail:missing
+# for a Pick-Your-AI checkout while `doctor` on the same checkout reported the footer n/a.
+def _checkout(tmp_path, owner, repo="synthetic-tool", with_footer=False):
+    import subprocess
+    rd = tmp_path / "checkout"
+    rd.mkdir()
+    subprocess.run(["git", "init", "-q", str(rd)], check=True)
+    subprocess.run(["git", "-C", str(rd), "remote", "add", "origin", f"https://github.com/{owner}/{repo}.git"], check=True)
+    body = "# X\n\nSynthetic fixture.\n\n## License\n\nMIT.\n"
+    if with_footer:
+        body += "\n" + footer.block(load_brand(None)) + "\n"
+    (rd / "README.md").write_text(body, encoding="utf-8")
+    return rd
+
+
+def test_checkout_owner_without_meta_agrees_with_doctor(tmp_path):
+    rd = _checkout(tmp_path, "Pick-Your-AI")
+    p = run_cli("--format", "json", "--allow-t3", "--repo-dir", rd, "footer", "--check", rd / "README.md")
+    out = json.loads(p.stdout)
+    assert p.returncode == 0, out
+    assert out["result"] == "exempt" and out["logs"] == ["exempt:footer"]
+    d = run_cli("--allow-t3", "--repo-dir", rd, "doctor", "--format", "json")
+    assert json.loads(d.stdout)["cells"]["footer"] == "n/a", d.stdout
+
+
+def test_checkout_owner_from_cwd_without_repo_dir(tmp_path):
+    rd = _checkout(tmp_path, "Pick-Your-AI")
+    p = run_cli("--format", "json", "--allow-t3", "footer", "--check", "README.md", cwd=rd)
+    assert p.returncode == 0 and json.loads(p.stdout)["result"] == "exempt", p.stdout + p.stderr
+
+
+def test_no_repo_dir_keeps_checking_the_readme(tmp_path):
+    rd = _checkout(tmp_path, "Pick-Your-AI")
+    p = run_cli("--format", "json", "--allow-t3", "--no-repo-dir", "footer", "--check", rd / "README.md", cwd=rd)
+    assert p.returncode == 1 and json.loads(p.stdout)["result"] == "fail:missing", p.stdout + p.stderr
+
+
+def test_checkout_of_a_footer_owner_still_checks_the_readme(tmp_path):
+    rd = _checkout(tmp_path, "LibreEvolve", with_footer=True)
+    p = run_cli("--format", "json", "--repo-dir", rd, "footer", "--check", rd / "README.md")
+    assert p.returncode == 0 and json.loads(p.stdout)["result"] == "pass", p.stdout + p.stderr
+    rd2 = tmp_path / "other"
+    rd2.mkdir()
+    (rd2 / "README.md").write_text("# X\n", encoding="utf-8")
+    p = run_cli("--format", "json", "--repo-dir", rd, "footer", "--check", rd2 / "README.md")
+    assert p.returncode == 1 and json.loads(p.stdout)["result"] == "fail:missing", p.stdout + p.stderr
+
+
+def test_unsigned_t3_checkout_is_refused_like_doctor(tmp_path):
+    rd = _checkout(tmp_path, "Pick-Your-AI")
+    p = run_cli("--format", "json", "--repo-dir", rd, "footer", "--check", rd / "README.md")
+    assert p.returncode == 2, p.stdout + p.stderr

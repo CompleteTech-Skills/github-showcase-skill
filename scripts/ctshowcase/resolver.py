@@ -295,6 +295,8 @@ class Resolver:
             raise Refused(f"{login} is on HOLD", log="hold")
         if st == "t3" and not (allow_t3 or t3_signed_off()):
             raise Refused(f"{login} is T3; needs co-owner sign-off", log="t3-signoff")
+        if self.brand is not None:  # issue 40: an owner without its own brand identity fails loudly (config.py)
+            self.brand.require_identity(self.brand_key(login) or login)
         return st
 
     def family_hold(self, login: str) -> bool:

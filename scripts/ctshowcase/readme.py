@@ -447,12 +447,17 @@ def gate_managed_license(ctx: RepoContext, text: str, removed: list[str]) -> str
     """Upgrade of a README that already has a managed `showcase:license` section: without org `license_wording` the
     rights sentence is replaced by the factual line (public) or the section is dropped (private). Orgs with wording
     are untouched. Lines that go are recorded in `removed` as intentional (issue 36)."""
-    if (ctx.org.get("license_wording") or "").strip() or _mark_index(text) < 0:
+    i = -1 if (ctx.org.get("license_wording") or "").strip() else _mark_index(text)
+    if i < 0:
         return text
     new = license_block(ctx, text)
     if new != text:
+        # only lines of the managed span (heading, mark, the paragraph after it) are recorded as intentional; any
+        # other line that went missing stays unrecorded, so `preservation()` reports it instead of accepting it
+        start, end, _ = _managed_license_span(text, i)
+        managed = set(text[start:end].splitlines())
         gone = set(new.splitlines())
-        removed += [ln for ln in text.splitlines() if ln.strip() and ln not in gone]
+        removed += [ln for ln in text.splitlines() if ln.strip() and ln not in gone and ln in managed]
         ctx.log("needs-input:license-wording")
     return new
 
@@ -991,13 +996,34 @@ LICENSE_MARK = "<!-- showcase:license -->"
 
 
 def _mark_index(text: str) -> int:
-    """Offset of the first `showcase:license` mark outside fenced, inline and indented code, or -1."""
+    """Offset of the first managed `showcase:license` mark, or -1. Managed means outside fenced and inline code AND at
+    the start of its line (at most three spaces, no tab), as the generator writes it. A mark after other text on its
+    line, or on a line indented four columns or more (indented code, `    prefix <!-- showcase:license -->`), is an
+    authored example and is never rewritten: the same rule `_license_paragraphs` uses to keep indented code."""
     m = masked(text)
     for hit in re.finditer(re.escape(LICENSE_MARK), m):
         lead = m[m.rfind("\n", 0, hit.start()) + 1:hit.start()]
-        if lead.strip() or (len(lead) < 4 and "\t" not in lead):
+        if not lead.strip() and len(lead) < 4 and "\t" not in lead:
             return hit.start()
     return -1
+
+
+LICENSE_H2_BEFORE_MARK = re.compile(r"(?m)^## (?:License|Licensing|Licence)[ \t]*\n\n?\Z")
+SECTION_STOP = re.compile(r"(?m)^(?: {0,3}#{1,6}[ \t]|" + re.escape("<!-- showcase:") + ")")
+
+
+def _managed_license_span(text: str, i: int) -> tuple[int, int, int | None]:
+    """(start, end, heading start or None) of the managed License text at mark offset `i`: the H2 right above the
+    mark (when there is one), the mark and the one paragraph after it. Nothing outside this span is generated."""
+    m = re.compile(re.escape(LICENSE_MARK) + r"\n.*?(?:\n\n|\n?$)", re.S).match(text, i)
+    head = LICENSE_H2_BEFORE_MARK.search(text[:i])
+    return (head.start() if head else i), (m.end() if m else i), (head.start() if head else None)
+
+
+def _authored_section_rest(text: str, pos: int) -> str:
+    """The License section's text after `pos` up to the next heading or showcase block (outside code)."""
+    hit = SECTION_STOP.search(masked(text), pos)
+    return text[pos:hit.start() if hit else len(text)]
 
 
 def license_block(ctx: RepoContext, text: str) -> str:
@@ -1008,10 +1034,13 @@ def license_block(ctx: RepoContext, text: str) -> str:
     if i < 0:
         return text
     lic = license_section(ctx)
-    if not lic and license_omitted(ctx):  # intentional omission: drop the managed heading and paragraph
-        m = re.compile(re.escape(LICENSE_MARK) + r"\n.*?(?:\n\n|\n?$)", re.S).match(text, i)
-        head = re.search(r"(?m)^## (?:License|Licensing|Licence)[ \t]*\n\n?\Z", text[:i])
-        return text[:head.start() if head else i] + text[m.end() if m else i:]
+    if not lic and license_omitted(ctx):  # intentional omission: drop the managed paragraph
+        _, end, head = _managed_license_span(text, i)
+        if head is not None and _authored_section_rest(text, end).strip():
+            # authored legal text follows the managed paragraph: it keeps its own `## License` heading, as upgrade
+            # does, instead of sliding under the previous section (header refresh and bootstrap share this path)
+            head = None
+        return text[:head if head is not None else i] + text[end:]
     if not lic:
         return text
     m = re.compile(re.escape(LICENSE_MARK) + r"\n(.*?)(\n\n|\n?$)", re.S).match(text, i)
