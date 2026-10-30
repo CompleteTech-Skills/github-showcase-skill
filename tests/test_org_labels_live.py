@@ -241,3 +241,17 @@ def test_workflow_reference_is_a_final_skip_not_pending_input(brand, tmp_path, r
     assert row["ops"] == []
     assert "label-referenced" in row["logs"]
     assert not row.get("held") and result["result"] != "incomplete"
+
+
+@pytest.mark.parametrize("name", ["NUL", "CON", "AUX", "PRN", "COM1", "LPT1"])
+def test_missing_device_named_checkout_falls_back_to_capture(brand, tmp_path, name):
+    # Win32 reports reserved device paths as existing even though there is no checkout directory.
+    (tmp_path / N).mkdir()
+    estate = O.Estate(brand, Resolver(brand, {"orgs": {N: {"final_repos": [name]}}}), {
+        name: dict(listing(name), labels=[{"name": "bug", "color": "ff0000"}], files=[], files_complete=True),
+        ".github": dict(listing(".github"), files=[], files_complete=True),
+    })
+    result, _ = O.labels_plan(estate, N, checkouts=str(tmp_path))
+    assert result["repos"][0]["repo"] == f"{N}/{name}"
+    assert result["repos"][0]["result"] == "plan"
+    assert result["repos"][0]["ops"]

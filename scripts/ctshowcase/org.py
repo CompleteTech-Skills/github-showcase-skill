@@ -1756,7 +1756,7 @@ def labels_plan(estate: Estate, org: str, *, allow_t3: bool = False, checkouts: 
             # no checkout here: §6.4 rule 0 runs against the captured file lists of the repository and of the org's
             # .github (its default issue forms apply to a repository without forms of its own); unproven renames are held
             repo_dir = checkout_root / login / n if checkout_root is not None else None
-            if repo_dir is not None and repo_dir.exists():
+            if repo_dir is not None and repo_dir.is_dir():
                 origin = labelsmod._checkout_origin(repo_dir)
                 current_owner, current_name = full.split("/", 1)
                 if (not origin or origin[1].lower() != current_name.lower()
