@@ -276,3 +276,17 @@ def test_whitespace_cli_with_whitespace_override_still_exit_4(tmp_path):
     p, out = _render(tmp_path, meta, "--subtitle", "   ", "--chip", "Python", "--chip", "MIT",
                      repo_dir=_override_repo(tmp_path, '"   "'))
     assert p.returncode == 4 and not out.exists()
+
+
+def test_whitespace_subtitles_with_description_keep_base_behaviour(tmp_path):
+    """#99 review (P2): the whitespace filter applies only when the description is empty. With a description the
+    base emitted any truthy cli/override subtitle, so output must not change (a 200-char W description once flipped
+    from exit 0 on base to art-fail:subtitle). Passes on the pre-#99 base by design."""
+    meta = _empty_description_meta(tmp_path, description="Offline triage for agents.")
+    p, out = _render(tmp_path, meta, "--subtitle", "   ", "--chip", "Python", "--chip", "MIT", name="c.png")
+    info = json.loads(p.stdout)
+    assert p.returncode == 0 and info["subtitle_source"] == "cli" and "description-missing" not in info["logs"]
+    p, out = _render(tmp_path, meta, "--chip", "Python", "--chip", "MIT", name="o.png",
+                     repo_dir=_override_repo(tmp_path, '"   "'))
+    info = json.loads(p.stdout)
+    assert p.returncode == 0 and info["subtitle_source"] == "override" and "description-missing" not in info["logs"]
