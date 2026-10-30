@@ -948,6 +948,8 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--type", dest="type_override", metavar="TYPE", help="§5.4 type to use instead of detection (when the file tree is not available); logged")
     p.add_argument("--format", choices=("json", "text"), default=None, help="output style")
     p.add_argument("--quiet", action="store_true")
+    p.add_argument("--allow-t3", action="store_true",
+                   help="treat a T3 (co-owned) owner as signed off for this run: every repository command and generator, not just `meta`; pass only when a t3-metadata or t3-signoff row is approved (default: T3 owners are refused, exit 2)")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__} ({STANDARD})")
     sub = p.add_subparsers(dest="command", required=True, metavar="<command>")
 
@@ -1066,7 +1068,7 @@ def parser() -> argparse.ArgumentParser:
     s = sub.add_parser("meta", help="normalized metadata (read-only gh api GETs with --from-gh)")
     s.add_argument("--from-gh", metavar="OWNER/REPO")
     s.add_argument("--out")
-    s.add_argument("--allow-t3", action="store_true",
+    s.add_argument("--allow-t3", action="store_true", default=argparse.SUPPRESS,
                    help="read a T3 (co-owned) repository; pass only when a t3-metadata or t3-signoff row is approved")
     s.set_defaults(func=cmd_meta)
 
@@ -1189,6 +1191,16 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main(argv=None) -> int:
+    """Run one invocation. `--allow-t3` holds only for this call: the previous value is restored on every exit."""
+    from ctshowcase.config import set_t3_signed_off, t3_signed_off
+    previous = t3_signed_off()
+    try:
+        return _main(argv)
+    finally:
+        set_t3_signed_off(previous)
+
+
+def _main(argv=None) -> int:
     # Redirected Windows streams can start as cp1252 even when their consumers
     # expect UTF-8. Configure before argparse, which also writes help and errors.
     # StringIO and embedding hosts may replace either stream without reconfigure.
@@ -1208,6 +1220,8 @@ def main(argv=None) -> int:
         args.files.extend(remaining)
     elif remaining:
         cli.error("unrecognized arguments: " + " ".join(remaining))
+    from ctshowcase.config import set_t3_signed_off
+    set_t3_signed_off(getattr(args, "allow_t3", False))
     if args.format is None:
         args.format = "text" if args.command in GENERATORS else "json"
     try:

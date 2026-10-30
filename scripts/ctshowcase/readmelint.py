@@ -106,7 +106,8 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
             warns.append(f"badges-short: {nbadges} badge (no licence or language to show yet)")
     for s in shields:
         col = re.split(r"[?)]", s.rsplit("-", 1)[-1])[0].upper()
-        if re.fullmatch(r"[0-9A-F]{6}", col) and col not in PALETTE:
+        family_cols = {str(ctx.style.get(k) or "").upper() for k in ("badge_brand", "badge_accent")}
+        if re.fullmatch(r"[0-9A-F]{6}", col) and col not in PALETTE and col not in family_cols:
             fails.append(f"R7 off-palette badge colour {col}")
     # tagline == description
     desc = (ctx.meta.get("description") or "").strip()
