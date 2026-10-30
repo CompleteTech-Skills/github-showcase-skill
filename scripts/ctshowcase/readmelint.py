@@ -8,7 +8,7 @@ from urllib.parse import unquote
 from . import footer as footermod
 from .context import RepoContext
 from .detect import standard
-from .readme import BANNER_BLOCK, EMOJI, MARK, is_footer_like, masked, normalize_text, nav_first, preserved, split_sections
+from .readme import BANNER_BLOCK, EMOJI, MARK, is_footer_like, license_omitted, masked, normalize_text, nav_first, preserved, split_sections
 
 IMG_MD = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)[^)]*\)")
 IMG_HTML = re.compile(r"<img\b([^>]*)>", re.I)
@@ -132,7 +132,7 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
             fails.append(f"R7 unexpected H2 '{n}' (move under ## Notes)")
     if names and names[-1] not in ("License", "Licensing"):
         lic_needed = any(r in ("License", "Licensing") for r in req)
-        if any(n in ("License", "Licensing") for n in names) or lic_needed and ctx.meta.get("license"):
+        if any(n in ("License", "Licensing") for n in names) or lic_needed and ctx.meta.get("license") and not license_omitted(ctx):
             fails.append("R7 License must be the last H2")
     if "Notes" in names and names.index("Notes") < len(names) - 2:
         fails.append("R7 ## Notes must sit immediately before License")

@@ -115,11 +115,49 @@ def test_private_configured_holder_replaces_copyright_name(make_ctx, tmp_path):
     assert readme.license_section(ctx) == ("License", "Proprietary. Copyright (c) 2025 Example Steward Ltd. All rights reserved.")
 
 
-def test_touchedbyanagent_private_hold_unchanged_without_wording(make_ctx, tmp_path):
+def test_touchedbyanagent_private_without_wording_omits_hold_row(make_ctx, tmp_path):
+    # the "Proprietary. All rights reserved." hold row is a reserved-rights sentence, so it needs wording too (issue 36)
     ctx = make_ctx(repo_dir=tmp_path, owner="TouchedByAnAgent", repo="thing", license=None, visibility="private",
                    created_at="2025-01-01T00:00:00Z")
-    set_wording(ctx, "")
+    assert readme.license_section(ctx) is None
+    assert "needs-input:license-wording" in ctx.logs
+
+
+def test_touchedbyanagent_private_with_wording_keeps_hold_row(make_ctx, tmp_path):
+    ctx = make_ctx(repo_dir=tmp_path, owner="TouchedByAnAgent", repo="thing", license=None, visibility="private",
+                   created_at="2025-01-01T00:00:00Z")
+    set_wording(ctx, "Example Steward Ltd")
     assert readme.license_section(ctx) == ("License", RV["private_hold"])
+
+
+def _template():
+    from conftest import ROOT
+    return (ROOT / "tests" / "fixtures" / "template-README.md").read_text(encoding="utf-8")
+
+
+def test_bootstrap_private_without_wording_removes_managed_license(make_ctx, tmp_path):
+    ctx = make_ctx(tmp_path, owner="LibreEvolve", repo="new-thing", description="", license=None, visibility="private",
+                   created_at="2025-01-01T00:00:00Z")
+    out = readme.bootstrap(ctx, _template())
+    assert "## License" not in out and "showcase:license" not in out.split("showcase:footer")[0].split("template-body:pristine")[-1][-200:]
+    assert "needs-input:license-wording" in ctx.logs
+
+
+def test_header_refresh_private_without_wording_removes_license_and_lints(make_ctx, tmp_path):
+    from ctshowcase import readmelint
+    kw = dict(owner="LibreEvolve", repo="thing", description="A thing.", license="MIT", visibility="private",
+              created_at="2025-01-01T00:00:00Z")
+    text = readme.scaffold(make_ctx(tmp_path, **kw))
+    assert "## License" not in text
+    # an older managed License paragraph from before the opt-in is removed on refresh, not preserved
+    block = "## License\n\n<!-- showcase:license -->\nProprietary. Copyright (c) 2025 X. All rights reserved.\n\n"
+    old = text.replace("<!-- showcase:footer:start -->", block + "<!-- showcase:footer:start -->", 1)
+    ctx = make_ctx(tmp_path, **kw)
+    refreshed = readme.header_only(ctx, old)
+    assert "All rights reserved" not in refreshed and "## License" not in refreshed
+    (tmp_path / "README.md").write_text(text, encoding="utf-8")
+    res = readmelint.lint(make_ctx(tmp_path, **kw), tmp_path / "README.md")
+    assert not any("License must be the last H2" in f for f in res["fails"])
 
 
 def test_fork_upstream_path_still_returns_none(make_ctx, tmp_path):
