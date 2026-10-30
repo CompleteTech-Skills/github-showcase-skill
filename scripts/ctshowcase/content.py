@@ -37,8 +37,8 @@ from .resolver import Resolver
 
 # the estate hand-off tree when the skill lives inside it (or is its installed copy); optional everywhere
 ESTATE = next((c for c in estate_candidates() if (c / "art").is_dir()), ROOT.parent)
-DEFAULT_ART_DIRECTION = ESTATE / "art" / "ART_DIRECTION.md"
 SKILL_ART_DIRECTION = ROOT / "references" / "art-direction.md"
+DEFAULT_ART_DIRECTION = SKILL_ART_DIRECTION
 
 
 def _now() -> str:
@@ -1766,7 +1766,7 @@ HEX = r"`(#[0-9A-Fa-f]{6})`"
 def load_art_direction(path=None) -> str:
     p = Path(path) if path else DEFAULT_ART_DIRECTION
     if not p.is_file():
-        raise NeedsInput("art-direction", f"art direction not found: {p} (pass --art-direction art/ART_DIRECTION.md)")
+        raise NeedsInput("art-direction", f"art direction not found: {p} (pass --art-direction FILE to use another file)")
     return p.read_text(encoding="utf-8")
 
 
@@ -1828,12 +1828,33 @@ def org_glyph(text: str, owner: str) -> str | None:
     return None
 
 
+def icon_colours(ctx, text: str, org: dict, resolver: Resolver, *, require_palette: bool = True) -> dict:
+    """Keep estate palettes explicit; the bundled template uses the committed brand tokens."""
+    family = org_style(resolver, ctx.brand, ctx.owner)["name"]
+    colours = family_colours(text, org["brand_key"], family, resolver.aliases(ctx.owner))
+    if _section(text, "Repository glyph prompt template") and not _section(text, "(b) Family palette"):
+        tokens = ctx.style["tokens"]
+        missing = [key for key in ("icon_ink", "icon_spark") if not tokens.get(key)]
+        if missing:
+            if not require_palette:
+                return colours
+            raise NeedsInput("icon-palette", "selected brand config needs " + ", ".join(missing) +
+                             " tokens for the bundled prompt; add them or pass --art-direction FILE "
+                             "with a family palette")
+        colours.update(family_label=family, LINE_NAME="family icon ink", LINE_HEX=tokens["icon_ink"],
+                       CORE_HEX=tokens["title"], GLOW_HEX=tokens["accent_mid"],
+                       SPARK_NAME="family icon spark", SPARK_HEX=tokens["icon_spark"],
+                       SPARK_CORE_HEX=tokens["title"], SPARK_BLOOM_HEX=tokens["icon_spark"],
+                       INK=[tokens["icon_ink"], tokens["icon_spark"]])
+    return colours
+
+
 def seed_for(text: str, owner: str | list[str], family: str) -> str | None:
     """The org's seed (any of its logins, CQ-03), else the family's."""
     m = re.search(r"seeds \(([^)]*)\)", text)
     if not m:
         return None
-    seeds = dict((k.strip(), v) for k, v in re.findall(r"([A-Za-z][\w-]*)\s+(\d{3,5})", m.group(1)))
+    seeds = dict((k.strip(), v) for k, v in re.findall(r"([A-Za-z][\w-]*)\s+`?(\d{3,5})`?", m.group(1)))
     for key in (*([owner] if isinstance(owner, str) else owner), {"completetech": "CompleteTech"}.get(family), family):
         for k, v in seeds.items():
             if key and k.lower() == str(key).lower():
@@ -1857,7 +1878,7 @@ def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = Non
     org["canonical"], org["current"] = org["brand_key"], current_login(resolver, owner)
     family = org_style(resolver, ctx.brand, owner)["name"]
     logins = [org["canonical"], *resolver.aliases(owner)]  # ART_DIRECTION may name the org by any of its logins (CQ-03)
-    colours = family_colours(art_text, org["canonical"], family, logins)
+    colours = icon_colours(ctx, art_text, org, resolver, require_palette=option.upper() == "A")
     org_mark = next((g for g in (org_glyph(art_text, x) for x in logins) if g), None)
     facts = {"repository": f"{org['current']}/{repo}", "description": ctx.meta.get("description") or "",
              "type": ctx.det.get("type"), "category": ctx.det.get("category"), "topics": ctx.meta.get("topics") or [],
@@ -1903,16 +1924,20 @@ def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = Non
                                                              if x)).rstrip()
         prompt = prompt.replace("[STYLE LOCK — FAMILY]", f"[STYLE LOCK — {colours.get('family_label') or family}]")
     else:
-        tpl = _template(art_text, "(d) Shared prompt template")
+        tpl = _template(art_text, "(d) Shared prompt template") or \
+            _template(art_text, "Repository glyph prompt template")
         if not tpl:
-            raise NeedsInput("art-direction", "ART_DIRECTION.md has no (d) shared prompt template")
+            raise NeedsInput("art-direction", "selected art direction has no (d) Shared prompt template "
+                             "or Repository glyph prompt template")
+        seed = seed_for(art_text, logins, family)
         slots = {k: colours.get(k) for k in ("LINE_NAME", "LINE_HEX", "CORE_HEX", "GLOW_HEX", "SPARK_NAME", "SPARK_HEX",
                                               "SPARK_CORE_HEX", "SPARK_BLOOM_HEX")}
         slots.update(ACCOUNT=f"{org['current']}/{repo}", KIND="repository", CIRCLE_CLAUSE="",
                      CROP="repository icon, shown inside the light card of the README hero banner, the repo card and the "
                           "social preview", SECONDARY_LIGHT="", SECONDARY_LINE="", SPARK_D="94", SPARK_CORE_D="37",
                      TEXT_RULE="Any text, letters, numbers or words",
-                     SEED=seed_for(art_text, logins, family) or "not set",
+                     SEED=seed or "not set",
+                     SEED_INSTRUCTION=f"Use seed {seed} when supported." if seed else "Use the tool's default seed.",
                      STYLE_REFERENCES="the three approved pilot renders from art/golden/neon-night/.",
                      BRAND_REFERENCE=f"Org avatar art/reference/avatars/{org['canonical']}.png for family consistency "
                                      "only: do not copy its glyph; this repository's silhouette must differ from it at "
@@ -2224,7 +2249,7 @@ def add_parser(sub, cli=None):
     a.add_argument("--option", choices=("A", "B"), default="A", help="q59 option: A Neon Night glyph, B isometric")
     a.add_argument("--glyph", help="YAML/JSON with the writer's glyph_name, glyph_description, spark_placement, "
                                    "size_class (option B: subject, objects)")
-    a.add_argument("--art-direction", help="art/ART_DIRECTION.md (default: beside the skill)")
+    a.add_argument("--art-direction", help="art direction file (default: the skill's references/art-direction.md)")
     a.add_argument("--in", dest="src", help="normalize: the returned candidate PNG")
     a.add_argument("--ground", choices=("auto", "transparent", "keep"), default="auto")
     a.add_argument("--out", help="prompt: the prompt file (art/prompts/<org>/<repo>/icon.md); normalize: the icon "
@@ -2547,10 +2572,9 @@ def _cmd_icon(args, cli, resolver, head):
     ink = []
     try:
         art = load_art_direction(args.art_direction)
-        ink = family_colours(art, org["brand_key"], org_style(resolver, ctx.brand, ctx.owner)["name"],
-                             resolver.aliases(ctx.owner)).get("INK") or []
-    except NeedsInput:
-        ctx.log("needs-input:art-direction")
+        ink = icon_colours(ctx, art, org, resolver).get("INK") or []
+    except NeedsInput as exc:
+        ctx.log(exc.log)
     rd = ctx.repo_dir
     siblings = [p.name for p in (rd / "assets").glob("icon*")] if rd and (rd / "assets").is_dir() else []
     if args.icon_action == "normalize":
