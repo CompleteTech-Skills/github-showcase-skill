@@ -454,3 +454,42 @@ def test_refreshed_tagline_cannot_hide_a_deleted_authored_line():
     after = f"# T\n\n{start}\n{line}\n{end}\n\n## Notes\n"
     assert f"lost line: {line}" in R.preservation(before, after, [TAGLINE])
     assert f"lost line: {line}" not in R.preservation(before, after + f"\n{line}\n", [TAGLINE])
+
+
+def _cli_write(tmp_path, text, desc):
+    import json
+    from conftest import meta_dict, run_cli
+    repo = tmp_path / "repo"
+    repo.mkdir(exist_ok=True)
+    (repo / "README.md").write_text(text, encoding="utf-8")
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict(description=desc)), encoding="utf-8")
+    p = run_cli("--meta", meta, "--repo-dir", repo, "readme", "--write")
+    return p, (repo / "README.md").read_text(encoding="utf-8")
+
+
+def test_cli_refresh_to_a_much_shorter_description_is_not_a_shrink(tmp_path):
+    # the replaced tagline body is generated text, so its size change never trips the 10% non-whitespace guard
+    long_desc = "Route Northwind support tickets to the right queue " + "and keep every owner informed " * 8
+    text = TEXT.replace(TAGLINE, f"**{long_desc.strip()}**") + "\n" + "Authored text. " * 3 + "\n"
+    p, after = _cli_write(tmp_path, text, "Triage.")
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert _tagline_body(after) == "**Triage.**" and "Authored text." in after
+
+
+def test_cli_shrink_guard_still_catches_a_lost_authored_section(tmp_path):
+    # the size exemption covers only the tagline body: dropping authored text elsewhere is still a shrink
+    big = TEXT + "\n" + "Authored line one.\n" * 60
+    after = big.replace("Authored line one.\n" * 60, "")
+    removed = [TAGLINE]
+    assert any("non-whitespace dropped" in x for x in R.preservation(big, after.replace(TAGLINE, "**Triage.**"), removed))
+
+
+def test_cli_refresh_keeps_an_authored_line_equal_to_the_new_description(tmp_path):
+    # an existing tagline block supplies the tagline: an authored bold line outside it that equals the new
+    # description is authored text, never an old tagline to erase
+    line = f"**{NEW_DESC}**"
+    text = TEXT.replace("## Usage", line + "\n\n## Usage")
+    p, after = _cli_write(tmp_path, text, NEW_DESC)
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert after.count(line) == 2

@@ -649,11 +649,11 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
                                                                if isinstance(x, str) and x.strip()]
                      and bootstrap_state(text) == "pristine")
 
-    def is_header_line(ln: str) -> bool:
+    def is_header_line(ln: str, by_desc: bool = True) -> bool:
         s_ = ln.strip()
         if HEADER_LINE.match(ln) or "docs/images/banner.png" in ln:
             return True
-        return bool(desc) and s_ in (f"**{desc}**", f"<p align=\"center\"><b>{desc}</b></p>", f"<b>{desc}</b>")
+        return by_desc and bool(desc) and s_ in (f"**{desc}**", f"<p align=\"center\"><b>{desc}</b></p>", f"<b>{desc}</b>")
 
     # group the preamble into units: centred HTML blocks and <picture> blocks are classified as a whole
     units: list[list[str]] = []
@@ -678,7 +678,7 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
             is_hdr = is_header_line(ln) or bold
             if preserve:  # additive only: just an old nav line is replaced
                 is_hdr = s_.startswith("**") and " · " in s_ and not "".join(keep_pre).strip()
-            elif bold and not is_header_line(ln) and (old_tag or "").strip():
+            elif bold and not is_header_line(ln, by_desc=False) and (old_tag or "").strip():
                 # a tagline block already holds a line: this bold line is authored text beside it, never an old tagline
                 keep_pre.append(ln)
                 continue
@@ -989,6 +989,10 @@ def preservation(before: str, after: str, removed: list[str]) -> list[str]:
         fresh = Counter(ln.strip() for ln in tag["new"].splitlines() if ln.strip())
         fresh.subtract(Counter(ln.strip() for ln in tag["old"].splitlines() if ln.strip()))
         a_lines.subtract(+fresh)
+        # the replaced tagline body is generated text too: its size change (a shorter description) is not a shrink
+        nb_tag, na_tag = nonws(tag["old"]), nonws(tag["new"])
+    else:
+        nb_tag = na_tag = 0
     for ln, n in b_lines.items():
         if n <= 0:
             continue
@@ -996,7 +1000,7 @@ def preservation(before: str, after: str, removed: list[str]) -> list[str]:
             continue  # headings may be renamed / demoted / emoji-stripped
         if a_lines.get(ln, 0) < n:
             problems.append(f"lost line: {ln[:60]}")
-    nb, na = nonws(before), nonws(after)
+    nb, na = nonws(before) - nb_tag, nonws(after) - na_tag
     if nb and na < nb * 0.9:
         problems.append(f"non-whitespace dropped {nb} -> {na}")
     return problems
