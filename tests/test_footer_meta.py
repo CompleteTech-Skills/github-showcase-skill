@@ -163,3 +163,47 @@ def test_unsigned_t3_checkout_is_refused_like_doctor(tmp_path):
     rd = _checkout(tmp_path, "Pick-Your-AI")
     p = run_cli("--format", "json", "--repo-dir", rd, "footer", "--check", rd / "README.md")
     assert p.returncode == 2, p.stdout + p.stderr
+
+
+def test_readme_of_another_checkout_does_not_take_the_cwd_owner(tmp_path):
+    # epic 35 review 3 (reviewer A, P3): without --repo-dir the owner came from the cwd's origin, so a `footer: false`
+    # cwd (Pick-Your-AI) answered exempt:footer for an unrelated LibreEvolve README without reading it. The owner now
+    # comes from the checkout that holds the README. Fails before this change (result exempt, exit 0).
+    cwd = _checkout(tmp_path, "Pick-Your-AI")
+    other_root = tmp_path / "other"
+    other_root.mkdir()
+    other = _checkout(other_root, "LibreEvolve")
+    p = run_cli("--format", "json", "--allow-t3", "footer", "--check", other / "README.md", cwd=cwd)
+    out = json.loads(p.stdout)
+    assert p.returncode == 1 and out["result"] == "fail:missing", out
+    # a README outside any checkout is checked plainly, whatever the cwd owner
+    loose = tmp_path / "loose"
+    loose.mkdir()
+    (loose / "README.md").write_text("# X\n", encoding="utf-8")
+    p = run_cli("--format", "json", "--allow-t3", "footer", "--check", loose / "README.md", cwd=cwd)
+    assert p.returncode == 1 and json.loads(p.stdout)["result"] == "fail:missing", p.stdout + p.stderr
+
+
+def test_meta_with_repo_dir_reads_the_checkout_like_doctor(tmp_path):
+    # epic 35 review 3 (reviewer B, P2): with --meta and --repo-dir, footer --check now reads the same checkout doctor
+    # reads (meta.merged plus the checkout's .github/showcase.yml). The reviewer's exact scenario (`type: fork` in the
+    # checkout config) does not reproduce as a verdict disagreement: the config schema has no `fork` type (fork-ness is
+    # GitHub's flag, a `-fork` slug or `--type fork`, detect.is_fork), so doctor refuses that checkout with `config`.
+    # footer --check now refuses it the same way instead of answering hold from the metadata alone.
+    rd = _checkout(tmp_path, "romgenie-following-repos")
+    (rd / ".github").mkdir()
+    meta = _meta(tmp_path, "romgenie-following-repos")
+    (rd / ".github" / "showcase.yml").write_text("type: fork\n", encoding="utf-8")
+    args = ("--format", "json", "--meta", meta, "--repo-dir", rd)
+    d = json.loads(run_cli(*args, "doctor", "--format", "json").stdout)
+    f = json.loads(run_cli(*args, "footer", "--check", rd / "README.md").stdout)
+    assert d["result"] == f["result"] == "config", (d, f)
+    # a valid checkout type: both report the watching non-fork hold
+    (rd / ".github" / "showcase.yml").write_text("type: cli\n", encoding="utf-8")
+    d = json.loads(run_cli(*args, "doctor", "--format", "json").stdout)
+    f = json.loads(run_cli(*args, "footer", "--check", rd / "README.md").stdout)
+    assert d["cells"]["footer"] == "hold" and f["logs"] == ["hold:watching-non-fork"], (d["cells"], f)
+    # --type fork (the one way to declare a fork besides GitHub's flag) exempts both
+    d = json.loads(run_cli(*args, "--type", "fork", "doctor", "--format", "json").stdout)
+    f = json.loads(run_cli(*args, "--type", "fork", "footer", "--check", rd / "README.md").stdout)
+    assert d["cells"]["footer"] == "n/a" and f["logs"] == ["exempt:watching-fork"], (d["cells"], f)

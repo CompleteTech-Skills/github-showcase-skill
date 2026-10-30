@@ -446,3 +446,44 @@ def test_header_refresh_rewrite_keeps_subsection_under_managed_row(make_ctx, tmp
     text = _readme_with_license("<!-- showcase:license -->\n" + FACTUAL_MIT + "\n" + TIGHT_TERMS)
     out = readme.header_only(ctx, text)
     assert "<!-- showcase:license -->\n" + RV["t1_mit"] + "\n" + TIGHT_TERMS in out
+
+
+# --- epic 35 review round 3: a blank line after the mark, and H3-H6 inside the License section ---
+# On the round 2 HEAD a mark followed by a blank line and the old rights sentence left that sentence behind on header
+# refresh (public: the factual line was inserted above it; private: only the mark went), and `### Additional terms`
+# after the managed row made the section look empty, so header refresh dropped `## License` while upgrade kept it.
+OLD_T2 = RV["t2_mit"].replace("<Brand>", "LibreEvolve")
+PRIVATE_ROW = "Proprietary. Copyright (c) 2025 X. All rights reserved."
+
+
+def test_header_refresh_replaces_rights_row_after_a_blank_line(make_ctx, tmp_path):
+    ctx = make_ctx(repo_dir=tmp_path, owner="LibreEvolve", repo="thing", license="MIT", description="A thing.")
+    text = _readme_with_license("<!-- showcase:license -->\n\n" + OLD_T2)
+    assert OLD_T2 not in readme.split_generated_license("<!-- showcase:license -->\n\n" + OLD_T2)[1]  # upgrade's view
+    for out in (readme.header_only(ctx, text), readme.license_block(ctx, text)):  # header refresh; bootstrap's path
+        assert "## License\n\n<!-- showcase:license -->\n" + FACTUAL_MIT in out
+        assert "reserved" not in out and "CompleteTech" not in out and OLD_T2 not in out, out
+
+
+def test_private_refresh_removes_rights_row_after_a_blank_line(make_ctx, tmp_path):
+    ctx = _libre(make_ctx, tmp_path, description="A thing.")
+    text = _readme_with_license("<!-- showcase:license -->\n\n" + PRIVATE_ROW) + "\n## Next\n\nMore.\n"
+    out = readme.header_only(ctx, text)
+    assert "All rights reserved" not in out and "## License" not in out and "## Next\n\nMore." in out, out
+
+
+def test_blank_line_then_indented_code_after_mark_stays_authored(make_ctx, tmp_path):
+    ctx = _libre(make_ctx, tmp_path, description="A thing.")
+    code = "    Copyright (c) 2025 X. All rights reserved."
+    text = _readme_with_license("<!-- showcase:license -->\n\n" + code)
+    assert code in readme.header_only(ctx, text)
+
+
+def test_header_refresh_keeps_license_heading_over_nested_subsection(make_ctx, tmp_path):
+    ctx = _libre(make_ctx, tmp_path, description="A thing.")
+    text = _readme_with_license("<!-- showcase:license -->\n" + PRIVATE_ROW + "\n\n### Additional terms\n\nKeep this.")
+    out = readme.header_only(ctx, text)
+    assert "All rights reserved" not in out
+    assert "## License\n\n### Additional terms\n\nKeep this." in out, out
+    up, _ = readme.upgrade(_libre(make_ctx, tmp_path, description="A thing."), text)
+    assert "## License" in up and "### Additional terms" in up  # upgrade agrees

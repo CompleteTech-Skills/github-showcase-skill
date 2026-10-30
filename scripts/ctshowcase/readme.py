@@ -1032,7 +1032,9 @@ def _mark_index(text: str) -> int:
 
 
 LICENSE_H2_BEFORE_MARK = re.compile(r"(?m)^## (?:License|Licensing|Licence)[ \t]*\n\n?\Z")
-SECTION_STOP = re.compile(r"(?m)^(?: {0,3}#{1,6}[ \t]|" + re.escape("<!-- showcase:") + ")")
+# The License section ends at the next H1/H2 or showcase block. An H3-H6 (`### Additional terms`) is content of the
+# section and keeps its `## License` heading (epic 35 review 3), as upgrade (split_generated_license) keeps it.
+SECTION_STOP = re.compile(r"(?m)^(?: {0,3}#{1,2}[ \t]|" + re.escape("<!-- showcase:") + ")")
 
 
 def _managed_license_span(text: str, i: int) -> tuple[int, int, int | None]:
@@ -1051,7 +1053,14 @@ def _managed_paragraph(text: str, i: int) -> tuple[int, str, int] | None:
         return None
     nl = i + len(LICENSE_MARK)
     lines = text[nl + 1:].split("\n")
-    n = _paragraph_len(lines)
+    # blank lines between the mark and its row belong to the row, as split_generated_license reads a lone mark
+    # paragraph (epic 35 review 3): a mark, a blank line and the old rights sentence are still one managed row.
+    # Indented code after the gap is an authored example (as in _license_paragraphs) and is never generated.
+    k = 0
+    while k < len(lines) - 1 and not lines[k].strip():
+        k += 1
+    rest = _paragraph_len(lines[k:])
+    n = k + rest if rest and not (k and lines[k].startswith(("    ", "\t"))) else 0
     body_end = nl + sum(len(ln) + 1 for ln in lines[:n])  # the newline that ends the last generated line (or the mark)
     body_end = min(body_end, len(text))
     sep = "\n\n" if text.startswith("\n\n", body_end) else ("\n" if text.startswith("\n", body_end) else "")

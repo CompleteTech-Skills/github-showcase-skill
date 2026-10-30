@@ -338,18 +338,40 @@ def cmd_intro(args):
             "logs": logs}, OK
 
 
+def _readme_checkout(readme: str) -> Path | None:
+    """Top level of the git checkout that holds `readme` (a local `git rev-parse`, no network), else None."""
+    import subprocess
+    d = Path(readme).resolve().parent
+    while not d.is_dir() and d != d.parent:
+        d = d.parent
+    try:
+        top = subprocess.run(["git", "-C", str(d), "rev-parse", "--show-toplevel"], capture_output=True, text=True,
+                             timeout=10).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return Path(top) if top else None
+
+
 def _footer_owner_source(args) -> tuple[dict | None, Path | None]:
     """(metadata, checkout) that names the owner for `footer --check` without `--org` (issue 44).
-    `--meta FILE`: the metadata alone (checkout None; unchanged behaviour). Otherwise, unless `--no-repo-dir`, the
-    checkout `doctor` would read: `--repo-dir DIR`, else the current directory, owner and repo from its origin (a local
-    `git remote get-url`, no network). (None, None) when nothing names an owner: the README is checked as before."""
+    `--meta FILE`: the metadata; with an explicit `--repo-dir DIR` also that checkout, merged exactly as `doctor` merges
+    the same two arguments (meta.merged, RepoContext reading the checkout's `.github/showcase.yml` with its `for`
+    scoping), so the two verdicts agree; without `--repo-dir` the metadata alone (unchanged behaviour).
+    Otherwise, unless `--no-repo-dir`: `--repo-dir DIR`, else the checkout that holds the README being checked (not the
+    current directory: a README of another checkout must not take the cwd owner's exemption), owner and repo from its
+    origin (a local `git remote get-url`, no network). (None, None) when nothing names an owner: the README is checked
+    as before."""
+    from ctshowcase.meta import from_repo_dir, load_file, merged, normalize
     if args.meta:
-        from ctshowcase.meta import load_file
-        return load_file(args.meta), None
+        if args.no_repo_dir or args.repo_dir is None:
+            return load_file(args.meta), None
+        rd = repo_dir(args)  # the slug check doctor applies (review A4): a checkout of another repository refuses
+        return merged(args.meta, str(rd)), rd
     if args.no_repo_dir:
         return None, None
-    rd = repo_dir(args)
-    from ctshowcase.meta import from_repo_dir, normalize
+    rd = repo_dir(args) if args.repo_dir is not None else _readme_checkout(args.check)
+    if rd is None:
+        return None, None
     m = from_repo_dir(rd)
     if not m.get("owner"):
         return None, None

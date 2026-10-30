@@ -134,7 +134,8 @@ def test_legit_exceptions_still_exist(brand):
 
 # -- Rendered-output audit (acceptance criterion 2) -------------------------------------------------
 # The data audit above can pass while a render path still falls back to the CompleteTech family or the
-# 005ADD brand blue. Render the card, the banner style tokens, the README scaffold and the README lint
+# 005ADD brand blue. Render the card (SVG and scene text), the banner (scene text) and its style tokens, the README
+# scaffold and the README lint
 # for EVERY org row and scan the text. This is an audit of existing data: it passes on the base because
 # the base is already correct for every row except TicketStub (strict xfail below); it would fail on any
 # regression, which test_render_audit_catches_a_family_regression demonstrates by mutation.
@@ -146,9 +147,27 @@ def _owned(raw: dict, owner: str) -> bool:
     return (owner not in family_mismatches(raw) and raw['orgs'][owner].get('family') == 'completetech')         or owner in LEGIT_COMPLETETECH_ROWS or owner == raw['brand_strings']['demo_owner']
 
 
+def scene_text(scene, info: dict) -> str:
+    """Every string a scene draws (Text nodes, Clip children included), its title and description, and the layout's
+    text metadata (eyebrow, title, subtitle, chips): what the renderer outlines into paths."""
+    from ctshowcase.scene import Clip, Text
+    out = [scene.title, scene.desc]
+
+    def walk(nodes):
+        for n in nodes:
+            if isinstance(n, Text):
+                out.append(n.text)
+            elif isinstance(n, Clip):
+                walk(n.children)
+    walk(scene.nodes)
+    out += [str(info.get(k) or '') for k in ('eyebrow', 'title_lines', 'subtitle', 'name_lines', 'desc_lines')]
+    out += [c.get('text', '') for c in info.get('chips') or [] if isinstance(c, dict)]
+    return ' | '.join(out)
+
+
 def rendered_leaks(brand, owner: str, tmp_path: Path) -> dict[str, list[str]]:
     from conftest import EX, meta_dict
-    from ctshowcase import card, footer, readme, readmelint
+    from ctshowcase import banner, card, footer, readme, readmelint
     from ctshowcase.context import RepoContext
     from ctshowcase.meta import normalize
     from ctshowcase.typeset import Fonts
@@ -156,11 +175,17 @@ def rendered_leaks(brand, owner: str, tmp_path: Path) -> dict[str, list[str]]:
     (tmp_path / 'docs/images').mkdir(parents=True, exist_ok=True)
     (tmp_path / 'docs/images/banner.png').write_bytes(b'x')
     ctx = RepoContext(brand, normalize(meta_dict(owner=owner, description='Run the Northwind customer support email triage agent from the command line.')), tmp_path)
-    svg = card.render(ctx, Fonts(brand))[0]
+    fonts = Fonts(brand)
+    svg, card_scene, card_info = card.render(ctx, fonts)
+    # the card and banner draw their text as outlined SVG paths / PNG pixels, so the strings are scanned from the
+    # scene before outlining (epic 35 review 3: a hardcoded CompleteTech eyebrow passed the path-only scan)
+    banner_scene, banner_info = banner.layout(ctx, fonts)
     text = readme.scaffold(ctx, '')
     (tmp_path / 'README.md').write_text(text, encoding='utf-8')
     surfaces = {
         'card': svg.decode() if isinstance(svg, bytes) else svg,
+        'card text': scene_text(card_scene, card_info),
+        'banner text': scene_text(banner_scene, banner_info),
         'banner style tokens': json.dumps(ctx.style, sort_keys=True),
         # decision 18: the footer is the one place the CompleteTech name is correct; strip only it (Type badges are
         # scanned: each non-CompleteTech family sets badge_brand, so no 005ADD badge is exempt)
@@ -259,6 +284,16 @@ def test_render_audit_catches_a_family_regression(brand, tmp_path):
     raw['orgs']['Pick-Your-AI']['family'] = 'completetech'
     leaks = rendered_leaks(Brand(raw, brand.path), 'Pick-Your-AI', tmp_path)
     assert {'card', 'banner style tokens'} <= set(leaks), leaks
+
+
+def test_render_audit_catches_a_hardcoded_completetech_label(brand, tmp_path, monkeypatch):
+    # epic 35 review 3 (reviewer B, P2): with the shared eyebrow function returning `CompleteTech`, a LibreEvolve card
+    # and banner carried that label but the audit returned {} (the card text is outlined paths, the banner was only
+    # scanned as style tokens). The scene text surfaces catch it on both renderers.
+    from ctshowcase import chips
+    monkeypatch.setattr(chips, 'eyebrow_text', lambda ctx, category=None: 'CompleteTech')
+    leaks = rendered_leaks(brand, 'LibreEvolve', tmp_path)
+    assert {'card text', 'banner text'} <= set(leaks), leaks
 
 
 def test_data_audit_catches_a_family_regression(brand):
@@ -401,3 +436,24 @@ def test_project_readme_refuses_ticketstub(tmp_path):
     r = run_cli('--allow-t3', '--format', 'json', 'project', 'readme', '--capture', cap, '--owner',
                 'Jevelopers-neatHack-2026', '--display-name', 'TicketStub', *NO_ESTATE)
     assert r.returncode == 4 and 'needs-input:org-family' in r.stdout + r.stderr, (r.stdout, r.stderr)
+
+
+def test_org_reports_answer_for_a_gated_owner_and_generators_still_refuse(tmp_path):
+    # epic 35 review 3 (reviewer A, P2): `org health` and `org doctor` are read-only reports and `org labels` renders
+    # no brand text, so org._gate passes identity=False for them (as per-repo doctor does); they returned
+    # needs-input:org-family for TicketStub before this change. profile, about and pins render brand text and keep it.
+    from conftest import run_cli
+    empty = tmp_path / 'dot-github'
+    empty.mkdir()
+    r = run_cli('--format', 'json', 'org', 'health', 'Jevelopers-neatHack-2026', '--allow-t3', '--dot-github', empty)
+    out = json.loads(r.stdout)
+    assert 'needs-input:org-family' not in out.get('logs', []) and out.get('cells'), out
+    snap = tmp_path / 'snap.json'
+    snap.write_text('{}', encoding='utf-8')
+    r = run_cli('--format', 'json', 'org', 'doctor', 'Jevelopers-neatHack-2026', '--allow-t3', '--snapshot', snap)
+    out = json.loads(r.stdout)
+    assert out.get('action') == 'doctor' and out.get('cells'), out
+    for action in ('profile', 'about', 'pins'):
+        r = run_cli('--format', 'json', 'org', action, 'Jevelopers-neatHack-2026', '--allow-t3', *NO_ESTATE)
+        assert r.returncode == 4 and 'needs-input:org-family' in r.stdout, (action, r.stdout, r.stderr)
+

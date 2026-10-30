@@ -276,10 +276,12 @@ def append_jobs(path: str | Path | None, jobs: list[dict]) -> None:
 
 
 def _gate(estate: Estate, org: str, *, allow_t3=False, allow_hold=False,
-          require_registry=True) -> tuple[str, dict, dict]:
-    """Resolve and gate the org: (current login, brand row, registry row). Excluded, T3 and HOLD orgs refuse."""
+          require_registry=True, identity=True) -> tuple[str, dict, dict]:
+    """Resolve and gate the org: (current login, brand row, registry row). Excluded, T3 and HOLD orgs refuse.
+    `identity` keeps the issue 40 gate (needs-input:org-family) for commands that render brand text (profile, about,
+    pins); the read-only reports (health, doctor) and the label planners render none and pass identity=False."""
     r = estate.resolver
-    r.check_owner(org, allow_t3=allow_t3, allow_hold=allow_hold)
+    r.check_owner(org, allow_t3=allow_t3, allow_hold=allow_hold, identity=identity)
     login = r.canonical(org)
     row = r.brand_org(org)
     if row.get("tier") == "T3" and not allow_t3:
@@ -1674,7 +1676,7 @@ def _label_api(path: str, *, pages: bool = False, optional: bool = False):
 def capture_label_repos(estate: Estate, org: str, *, allow_t3: bool = False) -> None:
     """Discover accessible repositories and capture only the live labels and tree needed for a label plan."""
     from .detect import is_fork
-    login, row, _ = _gate(estate, org, allow_t3=allow_t3, require_registry=False)
+    login, row, _ = _gate(estate, org, allow_t3=allow_t3, require_registry=False, identity=False)
     if _tier(row) in ("T2-R", "T3") or row.get("family") == "romgenie":
         return
     entries = _label_api(f"orgs/{login}/repos?type=all&per_page=100", pages=True)
@@ -1755,7 +1757,8 @@ def labels_plan(estate: Estate, org: str, *, allow_t3: bool = False, checkouts: 
                 dot_github: str | None = None, registry_free: bool = False) -> tuple[dict, int]:
     from . import labels as labelsmod
     from .detect import is_fork
-    login, row, reg = _gate(estate, org, allow_t3=allow_t3, require_registry=not registry_free)
+    login, row, reg = _gate(estate, org, allow_t3=allow_t3, require_registry=not registry_free,
+                            identity=False)
     tier, fam = _tier(row), row.get("family")
     repos, jobs, logs = [], [], []
     if tier in ("T2-R", "T3") or fam == "romgenie":
@@ -1904,7 +1907,8 @@ def _dot_github_files(estate: Estate, login: str, repo_dir: str | Path | None) -
 
 
 def health(estate: Estate, org: str, *, repo_dir: str | Path | None = None, allow_t3: bool = False) -> tuple[dict, int]:
-    login, row, reg = _gate(estate, org, allow_t3=allow_t3, allow_hold=True, require_registry=False)
+    login, row, reg = _gate(estate, org, allow_t3=allow_t3, allow_hold=True, require_registry=False,
+                            identity=False)
     fam, tier = row.get("family"), _tier(row)
     files, source = _dot_github_files(estate, login, repo_dir)
     vis = estate.visibility(f"{login}/.github")
@@ -2059,7 +2063,8 @@ def doctor(estate: Estate, org: str, snap: dict, *, repo_dir: str | Path | None 
            email_approved: bool | None = None, allow_t3: bool = False) -> dict:
     """O1 avatar, O2 About, O3 profile README, O4 health, O6 pins, O9 banner, O11 verified badge."""
     r = estate.resolver
-    login, row, reg = _gate(estate, org, allow_t3=allow_t3, allow_hold=True, require_registry=False)
+    login, row, reg = _gate(estate, org, allow_t3=allow_t3, allow_hold=True, require_registry=False,
+                            identity=False)
     has_registry = r.registry_key(org) is not None
     for m in snap.get("repos") or []:
         if not isinstance(m, dict) or not m.get("name"):
