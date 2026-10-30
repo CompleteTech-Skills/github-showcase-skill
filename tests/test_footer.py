@@ -115,12 +115,20 @@ def test_check_meta_footer_true_still_checked(tmp_path):
     assert proc.returncode == 0
 
 
-@pytest.mark.parametrize("footer_value", [False, "hold"])
+@pytest.mark.parametrize("footer_value", [False, "hold", True])
 def test_check_meta_agrees_with_org_flag(tmp_path, footer_value):
     from conftest import run_cli
+    from ctshowcase.config import load_brand
+    from ctshowcase.context import RepoContext
     import json
     cfg = _cfg(tmp_path, footer_value)
     _, by_meta = _check_meta(cfg, _meta(tmp_path, "Northwind-Trading-Co"), tmp_path, _readme(tmp_path))
+    if footer_value is True:
+        # --org emits no comparable result for a checked owner; compare to RepoContext instead.
+        meta = {"owner": "Northwind-Trading-Co", "repo": "r", "fork": False, "visibility": "public"}
+        assert RepoContext(load_brand(cfg), meta, None).footer_status() is None
+        assert by_meta["result"].startswith("fail") or by_meta["result"] == "pass"
+        return
     by_org = json.loads(run_cli("--config", cfg, "--format", "json", "footer", "--check", _readme(tmp_path),
                                 "--org", "Northwind-Trading-Co").stdout)
     assert by_meta["result"] == by_org["result"]
