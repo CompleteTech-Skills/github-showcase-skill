@@ -3,7 +3,7 @@
 # the dependency and pattern lists it reads live here.
 standard: ct-std-v1
 domain_tlds: [com, tech, llc, club, app, ai, games, io, net, org]
-security_owner: CompleTetech-Security
+security_owner: CompleteTech-Security
 game_owners: [jevplay-games, CompleteTech-Games, CompleteTechDiscord-Games]
 research_owner: CompleteTech-LLC-AI-Research
 deps:

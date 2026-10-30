@@ -24,11 +24,11 @@ $S --meta examples/meta/northwind-cve-2026-00001-check.json --no-repo-dir \
 # Public repositories (read-only `meta --from-gh` captures in tests/fixtures/meta)
 # php2shell-check as the skill derives it today (the Security org's Neon Night mark until the repository has its own
 # icon), and in the golden's own configuration (the full logo on the white card) for the layout comparison.
-$S --meta "$F/CompleTetech-Security__php2shell-check.json" --repo-dir examples/repos/php2shell-check \
+$S --meta "$F/CompleteTech-Security__php2shell-check.json" --repo-dir examples/repos/php2shell-check \
    banner --out "$O/banner-php2shell.png"
-$S --meta "$F/CompleTetech-Security__php2shell-check.json" --repo-dir examples/repos/php2shell-check \
+$S --meta "$F/CompleteTech-Security__php2shell-check.json" --repo-dir examples/repos/php2shell-check \
    banner --icon assets/brand/logo.png --out "$O/banner-php2shell-golden.png"
-$S --meta "$F/CompleTetech-Security__php2shell-check.json" --repo-dir examples/repos/php2shell-check \
+$S --meta "$F/CompleteTech-Security__php2shell-check.json" --repo-dir examples/repos/php2shell-check \
    card --out "$O/card-php2shell.svg" --png "$O/card-php2shell.png"
 # agentic-email-skill: its description's head does not fit one line, so the example passes the subtitle the
 # repository should set in its .github/showcase.yml.
@@ -40,7 +40,7 @@ $S --meta "$F/jevplay-games__jev-minesweeper.json" --repo-dir examples/repos/jev
    banner --out "$O/banner-jev-minesweeper.png"
 $S --meta "$F/jevplay-games__jev-minesweeper.json" --repo-dir examples/repos/jev-minesweeper \
    card --out "$O/card-jev-minesweeper.svg" --png "$O/card-jev-minesweeper.png"
-$S --meta "$F/CompleTetech-Security__netscaler-cve-2026-19489-check.json" --no-repo-dir \
+$S --meta "$F/CompleteTech-Security__netscaler-cve-2026-19489-check.json" --no-repo-dir \
    banner --out "$O/banner-netscaler-cve-2026-19489-check.png"
 $S --meta "$F/CompleteTech-LLC-AI-Research__ai-self-replication-study.json" --no-repo-dir \
    banner --out "$O/banner-ai-self-replication-study.png"

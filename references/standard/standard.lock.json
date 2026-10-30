@@ -679,7 +679,6 @@
   "min_public": 5,
   "org_topics": {
    "AI-Ascension": "ai-ascension",
-   "CompleTetech-Security": "completetech-security",
    "CompleteTech-Career-Toolkit": "completetech-career-toolkit",
    "CompleteTech-Commerce": "completetech-commerce",
    "CompleteTech-Creative": "completetech-creative",
@@ -694,6 +693,7 @@
    "CompleteTech-ManageEngine": "completetech-manageengine",
    "CompleteTech-Patent-IP": "completetech-patent-ip",
    "CompleteTech-Pokemon": "completetech-tcg",
+   "CompleteTech-Security": "completetech-security",
    "CompleteTech-Skills": "completetech-skills",
    "CompleteTechDiscord-Games": "completetech-discord-games",
    "Jev-Engineering": "jev-engineering",
@@ -796,7 +796,7 @@
    "CompleteTechDiscord-Games"
   ],
   "research_owner": "CompleteTech-LLC-AI-Research",
-  "security_owner": "CompleTetech-Security",
+  "security_owner": "CompleteTech-Security",
   "standard": "ct-std-v1",
   "types": {
    "agent-skills": {

@@ -143,7 +143,7 @@ A private repository on variants A–E keeps that variant, adds the I callout an
   <img src="docs/images/banner.png" alt="REPO-SLUG by CompleteTech LLC" width="100%">
 </p>
 
-**CompleteTech Security** · [All checkers](https://github.com/CompleTetech-Security) · [Reference](docs/REFERENCE.md) · [Licensing](LICENSING.md) · [Security](SECURITY-URL)
+**CompleteTech Security** · [All checkers](https://github.com/CompleteTech-Security) · [Reference](docs/REFERENCE.md) · [Licensing](LICENSING.md) · [Security](SECURITY-URL)
 
 <p align="center">
   <a href="https://github.com/ORG/REPO/actions/workflows/tests.yml"><img src="https://github.com/ORG/REPO/actions/workflows/tests.yml/badge.svg" alt="Tests"></a>

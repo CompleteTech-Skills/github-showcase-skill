@@ -333,11 +333,11 @@ orgs:
     brand_topic: completetech
     family_topics: [ai-research]
     footer: true
-  CompleTetech-Security:
+  CompleteTech-Security:
     family: completetech
-    former_slugs: []
+    former_slugs: [CompleTetech-Security]
     tier: T1
-    mark: assets/orgs/CompleTetech-Security/mark.png
+    mark: assets/orgs/CompleteTech-Security/mark.png
     display_name: CompleteTech Security
     nav_name: CompleteTech Security
     description: Offline, dependency-free CVE version checkers for network appliances and Node.js. A CompleteTech LLC organization.

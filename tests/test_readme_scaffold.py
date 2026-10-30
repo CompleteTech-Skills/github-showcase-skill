@@ -53,7 +53,7 @@ def test_f_layout_parity(make_ctx, tmp_path):
     out = readme.scaffold(ctx)
     assert not any(ln.startswith("# ") for ln in out.splitlines())  # no H1 in F
     assert '<p align="center"><b>Check NetScaler versions' in out
-    assert "[All checkers](https://github.com/CompleTetech-Security)" in out and "[Licensing](LICENSING.md)" in out
+    assert "[All checkers](https://github.com/CompleteTech-Security)" in out and "[Licensing](LICENSING.md)" in out
 
 
 def test_badges_local(tmp_path):
