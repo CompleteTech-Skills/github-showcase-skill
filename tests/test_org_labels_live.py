@@ -220,3 +220,24 @@ def test_member_checkout_origin_follows_pending_repository_rename(brand, tmp_pat
     result, _ = O.labels_plan(estate, N, checkouts=str(tmp_path))
     assert result["repos"][0]["repo"] == f"{N}/old-name"
     assert all(j.get("repo", f"{N}/old-name") == f"{N}/old-name" for j in result["jobs"])
+
+
+@pytest.mark.parametrize("registry_free", [False, True])
+def test_workflow_reference_is_a_final_skip_not_pending_input(brand, tmp_path, registry_free):
+    repo = tmp_path / N / "one"
+    init_checkout(repo, f"{N}/one")
+    workflow = repo / ".github/workflows/check.yml"
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text("name: bug\non: issues\njobs: {}\n", encoding="utf-8")
+    existing = [dict(lb) for lb in L.standard_labels() if lb["name"] != "type:bug"]
+    existing.append({"name": "bug", "color": "ff0000", "description": "old"})
+    registry = {} if registry_free else {"orgs": {N: {"final_repos": ["one"]}}}
+    estate = O.Estate(brand, Resolver(brand, registry), {
+        "one": dict(listing("one"), labels=existing, files=[".github/workflows/check.yml"], files_complete=True),
+    })
+    result, _ = O.labels_plan(estate, N, registry_free=registry_free, checkouts=str(tmp_path))
+    row = result["repos"][0]
+    assert row["result"] == "pass"
+    assert row["ops"] == []
+    assert "label-referenced" in row["logs"]
+    assert not row.get("held") and result["result"] != "incomplete"

@@ -1772,7 +1772,7 @@ def labels_plan(estate: Estate, org: str, *, allow_t3: bool = False, checkouts: 
         unchecked = [{"label": o["name"], "new_name": o["new_name"], "check_files": o["check_files"]} for o in ops
                      if o.get("log") == labelsmod.NEEDS_CHECKOUT]
         held_ops = [o for o in ops if o.get("log") in
-                    (labelsmod.NEEDS_CHECKOUT, "label-rewrite-first", "label-referenced")]
+                    (labelsmod.NEEDS_CHECKOUT, "label-rewrite-first")]
         rewrites = [{"label": o["name"], "new_name": o["new_name"], **hit}
                     for o in ops for hit in o.get("rewrite_references") or []]
         repos.append({"repo": full, "result": "needs-input" if held_ops else "plan" if writes else "pass", "ops": writes,
