@@ -125,7 +125,12 @@ def merge(ctx: RepoContext, also_in: list[str] | None = None, prune: bool = Fals
         if private and a in t["private_banned"]:
             continue
         if a not in vocab and a != cve_vendor:
-            if not prune and a not in extras_kept:
+            # additive default: an out-of-vocabulary topic is kept as an extra (never in `surviving`, so the domain and
+            # tech ranking is unchanged). `$` in drop_valid also matches before a trailing newline, so an extra must
+            # pass fullmatch; "custom-topic\n" was removed by the vocabulary check on base and stays removed.
+            if prune:
+                continue
+            if re.fullmatch(t["drop_valid"], a) and a not in extras_kept:
                 extras_kept.append(a)
             continue
         if a not in surviving:
