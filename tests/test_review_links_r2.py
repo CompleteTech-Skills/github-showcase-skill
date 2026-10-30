@@ -11,7 +11,7 @@ from ctshowcase import footer as footermod
 from ctshowcase import resolver as R
 
 FIX = ROOT / "tests" / "fixtures" / "content"
-ACTIONS = json.loads((FIX / "estate-actions.json").read_text())
+ACTIONS = json.loads((FIX / "estate-actions.json").read_text(encoding="utf-8"))
 NW = "Northwind-Trading-Co"
 SKILLS = "CompleteTech-Skills"
 REPO = "support-triage-agent"
@@ -47,7 +47,7 @@ def test_footer_logo_urls_are_not_this_repository_under_a_former_owner(brand, tm
     res = C.links_report(tree, ["README.md", "profile/README.md"], resolver=resolver(brand), self_slug=(SKILLS, ".github"))
     assert res["counts"].get("moved") is None and "link-rewrite" not in res["logs"]
     assert res["proposals"] == [] and C.proposal_diff(tree, res["proposals"]).strip() == ""
-    assert footermod.check(brand, (tree.root / "README.md").read_text())[0] == "pass"
+    assert footermod.check(brand, (tree.root / "README.md").read_text(encoding="utf-8"))[0] == "pass"
 
 
 def test_footer_urls_are_never_rewritten_even_with_a_recorded_move(brand, tmp_path):

@@ -105,6 +105,8 @@
    },
    "eyebrow": "#00A7FD",
    "gold_trace": "#FFC300",
+   "icon_ink": "#005ADD",
+   "icon_spark": "#A87C00",
    "ink": "#0F172A",
    "muted": "#94A3B8",
    "plate_low": "#001F3F",
@@ -157,6 +159,8 @@
     },
     "eyebrow": "#F2B75C",
     "gold_trace": "#F2B75C",
+    "icon_ink": "#15120E",
+    "icon_spark": "#8A591C",
     "muted": "#C9BFAE",
     "plate_low": "#2A241C",
     "signal_core": "#FFF4E0",
@@ -202,6 +206,8 @@
     },
     "eyebrow": "#22D3EE",
     "gold_trace": "#22D3EE",
+    "icon_ink": "#8B5CF6",
+    "icon_spark": "#22D3EE",
     "plate_low": "#0C075C",
     "title": "#F1F5F9"
    }
@@ -252,6 +258,8 @@
     },
     "eyebrow": "#F386A1",
     "gold_trace": "#F386A1",
+    "icon_ink": "#3A1A33",
+    "icon_spark": "#6B214F",
     "ink": "#1E1E1E",
     "muted": "#C9CDD3",
     "plate_low": "#1E1E1E",
@@ -295,6 +303,8 @@
     },
     "eyebrow": "#10B981",
     "gold_trace": "#10B981",
+    "icon_ink": "#10B981",
+    "icon_spark": "#F1F5F9",
     "plate_low": "#021527",
     "title": "#F1F5F9"
    }
@@ -333,6 +343,8 @@
     },
     "eyebrow": "#F4C430",
     "gold_trace": "#F4C430",
+    "icon_ink": "#B8860B",
+    "icon_spark": "#F8FAFC",
     "plate_low": "#002C31",
     "title": "#F8FAFC"
    }
@@ -372,6 +384,8 @@
     },
     "eyebrow": "#F59E0B",
     "gold_trace": "#F59E0B",
+    "icon_ink": "#E11D74",
+    "icon_spark": "#F59E0B",
     "plate_low": "#1D1116",
     "title": "#FDF2F8"
    }

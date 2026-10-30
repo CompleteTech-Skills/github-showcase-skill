@@ -1189,7 +1189,25 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main(argv=None) -> int:
-    args = parser().parse_args(argv)
+    # Redirected Windows streams can start as cp1252 even when their consumers
+    # expect UTF-8. Configure before argparse, which also writes help and errors.
+    # StringIO and embedding hosts may replace either stream without reconfigure.
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            # Supplying encoding alone resets errors to strict. Keep stderr's
+            # backslashreplace and POSIX stdout's surrogateescape for paths
+            # containing undecodable filesystem bytes.
+            reconfigure(encoding="utf-8", errors=stream.errors)
+    cli = parser()
+    args, remaining = cli.parse_known_args(argv)
+    # Older Python 3.12 argparse stops a '*' positional after an intervening
+    # option: `lint svg --kind card file.svg` leaves the file unconsumed.
+    # Only lint's file operands may continue here; unknown options still fail.
+    if remaining and args.command == "lint" and all(not item.startswith("-") for item in remaining):
+        args.files.extend(remaining)
+    elif remaining:
+        cli.error("unrecognized arguments: " + " ".join(remaining))
     if args.format is None:
         args.format = "text" if args.command in GENERATORS else "json"
     try:
