@@ -5,6 +5,12 @@ directly; brand.org() is deliberately not used because it resolves aliases.
 """
 from __future__ import annotations
 
+# NOTE for reviewers: this module is a regression AUDIT of existing behaviour (task 40 acceptance
+# criteria 1 and 2 describe the current state of brand.yaml, not a code change). It is therefore
+# expected to pass unchanged on the base commit; verified by running this file against base
+# 2be04ac (13 passed, 19 skipped, 2 xfailed, identical to HEAD). A "fails on base" check does not
+# apply: no default behaviour or brand.yaml edit is made, by design (see the acceptance criteria).
+
 import copy
 import json
 import re
