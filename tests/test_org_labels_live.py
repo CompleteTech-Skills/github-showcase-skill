@@ -1,8 +1,12 @@
 """Registry-free org label planning uses only synthetic GitHub GET responses."""
 import json
+import os
 import subprocess
+import sys
 
 import pytest
+
+from conftest import ROOT
 
 from ctshowcase import org as O
 from ctshowcase import labels as L
@@ -255,3 +259,57 @@ def test_missing_device_named_checkout_falls_back_to_capture(brand, tmp_path, na
     assert result["repos"][0]["repo"] == f"{N}/{name}"
     assert result["repos"][0]["result"] == "plan"
     assert result["repos"][0]["ops"]
+
+
+@pytest.mark.parametrize("source_labels,destination_labels", [("bug", None), ("type:bug", "bug"), (None, None)])
+def test_cli_pending_transfer_checks_current_owner_defaults(tmp_path, source_labels, destination_labels):
+    source = "Northwind-Labs"
+    checkouts = tmp_path / "checkouts"
+    init_checkout(checkouts / N / "member", f"{source}/member")
+    target_defaults = checkouts / N / ".github"
+    init_checkout(target_defaults, f"{N}/.github")
+    for owner, labels in ((source, source_labels), (N, destination_labels)):
+        if labels is None:
+            continue
+        directory = checkouts / owner / ".github"
+        if owner == source:
+            init_checkout(directory, f"{source}/.github")
+        form = directory / ".github/ISSUE_TEMPLATE/bug.yml"
+        form.parent.mkdir(parents=True)
+        form.write_text(f"name: Bug\nlabels: ['{labels}']\n", encoding="utf-8")
+    (tmp_path / "decisions").mkdir()
+    registry = tmp_path / "registry.json"
+    registry.write_text(json.dumps({"orgs": {N: {"final_repos": ["member"]}, source: {}}}), encoding="utf-8")
+    approvals = tmp_path / "decisions/APPROVED_ACTIONS.yaml"
+    approvals.write_text(json.dumps({"actions": [{"id": "move-member", "approved": True}]}), encoding="utf-8")
+    actions = tmp_path / "decisions/estate-actions.json"
+    actions.write_text(json.dumps([{"id": "move-member", "action": "transfer", "owner": source,
+                                    "repo": "member", "target_owner": N}]), encoding="utf-8")
+    metas = tmp_path / "meta"
+    metas.mkdir()
+    existing = [dict(lb) for lb in L.standard_labels() if lb["name"] != "type:bug"]
+    existing.append({"name": "bug", "color": "ff0000", "description": "old"})
+    captures = [
+        {"owner": source, "repo": "member", "visibility": "public", "labels": existing,
+         "files": [], "files_complete": True},
+        {"owner": N, "repo": ".github", "visibility": "public", "files": [], "files_complete": True},
+    ]
+    for i, meta in enumerate(captures):
+        (metas / f"{i}.json").write_text(json.dumps(meta), encoding="utf-8")
+    proc = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/showcase.py"), "org", "labels", N, "--registry", str(registry),
+         "--meta-dir", str(metas), "--approved-yaml", str(approvals), "--actions", str(actions),
+         "--checkouts", str(checkouts), "--dot-github", str(target_defaults)],
+        capture_output=True, text=True, encoding="utf-8", env={**os.environ, "SHOWCASE_ESTATE_ROOT": str(tmp_path)},
+    )
+    assert proc.returncode == 0, proc.stderr
+    result = json.loads(proc.stdout)
+    row = result["repos"][0]
+    assert row["repo"] == f"{source}/member"
+    renames = [job for job in result["jobs"] if "--name" in job.get("argv", [])]
+    if source_labels == "type:bug":
+        assert renames and row["result"] == "plan"
+    else:
+        assert not renames and row["result"] == "needs-input"
+        if source_labels == "bug":
+            assert row["rewrite_first"][0]["repo"] == f"{source}/.github"
