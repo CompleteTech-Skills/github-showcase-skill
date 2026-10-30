@@ -13,6 +13,26 @@ from .context import RepoContext
 from .detect import standard
 
 COLUMNS = ["R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8", "R9", "R10", "R11", "banner", "icon", "card", "footer"]
+# Skill-controlled: the skill renders or checks these from files it generates (logo files, banner, icon, card, README footer).
+SKILL_CELLS = ["R9", "banner", "icon", "card", "footer"]
+# Owner-controlled: GitHub-side state or content the skill must not write (name, description, topics, homepage, repo
+# settings, labels, README sections, license, social preview upload, community health).
+OWNER_CELLS = ["R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8", "R10", "R11"]
+_SKILL_DONE = ("pass", "warn", "n/a")
+_OWNER_PENDING = ("fail", "unknown", "hold", "incomplete")
+
+
+def verdict(cells: dict[str, str]) -> tuple[str, list[str]]:
+    """Split a doctor row's cells into (skill_complete, owner_pending).
+
+    skill_complete is "yes" only when every SKILL_CELLS value is pass, warn or n/a. Anything else (incomplete, fail,
+    unknown, hold, or a missing key) is "no"; a banner marked incomplete is therefore not skill-complete.
+    owner_pending lists the OWNER_CELLS ids, in OWNER_CELLS order, whose value is fail, unknown, hold or incomplete.
+    A missing key counts as unknown. Pure function: no I/O, no network.
+    """
+    skill_complete = "yes" if all(cells.get(c, "unknown") in _SKILL_DONE for c in SKILL_CELLS) else "no"
+    owner_pending = [c for c in OWNER_CELLS if cells.get(c, "unknown") in _OWNER_PENDING]
+    return skill_complete, owner_pending
 LOGO_SHA = {"assets/logo.png": "a5c3c4ef55336ed4b883d3bc3bb6e1e942b836469bd2b2933bc8cc230b321621",
             "assets/logo-dark.png": "0dc00c0e5159518ff1d552b7052293b4e545ddd35be489e6d114e3ea64db27ec"}
 
@@ -41,7 +61,7 @@ def _cell(code: str) -> str:
     return "n/a" if code.startswith("exempt") else "hold"
 
 
-def row(ctx: RepoContext) -> dict:
+def row(ctx: RepoContext, skill_verdict: bool = False) -> dict:
     cells: dict[str, str] = {}
     logs: list[str] = []
     rd = ctx.repo_dir
@@ -162,18 +182,34 @@ def row(ctx: RepoContext) -> dict:
         if re.search(r"<!-- showcase:checklist:start -->.*- \[ \].*<!-- showcase:checklist:end -->",
                      (rd / "README.md").read_text(encoding="utf-8"), re.S):
             logs.append("checklist: open")
-    return {"repo": f"{ctx.owner}/{ctx.repo}", "type": ctx.det["type"], "variant": ctx.det["variant"], "cells": cells,
-            "done": "yes" if done else "no", "logs": sorted(set(logs + ctx.logs))}
+    res = {"repo": f"{ctx.owner}/{ctx.repo}", "type": ctx.det["type"], "variant": ctx.det["variant"], "cells": cells,
+           "done": "yes" if done else "no", "logs": sorted(set(logs + ctx.logs))}
+    if skill_verdict:
+        sc, pend = verdict(cells)
+        res["skill_complete"] = sc
+        res["owner_pending"] = pend
+    return res
+
+
+# opt-in columns (row(..., skill_verdict=True)); absent from the output unless the row carries skill_complete
+_VERDICT_COLS = ["skill_complete", "owner_pending"]
+
+
+def _verdict_vals(r: dict) -> list[str]:
+    if "skill_complete" not in r:
+        return []
+    return [r["skill_complete"], ",".join(r["owner_pending"]) or "-"]
 
 
 def as_tsv(r: dict, header: bool = False) -> str:
-    cols = ["owner/repo", "type", "variant", *COLUMNS, "done"]
-    line = "\t".join([r["repo"], r["type"], r["variant"], *[r["cells"][c] for c in COLUMNS], r["done"]])
+    cols = ["owner/repo", "type", "variant", *COLUMNS, "done", *(_VERDICT_COLS if "skill_complete" in r else [])]
+    vals = [r["repo"], r["type"], r["variant"], *[r["cells"][c] for c in COLUMNS], r["done"], *_verdict_vals(r)]
+    line = "\t".join(vals)
     return ("\t".join(cols) + "\n" if header else "") + line
 
 
 def as_md(r: dict, header: bool = False) -> str:
-    cols = ["owner/repo", "type", "variant", *COLUMNS, "done"]
-    vals = [r["repo"], r["type"], r["variant"], *[r["cells"][c] for c in COLUMNS], r["done"]]
+    cols = ["owner/repo", "type", "variant", *COLUMNS, "done", *(_VERDICT_COLS if "skill_complete" in r else [])]
+    vals = [r["repo"], r["type"], r["variant"], *[r["cells"][c] for c in COLUMNS], r["done"], *_verdict_vals(r)]
     head = ("| " + " | ".join(cols) + " |\n|" + "---|" * len(cols) + "\n") if header else ""
     return head + "| " + " | ".join(vals) + " |"
