@@ -823,3 +823,71 @@ def test_schema_accepts_icon_strict_family_ink(brand):
     assert schema_errors(raw) == []
     raw["families"]["completetech"]["icon_strict_family_ink"] = "yes"
     assert schema_errors(raw) != []
+
+
+# ---------------------------------------------------------------------------------------------------
+# configurable contrast floor (E3.2.2): default 3.0, `--min-contrast` > family key `icon_min_contrast` > 3.0
+# ---------------------------------------------------------------------------------------------------
+CONTRAST_INK = (122, 141, 176)  # ~3.1:1 on the card: between the 3.0 default floor and the 4.5 recommendation
+
+
+def test_icon_min_contrast_default_3_and_configurable(brand):
+    from ctshowcase.color import contrast
+    card = brand.style(NW)["tokens"]["card_fill"]
+    img = C.normalize_icon(_candidate(card, ink=CONTRAST_INK), "transparent", card)[0]
+    data = C.icon_bytes(img)[0]
+    qa = C.icon_qa(data, card=card)
+    assert _check_result(qa, "contrast-on-card") == "pass", qa
+    detail = next(c["detail"] for c in qa["checks"] if c["check"] == "contrast-on-card")
+    assert detail.endswith("(>= 3:1)"), detail
+    # self-check: the measured ink lies between the default floor and the recommended one
+    ratio = contrast(qa["dominant_ink"], card)
+    assert 3.0 < ratio < 4.5, ratio
+    qa = C.icon_qa(data, card=card, min_contrast=4.5)
+    assert _check_result(qa, "contrast-on-card") == "fail" and qa["result"] == "fail", qa
+    detail = next(c["detail"] for c in qa["checks"] if c["check"] == "contrast-on-card")
+    assert "(>= 4.5:1)" in detail, detail
+    # an explicit 3.0 is the default
+    assert C.icon_qa(data, card=card, min_contrast=3.0)["checks"] == C.icon_qa(data, card=card)["checks"]
+
+
+def test_icon_contrast_floor_helper():
+    from ctshowcase.errors import ShowcaseError
+    assert C.icon_contrast_floor(None, None) == 3.0
+    assert C.icon_contrast_floor(4.5, None) == 4.5
+    assert C.icon_contrast_floor(None, 4.5) == 4.5
+    assert C.icon_contrast_floor(3.5, 4.5) == 3.5  # the CLI value wins over the family key
+    for bad in (0.5, 22, True, "x"):
+        with pytest.raises(ShowcaseError) as exc:
+            C.icon_contrast_floor(bad, None)
+        assert exc.value.log == "usage" and exc.value.code == 2, bad
+    with pytest.raises(ShowcaseError):
+        C.icon_contrast_floor(None, 22)
+
+
+def test_icon_min_contrast_cli(capsys, tmp_path, brand):
+    card = brand.style(NW)["tokens"]["card_fill"]
+    img = C.normalize_icon(_candidate(card, ink=CONTRAST_INK), "transparent", card)[0]
+    out = write(tmp_path, {"repo/assets/icon.png": C.icon_bytes(img)[0]}) / "repo" / "assets" / "icon.png"
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    check = ("--meta", meta, "--no-repo-dir", "content", "icon", "check", "--out", out,
+             "--art-direction", FIX / "ART_DIRECTION.min.md", *NO_ESTATE)
+    code, res = run_content(capsys, *check, "--min-contrast", "4.5")
+    assert code == 1 and res["result"] == "fail", res
+    code, res = run_content(capsys, *check)
+    assert code == 0 and res["result"] in ("pass", "warn"), res
+    code, res = run_content(capsys, *check, "--min-contrast", "30")
+    assert code == 2, res
+
+
+def test_schema_icon_min_contrast(brand):
+    import copy
+    from ctshowcase.config import schema_errors
+    raw = copy.deepcopy(brand.raw)
+    raw["families"]["completetech"]["icon_min_contrast"] = 4.5
+    assert schema_errors(raw) == []
+    raw["families"]["completetech"]["icon_min_contrast"] = 0.5
+    assert schema_errors(raw) != []
+    raw["families"]["completetech"]["icon_min_contrast"] = 22
+    assert schema_errors(raw) != []
