@@ -38,3 +38,11 @@ python scripts/validate_quality.py
 - **Generators** must stay deterministic: rendering the same inputs twice gives byte-identical files. Add a regression test for every layout change, and compare the php2shell render against the golden layout mask.
 - **Fixtures** are synthetic (Northwind Trading Co.) or copied from public repositories only. Never copy metadata, names or README text from a private repository into `tests/` or `examples/`.
 - **Previews** in `assets/examples/` and `docs/images/` are regenerated with `scripts/showcase.py`, never edited by hand. View them on a contact sheet before committing.
+
+### Windows tests
+
+The full suite supports Windows without enabling UTF-8 mode globally. Use the virtual
+environment's Python, and install Git for Windows to run the Action shell tests.
+Those tests use the `requires_bash` marker and skip with a specific dependency reason
+only when the compatible shell is missing. See [Windows test portability](references/windows-testing.md)
+for the issue #9 triage and the cross-platform test workflow.

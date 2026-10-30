@@ -4,12 +4,12 @@ Synthetic Northwind fixtures only."""
 import importlib.util
 import json
 import os
-import subprocess
 import sys
 
 import yaml
+import pytest
 
-from conftest import EX, ROOT, run_cli
+from conftest import EX, ROOT, run_bash, run_cli
 from ctshowcase import content as C
 from ctshowcase import readme, readmelint
 
@@ -26,24 +26,25 @@ def _cli():
 
 # ------------------------------------------------------------------------- Action: a held README keeps the run green
 def _generate(tmp_path, mode):
-    step = next(s for s in yaml.safe_load((ROOT / "action.yml").read_text())["runs"]["steps"] if s.get("id") == "generate")
+    step = next(s for s in yaml.safe_load((ROOT / "action.yml").read_text(encoding="utf-8"))["runs"]["steps"] if s.get("id") == "generate")
     repo, rt = tmp_path / "repo", tmp_path / "rt"
     repo.mkdir(parents=True)
     rt.mkdir()
-    (repo / "README.md").write_text("# northwind-tools\n\nDemo tools.\n")
+    (repo / "README.md").write_text("# northwind-tools\n\nDemo tools.\n", encoding="utf-8")
     (rt / "meta.json").write_text(json.dumps({"owner": WATCH, "repo": "northwind-tools", "description": "Northwind demo tools.",
                                               "topics": [], "fork": False, "archived": False, "visibility": "public",
-                                              "language": "Python"}))
+                                              "language": "Python"}), encoding="utf-8")
     out = tmp_path / "gh_out"
-    out.write_text("")
+    out.write_text("", encoding="utf-8")
     env = dict(os.environ, GITHUB_ACTION_PATH=str(ROOT), RUNNER_TEMP=str(rt), GITHUB_OUTPUT=str(out),
                GITHUB_REPOSITORY=f"{WATCH}/northwind-tools", SHOWCASE_OUTPUTS="banner,card", SHOWCASE_README=mode,
                SHOWCASE_IS_TEMPLATE="false", SHOWCASE_ALLOW_UNMEASURED="false",
                PATH=os.path.dirname(sys.executable) + os.pathsep + os.environ.get("PATH", ""))
-    p = subprocess.run(["bash", "-c", step["run"]], cwd=repo, env=env, capture_output=True, text=True)
-    return p, out.read_text(), (repo / "README.md").read_text()
+    p = run_bash(step["run"], cwd=repo, env=env)
+    return p, out.read_text(encoding="utf-8"), (repo / "README.md").read_text(encoding="utf-8")
 
 
+@pytest.mark.requires_bash
 def test_action_skips_a_held_readme_instead_of_failing(tmp_path):
     for mode in ("header", "bootstrap"):
         p, outputs, text = _generate(tmp_path / mode, mode)
@@ -92,9 +93,9 @@ def test_labels_jobs_without_plan_read_the_live_labels(tmp_path, monkeypatch):
     m = tmp_path / "meta.json"
     m.write_text(json.dumps({"owner": "CompleteTech-LLC", "repo": "northwind-demo", "visibility": "public",
                              "description": "Run the Northwind demo.", "labels": [], "has_issues": True,
-                             "files": ["README.md"], "files_complete": True}))
+                             "files": ["README.md"], "files_complete": True}), encoding="utf-8")
     gh = tmp_path / "dot-github.json"
-    gh.write_text(json.dumps({"owner": "CompleteTech-LLC", "repo": ".github", "files": ["README.md"], "files_complete": True}))
+    gh.write_text(json.dumps({"owner": "CompleteTech-LLC", "repo": ".github", "files": ["README.md"], "files_complete": True}), encoding="utf-8")
     jobs = tmp_path / "jobs.jsonl"
     for flags in (["--jobs", str(jobs)], ["--records", str(tmp_path / "rec.jsonl")], ["--gh"]):
         monkeypatch.setattr(M, "_gh", lambda path, paginate=False, raw=False: None)  # the GET fails
@@ -119,7 +120,7 @@ def test_labels_answer_na_for_an_archived_repository(tmp_path):
     m = tmp_path / "arch.json"
     m.write_text(json.dumps({"owner": "Northwind-Trading-Co", "repo": "order-ledger", "visibility": "public",
                              "description": "Record Northwind orders.", "archived": True,
-                             "labels": [{"name": "bug", "color": "d73a4a", "description": ""}]}))
+                             "labels": [{"name": "bug", "color": "d73a4a", "description": ""}]}), encoding="utf-8")
     p = run_cli("--meta", m, "--no-repo-dir", "labels", "--plan", "--jobs", tmp_path / "j.jsonl")
     out = json.loads(p.stdout)
     assert p.returncode == 0 and out["result"] == "n/a" and out["logs"] == ["archived"]
@@ -133,7 +134,7 @@ def test_upgrade_keeps_an_authored_centred_credits_block(tmp_path):
     block = ('<p align="center">\n  <img src="docs/sponsors.png" alt="Our sponsors" width="400"><br>\n'
              "  Thanks to Acme Corp and Globex for funding the 2026 roadmap.<br>\n"
              "  Built by the Northwind volunteers, hosted on complete.tech infrastructure.\n</p>\n")
-    (repo / "README.md").write_text("# Support Triage Agent\n\nTriage agent.\n\n## Usage\n\nRun it.\n\n" + block)
+    (repo / "README.md").write_text("# Support Triage Agent\n\nTriage agent.\n\n## Usage\n\nRun it.\n\n" + block, encoding="utf-8")
     p = run_cli("--meta", EX / "meta" / "northwind-support-triage-agent.json", "--repo-dir", repo, "--format", "json",
                 "readme", "--mode", "upgrade")
     out = json.loads(p.stdout)
@@ -168,7 +169,7 @@ def test_a_public_board_without_approval_names_no_repository(brand):
 # ------------------------------------------------------------------------- footer --check for the watching org
 def test_footer_check_reads_the_watching_orgs_readme(tmp_path):
     r = tmp_path / "README.md"
-    r.write_text("# .github\n\nProfile of the watching org.\n")
+    r.write_text("# .github\n\nProfile of the watching org.\n", encoding="utf-8")
     p = run_cli("footer", "--check", r, "--org", WATCH)
     assert p.returncode == 1 and json.loads(p.stdout)["result"] == "fail:missing"
     p = run_cli("--format", "json", "footer", "--org", WATCH)  # printing the markup: still exempt

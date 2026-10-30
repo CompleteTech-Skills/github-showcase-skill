@@ -117,6 +117,10 @@ CLI stdout and stderr use UTF-8, including redirected Windows output, raw footer
 JSON, help and errors. Decode captured CLI output as UTF-8; JSON keeps Unicode characters
 without ASCII escaping. No `PYTHONIOENCODING` workaround is needed.
 
+Contributor tests also decode CLI captures and Markdown fixtures as UTF-8. Action
+shell tests use Git Bash on Windows and an explicit `requires_bash` dependency marker;
+see [Windows test portability](references/windows-testing.md) for setup and the individual failure triage.
+
 The four command groups follow the same rules as the repository commands: read-only toward GitHub, one JSON object on stdout (`command`, `action`, `owner`, `result`, `logs[]`), the same exit codes, and refusals for excluded, HOLD and T3 owners. What they add:
 
 **Command-name contract.** The orchestrator, the standard and other workstreams call these names, so they are fixed: the repository commands in the Command Reference; the top-level generators `banner`, `card`, `org-banner`, `org-tile`, `intro` and `contact-sheet`; and the groups `org {profile,about,pins,labels,health,doctor}`, `project {capture-query,normalize,copy-plan,readme,lint,estate-plan}`, `enterprise {snapshot-query,discover,snapshot,doctor,seat-check,diff,plan}` and `content {social,icon,links,linguist,actions,images,sidebar}`. The social preview is `content social`; the old top-level `social-preview` still parses as a hidden, deprecated alias (same options, same file, logged `deprecated:social-preview`) and is not documented as a command.
