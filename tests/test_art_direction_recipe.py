@@ -75,13 +75,16 @@ BASE_TABLE_ROWS = """| Family | Canvas | Primary | Accent | Text | Motif | Fonts
 | TouchedByAnAgent | Glossy 3D product illustration on deep maroon: smooth pink-peach robotics, warm amber glow, soft magenta signal ripples, tasteful and non-suggestive, studio lighting. |
 | romgenie | Glossy illustrated 3D still life in a warm vault: brass-bound objects, soft lamp light from above, dark teal ambient background, storybook-premium finish. |""".splitlines()
 
+# The provenance template outside the recipe. Issue #61 (one image per prompt run) deliberately
+# replaced the former "Candidates: 4 or 8" line with "Images requested", because each run now
+# asks for one image; the recipe (#64) must not change anything else in this block.
 BASE_PROVENANCE = """## assets/icon.png
 - Date: YYYY-MM-DD
 - Tool and model: TOOL / MODEL ID AND VERSION
 - Seed: SEED or "not supported"
 - Reference images: golden reference path, jev-reference.png, or "none"
 - Prompt: (verbatim, fenced)
-- Candidates: 4 or 8; selected: N (reason: one line)
+- Images requested: as asked in the prompt (`content icon prompt` asks for 1); selected: N (reason: one line)
 - Post-processing: showcase.py VERSION; output sha256 HASH; size KB
 """
 

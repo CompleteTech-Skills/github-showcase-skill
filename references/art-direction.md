@@ -9,10 +9,10 @@ Condensed from `ct-std-v1` §9 with decisions 12, 13, 19 and 21 applied. It cove
 1. **The image model draws only illustration layers.** Never text, letters, numbers, logos or brand marks.
 2. **Marks come only from committed files.** Never crop, mask, recolour or redraw a mark. The only crops ever made are the one-time `mark-dark.png`, `bulb-dark.png` and `jev-reference.png`, made by the estate planner on the chosen master (decision 19: re-measure on the new master; never reuse old pixel coordinates).
 3. **All text is typeset by the compositor** with real fonts: Poppins and JetBrains Mono for CompleteTech (both OFL); T2 families use their own fonts.
-4. **One style lock per family**, verbatim. Use the same model and version for a family run; record the seed if the tool supports seeds (CompleteTech `1025`, Jev-Engineering `3001`, jevplay-games `3101`, LibreEvolve `4001`, TouchedByAnAgent `5001`, romgenie `6001`).
+4. **One style lock per family**, verbatim. Use the same model and version for a family run; record a seed only when one was requested (`content icon prompt --seed N`; otherwise "not supported"). Family seeds, for runs that choose to request one: CompleteTech `1025`, Jev-Engineering `3001`, jevplay-games `3101`, LibreEvolve `4001`, TouchedByAnAgent `5001`, romgenie `6001`.
 5. **Pilot first, per family.** The user approves the first banner and card of each family before the rest are generated; they become the family's golden references.
 6. **Every in-scope repository gets its own icon** (decision 12), `assets/icon.png`; watching-org forks are the only exception. T3 art waits for co-owner sign-off.
-7. **Selection:** generate 4 candidates, reject any that fails the QA checklist, select the first remaining one in generation order with a one-line reason. If none passes, generate 4 more once; then log `art-fail`.
+7. **Selection:** run the one-image prompt up to 4 times (each run is a candidate), reject any that fails the QA checklist, select the first remaining one in generation order with a one-line reason. If none passes, run it 4 more times once; then log `art-fail`.
 8. **Mascot:** every jevplay-games prompt uses exactly `jevplay-games/.github/profile/assets/jev-reference.png`.
 9. **No third-party IP:** no Pokémon creatures or Poké Balls, Among Us crewmates, Discord, Zoho or NetScaler logos, Hasbro board designs, real people, or anything sexual or suggestive.
 10. **One dark design** (decision 21): banners, cards, tiles and intros ship one dark file used on both GitHub themes.
@@ -126,9 +126,9 @@ Use the same model and version for a whole family run (pipeline rule 4) and reco
 palette slots and flat render inks come from the selected family's `icon_ink`
 and `icon_spark` tokens in `brand.yaml`. Both are chosen to meet the icon QA's
 3:1 contrast threshold on that family's card, with a distinct outline and spark.
-The writer supplies the four glyph fields with `--glyph`. Documented family seeds
-above are used when available; otherwise the prompt explicitly uses the tool's
-default seed. It does
+The writer supplies the four glyph fields with `--glyph`. The prompt asks for one image and
+asserts no seed; pass `--seed N` to request one, which the prompt and its provenance
+block then record (otherwise the seed is recorded as "not supported"). It does
 not require the estate's avatar tables or reference images. An explicit
 `--art-direction FILE` may instead supply the estate-format `(b) Family palette`
 and `(d) Shared prompt template` sections.
@@ -149,7 +149,7 @@ glyph outline in {LINE_HEX} so the spark remains distinct at small sizes.
 
 No text, letters, numbers, words, logos, brand marks, human figures or third-party IP.
 {EXTRA_NEGATIVES}
-Produce four candidates. {SEED_INSTRUCTION}
+Produce one image.{SEED_INSTRUCTION}
 The lock pass renders assets/icon.png as a flat glyph in the family's light-surface
 inks, without a tile or glow. Do not render the repository name in the image.
 ```
@@ -200,7 +200,7 @@ No text, letters, numbers, symbols, words, labels, signatures, watermarks, logos
 - Seed: SEED or "not supported"
 - Reference images: golden reference path, jev-reference.png, or "none"
 - Prompt: (verbatim, fenced)
-- Candidates: 4 or 8; selected: N (reason: one line)
+- Images requested: as asked in the prompt (`content icon prompt` asks for 1); selected: N (reason: one line)
 - Post-processing: showcase.py VERSION; output sha256 HASH; size KB
 ```
 
