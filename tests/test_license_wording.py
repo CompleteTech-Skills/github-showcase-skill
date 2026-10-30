@@ -192,3 +192,40 @@ def test_wording_log_is_recorded_once_per_context(make_ctx, tmp_path):
     readme.license_section(ctx)
     readme.license_section(ctx)
     assert ctx.logs.count("needs-input:license-wording") == 1
+
+
+# --- review round: upgrade must never delete authored License text, and must gate managed sections (issue 36) ---
+AUTHORED = "Internal use only by the Example team; contact the owners before sharing."
+
+
+def _readme_with_license(body):
+    return f"# thing\n\nA thing.\n\n## Usage\n\nRun it.\n\n## License\n\n{body}\n"
+
+
+def test_upgrade_private_no_wording_keeps_authored_license_section(make_ctx, tmp_path):
+    ctx = make_ctx(repo_dir=tmp_path, owner="LibreEvolve", repo="thing", license=None, visibility="private",
+                   created_at="2025-01-01T00:00:00Z")
+    text = _readme_with_license(AUTHORED)
+    out, removed = readme.upgrade(ctx, text)
+    assert AUTHORED in out and AUTHORED not in removed
+    assert readme.preservation(text, out, removed) == []
+    assert "needs-input:license-wording" in ctx.logs
+
+
+def test_upgrade_private_no_wording_drops_only_generated_license_text(make_ctx, tmp_path):
+    ctx = make_ctx(repo_dir=tmp_path, owner="LibreEvolve", repo="thing", license=None, visibility="private",
+                   created_at="2025-01-01T00:00:00Z")
+    out, _ = readme.upgrade(ctx, _readme_with_license("Proprietary. Copyright (c) 2025 X. All rights reserved."))
+    assert "All rights reserved" not in out and "## License" not in out
+
+
+def test_upgrade_public_managed_rights_sentence_becomes_factual_line(make_ctx, tmp_path):
+    managed = "<!-- showcase:license -->\n" + RV["t1_mit"]
+    text = _readme_with_license(managed)
+    for preserve in (False, True):
+        c = make_ctx(repo_dir=tmp_path, owner="LibreEvolve", repo="thing", license="MIT")
+        if preserve:
+            c.org = dict(c.org, readme_preserve=["thing"])
+        out, removed = readme.upgrade(c, text)
+        assert FACTUAL_MIT in out and "reserved" not in out
+        assert "needs-input:license-wording" in c.logs
