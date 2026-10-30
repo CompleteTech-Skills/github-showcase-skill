@@ -80,6 +80,9 @@ def _check_meta(cfg, meta, tmp_path, readme):
 # unchanged behaviour: footer True, default --check, --org, unknown owner). The task-45 merge 3e45b87, which this branch
 # is based on, already contains the fix, so all 16 pass there by design. Reproduce on a base export with
 # `git archive 2be04ac | tar -x -C <dir>`, copy this file in, and run `python -m pytest -q tests/test_footer.py`.
+# Reproduced for this unit (fresh export of 2be04ac, this file copied in): 8 failed, 8 passed; test_check_meta_footer_false_exempt
+# fails there. The diff against 3e45b87 is test-only BY DESIGN, because 3e45b87 already contains the task-45 fix, so
+# the regression can only be shown against 2be04ac, not against this branch's base.
 
 
 def test_check_meta_footer_false_exempt(tmp_path):
