@@ -936,7 +936,7 @@ def cmd_doctor(args):
         return res, OK
     ctx = context(args)
     ctx.brand.check_owner(ctx.owner, allow_t3=True)
-    r = doctor.row(ctx)
+    r = doctor.row(ctx, skill_verdict=args.skill_verdict)
     fmt = args.doctor_format
     if fmt == "tsv":
         print(doctor.as_tsv(r, args.header))
@@ -1224,6 +1224,9 @@ def parser() -> argparse.ArgumentParser:
     s = sub.add_parser("doctor", help="definition-of-done coverage row; --estate: intake proposals and template drift")
     s.add_argument("--format", dest="doctor_format", choices=("tsv", "json", "md"), default="tsv")
     s.add_argument("--header", action="store_true")
+    s.add_argument("--skill-verdict", action="store_true",
+                   help="add skill_complete (yes/no) and owner_pending (owner-controlled cells still open) next to done; "
+                        "off by default, output unchanged without it")
     s.add_argument("--estate", action="store_true",
                    help="classify repositories missing from the registry with POLICY.md into NEW_PROPOSALS entries and "
                         "diff template-managed files against the template (read only)")
