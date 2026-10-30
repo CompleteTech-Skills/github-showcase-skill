@@ -16,7 +16,19 @@ ORG = "Northwind-Trading-Co"
 
 def cli(tmp_path, *args):
     env = dict(os.environ, SHOWCASE_ESTATE_ROOT=str(tmp_path), PYTHONIOENCODING="utf-8")
-    proc = subprocess.run([sys.executable, str(ROOT / "scripts/showcase.py"), "org", *args],
+    # An empty SHOWCASE_ESTATE_ROOT does not disable fallback discovery. Restrict the child to
+    # the explicit synthetic root so tests cannot inspect a developer's sibling estate bundle.
+    bootstrap = """import runpy, sys
+from pathlib import Path
+script = Path(sys.argv.pop(1))
+sys.path.insert(0, str(script.parent))
+import ctshowcase
+ctshowcase.estate_candidates = lambda: []
+from ctshowcase import resolver
+resolver.estate_candidates = lambda: []
+runpy.run_path(str(script), run_name="__main__")
+"""
+    proc = subprocess.run([sys.executable, "-c", bootstrap, str(ROOT / "scripts/showcase.py"), "org", *args],
                           capture_output=True, encoding="utf-8", env=env)
     return proc, json.loads(proc.stdout)
 
@@ -184,3 +196,19 @@ def test_unverified_missing_reason_inputs_are_unknown(brand, captured):
     result = O.doctor(O.Estate(brand, Resolver(brand)), "CompleteTech-LLC", snap)
     assert result["cells"]["O11"] == "unknown"
     assert not any("blog-other-domain" in note or "email-blank" in note for note in result["notes"])
+
+
+def test_cli_helper_ignores_ambient_sibling_registry(tmp_path, monkeypatch):
+    bundle = tmp_path / "bundle"
+    skill = bundle / "skill"
+    shutil.copytree(ROOT / "scripts", skill / "scripts", ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copytree(ROOT / "references", skill / "references")
+    registry = bundle / "registry/estate.yaml"
+    registry.parent.mkdir()
+    registry.write_text("version: 1\norgs:\n  Northwind-Labs: {}\n", encoding="utf-8")
+    monkeypatch.setattr(sys.modules[__name__], "ROOT", skill)
+    isolated = tmp_path / "isolated"
+    isolated.mkdir()
+    proc, result = cli(isolated, "health", ORG, "--dot-github", str(checkout(isolated)))
+    assert proc.returncode == 0, result
+    assert result["result"] == "pass"
