@@ -621,6 +621,19 @@ def test_icon_prompt_needs_writer_then_ok(brand, icon_ctx):
     assert md.startswith("# Repo icon prompt: Northwind-Trading-Co/support-triage-agent") and "```text" in md
 
 
+def test_icon_prompt_states_the_flat_ground(brand, icon_ctx):
+    """The option-A prompt names the family card colour as one flat ground and forbids vignette and glow."""
+    glyph = {"glyph_name": "Inbox Tray", "glyph_description": "An open tray seen front-on.",
+             "spark_placement": "held inside the tray", "size_class": "wide"}
+    # the bundled art direction carries the template sentence the ground clause rewrites; the synthetic
+    # estate fixture does not, so it would leave the prompt unchanged by design
+    p = C.icon_prompt(icon_ctx, resolver(brand), C.load_art_direction(), glyph)["prompt"]
+    assert "perfectly flat" in p
+    assert brand.style(NW)["tokens"]["card_fill"].upper() in p
+    assert "no vignette, texture, gradient, shadow or glow" in p
+    assert "Keep the background empty" not in p
+
+
 def test_icon_prompt_parses_the_bundled_art_direction(brand, fixture_meta):
     from ctshowcase.context import RepoContext
     from ctshowcase.meta import normalize

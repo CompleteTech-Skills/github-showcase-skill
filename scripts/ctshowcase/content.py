@@ -1867,6 +1867,11 @@ def _template(text: str, section: str) -> str | None:
     return m.group(1) if m else None
 
 
+def ground_clause(card: str) -> str:
+    return (f"Fill the entire background with one perfectly flat {card.upper()} colour: no vignette, texture, "
+            "gradient, shadow or glow in the background.")
+
+
 def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = None, option: str = "A",
                 language: str | None = None, skill_art: str | None = None) -> dict:
     """The Codex prompt for a repository icon (f.3 option A: the (d) template with "repo icon" for "avatar"; option
@@ -1970,6 +1975,9 @@ def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = Non
                                 "It joins the 28 Neon Night avatars and its sibling repo icons as one matched family")
         prompt = prompt.replace("(identical in all 28 repo icons)", "(identical to the Neon Night avatars)")
         prompt = prompt.replace("same model and version for all 28", "same model and version as the avatar set")
+        card = ctx.style["tokens"]["card_fill"]
+        prompt = prompt.replace("Keep the background empty and the glyph inside",
+                                ground_clause(card) + " Keep the glyph inside")
         for k, v in slots.items():
             if v is not None:
                 prompt = prompt.replace("{" + k + "}", str(v))
