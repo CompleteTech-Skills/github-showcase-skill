@@ -100,7 +100,7 @@ Use the same model and version for a whole family run (pipeline rule 4) and reco
 
 ### Retry and attempt limits
 
-- A run that finishes with no image path is retried as a NEW run with the same prompt, at most 2 retries (3 attempts total) per candidate set. Parallel runs sometimes produce no path, and a retry has succeeded.
+- A run that finishes with no image path is retried as a NEW run with the same prompt, at most 2 retries (3 attempts total) per candidate set. Parallel runs can finish without a path, which is why a retry is allowed.
 - Retries never alter the prompt.
 - Attempts that produced a path count toward pipeline rule 7 (4 candidates, then 4 more once, then log `art-fail`). Empty attempts do not count as candidates but do count toward the 3-attempt cap.
 - After the cap, stop and log `art-fail` with a one-line reason. Do not loop.

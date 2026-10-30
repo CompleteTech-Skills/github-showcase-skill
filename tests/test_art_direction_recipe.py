@@ -52,6 +52,14 @@ def test_recipe_retry_limit():
     assert "3 attempts" in section
 
 
+def test_recipe_makes_no_verification_claims():
+    # The recipe is documentation only: it must not report observed outcomes or
+    # verification (for example "a retry has succeeded") that nothing in the repo proves.
+    lowered = _recipe(_text()).lower()
+    for phrase in ("verified", "has succeeded", "tested on", "was tested", "confirmed on"):
+        assert phrase not in lowered, phrase
+
+
 def test_recipe_has_no_local_paths():
     section = _recipe(_text())
     assert not re.search(r"[A-Za-z]:\\Users|/home/|/Users/", section)
