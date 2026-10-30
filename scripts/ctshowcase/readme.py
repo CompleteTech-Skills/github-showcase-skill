@@ -299,11 +299,11 @@ def license_section(ctx: RepoContext) -> tuple[str, str] | None:
     if ctx.public and (ctx.det["variant"] == "F" or (ctx.org.get("license_chip") and lic and lic.upper().startswith("AGPL"))):
         return "Licensing", rv["security"]
     if not ctx.public:
-        if ctx.same_owner("TouchedByAnAgent"):
-            return "License", rv["private_hold"]
-        if not holder:
+        if not holder:  # before the TouchedByAnAgent hold row: that row is a rights sentence too (issue 36)
             ctx.log("needs-input:license-wording")
             return None
+        if ctx.same_owner("TouchedByAnAgent"):
+            return "License", rv["private_hold"]
         year = (ctx.meta.get("created_at") or "")[:4]
         if not year:
             ctx.log("needs-input:license-year")
@@ -326,6 +326,14 @@ def license_section(ctx: RepoContext) -> tuple[str, str] | None:
         return "License", rv["other"].replace("<license>", lic).replace("<path>", "LICENSE").replace("<Brand>", holder)
     ctx.log("needs-input:license")
     return None
+
+
+def license_omitted(ctx: RepoContext) -> bool:
+    """True when license_section() returns None on purpose: a private repository whose org row has no `license_wording`
+    gets no License section at all, so an existing managed one is removed, not preserved (issue 36)."""
+    f = ctx.facts
+    third = f.known and (ctx.repo.endswith("-fork") or any(x.startswith(("vendor/", "third_party/")) for x in f.files))
+    return not third and not ctx.public and not (ctx.org.get("license_wording") or "").strip()
 
 
 def section_facts(ctx: RepoContext, h2: str) -> str | None:
@@ -774,7 +782,10 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
     if existing_notes or notes:
         nb = "\n\n".join(x for x in ([existing_notes] if existing_notes else []) + notes)
         out.append(f"## Notes\n\n{nb}")
-    if license_body:
+    if license_body and license_omitted(ctx):
+        removed += [ln for ln in license_body[1].splitlines() if ln.strip()]
+        ctx.log("needs-input:license-wording")
+    elif license_body:
         out.append(f"## {license_body[0]}\n\n{license_body[1].strip()}")
     else:
         lic = license_section(ctx)
@@ -857,6 +868,10 @@ def license_block(ctx: RepoContext, text: str) -> str:
     if i < 0:
         return text
     lic = license_section(ctx)
+    if not lic and license_omitted(ctx):  # intentional omission: drop the managed heading and paragraph
+        m = re.compile(re.escape(LICENSE_MARK) + r"\n.*?(?:\n\n|\n?$)", re.S).match(text, i)
+        head = re.search(r"(?m)^## (?:License|Licensing|Licence)[ \t]*\n\n?\Z", text[:i])
+        return text[:head.start() if head else i] + text[m.end() if m else i:]
     if not lic:
         return text
     m = re.compile(re.escape(LICENSE_MARK) + r"\n(.*?)(\n\n|\n?$)", re.S).match(text, i)
