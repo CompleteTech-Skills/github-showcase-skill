@@ -234,8 +234,8 @@ Never modify, rename or delete an existing LICENSE, NOTICE or COPYING file.
 <p align="center">
   <a href="https://www.complete.tech">
     <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/CompleteTech-LLC/.github/main/brand/logo-dark.png">
-      <img src="https://raw.githubusercontent.com/CompleteTech-LLC/.github/main/brand/logo.png" alt="CompleteTech LLC" width="200">
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/CompleteTech-Skills/github-showcase-skill/main/assets/brand/logo-dark.png">
+      <img src="https://raw.githubusercontent.com/CompleteTech-Skills/github-showcase-skill/main/assets/brand/logo.png" alt="CompleteTech LLC" width="200">
     </picture>
   </a>
   <br>
@@ -244,7 +244,7 @@ Never modify, rename or delete an existing LICENSE, NOTICE or COPYING file.
 <!-- showcase:footer:end -->
 ```
 
-The 10 lines between the markers are byte-exact; `footer --check` reports `fail:missing`, `fail:not-last`, `fail:drift` or `fail:duplicate` (an old footer-like block, centred with "Built by" and complete.tech outside code, kept before the decision 18 footer), and `footer --check README.md --online` also sends a read-only HEAD to both raw logo URLs and fails (`fail:offline`) unless both return 200 (the Phase 4.0 hard gate before any README PR links them). It comes after the License section. Scope: every in-scope README, T2 families included. Exceptions: watching-org forks (`exempt`; the watching org's `.github` gets the footer, and its other non-fork repositories are held, `hold:watching-non-fork`, until decided) and T3 until sign-off (refused). TouchedByAnAgent is included (decision 18); an org whose `footer` is set to `hold` in `brand.yaml` logs `hold`. Forks outside the watching org (G), archived repositories (H) and `.github` repositories (J) get the footer too. It is the only `<picture>` the skill emits.
+The logo files are the existing masters published under this skill's `assets/brand/`. The former `.github/main/brand/` publication paths remain in `footer.legacy_logo_urls` solely for safe migration of existing marked or unmarked footers; they are never emitted. Authored partner credits are not migration targets. The 10 lines between the markers are byte-exact; `footer --check` reports `fail:missing`, `fail:not-last`, `fail:drift` or `fail:duplicate` (an old footer-like block, centred with "Built by" and complete.tech outside code, kept before the decision 18 footer), and `footer --check README.md --online` also sends a read-only HEAD to both raw logo URLs and fails (`fail:offline`) unless both return 200 (the Phase 4.0 hard gate before any README PR links them). It comes after the License section. Scope: every in-scope README, T2 families included. Exceptions: watching-org forks (`exempt`; the watching org's `.github` gets the footer, and its other non-fork repositories are held, `hold:watching-non-fork`, until decided) and T3 until sign-off (refused). TouchedByAnAgent is included (decision 18); an org whose `footer` is set to `hold` in `brand.yaml` logs `hold`. Forks outside the watching org (G), archived repositories (H) and `.github` repositories (J) get the footer too. It is the only `<picture>` the skill emits.
 
 ## What `readme` does
 

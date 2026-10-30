@@ -525,10 +525,13 @@ FOOTER_ATTR = re.compile(r"""\b(src|srcset|alt)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^
 
 def _footer_logo_url(url: str, brand) -> bool:
     """`url` is one of the decision 18 footer's own logo files (brand footer `logo_light_url` or `logo_dark_url`),
-    as configured or drifted only in scheme, branch, query or the github.com blob/raw form of the same file."""
+    including explicitly configured legacy URLs, or drifted only in scheme, branch, query or the github.com
+    blob/raw form of the same file."""
     url = url.strip().split("#", 1)[0].split("?", 1)[0]
-    for key in ("logo_light_url", "logo_dark_url"):
-        want = brand.raw["footer"][key]
+    footer = brand.raw["footer"]
+    urls = [footer[key] for key in ("logo_light_url", "logo_dark_url")]
+    urls.extend(footer.get("legacy_logo_urls", []))
+    for want in urls:
         if url == want:
             return True
         m = re.match(r"^https://raw\.githubusercontent\.com/([^/]+)/([^/]+)/[^/]+/(.+)$", want)
@@ -604,6 +607,10 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
     body, blocks = _strip_markers(text)
     want_footer = footer_wanted(ctx)
     removed: list[str] = []
+    if want_footer and blocks.get("footer") and is_footer_copy(blocks["footer"], ctx.brand):
+        # A configured publication-path change replaces only our recognized footer,
+        # not authored credits or partner images inside a similarly named block.
+        removed += [ln for ln in blocks["footer"].splitlines() if ln.strip()]
     if want_footer:  # an unmarked or drifted footer at the end is replaced by the marked one, never kept beside it
         body, old_footer = drop_old_footer(body, ctx.brand)
         removed += old_footer
