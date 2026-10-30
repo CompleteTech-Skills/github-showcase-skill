@@ -7,6 +7,7 @@ import re
 from PIL import Image
 
 from . import describe, footer as footermod, labels as labelsmod, pnglint, readmelint, svglint, topics as topicsmod
+from . import fingerprint as fp
 from . import readme as readmemod
 from .config import t3_signed_off
 from .context import RepoContext
@@ -39,6 +40,25 @@ def r1(ctx) -> str:
 def _cell(code: str) -> str:
     """Doctor cell for a surface that does not apply: exempt -> n/a; hold and t3-signoff -> hold."""
     return "n/a" if code.startswith("exempt") else "hold"
+
+
+_TAG_TAGS = re.compile(r'<p align="center">|</p>|<b>|</b>', re.I)
+
+
+def tagline_text(readme_text: str) -> str | None:
+    """The normalised body of the first `tagline` marker block outside code (E5.2.3), or None when there is none."""
+    for m in readmemod.find_blocks(readmemod.MARK, readme_text):
+        if m.group(1) != "tagline":
+            continue
+        body = " ".join(_TAG_TAGS.sub(" ", m.group(2)).split())
+        body = re.sub(r"^\*\*|\*\*$", "", body)
+        body = " ".join(body.split())
+        return body or None
+    return None
+
+
+def _same_words(a: str, b: str) -> bool:
+    return " ".join(a.split()) == " ".join(b.split())
 
 
 def row(ctx: RepoContext) -> dict:
@@ -162,6 +182,21 @@ def row(ctx: RepoContext) -> dict:
         if re.search(r"<!-- showcase:checklist:start -->.*- \[ \].*<!-- showcase:checklist:end -->",
                      (rd / "README.md").read_text(encoding="utf-8"), re.S):
             logs.append("checklist: open")
+    # E5.2.3 drift (logs only): the README tagline and any staged render differ from the live About text
+    live = (ctx.meta.get("description") or "").strip()
+    if rd and live and (rd / "README.md").is_file():
+        tag = tagline_text((rd / "README.md").read_text(encoding="utf-8"))
+        if tag is not None and not _same_words(tag, live):
+            logs.append("drift:tagline-description")
+        side = rd / "docs" / "images"
+        if (side / fp.SIDECAR).is_file():
+            data = fp.read_sidecar(side)
+            outputs = data.get("outputs") if isinstance(data, dict) else None
+            for rec in (outputs.values() if isinstance(outputs, dict) else []):
+                st = rec.get("staged_description") if isinstance(rec, dict) else None
+                if isinstance(st, dict) and st.get("sha256") != fp.description_sha256(live):
+                    logs.append("drift:staged-description")
+                    break
     return {"repo": f"{ctx.owner}/{ctx.repo}", "type": ctx.det["type"], "variant": ctx.det["variant"], "cells": cells,
             "done": "yes" if done else "no", "logs": sorted(set(logs + ctx.logs))}
 

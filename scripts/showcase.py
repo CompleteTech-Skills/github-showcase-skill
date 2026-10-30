@@ -187,6 +187,9 @@ def maybe_sidecar(ctx, out: Path, record: dict) -> None:
         # fingerprint inputs, so the fingerprint is unchanged.
         if isinstance(ctx.meta.get("id"), int) and not isinstance(ctx.meta.get("id"), bool):
             record = dict(record, repository_id=ctx.meta["id"])
+        # E5.2.3: a render from a staged description records only its digest, so `doctor` can flag it as drift
+        if getattr(ctx, "staged_description", None) is not None:
+            record = dict(record, staged_description={"sha256": fp.description_sha256(ctx.staged_description)})
         fp.write_sidecar(out.parent, inp, ctx.brand.sha256, out.name, record)
 
 

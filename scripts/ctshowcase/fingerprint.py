@@ -95,6 +95,12 @@ def write_sidecar(out_dir: Path, inp: dict, cfg_sha: str, name: str, record: dic
     return p
 
 
+def description_sha256(text: str | None) -> str:
+    """Digest of a one-sentence description, whitespace-normalised (E5.2.3 drift check compares it with the live About
+    text). Only the digest is written to the sidecar, never the proposed sentence itself."""
+    return hashlib.sha256(" ".join((text or "").split()).encode("utf-8")).hexdigest()
+
+
 def file_record(path: Path, **extra) -> dict:
     data = path.read_bytes()
     return {"sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data), **extra}

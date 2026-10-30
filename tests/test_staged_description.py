@@ -145,3 +145,134 @@ def test_exempt_without_description_is_unchanged(tmp_path, monkeypatch, capsys):
     assert rc == 0
     assert r["logs"] == ["exempt"]
     assert "staged_description" not in r
+
+
+# ---------------------------------------------------------------------------------------------------
+# E5.2.3: `doctor` logs drift between the artifacts and the live About text (logs only; cells, COLUMNS, TSV and
+# the exit code are unchanged). Every fixture is a synthetic Northwind copy in tmp_path.
+# ---------------------------------------------------------------------------------------------------
+import json as _jsonmod  # noqa: E402
+
+from ctshowcase import doctor  # noqa: E402
+
+DRIFT = ("drift:tagline-description", "drift:staged-description")
+
+
+def _live_text():
+    return _jsonmod.loads(META.read_text(encoding="utf-8"))["description"]
+
+
+def _meta_with(tmp_path, description):
+    data = _jsonmod.loads(META.read_text(encoding="utf-8"))
+    data["description"] = description
+    path = tmp_path / "live-meta.json"
+    path.write_text(_jsonmod.dumps(data), encoding="utf-8")
+    return path
+
+
+def _doctor_logs(rd, meta=META):
+    p = run_cli("--meta", meta, "--repo-dir", rd, "doctor", "--format", "json")
+    assert p.returncode in (0, 1), p.stderr
+    return _json(p)["logs"]
+
+
+def _tagline_span(text):
+    start = text.index("<!-- showcase:tagline:start -->") + len("<!-- showcase:tagline:start -->")
+    end = text.index("<!-- showcase:tagline:end -->")
+    return start, end
+
+
+def test_doctor_no_drift_when_equal(tmp_path):
+    rd = _repo(tmp_path)
+    p = run_cli("--meta", META, "--repo-dir", rd, "--format", "json", "readme", "--mode", "scaffold", "--write")
+    assert p.returncode == 0, p.stderr
+    readme = (rd / "README.md").read_text(encoding="utf-8")
+    assert doctor.tagline_text(readme) == " ".join(_live_text().split())  # the mechanism is really exercised
+    logs = _doctor_logs(rd)
+    assert not set(DRIFT) & set(logs)
+
+
+def test_doctor_flags_tagline_drift(tmp_path):
+    rd = _repo(tmp_path)
+    p = run_cli("--meta", META, "--repo-dir", rd, "--format", "json", "banner",
+                "--out", rd / "docs/images/banner.png", "--description", "Staged sentence.")
+    assert p.returncode == 0, p.stderr
+    assert "staged-description" in _json(p)["logs"]
+    p = run_cli("--meta", META, "--repo-dir", rd, "--format", "json", "readme", "--mode", "scaffold", "--write",
+                "--description", "Staged sentence.")
+    assert p.returncode == 0, p.stderr
+    logs = _doctor_logs(rd)  # the unmodified live meta
+    assert "drift:tagline-description" in logs
+    assert "drift:staged-description" in logs
+
+
+def test_doctor_ignores_whitespace_difference(tmp_path):
+    rd = _repo(tmp_path)
+    run_cli("--meta", META, "--repo-dir", rd, "--format", "json", "readme", "--mode", "scaffold", "--write")
+    readme_path = rd / "README.md"
+    text = readme_path.read_text(encoding="utf-8")
+    start, end = _tagline_span(text)
+    body = text[start:end]
+    spread = body.replace(" ", "  \n  ")  # double spaces and newlines inside the tagline block only
+    assert spread != body
+    readme_path.write_text(text[:start] + spread + text[end:], encoding="utf-8")
+    logs = _doctor_logs(rd)
+    assert not set(DRIFT) & set(logs)
+
+
+def test_doctor_no_readme_or_no_tagline_block_is_silent(tmp_path):
+    rd = _repo(tmp_path)  # fixture README has no tagline block
+    assert not set(DRIFT) & set(_doctor_logs(rd, _meta_with(tmp_path, "A different sentence.")))
+    (rd / "README.md").unlink()  # no README at all
+    assert not set(DRIFT) & set(_doctor_logs(rd, _meta_with(tmp_path, "A different sentence.")))
+
+
+def test_doctor_missing_live_description_is_silent(tmp_path):
+    rd = _repo(tmp_path)
+    run_cli("--meta", META, "--repo-dir", rd, "--format", "json", "banner",
+            "--out", rd / "docs/images/banner.png", "--description", "Staged sentence.")
+    run_cli("--meta", META, "--repo-dir", rd, "--format", "json", "readme", "--mode", "scaffold", "--write",
+            "--description", "Staged sentence.")
+    logs = _doctor_logs(rd, _meta_with(tmp_path, "   "))
+    assert not set(DRIFT) & set(logs)
+
+
+def test_doctor_applied_description_clears_drift(tmp_path):
+    rd = _repo(tmp_path)
+    run_cli("--meta", META, "--repo-dir", rd, "--format", "json", "banner",
+            "--out", rd / "docs/images/banner.png", "--description", "Staged sentence.")
+    run_cli("--meta", META, "--repo-dir", rd, "--format", "json", "readme", "--mode", "scaffold", "--write",
+            "--description", "Staged sentence.")
+    assert "drift:staged-description" in _doctor_logs(rd)
+    applied = _meta_with(tmp_path, "Staged sentence.")  # the About text now equals the staged one
+    assert not set(DRIFT) & set(_doctor_logs(rd, applied))
+
+
+def test_doctor_tsv_unchanged(tmp_path):
+    rd = _repo(tmp_path)
+    run_cli("--meta", META, "--repo-dir", rd, "--format", "json", "banner",
+            "--out", rd / "docs/images/banner.png", "--description", "Staged sentence.")
+    sidecar = rd / "docs/images/.showcase.json"
+    assert sidecar.is_file()
+    with_side = [run_cli("--meta", META, "--repo-dir", rd, "doctor", *f).stdout for f in ((), ("--header",))]
+    md_with = run_cli("--meta", META, "--repo-dir", rd, "doctor", "--format", "md").stdout
+    sidecar.unlink()
+    without = [run_cli("--meta", META, "--repo-dir", rd, "doctor", *f).stdout for f in ((), ("--header",))]
+    md_without = run_cli("--meta", META, "--repo-dir", rd, "doctor", "--format", "md").stdout
+    assert with_side == without and md_with == md_without
+
+
+def test_tagline_text_normalises_markup():
+    text = '<!-- showcase:tagline:start -->\n<p align="center">\n  <b>**Hello   world.**</b>\n</p>\n<!-- showcase:tagline:end -->'
+    assert doctor.tagline_text(text) == "Hello world."
+    assert doctor.tagline_text("no markers here") is None
+    assert doctor.tagline_text("<!-- showcase:tagline:start -->\n** **\n<!-- showcase:tagline:end -->") is None
+
+
+def test_tagline_in_fenced_code_is_ignored(tmp_path):
+    fenced = ("Example:\n\n```markdown\n<!-- showcase:tagline:start -->\n**Fenced example.**\n"
+              "<!-- showcase:tagline:end -->\n```\n")
+    assert doctor.tagline_text(fenced) is None
+    rd = _repo(tmp_path)
+    (rd / "README.md").write_text(fenced, encoding="utf-8")
+    assert not set(DRIFT) & set(_doctor_logs(rd))
