@@ -226,6 +226,11 @@
     },
     "icon_strict_family_ink": {
      "type": "boolean"
+    },
+    "icon_min_contrast": {
+     "type": "number",
+     "minimum": 1,
+     "maximum": 21
     }
    }
   },

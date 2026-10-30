@@ -2127,11 +2127,24 @@ def _dhash(img, size: int = 16) -> int:
     return bits
 
 
+ICON_MIN_CONTRAST = 3.0  # default contrast floor of the icon ink on the card (E3.2.2)
+
+
+def icon_contrast_floor(cli_value, family_value) -> float:
+    """The contrast floor of the icon ink on the card: `--min-contrast`, else the family key `icon_min_contrast`, else
+    3.0. Only 1 to 21 is valid (WCAG contrast range); a bool or non-number is refused."""
+    value = cli_value if cli_value is not None else family_value if family_value is not None else ICON_MIN_CONTRAST
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not 1 <= value <= 21:
+        raise ShowcaseError(f"--min-contrast / icon_min_contrast must be between 1 and 21, got {value}", log="usage")
+    return float(value)
+
+
 def icon_qa(data: bytes, *, card: str, ink: list[str] | None = None, org_mark: Path | None = None,
-            siblings: list[str] | None = None, strict: bool = False) -> dict:
+            siblings: list[str] | None = None, strict: bool = False, min_contrast: float = 3.0) -> dict:
     """Automated icon checks (f.3, art QA): size, budget, alpha, live area, coverage, contrast on the card, family
     inks, not the org glyph, one file. OCR and the 48 px set sheet stay manual. `strict` makes a failing family-ink
-    check fail the icon (default: warn); with no `ink` the family-ink check is not emitted at all."""
+    check fail the icon (default: warn); with no `ink` the family-ink check is not emitted at all. `min_contrast` is
+    the contrast floor of the dominant ink on the card (default 3.0; see icon_contrast_floor)."""
     from PIL import Image
     from .color import contrast, hexstr, rgb as hexrgb
     from .pnglint import validate_png
@@ -2188,7 +2201,8 @@ def icon_qa(data: bytes, *, card: str, ink: list[str] | None = None, org_mark: P
             counts[key] = counts.get(key, 0) + 1
         dom = hexstr(max(counts, key=counts.get))
         cr = contrast(dom, card)
-        add("contrast-on-card", cr >= 3.0, f"dominant ink {dom} on {card}: {cr:.2f}:1 (>= 3:1)")
+        floor = float(min_contrast)
+        add("contrast-on-card", cr >= floor, f"dominant ink {dom} on {card}: {cr:.2f}:1 (>= {floor:g}:1)")
         if ink:
             near = min(_de(lab(hexrgb(dom)), lab(hexrgb(x))) for x in ink)
             add("family-ink", near <= 12, f"dominant ink {dom}, nearest family ink ΔE {near:.1f}",
@@ -2260,6 +2274,9 @@ def add_parser(sub, cli=None):
     a.add_argument("--allow-hold", action="store_true", help="work on a family that is on hold (as banner and card)")
     a.add_argument("--strict", action="store_true", help="fail (not warn) when the dominant ink is not a family ink; "
                                                          "also set by the family key icon_strict_family_ink")
+    a.add_argument("--min-contrast", type=float, default=None,
+                   help="contrast floor of the icon ink on the card plate (default: family key icon_min_contrast, "
+                        "else 3.0; 4.5 is recommended)")
 
     a = cs.add_parser("links", parents=[common], help="CQ-04: relative links, anchors and remote targets")
     a.add_argument("files", nargs="*", help="Markdown files (default: displayed README, docs/**, .github/*.md, profile)")
@@ -2574,6 +2591,7 @@ def _cmd_icon(args, cli, resolver, head):
                    note="The glyph is the writer's: fill glyph_name, glyph_description, spark_placement and size_class "
                         "(--glyph FILE) and re-run until the result is ok; nothing is written before then.")
         return obj, _code(result)
+    floor = icon_contrast_floor(getattr(args, "min_contrast", None), ctx.style.get("icon_min_contrast"))
     ink = []
     try:
         art = load_art_direction(args.art_direction)
@@ -2589,7 +2607,7 @@ def _cmd_icon(args, cli, resolver, head):
         src.load()
         img, info = normalize_icon(src, args.ground, card, pixel_art=bool(ctx.style.get("icon_pixel_art")))
         data, qlogs = icon_bytes(img)
-        qa = icon_qa(data, card=card, ink=ink, org_mark=mark, siblings=siblings, strict=strict)
+        qa = icon_qa(data, card=card, ink=ink, org_mark=mark, siblings=siblings, strict=strict, min_contrast=floor)
         out = Path(args.out) if args.out else cli.default_out(args, "assets/icon.png")
         if qa["result"] == "fail":
             return dict(head, result="fail", out=None, info=info, qa=qa, logs=ctx.logs + qlogs + ["art-fail:icon-qa"],
@@ -2605,7 +2623,8 @@ def _cmd_icon(args, cli, resolver, head):
     if path is None or not path.is_file():
         return dict(head, result="fail", file=str(path) if path else None, logs=ctx.logs + ["needs-input:repo-icon"]), \
             CHECK_FAILED
-    qa = icon_qa(path.read_bytes(), card=card, ink=ink, org_mark=mark, siblings=siblings, strict=strict)
+    qa = icon_qa(path.read_bytes(), card=card, ink=ink, org_mark=mark, siblings=siblings, strict=strict,
+                 min_contrast=floor)
     return dict(head, result=qa["result"], file=str(path), qa=qa, logs=ctx.logs), _code(qa["result"])
 
 
