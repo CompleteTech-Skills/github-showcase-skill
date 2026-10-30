@@ -235,3 +235,44 @@ def test_scoped_override_does_not_satisfy_banner(tmp_path):
         encoding="utf-8")
     p, out = _render(tmp_path, meta, repo_dir=repo)
     assert p.returncode == 4 and not out.exists()
+
+
+def _override_repo(tmp_path, subtitle):
+    """A checkout whose `.github/showcase.yml` carries only a subtitle and chips (synthetic Northwind data)."""
+    repo = tmp_path / "repo"
+    (repo / ".github").mkdir(parents=True)
+    (repo / ".github" / "showcase.yml").write_text(
+        f"subtitle: {subtitle}\nchips:\n  key: [Email]\n  attrs: [Python, MIT]\n", encoding="utf-8")
+    return repo
+
+
+def test_whitespace_cli_subtitle_defers_to_override(tmp_path):
+    """#99 review (P3): a whitespace-only --subtitle is absent, so the override text renders, not a blank line.
+    Reproduced on HEAD before the fix: subtitle '   ' with subtitle_source 'cli'."""
+    meta = _empty_description_meta(tmp_path)
+    p, out = _render(tmp_path, meta, "--subtitle", "   ", repo_dir=_override_repo(tmp_path, SUBTITLE_TEXT))
+    info = json.loads(p.stdout)
+    assert p.returncode == 0 and out.exists(), p.stdout + p.stderr
+    assert info["subtitle_source"] == "override" and info["subtitle"] == SUBTITLE_TEXT
+    assert "description-missing" in info["logs"]
+
+
+def test_whitespace_override_defers_to_long_cli_subtitle(tmp_path):
+    """#99 review (P2): a whitespace-only override is absent, so a long --subtitle wraps instead of a blank one-liner.
+    Reproduced on HEAD before the fix: subtitle '   ' with subtitle_source 'override'."""
+    long_text = ("Offline triage for agents that reads every support mailbox, groups duplicate tickets, "
+                 "drafts replies and escalates risky ones.")
+    meta = _empty_description_meta(tmp_path)
+    p, out = _render(tmp_path, meta, "--subtitle", long_text, repo_dir=_override_repo(tmp_path, '"   "'))
+    info = json.loads(p.stdout)
+    assert p.returncode == 0 and out.exists(), p.stdout + p.stderr
+    assert info["subtitle_source"].startswith("subtitle-") and info["subtitle_source"].endswith("-lines")
+    assert info["subtitle"].startswith("Offline triage for agents that reads every support mailbox")
+
+
+def test_whitespace_cli_with_whitespace_override_still_exit_4(tmp_path):
+    """Both sources blank: the subtitle is absent, so the empty-description refusal (exit 4) still applies."""
+    meta = _empty_description_meta(tmp_path)
+    p, out = _render(tmp_path, meta, "--subtitle", "   ", "--chip", "Python", "--chip", "MIT",
+                     repo_dir=_override_repo(tmp_path, '"   "'))
+    assert p.returncode == 4 and not out.exists()

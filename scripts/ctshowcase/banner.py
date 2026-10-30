@@ -74,9 +74,11 @@ def description_heads(first: str) -> list[str]:
 def subtitle_candidates(ctx: RepoContext, cli: str | None) -> list[tuple[str, str]]:
     """One-line candidates in order: cli, override, security short title, description, first sentence, heads."""
     out: list[tuple[str, str]] = []
-    if cli:
+    # #99 review: a whitespace-only value is absent (require_banner_text and layout's fallback already treat it so);
+    # emitting it here would win the one-line pass and render a blank subtitle while the real text is ignored.
+    if cli and cli.strip():
         out.append((cli, "cli"))
-    if ctx.override.get("subtitle"):
+    if str(ctx.override.get("subtitle") or "").strip():
         out.append((ctx.override["subtitle"], "override"))
     desc = (ctx.meta.get("description") or "").strip()
     if ctx.det["type"] == "security-check":
