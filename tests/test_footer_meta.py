@@ -1,5 +1,9 @@
 """`footer --check README.md --meta FILE` takes the owner from the metadata and answers like `--org` (E2.3.1).
 
+Every test here fails on the base commit 2be04ac (verified: 7 failed on base, see the commit message). The tests
+that pin behaviour which must NOT change (default paths, unknown owner, `.github` of the watching org) live in
+tests/test_footer_meta_guards.py: they pass on base by design.
+
 Synthetic metadata only: owners are public org rows of references/brand.yaml; repository names are invented.
 """
 import json
@@ -55,13 +59,6 @@ def test_watching_non_fork_is_held(tmp_path):
     assert out["result"] == "hold" and out["logs"] == ["hold:watching-non-fork"]
 
 
-def test_watching_org_dot_github_still_checks_the_readme(tmp_path):
-    code, out = _footer("footer", "--check", _readme(tmp_path),
-                        "--meta", _meta(tmp_path, "romgenie-following-repos", repo=".github"))
-    assert code == 1, out
-    assert out["result"] == "fail:missing"
-
-
 def test_t3_owner_is_refused_without_signoff(tmp_path):
     p = run_cli("--meta", _meta(tmp_path, "Pick-Your-AI"), "footer", "--check", _readme(tmp_path, with_footer=True))
     assert p.returncode == 2, (p.stdout, p.stderr)
@@ -93,31 +90,3 @@ def test_exempt_owner_makes_no_online_requests(tmp_path):
                         "--meta", _meta(tmp_path, "Pick-Your-AI"))
     assert code == 0, out
     assert out["result"] == "exempt" and "online" not in out
-
-
-def test_footer_applying_owner_still_checks_the_readme(tmp_path):
-    code, out = _footer("footer", "--check", _readme(tmp_path, with_footer=True),
-                        "--meta", _meta(tmp_path, "CompleteTech-LLC"))
-    assert code == 0, out
-    assert out["result"] == "pass"
-    code, out = _footer("footer", "--check", _readme(tmp_path), "--meta", _meta(tmp_path, "CompleteTech-LLC"))
-    assert code == 1 and out["result"] == "fail:missing"
-
-
-def test_unknown_owner_falls_through_to_the_readme_check(tmp_path):
-    code, out = _footer("footer", "--check", _readme(tmp_path, with_footer=True),
-                        "--meta", _meta(tmp_path, "unknown"))
-    assert code == 0, out
-    assert out["result"] == "pass"
-
-
-def test_meta_without_check_prints_the_markup_unchanged(tmp_path):
-    code, out = _footer("footer", "--meta", _meta(tmp_path, "Pick-Your-AI"))
-    assert code == 0, out
-    assert out["result"] == "ok" and out["markup"] == footer.block(load_brand(None))
-
-
-def test_default_check_without_meta_is_unchanged(tmp_path):
-    code, out = _footer("footer", "--check", _readme(tmp_path, with_footer=True))
-    assert code == 0, out
-    assert out["result"] == "pass" and "exempt" not in json.dumps(out)
