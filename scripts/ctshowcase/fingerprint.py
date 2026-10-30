@@ -97,7 +97,8 @@ def write_sidecar(out_dir: Path, inp: dict, cfg_sha: str, name: str, record: dic
 
 def description_sha256(text: str | None) -> str:
     """Digest of a one-sentence description, whitespace-normalised (E5.2.3 drift check compares it with the live About
-    text). Only the digest is written to the sidecar, never the proposed sentence itself."""
+    text). A staged render adds this digest as `staged_description.sha256` on its output record. The record's
+    top-level `inputs.description` is unchanged and still holds the rendered text (fingerprint inputs, spec A6.0)."""
     return hashlib.sha256(" ".join((text or "").split()).encode("utf-8")).hexdigest()
 
 

@@ -50,7 +50,8 @@ def tagline_text(readme_text: str) -> str | None:
     for m in readmemod.find_blocks(readmemod.MARK, readme_text):
         if m.group(1) != "tagline":
             continue
-        body = " ".join(_TAG_TAGS.sub(" ", m.group(2)).split())
+        # markup is removed, not replaced by a space: `Hello <b>world</b>.` renders as "Hello world." (no gap before ".")
+        body = " ".join(_TAG_TAGS.sub("", m.group(2)).split())
         body = re.sub(r"^\*\*|\*\*$", "", body)
         body = " ".join(body.split())
         return body or None
@@ -184,15 +185,22 @@ def row(ctx: RepoContext) -> dict:
             logs.append("checklist: open")
     # E5.2.3 drift (logs only): the README tagline and any staged render differ from the live About text
     # Only the tagline check needs README.md; the sidecar check depends on the sidecar and the live text alone.
+    # The drift logs are optional: an unreadable README or sidecar adds no log and never changes the row or exit code.
     live = (ctx.meta.get("description") or "").strip()
     if rd and live:
         if (rd / "README.md").is_file():
-            tag = tagline_text((rd / "README.md").read_text(encoding="utf-8"))
+            try:
+                tag = tagline_text((rd / "README.md").read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                tag = None
             if tag is not None and not _same_words(tag, live):
                 logs.append("drift:tagline-description")
         side = rd / "docs" / "images"
         if (side / fp.SIDECAR).is_file():
-            data = fp.read_sidecar(side)
+            try:
+                data = fp.read_sidecar(side)
+            except (OSError, ValueError):
+                data = {}
             outputs = data.get("outputs") if isinstance(data, dict) else None
             for rec in (outputs.values() if isinstance(outputs, dict) else []):
                 st = rec.get("staged_description") if isinstance(rec, dict) else None

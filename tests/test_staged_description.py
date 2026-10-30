@@ -291,3 +291,57 @@ def test_doctor_sidecar_drift_without_readme(tmp_path):
     logs = _doctor_logs(rd)
     assert "drift:staged-description" in logs
     assert "drift:tagline-description" not in logs
+
+
+def test_tagline_inline_markup_has_no_gap():
+    # regression (review E5.2.3 B P2): markup was replaced by a space, so "world</b>." normalised to "world ."
+    text = ('<!-- showcase:tagline:start -->\n<p align="center">\n  <b>**Hello <b>world</b>.**</b>\n</p>\n'
+            '<!-- showcase:tagline:end -->')
+    assert doctor.tagline_text(text) == "Hello world."
+    assert doctor.tagline_text("<!-- showcase:tagline:start -->\nHello<b>world</b>\n<!-- showcase:tagline:end -->") \
+        == "Helloworld"
+
+
+def test_doctor_inline_markup_is_not_drift(tmp_path):
+    rd = _repo(tmp_path)
+    run_cli("--meta", META, "--repo-dir", rd, "--format", "json", "readme", "--mode", "scaffold", "--write")
+    readme_path = rd / "README.md"
+    text = readme_path.read_text(encoding="utf-8")
+    start, end = _tagline_span(text)
+    readme_path.write_text(text[:start] + "\n  <b>Hello <b>world</b>.</b>\n" + text[end:], encoding="utf-8")
+    applied = _meta_with(tmp_path, "Hello world.")  # the live About text reads the same as the rendered tagline
+    assert not set(DRIFT) & set(_doctor_logs(rd, applied))
+
+
+def test_doctor_unreadable_sidecar_keeps_row(tmp_path, monkeypatch, capsys):
+    # regression (review E5.2.3 B P2): an OSError from the optional sidecar read must not change the row or exit code
+    import showcase
+    from ctshowcase import fingerprint
+    rd = _repo(tmp_path)
+    p = run_cli("--meta", META, "--repo-dir", rd, "--format", "json", "banner",
+                "--out", rd / "docs/images/banner.png", "--description", "Staged sentence.")
+    assert p.returncode == 0, p.stderr
+    base_rc = showcase.main(["--meta", str(META), "--repo-dir", str(rd), "doctor"])
+    base_out = capsys.readouterr().out
+
+    def denied(_out_dir):
+        raise PermissionError("denied")
+    monkeypatch.setattr(fingerprint, "read_sidecar", denied)
+    rc = showcase.main(["--meta", str(META), "--repo-dir", str(rd), "doctor"])
+    out = capsys.readouterr().out
+    assert rc == base_rc
+    assert out == base_out  # the TSV row (no drift log in TSV output) is unchanged
+
+
+def test_staged_record_stores_digest_and_keeps_inputs_text(tmp_path):
+    # the claim in CHANGELOG and fingerprint.description_sha256: each output record adds a digest; inputs.description
+    # still carries the rendered text (fingerprint inputs are not changed by this task)
+    from ctshowcase import fingerprint as fp
+    rd = _repo(tmp_path)
+    p = run_cli("--meta", META, "--repo-dir", rd, "--format", "json", "card",
+                "--out", rd / "docs/images/card.svg", "--description", "Staged sentence.")
+    assert p.returncode == 0, p.stderr
+    data = fp.read_sidecar(rd / "docs" / "images")
+    rec = data["outputs"]["card.svg"]
+    assert rec["staged_description"] == {"sha256": fp.description_sha256("Staged sentence.")}
+    assert data["inputs"]["description"] == "Staged sentence."
