@@ -369,3 +369,26 @@ def test_readme_write_preserves_old_version_sidecar_and_adds_no_repository_id(tm
     q = subprocess.run([*PREP, "foreign", "Northwind-Trading-Co/northwind-gadget"], cwd=rd, env=env,
                        capture_output=True, text=True)
     assert q.stdout.strip() == "true", q.stderr
+
+
+def test_readme_record_without_repository_id_keeps_foreign_art_provable(tmp_path):
+    # Review round 3 (B asked for repository_id on the README record; A/decision: merge-only, no id). Evidence for
+    # declining: action_prepare.foreign() joins the ids of ALL output records. Art copied from repository 1111 carries
+    # that id; a README record stamped with this repository's id (4242) would make the set {1111, 4242}, contain the
+    # runner's id, and stop foreign() from proving the copy, so the copied banner/icon would be kept.
+    repo = tmp_path / "repo"
+    (repo / "docs" / "images").mkdir(parents=True)
+    inp = {"owner": "Northwind-Trading-Co", "repo": "northwind-widget", "type": "cli"}
+    env = {k: v for k, v in os.environ.items() if k != "SHOWCASE_IS_TEMPLATE"}
+    env["GITHUB_REPOSITORY_ID"] = "4242"
+
+    def foreign(outputs):
+        (repo / SIDE).write_text(json.dumps({"inputs": inp, "outputs": outputs}), encoding="utf-8")
+        p = subprocess.run([*PREP, "foreign", "Northwind-Trading-Co/northwind-gadget"], cwd=repo, env=env,
+                           capture_output=True, text=True)
+        assert p.returncode == 0, p.stderr
+        return p.stdout.strip()
+
+    copied = {"banner.png": {"sha256": "x", "repository_id": 1111}}
+    assert foreign({**copied, "README.md": {"staged_description": _staged(STAGED)}}) == "true"  # what the code writes
+    assert foreign({**copied, "README.md": {"staged_description": _staged(STAGED), "repository_id": 4242}}) == "false"
