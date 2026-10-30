@@ -50,3 +50,8 @@ Clean Linux testing also exposed an older Python 3.12 `argparse` behavior: a lin
 filename after `--kind` could be rejected even though newer Python versions accept
 it. Lint now accepts those file operands while still rejecting unknown options;
 the same command-order regressions run on all supported platforms.
+
+The new macOS full-suite job also exposed Bash 3.2 treating an empty optional
+argument array as unset under `set -u`. The Action uses guarded array expansion
+for that shell, and its integration test covers both an empty and populated
+optional-argument array.

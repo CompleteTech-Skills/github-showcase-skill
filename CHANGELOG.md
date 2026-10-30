@@ -8,6 +8,7 @@ All notable changes to `github-showcase-skill` are recorded here. Versions follo
 
 - Windows contributor tests now use explicit UTF-8, native path basenames, a platform-independent read-only metadata stub, and Git Bash with stdin-safe Action scripts. All 15 issue #9 failures are individually documented; the full suite now runs in Windows, Linux and macOS CI.
 - Lint accepts file operands after options on older Python 3.12 versions while continuing to reject unrecognized options.
+- The Action's optional render arguments support macOS Bash 3.2, including an empty argument array with `set -u`.
 
 - CLI stdout and stderr are configured as UTF-8 before argument parsing, preserving their existing error handlers, so redirected Windows output preserves Unicode in label plans, raw footer markup, help and diagnostics without `UnicodeEncodeError`, and undecodable filenames still use the stream's original escape policy.
 - The Action summary and quality validator decode CLI results explicitly as UTF-8, preserving non-ASCII descriptions on Windows rather than corrupting them or failing with `UnicodeDecodeError`.

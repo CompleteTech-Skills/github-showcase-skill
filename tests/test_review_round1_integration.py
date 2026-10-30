@@ -25,7 +25,7 @@ def _cli():
 
 
 # ------------------------------------------------------------------------- Action: a held README keeps the run green
-def _generate(tmp_path, mode):
+def _generate(tmp_path, mode, allow_unmeasured="false"):
     step = next(s for s in yaml.safe_load((ROOT / "action.yml").read_text(encoding="utf-8"))["runs"]["steps"] if s.get("id") == "generate")
     repo, rt = tmp_path / "repo", tmp_path / "rt"
     repo.mkdir(parents=True)
@@ -38,16 +38,17 @@ def _generate(tmp_path, mode):
     out.write_text("", encoding="utf-8")
     env = dict(os.environ, GITHUB_ACTION_PATH=str(ROOT), RUNNER_TEMP=str(rt), GITHUB_OUTPUT=str(out),
                GITHUB_REPOSITORY=f"{WATCH}/northwind-tools", SHOWCASE_OUTPUTS="banner,card", SHOWCASE_README=mode,
-               SHOWCASE_IS_TEMPLATE="false", SHOWCASE_ALLOW_UNMEASURED="false",
+               SHOWCASE_IS_TEMPLATE="false", SHOWCASE_ALLOW_UNMEASURED=allow_unmeasured,
                PATH=os.path.dirname(sys.executable) + os.pathsep + os.environ.get("PATH", ""))
     p = run_bash(step["run"], cwd=repo, env=env)
     return p, out.read_text(encoding="utf-8"), (repo / "README.md").read_text(encoding="utf-8")
 
 
 @pytest.mark.requires_bash
-def test_action_skips_a_held_readme_instead_of_failing(tmp_path):
+@pytest.mark.parametrize("allow_unmeasured", ["false", "true"])
+def test_action_skips_a_held_readme_instead_of_failing(tmp_path, allow_unmeasured):
     for mode in ("header", "bootstrap"):
-        p, outputs, text = _generate(tmp_path / mode, mode)
+        p, outputs, text = _generate(tmp_path / mode, mode, allow_unmeasured)
         assert p.returncode == 0, p.stdout + p.stderr
         assert "skipped=1" in outputs and "README skipped" in p.stdout
         assert text == "# northwind-tools\n\nDemo tools.\n"  # held: the README is untouched
