@@ -1733,6 +1733,7 @@ def labels_plan(estate: Estate, org: str, *, allow_t3: bool = False, checkouts: 
     for n in names:
         m = estate.meta(f"{login}/{n}")
         full = estate.current(f"{login}/{n}")  # labels are written where the repository is today
+        current_owner, current_name = full.split("/", 1)
         if m is None or m.get("error") and "labels" not in m:
             repos.append({"repo": full, "result": "unknown", "log": "needs-input:metadata"})
             continue
@@ -1763,13 +1764,23 @@ def labels_plan(estate: Estate, org: str, *, allow_t3: bool = False, checkouts: 
             repo_dir = checkout_root / login / n if checkout_root is not None else None
             if repo_dir is not None and repo_dir.is_dir():
                 origin = labelsmod._checkout_origin(repo_dir)
-                current_owner, current_name = full.split("/", 1)
                 if (not origin or origin[1].lower() != current_name.lower()
                         or not estate.resolver.same(origin[0], current_owner)):
                     raise ShowcaseError(f"--checkouts entry for {full} must have its matching GitHub origin", log="usage")
             else:
                 repo_dir = None
-            repo_defaults = labelsmod.defaults_source(full, repo_dir=repo_dir, meta=m) if n == ".github" else defaults
+            repo_defaults = defaults
+            if current_name == ".github":
+                repo_defaults = labelsmod.defaults_source(full, repo_dir=repo_dir, meta=m)
+            elif not estate.resolver.same(current_owner, login):
+                # A pending transfer is still governed by its current owner's inherited forms.
+                source_dir = checkout_root / current_owner / ".github" if checkout_root is not None else None
+                if source_dir is not None and source_dir.is_dir():
+                    repo_defaults = labelsmod.defaults_for(current_owner, current_name, path=source_dir,
+                                                           resolver=estate.resolver)
+                else:
+                    repo_defaults = labelsmod.defaults_source(f"{current_owner}/.github",
+                                                             meta=estate.meta(f"{current_owner}/.github"))
             ops, lg = labelsmod.plan(existing, repo_dir, files=m.get("files"), complete=m.get("files_complete") is True,
                                      defaults=repo_defaults)
         writes = sorted((o for o in ops if o["op"] != "skip"), key=lambda o: o["op"] == "create")
