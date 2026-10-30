@@ -97,7 +97,8 @@ def _org_extra(ctx: RepoContext) -> set[str]:
 def _retain(core: list[str], extras_kept: list[str], approved: set[str], logs: list[str]) -> tuple[list[str], list[str]]:
     """Additive finalization shared by every type. Clean existing extras are appended after `core` in `current` order,
     up to GitHub's 20-topic limit (never the curated maximum), and logged review-remove:TOPIC unless the org approved
-    them. An extra that cannot fit is returned as `held`: logged, never listed in `remove`. -> (proposed, held)."""
+    them. An extra that cannot fit is returned as `held`: logged, never listed in `remove`; because the topics PUT
+    replaces the whole set, a non-empty `held` blocks every mutation (see merge's `held` key). -> (proposed, held)."""
     extras = [x for x in extras_kept if x not in core]
     kept = extras[:max(GITHUB_MAX_TOPICS - len(core), 0)]
     held = extras[len(kept):]
@@ -168,16 +169,26 @@ def merge(ctx: RepoContext, also_in: list[str] | None = None, prune: bool = Fals
     logs += m_logs
     limit = t["max_private"] if private else t["max_public"]
 
+    def finalize(core):
+        """Additive finalization: in-vocabulary topics the curated selection cut (domain/tech caps, fork parent) are
+        clean and accurate, so they are kept silently; out-of-vocabulary extras keep the review-remove log. Without
+        `prune`, nothing clean is ever listed in `remove`; what cannot fit GitHub's 20 is `held` (blocks the PUT)."""
+        cut = [] if prune else [x for x in surviving if x not in core]
+        out, held = _retain(core, cut + extras_kept, approved | set(cut), logs)
+        if held:
+            logs.append("needs-input:topics-over-limit")
+        return out, held
+
     if typ == "fork":
         parent = (meta.get("parent") or {}).get("topics") or []
         tech = [alias(x) for x in parent if alias(x) in set(t["featured"]) | set(t["allowed"])]
         # a fork listed in also_in also carries that org membership topic (§5.1), counted toward the maximum
         proposed = list(dict.fromkeys(["fork"] + m_topics + list(dict.fromkeys(tech))[:4]))[:limit]
-        proposed, held = _retain(proposed, extras_kept, approved, logs)
+        proposed, held = finalize(proposed)
         return _result(current, proposed, logs, held)
     if typ == "github-profile":
         proposed = [org.get("brand_topic") or "completetech", "github-profile"]
-        proposed, held = _retain(proposed, extras_kept, approved, logs)
+        proposed, held = finalize(proposed)
         return _result(current, proposed, logs, held)
 
     brand = org.get("brand_topic")
@@ -226,7 +237,7 @@ def merge(ctx: RepoContext, also_in: list[str] | None = None, prune: bool = Fals
     tech = [x for x in dict.fromkeys(tech) if x not in proposed][:3]
     proposed += tech
     proposed = list(dict.fromkeys(proposed))
-    proposed, held = _retain(proposed[:limit], extras_kept, approved, logs)
+    proposed, held = finalize(proposed[:limit])
     minimum = t["min_private"] if private else t["min_public"]
     if len(proposed) < minimum:
         logs.append("topics-short")
@@ -236,7 +247,7 @@ def merge(ctx: RepoContext, also_in: list[str] | None = None, prune: bool = Fals
 def _result(current, proposed, logs, held=()):
     return {"current": current, "proposed": proposed, "equal_as_set": set(current) == set(proposed),
             "add": [x for x in proposed if x not in current], "remove": [x for x in current if x not in proposed and x not in held],
-            "logs": logs}
+            "logs": logs, "held": list(held)}
 
 
 def registry_also_in(resolver, owner: str, repo: str) -> list[str]:

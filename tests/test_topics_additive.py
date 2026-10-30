@@ -49,6 +49,30 @@ def test_overflow_beyond_github_limit_is_held_not_removed(brand):
     held = [x for x in topics if x not in r["proposed"]]
     assert held and r["remove"] == []
     assert all(f"review-remove:{x}" in r["logs"] for x in held)
+    # the topics PUT replaces the whole set, so held topics block it instead of being silently deleted
+    assert r["held"] == held and "needs-input:topics-over-limit" in r["logs"]
+
+
+def test_overflow_emits_no_record_or_gh_line(brand, monkeypatch, tmp_path):
+    """showcase.py topics must not write a record/gh line whose PUT would delete held topics (reviewer A/B)."""
+    import argparse
+    import showcase
+    ctx = _ctx(brand, topics=[f"custom-{i}" for i in range(20)])
+    monkeypatch.setattr(showcase, "context", lambda a: ctx)
+    monkeypatch.setattr(showcase, "gate_owner", lambda *a, **k: None)
+    rec = tmp_path / "rec.json"
+    args = argparse.Namespace(also_in=None, registry=None, prune=False, records=str(rec), gh=True)
+    out, _ = showcase.cmd_topics(args)
+    assert out["held"] and "gh" not in out and not rec.exists()
+
+
+def test_vocabulary_topics_cut_by_caps_are_kept_silently(brand):
+    """Reviewer A/B: in-vocabulary topics the domain/tech [:3] caps cut are clean; never in remove, no review log."""
+    topics = ["python", "javascript", "typescript", "rust", "go", "finance", "trading", "ecommerce", "marketing", "sales"]
+    r = merge(_ctx(brand, topics=topics))
+    assert r["remove"] == [] and set(topics) <= set(r["proposed"])
+    assert not any(x.startswith("review-remove:") for x in r["logs"])
+    assert set(merge(_ctx(brand, topics=topics), prune=True)["remove"])  # legacy removal stays behind the flag
 
 
 @pytest.mark.parametrize("kw", [{"fork": True, "parent": {"topics": ["python"]}}, {"repo": ".github"}])

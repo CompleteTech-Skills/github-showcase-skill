@@ -488,12 +488,14 @@ def cmd_topics(args):
         res = Resolver.from_paths(ctx.brand, None if args.registry == "auto" else args.registry, require_registry=True)
         also_in = topics.registry_also_in(res, ctx.owner, ctx.repo)
     r = topics.merge(ctx, also_in, prune=args.prune)
-    if args.records and not r["equal_as_set"]:
+    # held topics would be deleted by the full-set PUT while the report says nothing is removed: emit no record or gh line
+    writable = not r["equal_as_set"] and not r["held"]
+    if args.records and writable:
         records.append(args.records, [records.record(ctx.owner, ctx.repo, "topics", "topics", r["current"], r["proposed"],
                                                      "§5.6 merge")])
     out = base("topics", ctx, result="pass" if r["equal_as_set"] else "fail", **{k: v for k, v in r.items() if k != "logs"},
                logs=ctx.logs + r["logs"])
-    if args.gh and not r["equal_as_set"]:
+    if args.gh and writable:
         out["gh"] = topics.gh_command(ctx.owner, ctx.repo, r["proposed"])
     return out, OK if r["equal_as_set"] else CHECK_FAILED
 
