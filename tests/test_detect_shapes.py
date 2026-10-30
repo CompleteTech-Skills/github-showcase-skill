@@ -150,46 +150,88 @@ def test_schema_rejects_non_boolean_detect_tuned():
 
 
 # Review follow-ups for detect_tuned (E4.4.2): the fingerprint, the explicit selectors and the private callout.
+# The fingerprint never parses the flag: when the override names `detect_tuned`, it records the untuned `type` and the
+# `type_tuned`, so a change to either regenerates. These tests pin the reviewer scenarios: a `for:` scoped away,
+# flow-style YAML with PyYAML hidden, and the default with no key.
+from ctshowcase import fingerprint  # noqa: E402
+
+NORTHWIND = {"owner": "Northwind-Trading-Co", "repo": "field-data"}
+
+
+def _write_override(tmp_path, text):
+    (tmp_path / ".github").mkdir(exist_ok=True)
+    (tmp_path / ".github" / "showcase.yml").write_text(text, encoding="utf-8")
+
+
+def _fp(meta, repo_dir):
+    return fingerprint.fingerprint(fingerprint.inputs(meta, repo_dir), "cfg")
+
+
 def test_fingerprint_type_follows_detect_tuned(tmp_path):
     # Tuned: planning JSON is ignored, so the tree is workspace. Adding a.csv (1500 of 2500 data bytes) makes it dataset.
-    # The fingerprint must follow the tuned type, or the Action would skip a README regeneration.
-    from ctshowcase import fingerprint  # noqa: E402
-
-    (tmp_path / ".github").mkdir()
-    (tmp_path / ".github" / "showcase.yml").write_text("detect_tuned: true\n", encoding="utf-8")
-    base = {"owner": "Northwind-Trading-Co", "repo": "field-data", "files": ["planning/plan.json", "src/build.py"],
-            "file_sizes": {"planning/plan.json": 9000, "src/build.py": 1000}}
+    # The tuned type must be fingerprinted, or the Action would skip a README regeneration.
+    _write_override(tmp_path, "detect_tuned: true\n")
+    base = dict(NORTHWIND, files=["planning/plan.json", "src/build.py"],
+                file_sizes={"planning/plan.json": 9000, "src/build.py": 1000})
     grown = dict(base, files=base["files"] + ["a.csv"], file_sizes=dict(base["file_sizes"], **{"a.csv": 1500}))
-    assert fingerprint.inputs(base, tmp_path)["type"] == "workspace"
-    assert fingerprint.inputs(grown, tmp_path)["type"] == "dataset"
-    assert fingerprint.fingerprint(fingerprint.inputs(base, tmp_path), "cfg") != \
-        fingerprint.fingerprint(fingerprint.inputs(grown, tmp_path), "cfg")
+    b, g = fingerprint.inputs(base, tmp_path), fingerprint.inputs(grown, tmp_path)
+    assert (b["type"], b["type_tuned"]) == ("dataset", "workspace")
+    assert (g["type"], g["type_tuned"]) == ("dataset", "dataset")
+    assert _fp(base, tmp_path) != _fp(grown, tmp_path)
 
 
-def test_fingerprint_type_untouched_without_flag(tmp_path):
-    from ctshowcase import fingerprint  # noqa: E402
-
-    base = {"owner": "Northwind-Trading-Co", "repo": "field-data", "files": ["planning/plan.json", "src/build.py"],
-            "file_sizes": {"planning/plan.json": 9000, "src/build.py": 1000}}
-    assert fingerprint.inputs(base, tmp_path)["type"] == "dataset"
-    (tmp_path / ".github").mkdir()
-    (tmp_path / ".github" / "showcase.yml").write_text("detect_tuned: false\n", encoding="utf-8")
-    assert fingerprint.inputs(base, tmp_path)["type"] == "dataset"
-
-
-@pytest.mark.parametrize("text,want", [
-    ("detect_tuned: true\n", True),
-    ("detect_tuned: false\n", False),
-    ("icon: assets/x.png\ndetect_tuned: yes  # comment\n", True),
-    ("", False),
-])
-def test_override_tuned_with_and_without_pyyaml(text, want, monkeypatch):
-    # yaml is None in sys.modules makes `import yaml` raise ImportError: the stdlib-only Action path.
-    from ctshowcase import fingerprint  # noqa: E402
-
-    assert fingerprint.override_tuned(text) is want
+def test_fingerprint_flow_mapping_without_pyyaml(tmp_path, monkeypatch):
+    # `{detect_tuned: true}` is valid for the schema. With PyYAML hidden (the Action's pre-install step) the flag is still
+    # recorded, so removing data.csv (tuned: dataset -> workspace) changes the fingerprint.
     monkeypatch.setitem(sys.modules, "yaml", None)
-    assert fingerprint.override_tuned(text) is want
+    _write_override(tmp_path, "{detect_tuned: true}\n")
+    with_csv = dict(NORTHWIND, files=["planning/plan.json", "src/build.py", "data.csv"],
+                    file_sizes={"planning/plan.json": 9000, "src/build.py": 1000, "data.csv": 1500})
+    without = dict(NORTHWIND, files=["planning/plan.json", "src/build.py"],
+                   file_sizes={"planning/plan.json": 9000, "src/build.py": 1000})
+    assert fingerprint.inputs(with_csv, tmp_path)["type_tuned"] == "dataset"
+    assert fingerprint.inputs(without, tmp_path)["type_tuned"] == "workspace"
+    assert _fp(with_csv, tmp_path) != _fp(without, tmp_path)
+
+
+def test_fingerprint_scoped_away_override_follows_untuned_type(tmp_path):
+    # `for:` names another repository, so RepoContext drops this override and renders the untuned type. Growing
+    # src/build.py moves the untuned type dataset -> workspace; the fingerprint must change even though the tuned type
+    # stays workspace throughout.
+    _write_override(tmp_path, "for: Northwind-Trading-Co/other\ndetect_tuned: true\n")
+    base = dict(NORTHWIND, files=["planning/plan.json", "src/build.py"],
+                file_sizes={"planning/plan.json": 9000, "src/build.py": 1000})
+    grown = dict(base, file_sizes=dict(base["file_sizes"], **{"src/build.py": 10000}))
+    assert (fingerprint.inputs(base, tmp_path)["type"], fingerprint.inputs(grown, tmp_path)["type"]) == \
+        ("dataset", "workspace")
+    assert _fp(base, tmp_path) != _fp(grown, tmp_path)
+
+
+def test_fingerprint_manifest_override_without_checkout():
+    # The metadata-only path (no checkout) reads the override from `manifests`, as RepoContext does.
+    meta = dict(NORTHWIND, files=["planning/plan.json", "src/build.py"],
+                file_sizes={"planning/plan.json": 9000, "src/build.py": 1000},
+                manifests={".github/showcase.yml": "detect_tuned: true\n"})
+    assert fingerprint.inputs(meta, None)["type_tuned"] == "workspace"
+
+
+def test_fingerprint_unchanged_without_detect_tuned_key(tmp_path):
+    # No key named: the inputs are exactly today's, so a default repository's fingerprint does not move.
+    base = dict(NORTHWIND, files=["planning/plan.json", "src/build.py"],
+                file_sizes={"planning/plan.json": 9000, "src/build.py": 1000})
+    assert fingerprint.inputs(base, tmp_path)["type"] == "dataset"
+    assert "type_tuned" not in fingerprint.inputs(base, tmp_path)
+    _write_override(tmp_path, "icon: assets/x.png\n")
+    assert "type_tuned" not in fingerprint.inputs(base, tmp_path)
+
+
+def test_fingerprint_detect_tuned_false_keeps_untuned_render(tmp_path):
+    # `detect_tuned: false` renders the untuned type (dataset); the tuned type is recorded beside it for audit.
+    _write_override(tmp_path, "detect_tuned: false\n")
+    base = dict(NORTHWIND, files=["planning/plan.json", "src/build.py"],
+                file_sizes={"planning/plan.json": 9000, "src/build.py": 1000})
+    inp = fingerprint.inputs(base, tmp_path)
+    assert (inp["type"], inp["type_tuned"]) == ("dataset", "workspace")
 
 
 def test_explicit_variant_k_is_accepted():

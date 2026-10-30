@@ -182,7 +182,7 @@ org-tile --org OWNER [--avatar PATH] [--illustration PATH] [--out PATH] [--png P
 intro (--profile CompleteDotTech | --org OWNER) [--name TEXT] [--eyebrow TEXT] [--tagline TEXT]
       [--chip key:TEXT] [--chip attr:TEXT]... [--mark PATH] [--height 320|360] [--static] [--out assets/intro.svg]
 footer [--check README.md [--online]] [--org OWNER] [--raw]
-readme [--mode auto|scaffold|upgrade|header] [--variant auto|A|B|C|D|E|F|G|H|I|J]
+readme [--mode auto|scaffold|upgrade|header] [--variant auto|A|B|C|D|E|F|G|H|I|J|K]
        [--write] [--diff] [--records FILE] [--bootstrap]
 lint svg --kind intro|card|tile|plate|divider FILE...
 lint readme [README.md] [--variant auto]
@@ -297,7 +297,7 @@ These user decisions outrank `STANDARD.md` (`ct-std-v1`). Full text: [references
 | [references/descriptions.md](references/descriptions.md) | Description checks D1–D8, V1, P1, B1, X1, keep-or-edit order, templates by type. |
 | [references/topics.md](references/topics.md) | Topic layers, type detection rules 1–25, vocabulary, aliases, merge algorithm, safety. |
 | [references/labels.md](references/labels.md) | The 23-label set, migration map, apply algorithm and `labels.yml`. |
-| [references/readme-variants.md](references/readme-variants.md) | Header block with banner and footer, variants A–J, H2 order, license rows, preserve list. |
+| [references/readme-variants.md](references/readme-variants.md) | Header block with banner and footer, variants A–K, H2 order, license rows, preserve list. |
 | [references/banner-layout.md](references/banner-layout.md) | Banner and card geometry measured from the golden, chip rules, eyebrow rules. |
 | [references/art-direction.md](references/art-direction.md) | Family palettes, motifs, asset sizes, prompt template for illustrations, art QA. |
 | [references/svg-rules.md](references/svg-rules.md) | GitHub-safe SVG rules with decision 21 applied, and what `lint svg` checks. |
