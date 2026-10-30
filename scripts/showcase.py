@@ -376,7 +376,7 @@ def cmd_footer(args):
 
 
 def cmd_readme(args):
-    from ctshowcase import readme, records
+    from ctshowcase import generated, readme, records
     ctx = context(args)
     gate_owner(ctx, allow_hold=True)
     rd = ctx.repo_dir
@@ -388,6 +388,13 @@ def cmd_readme(args):
         return base("readme", ctx, result="exempt", logs=["exempt"]), OK
     # a watching-org non-fork other than `.github`: held until decided (no README change, no --allow-hold)
     gate_watching(ctx, remedy=README_HOLD_REMEDY)
+    managed = generated.managed_reason(ctx, before)
+    if managed:
+        ctx.log("needs-input:readme-managed")
+        ctx.log(f"readme-managed:{managed}")
+        if args.write:
+            return base("readme", ctx, result="needs-input", mode=args.mode, managed=managed, written=False,
+                        logs=ctx.logs), NEEDS_INPUT
     if args.variant and args.variant != "auto":
         ctx.det["variant"] = args.variant
     ctx.local_badges = args.badges == "local"
@@ -445,6 +452,8 @@ def cmd_readme(args):
                                                      f"§7 variant {ctx.det['variant']} ({mode})")])
     res = base("readme", ctx, result="changed" if changed else "unchanged", mode="bootstrap" if args.bootstrap else mode,
                variant=ctx.det["variant"], written=bool(args.write and changed))
+    if managed:
+        res["managed"] = managed
     if args.diff or not args.write:
         if args.format == "text":
             sys.stdout.write(diff)

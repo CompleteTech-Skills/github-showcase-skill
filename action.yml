@@ -172,6 +172,11 @@ runs:
             fi
             echo "::error title=CompleteTech Showcase::readme failed (exit 2, see the log above)"
           fi
+          if [ "$rc" -eq 4 ] && grep -q 'needs-input:readme-managed' "$RUNNER_TEMP/readme.json" 2>/dev/null; then
+            echo "::warning title=CompleteTech Showcase::README skipped: it is generated or marked readme: managed (see the log above)"
+            skipped=1
+            return 0
+          fi
           return "$rc"
         }
         bootstrapped=false
