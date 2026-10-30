@@ -114,17 +114,36 @@ def test_explicit_missing_template_reports_the_required_sections(brand, make_ctx
         C.icon_prompt(ctx, Resolver(brand, {}, {}), "# Empty custom art direction\n")
 
 
-@pytest.mark.parametrize(("owner", "seed"), [
-    ("CompleteTech-Skills", "1025"), ("AI-Ascension", None), ("Jev-Engineering", "3001"),
-    ("jevplay-games", "3101"), ("LibreEvolve", "4001"), ("TouchedByAnAgent", "5001"),
-    ("romgenie-archive-repostiory", "6001")])
-def test_bundled_prompt_has_a_valid_seed_instruction(owner, seed, brand, make_ctx):
+GLYPH = {"glyph_name": "Inbox Tray", "glyph_description": "An open tray seen front-on.",
+         "spark_placement": "held inside the tray", "size_class": "wide", "subject": "an inbox tray",
+         "objects": "a tray and a card"}
+
+
+@pytest.mark.parametrize("option", ["A", "B"])
+@pytest.mark.parametrize("owner", ["CompleteTech-Skills", "AI-Ascension", "Jev-Engineering", "romgenie-archive-repostiory"])
+def test_prompt_asks_for_one_image_and_asserts_no_seed_by_default(option, owner, brand, make_ctx):
     from ctshowcase.resolver import Resolver
 
-    result = C.icon_prompt(make_ctx(owner=owner), Resolver(brand, {}, {}), C.load_art_direction())
-    expected = f"Use seed {seed} when supported." if seed else "Use the tool's default seed."
-    assert expected in result["prompt"]
-    assert "seed not set" not in result["prompt"]
+    art = (C.SKILL_ART_DIRECTION.read_text(encoding="utf-8") if option == "B" else None)
+    result = C.icon_prompt(make_ctx(owner=owner), Resolver(brand, {}, {}), C.load_art_direction(), GLYPH, option,
+                           skill_art=art)
+    p = result["prompt"]
+    assert "Produce one image." in p
+    assert "four candidates" not in p.lower() and "when supported" not in p and "seed" not in p.lower()
+    assert result["requested"] == {"images": 1, "seed": "not supported"}
+    md = C.prompt_markdown(result)
+    assert "- Requested: 1 image; seed: not supported." in md
+
+
+@pytest.mark.parametrize("option", ["A", "B"])
+def test_requested_seed_is_in_the_prompt_and_provenance(option, brand, make_ctx):
+    from ctshowcase.resolver import Resolver
+
+    art = (C.SKILL_ART_DIRECTION.read_text(encoding="utf-8") if option == "B" else None)
+    result = C.icon_prompt(make_ctx(owner="CompleteTech-Skills"), Resolver(brand, {}, {}), C.load_art_direction(),
+                           GLYPH, option, skill_art=art, seed=4242)
+    assert "Produce one image. Use seed 4242." in result["prompt"]
+    assert "- Requested: 1 image; seed: 4242." in C.prompt_markdown(result)
 
 
 @pytest.mark.parametrize("missing", [("icon_ink",), ("icon_spark",), ("icon_ink", "icon_spark")])

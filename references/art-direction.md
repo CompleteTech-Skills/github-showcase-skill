@@ -80,9 +80,9 @@ Starred values are approximate until the estate planner re-measures them and pub
 palette slots and flat render inks come from the selected family's `icon_ink`
 and `icon_spark` tokens in `brand.yaml`. Both are chosen to meet the icon QA's
 3:1 contrast threshold on that family's card, with a distinct outline and spark.
-The writer supplies the four glyph fields with `--glyph`. Documented family seeds
-above are used when available; otherwise the prompt explicitly uses the tool's
-default seed. It does
+The writer supplies the four glyph fields with `--glyph`. The prompt asks for one image and
+asserts no seed; pass `--seed N` to request one, which the prompt and its provenance
+block then record (otherwise the seed is recorded as "not supported"). It does
 not require the estate's avatar tables or reference images. An explicit
 `--art-direction FILE` may instead supply the estate-format `(b) Family palette`
 and `(d) Shared prompt template` sections.
@@ -103,7 +103,7 @@ glyph outline in {LINE_HEX} so the spark remains distinct at small sizes.
 
 No text, letters, numbers, words, logos, brand marks, human figures or third-party IP.
 {EXTRA_NEGATIVES}
-Produce four candidates. {SEED_INSTRUCTION}
+Produce one image.{SEED_INSTRUCTION}
 The lock pass renders assets/icon.png as a flat glyph in the family's light-surface
 inks, without a tile or glow. Do not render the repository name in the image.
 ```
@@ -154,7 +154,7 @@ No text, letters, numbers, symbols, words, labels, signatures, watermarks, logos
 - Seed: SEED or "not supported"
 - Reference images: golden reference path, jev-reference.png, or "none"
 - Prompt: (verbatim, fenced)
-- Candidates: 4 or 8; selected: N (reason: one line)
+- Images requested: as asked in the prompt (`content icon prompt` asks for 1); selected: N (reason: one line)
 - Post-processing: showcase.py VERSION; output sha256 HASH; size KB
 ```
 

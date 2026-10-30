@@ -1875,12 +1875,17 @@ def _template(text: str, section: str) -> str | None:
 
 
 def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = None, option: str = "A",
-                language: str | None = None, skill_art: str | None = None) -> dict:
+                language: str | None = None, skill_art: str | None = None, seed: int | None = None) -> dict:
     """The Codex prompt for a repository icon (f.3 option A: the (d) template with "repo icon" for "avatar"; option
     B: the illustration template on the light card). The tool fills every mechanical slot from the art direction and
     the repository's facts; the glyph itself is the writer's (needs-writer until `glyph` supplies it)."""
     glyph = {k.upper(): v for k, v in (glyph or {}).items() if v}
     invalid: dict = {}
+    # one image per request; a seed is only ever asserted when the caller asked for one (--seed), never inferred from
+    # the family's documented seed, because the image tool may not support seeds at all
+    seed_text = str(seed) if seed is not None else "not supported"
+    seed_instruction = f" Use seed {seed}." if seed is not None else ""
+    requested = {"images": 1, "seed": seed_text}
     owner, repo = ctx.owner, ctx.repo
     org = org_row(resolver, ctx.brand, owner, require=True)
     org["canonical"], org["current"] = org["brand_key"], current_login(resolver, owner)
@@ -1922,6 +1927,7 @@ def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = Non
         card = ctx.style["tokens"]["card_fill"]
         prompt = tpl.replace("FAMILY STYLE LOCK, VERBATIM", lock or "{STYLE_LOCK}")
         prompt = prompt.replace("Square 1024x1024 | Wide 1536x1024", "Square 1024x1024")
+        prompt = prompt.rstrip() + "\n\nProduce one image." + seed_instruction
         prompt = prompt.replace("untextured BG background", f"untextured {card} background")
         if family == "completetech" and pal:
             prompt = prompt.replace("PALETTE. HIGHLIGHT LINE", f"{pal.group(1)}. {pal.group(2)}")
@@ -1937,15 +1943,13 @@ def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = Non
         if not tpl:
             raise NeedsInput("art-direction", "selected art direction has no (d) Shared prompt template "
                              "or Repository glyph prompt template")
-        seed = seed_for(art_text, logins, family)
         slots = {k: colours.get(k) for k in ("LINE_NAME", "LINE_HEX", "CORE_HEX", "GLOW_HEX", "SPARK_NAME", "SPARK_HEX",
                                               "SPARK_CORE_HEX", "SPARK_BLOOM_HEX")}
         slots.update(ACCOUNT=f"{org['current']}/{repo}", KIND="repository", CIRCLE_CLAUSE="",
                      CROP="repository icon, shown inside the light card of the README hero banner, the repo card and the "
                           "social preview", SECONDARY_LIGHT="", SECONDARY_LINE="", SPARK_D="94", SPARK_CORE_D="37",
                      TEXT_RULE="Any text, letters, numbers or words",
-                     SEED=seed or "not set",
-                     SEED_INSTRUCTION=f"Use seed {seed} when supported." if seed else "Use the tool's default seed.",
+                     SEED=seed_text, SEED_INSTRUCTION=seed_instruction,
                      STYLE_REFERENCES="the three approved pilot renders from art/golden/neon-night/.",
                      BRAND_REFERENCE=f"Org avatar art/reference/avatars/{org['canonical']}.png for family consistency "
                                      "only: do not copy its glyph; this repository's silhouette must differ from it at "
@@ -1968,8 +1972,10 @@ def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = Non
         prompt = re.sub(r"\(a\) Geometry:.*?(?= \(b\) Style:)",
                         "(a) Geometry: none yet; this glyph is new, so section 7 is the geometry and the lock pass "
                         "traces the chosen candidate into the compositor.", tpl, flags=re.S)
-        prompt = re.sub(r"output art/out/avatars/\S+", f"output art/out/icons/{org['current']}/{repo}-1024-c{{1..4}}.png",
+        prompt = re.sub(r"output art/out/avatars/\S+", f"output art/out/icons/{org['current']}/{repo}-1024.png",
                         prompt)
+        prompt = re.sub(r"\b4 candidates\b", "1 image", prompt)
+        prompt = prompt.replace("seed {SEED} if the tool supports seeds", "seed: {SEED}")
         prompt = re.sub(r"The pipeline downsamples your image[^.]*\.",
                         "The lock pass traces your image into the compositor, which renders the flat 1024 × 1024 px "
                         "assets/icon.png in the family light-surface inks.", prompt)
@@ -1986,6 +1992,7 @@ def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = Non
     missing = sorted(set(re.findall(r"\{([A-Z_]+)\}", prompt)))
     ink = colours.get("INK") or []
     return {"prompt": prompt, "missing": missing, "invalid": invalid, "facts": facts, "option": option.upper(),
+            "requested": requested,
             "render": {"ink": ink[0] if ink else None, "spark": ink[1] if len(ink) > 1 else None,
                        "size": [ICON_PX, ICON_PX], "live_area": [LIVE_MARGIN, LIVE_MARGIN, ICON_PX - LIVE_MARGIN,
                                                                  ICON_PX - LIVE_MARGIN], "budget": ICON_BUDGET}}
@@ -2002,6 +2009,7 @@ def prompt_markdown(res: dict) -> str:
             f"- Render (lock pass): flat body in the light-surface ink {r['ink'] or '(see ART_DIRECTION (b))'}, spark in "
             f"{r['spark'] or '(see ART_DIRECTION (b))'}, no tile and no glow, centred in the live area "
             f"{r['live_area']}.\n"
+            f"- Requested: {res['requested']['images']} image; seed: {res['requested']['seed']}.\n"
             "- Then: `showcase.py content icon normalize --in <candidate.png>` and `showcase.py content icon check`.\n\n"
             "## Repository facts\n\n| Fact | Value |\n|---|---|\n" + rows + "\n\n## Prompt\n\n```text\n" +
             res["prompt"] + "\n```\n")
@@ -2260,6 +2268,8 @@ def add_parser(sub, cli=None):
     a.add_argument("--glyph", help="YAML/JSON with the writer's glyph_name, glyph_description, spark_placement, "
                                    "size_class (WIDE|TALL|SQUARE|DIAGONAL; option B: subject, objects)")
     a.add_argument("--art-direction", help="art direction file (default: the skill's references/art-direction.md)")
+    a.add_argument("--seed", type=int, help="prompt: ask the image tool for this seed (recorded in the prompt and "
+                                            "provenance; default: not supported, no seed is requested)")
     a.add_argument("--in", dest="src", help="normalize: the returned candidate PNG")
     a.add_argument("--ground", choices=("auto", "transparent", "keep"), default="auto")
     a.add_argument("--out", help="prompt: the prompt file (art/prompts/<org>/<repo>/icon.md); normalize: the icon "
@@ -2565,7 +2575,7 @@ def _cmd_icon(args, cli, resolver, head):
             except NeedsInput:
                 lang = None
         skill_art = SKILL_ART_DIRECTION.read_text(encoding="utf-8") if args.option == "B" else None
-        res = icon_prompt(ctx, resolver, art, glyph, args.option, lang, skill_art)
+        res = icon_prompt(ctx, resolver, art, glyph, args.option, lang, skill_art, args.seed)
         md = prompt_markdown(res)
         result = "needs-writer" if res["missing"] else "ok"
         out = None
