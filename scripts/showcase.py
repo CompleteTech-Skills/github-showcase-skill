@@ -432,7 +432,9 @@ def cmd_readme(args):
         else:
             after, removed = readme.upgrade(ctx, before)
             problems = readme.preservation(before, after, removed)
-            if problems:
+            if problems and managed:  # a managed dry run is only a preview (acceptance 2): never refused, nothing is written
+                ctx.log("readme-shrink")
+            elif problems:
                 return base("readme", ctx, result="fail", mode=mode, problems=problems[:20],
                             logs=ctx.logs + ["readme-shrink"]), CHECK_FAILED
     changed = after != before
