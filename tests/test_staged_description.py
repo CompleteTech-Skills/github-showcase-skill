@@ -212,6 +212,8 @@ def test_stale_staged_record_on_other_output_is_kept(tmp_path):
 def test_readme_write_records_staged_when_images_dir_exists(tmp_path):
     rd = _repo(tmp_path)
     (rd / "docs" / "images").mkdir(parents=True)
+    assert run_cli("--meta", META, "--repo-dir", rd, "--format", "json", "banner",
+                   "--out", rd / "docs/images/banner.png").returncode == 0  # a sidecar must already exist
     p = run_cli("--meta", META, "--repo-dir", rd, "--format", "json", "readme", "--mode", "scaffold", "--write",
                 "--description", "  " + STAGED + "  ")
     assert p.returncode == 0, p.stderr
@@ -220,7 +222,7 @@ def test_readme_write_records_staged_when_images_dir_exists(tmp_path):
     data = _sidecar(rd)
     assert data["outputs"]["README.md"]["staged_description"] == _staged(STAGED)
     assert set(data["outputs"]["README.md"]) <= {"staged_description", "repository_id"}  # no sha256/bytes for a README
-    assert data["inputs"]["description"] == STAGED
+    assert data["inputs"]["description"] != STAGED  # the art's inputs are untouched by a README-only write
 
 
 def test_readme_dry_run_writes_nothing(tmp_path):
@@ -329,3 +331,41 @@ def test_staged_record_strips_padded_text_and_hash_matches_text():
     rec = fp.staged_record(padded)
     assert rec == {"text": STAGED, "sha256": hashlib.sha256(STAGED.encode("utf-8")).hexdigest()}
     assert rec["sha256"] == fp.description_sha256(padded) == fp.staged_record(STAGED)["sha256"]
+
+
+def test_readme_with_empty_images_dir_and_no_sidecar_logs_unrecorded(tmp_path):
+    # Review finding (E5.2.2 R2 A): no sidecar means no rendered art; a fresh sidecar would make the Action's
+    # fingerprint step report changed=false for banner/card nobody rendered. Do not create one.
+    rd = _repo(tmp_path)
+    (rd / "docs" / "images").mkdir(parents=True)
+    p = run_cli("--meta", META, "--repo-dir", rd, "--format", "json", "readme", "--mode", "scaffold", "--write",
+                "--description", STAGED)
+    assert p.returncode == 0, p.stderr
+    assert "staged-description-unrecorded" in _json(p)["logs"]
+    assert not (rd / SIDE).exists()
+
+
+def test_readme_write_preserves_old_version_sidecar_and_adds_no_repository_id(tmp_path):
+    # Review finding (E5.2.2 R2 B): an existing sidecar keeps its skill_version/fingerprint/standard (older art must
+    # still read as changed), and the README record carries no repository_id (it could mask foreign art ids).
+    rd = _repo(tmp_path)
+    assert run_cli("--meta", META, "--repo-dir", rd, "--format", "json", "banner",
+                   "--out", rd / "docs/images/banner.png").returncode == 0
+    data = _sidecar(rd)
+    data["skill_version"] = "0.9.0"
+    data["outputs"]["banner.png"]["repository_id"] = 4242
+    (rd / SIDE).write_text(json.dumps(data, sort_keys=True, indent=1) + "\n", encoding="utf-8")
+    before = _sidecar(rd)
+    p = run_cli("--meta", META, "--repo-dir", rd, "--format", "json", "readme", "--mode", "scaffold", "--write",
+                "--description", STAGED)
+    assert p.returncode == 0, p.stderr
+    after = _sidecar(rd)
+    assert after["skill_version"] == "0.9.0"
+    for k in ("fingerprint", "standard", "inputs", "config_sha256", "schema"):
+        assert after[k] == before[k]
+    assert after["outputs"]["README.md"] == {"staged_description": _staged(STAGED)}
+    env = {k: v for k, v in os.environ.items() if k != "SHOWCASE_IS_TEMPLATE"}
+    env["GITHUB_REPOSITORY_ID"] = "9999"  # banner says 4242: still provably foreign after the README write
+    q = subprocess.run([*PREP, "foreign", "Northwind-Trading-Co/northwind-gadget"], cwd=rd, env=env,
+                       capture_output=True, text=True)
+    assert q.stdout.strip() == "true", q.stderr

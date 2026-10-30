@@ -468,18 +468,18 @@ def cmd_readme(args):
     if args.write and getattr(ctx, "staged_description", None) is not None:
         # E5.2.2: the README was rendered from the staged sentence; record it beside the art's sidecar. Never create docs/images.
         imgs = rd / "docs" / "images"
-        if imgs.is_dir():
-            from ctshowcase import fingerprint as fp
-            record = {"staged_description": fp.staged_record(ctx.staged_description)}
-            if isinstance(ctx.meta.get("id"), int) and not isinstance(ctx.meta.get("id"), bool):
-                record["repository_id"] = ctx.meta["id"]
-            # A README-only write must not move the art's recorded fingerprint: keep the sidecar's own inputs and
-            # config hash, so banner.png and card.svg still answer for the sentence they were rendered from.
-            old = fp.read_sidecar(imgs)
-            inp = old.get("inputs") or fp.inputs(ctx.meta, rd)
-            cfg = old.get("config_sha256") or ctx.brand.sha256
-            fp.write_sidecar(imgs, inp, cfg, "README.md", record)
+        from ctshowcase import fingerprint as fp
+        old = fp.read_sidecar(imgs) if imgs.is_dir() else {}
+        if old.get("outputs") is not None and isinstance(old.get("outputs"), dict) and old.get("inputs"):
+            # Merge ONLY the README record into the existing sidecar. Its fingerprint, skill_version, standard, inputs and
+            # config hash stay as the art was rendered (a README write must not mark older or differently-sourced art
+            # current). No repository_id on this record: it would join the ids action_prepare.foreign() compares and could
+            # mask copied art that carries another repository's id.
+            old["outputs"] = dict(old["outputs"], **{"README.md": {"staged_description": fp.staged_record(ctx.staged_description)}})
+            (imgs / fp.SIDECAR).write_text(json.dumps(old, sort_keys=True, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
         else:
+            # no docs/images, or no sidecar yet: a fresh sidecar would claim a fingerprint for art nobody rendered
+            # (the Action would then skip banner/card as unchanged). Never create either.
             ctx.log("staged-description-unrecorded")
     res = base("readme", ctx, result="changed" if changed else "unchanged", mode="bootstrap" if args.bootstrap else mode,
                variant=ctx.det["variant"], written=bool(args.write and changed))
