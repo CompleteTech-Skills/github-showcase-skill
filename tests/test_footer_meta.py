@@ -91,3 +91,16 @@ def test_exempt_owner_makes_no_online_requests(tmp_path):
                         "--meta", _meta(tmp_path, "Pick-Your-AI"))
     assert code == 0, out
     assert out["result"] == "exempt" and "online" not in out
+
+
+def test_type_override_agrees_with_repocontext(tmp_path):
+    """`--type fork` is part of the verdict: footer --check must agree with RepoContext(type_override=...)."""
+    from ctshowcase.context import RepoContext
+    from ctshowcase.meta import load_file
+    path = _meta(tmp_path, "romgenie-following-repos")
+    want = RepoContext(load_brand(None), load_file(path), None, type_override="fork").footer_status()
+    assert want == "exempt:watching-fork"
+    p = run_cli("--format", "json", "--meta", path, "--type", "fork", "footer", "--check", _readme(tmp_path))
+    out = json.loads(p.stdout)
+    assert p.returncode == 0, out
+    assert out["result"] == "exempt" and out["logs"] == [want]
