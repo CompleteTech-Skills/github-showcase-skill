@@ -2090,7 +2090,9 @@ def normalize_icon(img, ground: str = "auto", card: str | None = None, pixel_art
         src = _px(im)
         # Widen the key only when --ground-tolerance was raised above the default, so explicit modes and
         # in-tolerance grounds key exactly as before (KEY_DE); a vignetted ground drifts up to the spread from its mean.
-        key_de = KEY_DE + (spread if spread and spread > GROUND_DE else 0.0)
+        # The widening follows the requested tolerance (not the corner spread): a radial vignette has matching
+        # corners (spread 0) but a darker interior, so --ground-tolerance must still widen the key (review B, #52).
+        key_de = KEY_DE + (max(spread or 0.0, tol) if tol > GROUND_DE else 0.0)
         mask = Image.new("L", im.size)
         mask.putdata([0 if _de(lab(p[:3]), g) <= key_de else 255 for p in src])
         alpha = _min(mask, mask.filter(ImageFilter.GaussianBlur(2)))  # 2 px feather inside the edge, no ground halo

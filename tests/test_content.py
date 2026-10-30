@@ -736,6 +736,33 @@ def test_icon_ground_tolerance_boundaries():
         C.normalize_icon(far, "auto", "#032530", tolerance=5)
 
 
+def _radial(corner, centre, size=1024):
+    from PIL import Image, ImageDraw
+    from ctshowcase.color import rgb
+    c, m = rgb(corner), rgb(centre)
+    im = Image.new("RGB", (size, size))
+    px = im.load()
+    far = 2 * (size / 2) ** 2
+    for y in range(size):
+        for x in range(size):
+            k = 1 - ((x - size / 2) ** 2 + (y - size / 2) ** 2) / far * 2
+            k = max(0.0, k)
+            px[x, y] = tuple(round(c[i] + (m[i] - c[i]) * k) for i in range(3))
+    ImageDraw.Draw(im).rounded_rectangle((250, 250, 750, 750), radius=40, outline=(16, 185, 129), width=40)
+    return im
+
+
+def test_icon_radial_vignette_with_matching_corners_keys_at_raised_tolerance():
+    """Review B: corners agree (dE 0) but the interior is darker; raising --ground-tolerance must widen the key
+    so interior ground becomes transparent, while the default tolerance keeps the base key."""
+    img = _radial("#EEF0F2", "#D8E0EA")
+    base = C.normalize_icon(img, "auto", "#032530")[0]
+    out, info = C.normalize_icon(img, "auto", "#032530", tolerance=5)
+    assert info["mode"] == "transparent"
+    assert out.getpixel((512, 512))[3] == 0  # empty interior of the outline
+    assert base.getpixel((512, 512))[3] != 0  # default tolerance unchanged
+
+
 def test_icon_vignetted_night_tile_passes_qa_after_flattening():
     """Review A/B: a kept (night-tile) ground vignetted past the default tolerance is flattened, so icon_qa and the
     banner/card tile code (default tolerance) accept what `normalize --ground-tolerance 5` accepted."""
