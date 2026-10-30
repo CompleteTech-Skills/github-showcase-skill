@@ -1705,10 +1705,10 @@ def _labels_known(m: dict) -> bool:
 
 
 def labels_plan(estate: Estate, org: str, *, allow_t3: bool = False, checkouts: str | None = None,
-                dot_github: str | None = None) -> tuple[dict, int]:
+                dot_github: str | None = None, registry_free: bool = False) -> tuple[dict, int]:
     from . import labels as labelsmod
     from .detect import is_fork
-    login, row, reg = _gate(estate, org, allow_t3=allow_t3, require_registry=False)
+    login, row, reg = _gate(estate, org, allow_t3=allow_t3, require_registry=not registry_free)
     tier, fam = _tier(row), row.get("family")
     repos, jobs, logs = [], [], []
     if tier in ("T2-R", "T3") or fam == "romgenie":
@@ -1758,7 +1758,7 @@ def labels_plan(estate: Estate, org: str, *, allow_t3: bool = False, checkouts: 
             repo_dir = checkout_root / login / n if checkout_root is not None else None
             if repo_dir is not None and repo_dir.exists():
                 origin = labelsmod._checkout_origin(repo_dir)
-                if not origin or origin[1] != n or not estate.resolver.same(origin[0], login):
+                if not origin or origin[1].lower() != n.lower() or not estate.resolver.same(origin[0], login):
                     raise ShowcaseError(f"--checkouts entry for {full} must have its matching GitHub origin", log="usage")
             else:
                 repo_dir = None
@@ -2133,7 +2133,8 @@ def cmd_org(args):
     elif act == "labels":
         if args.repos_from_gh:
             capture_label_repos(estate, org, allow_t3=args.allow_t3)
-        res, code = labels_plan(estate, org, allow_t3=args.allow_t3, checkouts=args.checkouts, dot_github=args.dot_github)
+        res, code = labels_plan(estate, org, allow_t3=args.allow_t3, checkouts=args.checkouts, dot_github=args.dot_github,
+                                registry_free=args.repos_from_gh)
     elif act == "health":
         res, code = health(estate, org, repo_dir=args.dot_github, allow_t3=args.allow_t3)
     else:

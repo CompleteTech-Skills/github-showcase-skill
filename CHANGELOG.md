@@ -6,7 +6,7 @@ All notable changes to `github-showcase-skill` are recorded here. Versions follo
 
 ### Added
 
-- `org labels ORG --repos-from-gh` plans labels across accessible repositories without the private estate registry, with paginated read-only GitHub capture, optional verified local checkouts, unchanged reference guards, and a documented org-default-forms-first workflow.
+- `org labels ORG --repos-from-gh` plans labels across accessible repositories without the private estate registry, with paginated read-only GitHub capture, optional verified local checkouts, unchanged reference guards, and a documented org-default-forms-first workflow. Registry-backed plans still require the org registry row, and checkout repository names match GitHub case-insensitively.
 
 ### Fixed
 
