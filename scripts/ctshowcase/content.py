@@ -2322,7 +2322,7 @@ def _owner_repo(args, cli, rd: Path | None) -> tuple[str | None, str | None, dic
         m = load_file(args.meta)
         return m.get("owner"), m.get("repo"), m
     if rd is not None:
-        m = from_repo_dir(rd)
+        m = cli.assume_meta(args, rd, from_repo_dir(rd))  # --assume-repo replaces a stale origin identity (#116)
         return m.get("owner"), m.get("repo"), m
     return None, None, {}
 

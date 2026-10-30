@@ -24,7 +24,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from ctshowcase import STANDARD, __version__  # noqa: E402
-from ctshowcase.errors import CHECK_FAILED, NEEDS_INPUT, OK, USAGE, ShowcaseError  # noqa: E402
+from ctshowcase.errors import CHECK_FAILED, NEEDS_INPUT, OK, USAGE, Refused, ShowcaseError  # noqa: E402
 
 GENERATORS = {"banner", "card", "org-tile", "intro", "contact-sheet", "social-preview", "org-banner"}
 # `enterprise` contract names (org/project/enterprise/content groups) that map onto the original action names
@@ -75,6 +75,36 @@ def _same_slug(args, a: str, b: str) -> bool:
         return False
 
 
+def _gate_origin_owner(args, have: str) -> None:
+    """--assume-repo must never launder an excluded/hold/T3 origin owner past the approval gate: the owner the checkout
+    actually belongs to is checked exactly as it would be without the override (Refused, exit 2)."""
+    try:
+        b = brand(args, prefer_lock=True)
+        b.check_owner(have.split("/")[0], allow_t3=getattr(args, "allow_t3", False))
+        # a family-level hold lives in the family style, not owners.hold: the origin owner's family is gated too,
+        # with the same --allow-hold approval the command would need under its original identity
+        if b.resolver().family_hold(have.split("/")[0]) and not getattr(args, "allow_hold", False):
+            raise Refused(f"{have.split('/')[0]} family is on hold; pass --allow-hold (--assume-repo does not lift it)",
+                          log="hold")
+    except Refused:
+        raise
+    except ShowcaseError:  # no brand data to gate against: nothing further to refuse here
+        pass
+
+
+def assume_meta(args, rd, meta: dict) -> dict:
+    """Without --meta, apply --assume-repo to the identity read from a stale origin (only when an origin slug exists),
+    after the origin owner passes the normal owner gate. Shared by context, meta and fingerprint. Read-only."""
+    assumed = getattr(args, "assume_repo", None)
+    have = _origin_slug(rd) if rd else None
+    if assumed and not args.meta and have:
+        _gate_origin_owner(args, have)
+        owner, _, repo = assumed.partition("/")
+        meta = dict(meta, owner=owner, repo=repo)
+        args._assume_note = f"assume-repo:{assumed} (origin names {have}; the remote is unchanged)"
+    return meta
+
+
 def repo_dir(args) -> Path | None:
     """The target checkout. A missing --repo-dir is a usage error (exit 2). With --meta, the checkout must be the
     repository the metadata describes: run from inside it, or pass --repo-dir DIR / --no-repo-dir explicitly; a checkout
@@ -93,13 +123,29 @@ def repo_dir(args) -> Path | None:
         want = f"{m.get('owner')}/{m.get('repo')}"
         have = _origin_slug(rd)
         if have and not _same_slug(args, want, have):
-            raise ShowcaseError(f"metadata describes {want} but {rd.resolve()} is a checkout of {have}; pass the right "
-                                "--repo-dir, or --no-repo-dir to use the metadata alone", log="usage")
+            assumed = getattr(args, "assume_repo", None)
+            if assumed and _same_slug(args, want, assumed):
+                # Explicit operator override for a renamed repository whose origin still has the old slug. Read-only:
+                # the skill never rewrites the remote and makes no network call to follow GitHub's rename redirect.
+                _gate_origin_owner(args, have)
+                args._assume_note = f"assume-repo:{assumed} (origin names {have}; the remote is unchanged)"
+            else:
+                why = (f"--assume-repo {assumed} does not match the metadata's {want}" if assumed else
+                       "the origin may be a renamed repository's old slug")
+                raise ShowcaseError(
+                    f"metadata describes {want} but {rd.resolve()} is a checkout of {have} ({why}); fix the remote with "
+                    f"`git remote set-url origin https://github.com/{want}.git`, or pass `--assume-repo {want}` to accept "
+                    "this checkout as that repository for this run (the skill never edits the remote), or pass the right "
+                    "--repo-dir, or --no-repo-dir to use the metadata alone", log="usage")
         if not explicit and have is None:
             raise ShowcaseError(f"--meta {want} without --repo-dir: run from inside that repository's checkout, or pass "
                                 "--repo-dir DIR or --no-repo-dir", log="usage")
     args._rd_checked = rd
     return rd
+
+
+def _assume_logs(args) -> list:
+    return [args._assume_note] if getattr(args, "_assume_note", None) else []
 
 
 def default_out(args, rel: str) -> Path:
@@ -121,7 +167,11 @@ def context(args, b=None):
     b = b or brand(args)
     rd = repo_dir(args)
     meta = merged(args.meta, str(rd) if rd else None)
-    return RepoContext(b, meta, rd, type_override=getattr(args, "type_override", None))
+    meta = assume_meta(args, rd, meta)
+    ctx = RepoContext(b, meta, rd, type_override=getattr(args, "type_override", None))
+    if getattr(args, "_assume_note", None):
+        ctx.log(args._assume_note)
+    return ctx
 
 
 def base(cmd, ctx=None, **kw) -> dict:
@@ -599,7 +649,7 @@ def cmd_meta(args):
         m = M.from_gh(args.from_gh)
     else:
         rd = repo_dir(args)
-        m = M.merged(args.meta, str(rd) if rd else None)
+        m = assume_meta(args, rd, M.merged(args.meta, str(rd) if rd else None))
     m["detected"] = detect(m, RepoFacts(m, None if args.from_gh else repo_dir(args)))
     try:
         b = brand(args, prefer_lock=True)
@@ -611,7 +661,9 @@ def cmd_meta(args):
     if args.out:
         Path(args.out).write_text(text, encoding="utf-8")
         return {"command": "meta", "owner": m["owner"], "repo": m["repo"], "result": "ok", "out": args.out,
-                "detected": m["detected"], "logs": []}, OK
+                "detected": m["detected"], "logs": _assume_logs(args)}, OK
+    if getattr(args, "_assume_note", None):
+        sys.stderr.write(args._assume_note + "\n")
     sys.stdout.write(text)
     return None, OK
 
@@ -620,7 +672,7 @@ def cmd_fingerprint(args):
     from ctshowcase import fingerprint as fp
     from ctshowcase.meta import merged
     rd = repo_dir(args)
-    m = merged(args.meta, str(rd) if rd else None)
+    m = assume_meta(args, rd, merged(args.meta, str(rd) if rd else None))
     out_dir = (rd or Path(".")) / args.out_dir if not Path(args.out_dir).is_absolute() else Path(args.out_dir)
     inp = fp.inputs(m, rd)
     f = fp.fingerprint(inp, fp.config_sha256())
@@ -630,7 +682,7 @@ def cmd_fingerprint(args):
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
             fh.write(f"changed={'true' if changed else 'false'}\nfingerprint={f}\n")
     return {"command": "fingerprint", "owner": m.get("owner"), "repo": m.get("repo"), "result": "ok", "fingerprint": f,
-            "changed": changed, "logs": []}, OK
+            "changed": changed, "logs": _assume_logs(args)}, OK
 
 
 def cmd_fonts(args):
@@ -950,6 +1002,9 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--quiet", action="store_true")
     p.add_argument("--allow-t3", action="store_true",
                    help="treat a T3 (co-owned) owner as signed off for this run: every repository command and generator, not just `meta`; pass only when a t3-metadata or t3-signoff row is approved (default: T3 owners are refused, exit 2)")
+    p.add_argument("--assume-repo", metavar="OWNER/REPO",
+                   help="accept a checkout whose origin names a renamed repository's old slug as OWNER/REPO for this run "
+                        "(logged; the remote is never changed and no network call is made; default: a mismatch is refused, exit 2)")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__} ({STANDARD})")
     sub = p.add_subparsers(dest="command", required=True, metavar="<command>")
 
@@ -1222,6 +1277,8 @@ def _main(argv=None) -> int:
         cli.error("unrecognized arguments: " + " ".join(remaining))
     from ctshowcase.config import set_t3_signed_off
     set_t3_signed_off(getattr(args, "allow_t3", False))
+    if args.assume_repo and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+", args.assume_repo):
+        cli.error("--assume-repo expects OWNER/REPO")
     if args.format is None:
         args.format = "text" if args.command in GENERATORS else "json"
     try:
@@ -1240,6 +1297,14 @@ def _main(argv=None) -> int:
         if args.format == "text" and not args.quiet:
             print(f"{args.command}: {obj['error']}", file=sys.stderr)
             return code
+    note = getattr(args, "_assume_note", None)
+    if note:  # one shared path: every command that accepted the override logs it, whatever it does with ctx.logs
+        if obj is not None:
+            logs = list(obj.get("logs") or [])
+            if note not in logs:
+                obj["logs"] = logs + [note]
+        elif not getattr(args, "_assume_note_written", False):
+            sys.stderr.write(note + chr(10))
     if obj is not None:
         emit(args, obj)
     return code

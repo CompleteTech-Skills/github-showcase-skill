@@ -69,7 +69,7 @@ Do not use it for accounts outside the estate. Excluded owners (BunsDev, GoZippy
 
 ## Core Workflow
 
-Run every command **from inside the target repository's checkout**, with the skill's script by path: `python3 <skill-dir>/scripts/showcase.py ...`. With `--meta`, the checkout must be the repository the metadata describes (its `origin` is compared); otherwise pass `--repo-dir DIR` or `--no-repo-dir`. A missing `--repo-dir` exits 2, and default outputs (`docs/images/...`) are always written inside the target checkout, never into the current directory or the skill.
+Run every command **from inside the target repository's checkout**, with the skill's script by path: `python3 <skill-dir>/scripts/showcase.py ...`. With `--meta`, the checkout must be the repository the metadata describes (its `origin` is compared); otherwise pass `--repo-dir DIR` or `--no-repo-dir`. If the origin still names a renamed repository's old slug, the mismatch is refused (exit 2) with the fix: run `git remote set-url origin https://github.com/OWNER/REPO.git` yourself, or pass the global `--assume-repo OWNER/REPO` to accept the checkout as that repository for one run (every command that accepts it logs `assume-repo:` in its result `logs`, or on stderr for commands that print only a diff or document; without `--meta` it also replaces the stale origin slug as the repository identity, `content links` and `content images` included; the origin's owner still passes the excluded/hold/T3 gate and its family hold still needs `--allow-hold`; the skill never edits the remote and makes no network call). A missing `--repo-dir` exits 2, and default outputs (`docs/images/...`) are always written inside the target checkout, never into the current directory or the skill.
 
 | Step | Command | Gate |
 |---|---|---|
@@ -163,7 +163,7 @@ python3 $S --meta meta.json content links --base-ref origin/main --diff     # in
 ## Command Reference
 
 ```text
-python3 <skill-dir>/scripts/showcase.py [--config PATH] [--repo-dir DIR | --no-repo-dir] [--meta FILE] [--type TYPE] [--format json|text] [--quiet] [--version] <command> [options]
+python3 <skill-dir>/scripts/showcase.py [--config PATH] [--repo-dir DIR | --no-repo-dir] [--assume-repo OWNER/REPO] [--meta FILE] [--type TYPE] [--format json|text] [--quiet] [--version] <command> [options]
 
 meta --from-gh OWNER/REPO [--out FILE] [--allow-t3]
 fingerprint [--out-dir docs/images] [--github-output]
