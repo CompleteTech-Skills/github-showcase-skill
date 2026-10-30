@@ -116,19 +116,31 @@
       ]
     },
     "readme": {
-      "type": [
-        "object",
-        "null"
-      ],
-      "additionalProperties": false,
-      "properties": {
-        "header": {
-          "type": "boolean"
+      "description": "README ownership. managed: the README is owned by the repository's tooling, and `readme --write` refuses it (nothing is written; needs-input:readme-managed, exit 4). authored: generated-header detection is switched off, so a README that carries a generator header is treated as the author's. Absent or null: detect a generated header in the first 20 lines (or in front matter) and refuse it the same way. An object with header/footer booleans is the review-page answer that keeps its existing meaning.",
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "header": {
+              "type": "boolean"
+            },
+            "footer": {
+              "type": "boolean"
+            }
+          }
         },
-        "footer": {
-          "type": "boolean"
+        {
+          "type": "string",
+          "enum": [
+            "managed",
+            "authored"
+          ]
+        },
+        {
+          "type": "null"
         }
-      }
+      ]
     },
     "reason": {
       "type": [

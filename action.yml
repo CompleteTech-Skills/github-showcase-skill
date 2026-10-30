@@ -163,6 +163,13 @@ runs:
           local rc=0 held
           "${S[@]}" --format json readme "$@" > "$RUNNER_TEMP/readme.json" || rc=$?
           cat "$RUNNER_TEMP/readme.json"
+          # Exit 4 (needs-input:readme-managed): a README a tool owns (`readme: managed`, or a generator header or front
+          # matter) is never written, so the README step is skipped with a warning and the run stays green.
+          if [ "$rc" -eq 4 ]; then
+            echo "::warning title=CompleteTech Showcase::README skipped: it is managed by its tooling (needs-input:readme-managed, see the log above)"
+            skipped=1
+            return 0
+          fi
           if [ "$rc" -eq 2 ]; then
             held="$(python -c 'import json,sys;d=json.load(open(sys.argv[1]));print("yes" if d.get("result") == "refused" or any(str(x).startswith("hold") for x in d.get("logs") or []) else "")' "$RUNNER_TEMP/readme.json" 2>/dev/null || true)"
             if [ "$held" = "yes" ]; then

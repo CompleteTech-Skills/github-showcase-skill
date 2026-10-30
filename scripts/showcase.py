@@ -388,6 +388,16 @@ def cmd_readme(args):
         return base("readme", ctx, result="exempt", logs=["exempt"]), OK
     # a watching-org non-fork other than `.github`: held until decided (no README change, no --allow-hold)
     gate_watching(ctx, remedy=README_HOLD_REMEDY)
+    # a README a tool owns (`readme: managed`, a generator header or front matter) is never written: with --write
+    # nothing is written at all (no README, badge, CONTRIBUTING or --records line) and the run exits 4; a dry run
+    # still shows its diff, with the same logs.
+    from ctshowcase.content import readme_managed_reason
+    managed = readme_managed_reason(before, ctx.override)
+    if managed:
+        ctx.log("needs-input:readme-managed")
+        ctx.log(f"readme-managed:{managed}")
+        if args.write:
+            return base("readme", ctx, result="needs-input"), NEEDS_INPUT
     if args.variant and args.variant != "auto":
         ctx.det["variant"] = args.variant
     ctx.local_badges = args.badges == "local"
