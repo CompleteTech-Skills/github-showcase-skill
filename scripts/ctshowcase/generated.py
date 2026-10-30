@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 
+from .mdcode import masked
 from .readme import normalize_text
 
 WINDOW = 20
@@ -23,20 +24,6 @@ def _front_matter(lines: list[str]) -> list[str] | None:
     return None
 
 
-def _blank_fences(lines: list[str]) -> list[str]:
-    out, in_fence = [], False
-    for line in lines:
-        s = line.strip()
-        if s.startswith("```") or s.startswith("~~~"):
-            in_fence = not in_fence
-            out.append("")
-        elif in_fence:
-            out.append("")
-        else:
-            out.append(line)
-    return out
-
-
 def detect(text: str) -> str | None:
     """'front-matter' or 'header' when the README says it is generated or managed, else None. Returns no file text."""
     lines = normalize_text(text).split("\n")[:WINDOW]
@@ -44,8 +31,9 @@ def detect(text: str) -> str | None:
     if fm is not None:
         if any(GEN_RE.search(line) for line in fm) or FM_FLAG_RE.search("\n".join(fm)):
             return "front-matter"
-    joined = "\n".join(_blank_fences(lines))
-    for m in COMMENT_RE.finditer(joined):
+    # masked() blanks fenced code (a shorter fence inside a longer one does not close it) and inline code spans, so a
+    # comment shown as an example is not a generated header.
+    for m in COMMENT_RE.finditer(masked("\n".join(lines))):
         body = m.group(1).strip()
         if body.lower().startswith("showcase:"):
             continue
