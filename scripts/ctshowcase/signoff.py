@@ -83,19 +83,39 @@ def _expiry(rec: dict) -> _dt.date | None:
         return v.date()
     if isinstance(v, _dt.date):
         return v
+    # the whole value must parse: `2099-12-31garbage` is not a date, so it never validates (fail closed)
     try:
-        return _dt.date.fromisoformat(str(v)[:10])
+        return _dt.date.fromisoformat(str(v).strip())
+    except ValueError:
+        pass
+    try:
+        return _dt.datetime.fromisoformat(str(v).strip()).date()
     except ValueError:
         return None
 
 
-def _covers(rec: dict, repo: str | None) -> bool:
+def _covers(rec: dict, repo: str | None, logins: list[str] | None = None) -> bool:
+    """`*` covers everything; a bare name covers that repository; OWNER/NAME needs the owner to be one of `logins`
+    (the requested owner and its org aliases) as well as the name. A malformed `repos` (not a string or a list of
+    strings) covers nothing, so it surfaces as t3-signoff:scope instead of an uncaught exception."""
     repos = rec.get("repos")
-    repos = [repos] if isinstance(repos, str) else [str(x) for x in repos or []]
+    if isinstance(repos, str):
+        repos = [repos]
+    if not isinstance(repos, list) or not all(isinstance(x, str) for x in repos):
+        return False
     if "*" in repos:
         return True
     name = (repo or "").split("/")[-1].lower()
-    return bool(name) and any(r.split("/")[-1].lower() == name for r in repos)
+    if not name:
+        return False
+    mine = {x.lower() for x in logins or []}
+    for r in repos:
+        head, _, tail = r.rpartition("/")
+        if tail.lower() != name:
+            continue
+        if not head or head.lower() in mine or logins is None:
+            return True
+    return False
 
 
 def evaluate(owners: list[str], repo: str | None = None, today: _dt.date | None = None,
@@ -110,7 +130,7 @@ def evaluate(owners: list[str], repo: str | None = None, today: _dt.date | None 
             and str(r.get("owner") or "").lower() in logins]
     if not mine:
         return None, "missing"
-    scoped = [r for r in mine if _covers(r, repo)]
+    scoped = [r for r in mine if _covers(r, repo, sorted(logins))]
     if not scoped:
         return None, "scope"
     live = [r for r in scoped if (_expiry(r) or _dt.date.min) >= today]
@@ -143,7 +163,7 @@ def require(owner: str, repo: str | None = None, aliases: list[str] | None = Non
 
 def record_for(owner: str, repo: str | None = None) -> dict | None:
     for rec in _GRANTED.get((owner or "").lower(), []):
-        if _covers(rec, repo):
+        if _covers(rec, repo, _expand([owner or ""])):
             return rec
     return None
 

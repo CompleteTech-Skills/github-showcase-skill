@@ -109,7 +109,8 @@ class Brand:
                     return status
         return None
 
-    def check_owner(self, owner: str, *, allow_t3: bool = False, repo: str | None = None) -> str | None:
+    def check_owner(self, owner: str, *, allow_t3: bool = False, repo: str | None = None,
+                    verify_signoff: bool = True) -> str | None:
         """Raise Refused for excluded/hold/T3 owners; return 'watching' or None."""
         status = self.owner_status(owner)
         if status == "excluded":
@@ -118,7 +119,7 @@ class Brand:
             raise Refused(f"{owner} is on HOLD", log="hold")
         if status == "t3" and not (allow_t3 or t3_signed_off()):
             raise Refused(f"{owner} is T3; needs co-owner sign-off", log="t3-signoff")
-        if status == "t3":
+        if status == "t3" and verify_signoff:
             from . import signoff
             signoff.require(owner, repo, self.aliases(owner))  # no-op unless --require-t3-signoff
         return status

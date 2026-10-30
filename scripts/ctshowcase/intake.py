@@ -193,7 +193,7 @@ def new_plan(brand, slug: str, type_: str, *, template: str = TEMPLATE_REPO, des
     if not m:
         raise ShowcaseError("new needs OWNER/NAME", log="usage")
     owner, name = m.group(1), m.group(2)
-    status = brand.check_owner(owner)
+    status = brand.check_owner(owner, repo=name)
     if status == "watching":
         raise ShowcaseError(f"{owner} is the watching org: it holds forks only, never new repositories", log="exempt")
     if resolver is not None and resolver.is_placeholder(owner):

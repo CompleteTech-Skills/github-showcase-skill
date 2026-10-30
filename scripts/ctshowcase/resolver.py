@@ -288,7 +288,7 @@ class Resolver:
         return None
 
     def check_owner(self, login: str, *, allow_t3: bool = False, allow_hold: bool = False,
-                    repo: str | None = None) -> str | None:
+                    repo: str | None = None, verify_signoff: bool = True) -> str | None:
         """Refuse excluded, hold and (unless signed off) T3 orgs under any of their logins; return the status."""
         from .config import t3_signed_off
         from .errors import Refused
@@ -299,7 +299,7 @@ class Resolver:
             raise Refused(f"{login} is on HOLD", log="hold")
         if st == "t3" and not (allow_t3 or t3_signed_off()):
             raise Refused(f"{login} is T3; needs co-owner sign-off", log="t3-signoff")
-        if st == "t3":
+        if st == "t3" and verify_signoff:  # doctor passes False: it reports the hold instead of refusing
             from . import signoff
             signoff.require(login, repo, self.aliases(login))  # no-op unless --require-t3-signoff
         return st

@@ -791,7 +791,7 @@ def cmd_adopt(args):
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+", args.slug or ""):
         raise ShowcaseError("adopt needs OWNER/REPO", log="usage")
     b = brand(args)
-    b.check_owner(args.slug.split("/")[0])
+    b.check_owner(args.slug.split("/")[0], repo=args.slug.split("/")[1] if "/" in args.slug else None)
     if args.meta:
         m = M.load_file(args.meta)
         if not _same_slug(args, f"{m.get('owner')}/{m.get('repo')}", args.slug):
@@ -842,7 +842,7 @@ def cmd_doctor(args):
                                    template_dir=args.template_dir, checkouts=args.checkouts, out=args.out)
         return res, OK
     ctx = context(args)
-    ctx.brand.check_owner(ctx.owner, allow_t3=True, repo=ctx.repo)
+    ctx.brand.check_owner(ctx.owner, allow_t3=True, repo=ctx.repo, verify_signoff=False)  # read-only: doctor.row shows R7 hold
     r = doctor.row(ctx)
     fmt = args.doctor_format
     if fmt == "tsv":

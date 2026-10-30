@@ -2348,6 +2348,8 @@ def _ctx(args, cli, resolver):
 
 def _finish(args, obj: dict, code: int):
     jobs = list(obj.get("jobs") or []) + ([obj["job"]] if obj.get("job") else [])
+    from .signoff import stamp
+    stamp(jobs)  # before any serialization (--jobs, --report): a no-op unless --require-t3-signoff
     if getattr(args, "jobs", None) and jobs:  # writer jobs only; unapproved proposals stay in the report
         from .records import append
         append(args.jobs, jobs)
@@ -2369,9 +2371,9 @@ def cmd_content(args, cli=None):
     resolver = _resolver(args, cli)
     head = {"command": "content", "action": act}
     if act == "social":
-        owner, _, _ = _owner_repo(args, cli, None)
+        owner, srepo, _ = _owner_repo(args, cli, None)
         if owner:
-            resolver.check_owner(owner, allow_hold=args.allow_hold)
+            resolver.check_owner(owner, allow_hold=args.allow_hold, repo=srepo)
         obj, code = cli.cmd_social(args)
         obj = dict(head, **{k: v for k, v in obj.items() if k != "command"}, alias_of="social-preview")
         if args.job and obj.get("result") == "ok":
@@ -2391,7 +2393,7 @@ def cmd_content(args, cli=None):
             raise ShowcaseError(f"content {act} needs a checkout (--repo-dir)", log="usage")
         owner, repo, _ = _owner_repo(args, cli, rd)
         if owner:
-            resolver.check_owner(owner)
+            resolver.check_owner(owner, repo=repo)
         tree = Tree(rd)
         readme = displayed_readme(tree, args.readme_path)
         files = list(args.files) or markdown_files(tree, readme)
@@ -2496,7 +2498,7 @@ def _cmd_sidebar(args, cli, resolver, head):
         if args.only and not (resolver.same(o, args.only.split("/")[0]) and r.lower() == args.only.split("/")[1].lower()):
             continue
         try:
-            resolver.check_owner(o)
+            resolver.check_owner(o, repo=r)
         except Refused as exc:
             skipped.append({"repo": full, "why": exc.log})
             continue

@@ -155,7 +155,7 @@ def test_state_does_not_outlive_the_invocation(tmp_path, capsys):
 @pytest.mark.parametrize("repo,expect", [(None, "scope"), ("a", None), ("B", None), ("c", "scope")])
 def test_evaluate_scope_rules(repo, expect):
     from ctshowcase import signoff
-    recs = [{"id": "s", "owner": OWNER, "repos": ["a", "x/b"], "approved": True, "expires": "2099-01-01"}]
+    recs = [{"id": "s", "owner": OWNER, "repos": ["a", f"{OWNER}/b"], "approved": True, "expires": "2099-01-01"}]
     rec, why = signoff.evaluate([OWNER], repo, records=recs)
     assert why == expect and (rec is None) == (expect is not None)
 
@@ -231,3 +231,61 @@ def test_default_doctor_renderers_show_the_signoff_id(tmp_path):
         assert "t3s-13" in r.stdout, _out(r)
         plain = _run(tmp_path, b, "--allow-t3", "doctor", "--format", fmt)
         assert "t3s-13" not in plain.stdout and "signoff_id" not in plain.stdout  # off: output unchanged
+
+
+# --- review round 2: evidence for each fixed finding (synthetic records only) ---
+
+def _raw_bundle(tmp_path, body):
+    d = tmp_path / "bundle" / "decisions"
+    d.mkdir(parents=True)
+    (d / "t3-signoffs.yaml").write_text("signoffs:\n" + body, encoding="utf-8")
+    return tmp_path / "bundle"
+
+
+def test_doctor_without_allow_t3_still_reports_hold_under_the_flag(tmp_path):
+    r = _run(tmp_path, _bundle(tmp_path, []), "--require-t3-signoff", "doctor", "--format", "json")
+    assert r.returncode in (0, 1) and "t3-signoff:missing" not in _out(r), _out(r)
+    assert "hold" in _out(r)
+
+
+def test_qualified_scope_for_another_owner_refuses(tmp_path):
+    b = _bundle(tmp_path, [{"id": "t3s-4", "repos": ["Other-Org/northwind-synthetic"]}])
+    r = _run(tmp_path, b, "--require-t3-signoff", "--allow-t3", "describe")
+    assert r.returncode == 2 and "t3-signoff:scope" in _out(r), _out(r)
+
+
+def test_garbage_expiry_never_validates(tmp_path):
+    b = _bundle(tmp_path, [{"id": "t3s-5", "expires": "2099-12-31garbage"}])
+    r = _run(tmp_path, b, "--require-t3-signoff", "--allow-t3", "describe")
+    assert r.returncode == 2 and "t3-signoff:expired" in _out(r), _out(r)
+
+
+def test_malformed_repos_refuses_instead_of_raising(tmp_path):
+    b = _raw_bundle(tmp_path, f"  - id: t3s-6\n    owner: {OWNER}\n    repos: 7\n    approved: true\n    expires: 2099-12-31\n")
+    r = _run(tmp_path, b, "--require-t3-signoff", "--allow-t3", "describe")
+    assert r.returncode == 2 and "t3-signoff:scope" in _out(r) and "Traceback" not in _out(r), _out(r)
+
+
+def test_adopt_and_content_links_honour_repo_scoped_record(tmp_path):
+    b = _bundle(tmp_path, [{"id": "t3s-7", "repos": ["northwind-synthetic"]}])
+    r = _run(tmp_path, b, "--require-t3-signoff", "--allow-t3", "adopt", f"{OWNER}/northwind-synthetic")
+    assert "t3-signoff" not in _out(r), _out(r)
+
+
+def test_report_jobs_carry_signoff_id(tmp_path):
+    from ctshowcase import signoff
+    signoff.reset()
+    signoff.set_required(True)
+    try:
+        rec = {"id": "t3s-8", "owner": OWNER, "repos": ["*"], "approved": True, "expires": "2099-12-31"}
+        signoff._GRANTED[OWNER.lower()] = [rec]
+        from ctshowcase.content import _finish
+        import argparse
+        rp = tmp_path / "report.json"
+        _finish(argparse.Namespace(jobs=None, report=str(rp)),
+                {"job": {"phase": 3, "org": OWNER, "repo": f"{OWNER}/northwind-synthetic"}}, 0)
+        saved = json.loads(rp.read_text(encoding="utf-8"))["job"]
+        assert saved["signoff_id"] == "t3s-8" and saved["approval_id"] == "t3s-8"
+    finally:
+        signoff.set_required(False)
+        signoff.reset()
