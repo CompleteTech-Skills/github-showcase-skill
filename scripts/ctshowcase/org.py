@@ -272,7 +272,8 @@ def append_jobs(path: str | Path | None, jobs: list[dict]) -> None:
     append(path, jobs)
 
 
-def _gate(estate: Estate, org: str, *, allow_t3=False, allow_hold=False) -> tuple[str, dict, dict]:
+def _gate(estate: Estate, org: str, *, allow_t3=False, allow_hold=False,
+          require_registry=True) -> tuple[str, dict, dict]:
     """Resolve and gate the org: (current login, brand row, registry row). Excluded, T3 and HOLD orgs refuse."""
     r = estate.resolver
     r.check_owner(org, allow_t3=allow_t3, allow_hold=allow_hold)
@@ -284,7 +285,8 @@ def _gate(estate: Estate, org: str, *, allow_t3=False, allow_hold=False) -> tupl
     if r.family_hold(org) and not allow_hold:
         from .errors import Refused
         raise Refused(f"{login} is on HOLD (STANDARD §12.5 #4): only the decision 18 footer is built", log="hold")
-    return login, row, r.registry_org(org)
+    reg = r.registry_org(org) if require_registry or r.registry else {}
+    return login, row, reg
 
 
 def _tier(row: dict) -> str:
@@ -1295,6 +1297,15 @@ def verified_domain(blog: str, email: str | None, domains: list[str], *, hold=Fa
             "badge_eligible": reason is None, "reason": reason}
 
 
+def _verified_domains() -> list[str]:
+    from .enterprise import desired
+    try:
+        domains = list((desired() or {}).get("domains") or [])
+    except Exception:  # an unreadable enterprise.yaml must not block the About plan or snapshot check
+        domains = []
+    return domains or ["complete.tech", "www.complete.tech"]
+
+
 def about(estate: Estate, org: str, *, email_approved: bool | None = None, allow_t3: bool = False,
           in_enterprise: bool | None = None) -> tuple[dict, int]:
     r = estate.resolver
@@ -1327,13 +1338,8 @@ def about(estate: Estate, org: str, *, email_approved: bool | None = None, allow
         fails.append(f"description is {len(payload['description'])} characters (max {ORG_DESC_MAX})")
     if re.search(r"[\U0001F000-\U0001FAFF]", payload.get("description", "")):
         fails.append("description has an emoji")
-    from .enterprise import desired
-    try:
-        domains = list((desired() or {}).get("domains") or [])
-    except Exception:  # an unreadable enterprise.yaml must not block the About plan
-        domains = []
-    vd = verified_domain(payload.get("blog") or prof.get("blog") or "", payload.get("email"), domains or
-                         ["complete.tech", "www.complete.tech"], hold=hold, in_enterprise=in_enterprise)
+    vd = verified_domain(payload.get("blog") or prof.get("blog") or "", payload.get("email"), _verified_domains(),
+                         hold=hold, in_enterprise=in_enterprise)
     if vd["reason"]:
         logs.append(vd["reason"])
     argv = ["gh", "api", "-X", "PATCH", f"orgs/{login}"]
@@ -1751,12 +1757,17 @@ def _dot_github_files(estate: Estate, login: str, repo_dir: str | Path | None) -
 
 
 def health(estate: Estate, org: str, *, repo_dir: str | Path | None = None, allow_t3: bool = False) -> tuple[dict, int]:
-    login, row, reg = _gate(estate, org, allow_t3=allow_t3, allow_hold=True)
+    login, row, reg = _gate(estate, org, allow_t3=allow_t3, allow_hold=True, require_registry=False)
     fam, tier = row.get("family"), _tier(row)
     files, source = _dot_github_files(estate, login, repo_dir)
     vis = estate.visibility(f"{login}/.github")
     cells: dict[str, str] = {}
     logs, add = [], []
+    has_registry = estate.resolver.registry_key(org) is not None
+    if source == "missing" and not has_registry:
+        return {"command": "org", "action": "health", "owner": login, "result": "unknown", "source": source,
+                "cells": {".github": "unknown"}, "add": [],
+                "logs": ["needs-input:dot-github-files", "needs-input:registry"]}, OK
     if source == "missing" and ".github" in estate.repos_of(org):
         source = "unknown"  # the repository exists in the registry; only its capture is missing
         files = {}
@@ -1831,25 +1842,106 @@ def avatar_colours(path: str | Path) -> int:
 def _snap_org(snap: dict) -> dict:
     o = snap.get("org") or {}
     gql = (snap.get("graphql") or {}).get("data", snap.get("graphql") or {}).get("organization") or {}
-    return {"name": o.get("name", gql.get("name")), "description": o.get("description", gql.get("description")),
+    fields = {"name": o.get("name", gql.get("name")), "description": o.get("description", gql.get("description")),
             "blog": o.get("blog", gql.get("websiteUrl")), "location": o.get("location", gql.get("location")),
             "email": o.get("email", gql.get("email")), "twitter_username": o.get("twitter_username", gql.get("twitterUsername")),
             "is_verified": o.get("is_verified", gql.get("isVerified")), "avatar_url": o.get("avatar_url", gql.get("avatarUrl")),
             "pinned": [n.get("nameWithOwner") for n in ((gql.get("pinnedItems") or {}).get("nodes") or []) if n]
             if gql.get("pinnedItems") is not None else snap.get("pinned_public")}
+    captured = {"name": "name", "description": "description", "blog": "websiteUrl", "email": "email"}
+    return {k: v for k, v in fields.items() if k not in captured or k in o or captured[k] in gql}
+
+
+def _known_repo_names(estate: Estate, full: str) -> set[str]:
+    """All repository and owner names connected by the run's known rename/transfer actions."""
+    resolver = estate.resolver
+    edges = [(resolver.slug(after), resolver.slug(before))
+             for after, (before, _action) in getattr(resolver, "_repo_before", {}).items()]
+    names = {resolver.slug(full).lower(): resolver.slug(full)}
+    pending = list(names.values())
+    while pending:
+        current = pending.pop().lower()
+        for after, before in edges:
+            for source, target in ((after, before), (before, after)):
+                if source.lower() == current and target.lower() not in names:
+                    names[target.lower()] = target
+                    pending.append(target)
+    return {f"{alias}/{name.split('/', 1)[1]}" for name in names.values()
+            for alias in resolver.aliases(name.split("/", 1)[0])}
+
+
+def _partial_profile_checks(estate: Estate, row: dict, so: dict, text: str | None) -> tuple[dict, list[str]]:
+    """Check known identity and captured private links without inventing a registry's desired state."""
+    cells, notes = {}, []
+    differences = [k for k, expected in (("name", row.get("display_name")), ("description", row.get("description")))
+                   if expected and k in so and so[k] != expected]
+    cells["O2"] = "fail" if differences else "needs-input:registry"
+    notes += [f"O2 {k}: differs from brand identity" for k in differences]
+    notes.append("O2 checked captured name/description against brand; desired About fields need registry")
+    private, public, descriptions = set(), set(), []
+    for m in estate.metas.values():
+        if m["_repo"] == ".github":
+            continue
+        if estate.is_public(m["_full"]):
+            public.add(m["_repo"].lower())
+            descriptions.append(m.get("description") or "")
+        elif estate.visibility(m["_full"]) != "unknown":
+            private.update(_known_repo_names(estate, m["_full"]))
+    hits = leak_check(text, private, [], public, _logins(estate), descriptions) if text is not None else []
+    cells["O3"] = "fail" if hits or text is not None and not text.strip() else "needs-input:registry"
+    notes += [f"O3 leak: {hit}" for hit in hits]
+    if text is not None and not text.strip():
+        notes.append("O3 profile README is empty")
+    notes.append("O3 checked captured private repository links and empty README; required listings and internal notes "
+                 "need registry")
+    return cells, notes
+
+
+def _snapshot_visibility(meta: dict) -> str:
+    """Normalize the supported REST/GraphQL visibility fields on every snapshot ingestion path."""
+    visibility = str(meta.get("visibility") or "").lower()
+    if visibility in ("public", "private", "internal"):
+        return visibility
+    for key in ("isPrivate", "private"):
+        if isinstance(meta.get(key), bool):
+            return "private" if meta[key] else "public"
+    return ""
 
 
 def doctor(estate: Estate, org: str, snap: dict, *, repo_dir: str | Path | None = None, avatar: str | Path | None = None,
            email_approved: bool | None = None, allow_t3: bool = False) -> dict:
     """O1 avatar, O2 About, O3 profile README, O4 health, O6 pins, O9 banner, O11 verified badge."""
     r = estate.resolver
-    login, row, reg = _gate(estate, org, allow_t3=allow_t3, allow_hold=True)
+    login, row, reg = _gate(estate, org, allow_t3=allow_t3, allow_hold=True, require_registry=False)
+    has_registry = r.registry_key(org) is not None
     for m in snap.get("repos") or []:
-        if isinstance(m, dict) and m.get("name") and not estate.meta(f"{login}/{m['name']}"):
-            estate.add_meta({"owner": login, "repo": m["name"], "visibility": str(m.get("visibility", "")).lower(),
+        if not isinstance(m, dict) or not m.get("name"):
+            continue
+        existing = estate.meta(f"{login}/{m['name']}")
+        if existing is None:
+            estate.add_meta({**m, "owner": login, "repo": m["name"], "visibility": _snapshot_visibility(m),
                              "fork": m.get("isFork", m.get("fork")), "archived": m.get("isArchived", m.get("archived")),
                              "description": m.get("description"), "stargazers_count": m.get("stargazerCount", 0),
                              "pushed_at": m.get("pushedAt")})
+        else:
+            evidence = {}
+            if estate.visibility(f"{login}/{m['name']}") == "unknown":
+                if visibility := _snapshot_visibility(m):
+                    evidence["visibility"] = visibility
+            if "files" in m:
+                current_files, current_complete = _captured_files(existing)
+                incoming_files, incoming_complete = _captured_files(m)
+                if not current_complete:
+                    if incoming_complete:
+                        evidence.update(files=m["files"], files_complete=True)
+                    else:
+                        # Unlisted paths are unknown; explicit map entries retain presence or absence.
+                        merged = dict(current_files)
+                        for path, value in incoming_files.items():
+                            merged.setdefault(path, value)
+                        evidence.update(files=merged, files_complete=False)
+            if evidence:
+                estate.add_meta({**existing, **evidence})
     so = _snap_org(snap)
     cells: dict[str, str] = {}
     notes: list[str] = []
@@ -1863,22 +1955,27 @@ def doctor(estate: Estate, org: str, snap: dict, *, repo_dir: str | Path | None 
     else:
         cells["O1"] = "unknown"
     # O2 About
-    want, _ = about(estate, org, email_approved=email_approved, allow_t3=allow_t3)
+    want, _ = about(estate, org, email_approved=email_approved, allow_t3=allow_t3) if has_registry else ({}, OK)
     payload = want.get("payload") or {}
-    if so.get("name") is None and so.get("description") is None:
-        cells["O2"] = "unknown"
-    else:
-        diff = [k for k, v in payload.items() if (so.get(k) or "") != v]
-        cells["O2"] = "pass" if not diff else "fail"
-        notes += [f"O2 {k}: {so.get(k)!r} != {payload[k]!r}" for k in diff]
-        if "email" not in payload and not so.get("email"):
-            notes.append("O2 email empty (needs-approval:org-email)")
+    if has_registry:
+        if so.get("name") is None and so.get("description") is None:
+            cells["O2"] = "unknown"
+        else:
+            diff = [k for k, v in payload.items() if (so.get(k) or "") != v]
+            cells["O2"] = "pass" if not diff else "fail"
+            notes += [f"O2 {k}: {so.get(k)!r} != {payload[k]!r}" for k in diff]
+            if "email" not in payload and not so.get("email"):
+                notes.append("O2 email empty (needs-approval:org-email)")
     # O3 profile README
     text = snap.get("profile_readme")
     if text is None and repo_dir and (Path(repo_dir) / "profile" / "README.md").is_file():
         text = (Path(repo_dir) / "profile" / "README.md").read_text(encoding="utf-8")
-    data, _ = public_slice(estate, org)
-    if text is None:
+    data = public_slice(estate, org)[0] if has_registry else None
+    if not has_registry:
+        partial, partial_notes = _partial_profile_checks(estate, row, so, text)
+        cells.update(partial)
+        notes += partial_notes
+    elif text is None:
         cells["O3"] = "unknown"
     else:
         listed = {e["full_name"] for k in ("featured", "forks", "archived") for e in data[k]}
@@ -1900,7 +1997,10 @@ def doctor(estate: Estate, org: str, snap: dict, *, repo_dir: str | Path | None 
     want_pins = [(p.get("repo") if isinstance(p, dict) else p) for p in reg.get("pins_public") or []]
     want_pins = [estate.current(f"{login}/{n}") for n in want_pins if estate.is_public(f"{login}/{n}")]
     have = so.get("pinned")
-    if not want_pins and data["public_repo_count"] == 0:
+    if not has_registry:
+        cells["O6"] = "needs-input:registry"
+        notes.append("O6 desired pins need registry")
+    elif not want_pins and data["public_repo_count"] == 0:
         cells["O6"] = "n/a"
     elif have is None:
         cells["O6"] = "unknown"
@@ -1925,14 +2025,22 @@ def doctor(estate: Estate, org: str, snap: dict, *, repo_dir: str | Path | None 
     if so.get("is_verified") is True:
         cells["O11"] = "pass"
     elif so.get("is_verified") is False:
-        vd = want.get("verified_domain") or {}
-        cells["O11"] = "warn" if vd.get("reason") else "fail"
-        notes.append(f"O11 not verified: {vd.get('reason') or 'no reason code'}")
+        vd = (want.get("verified_domain") or {}) if has_registry else verified_domain(
+            so.get("blog") or "", so.get("email"), _verified_domains(),
+            hold=r.family_hold(org) or r.owner_status(org) == "hold")
+        if not has_registry and vd.get("reason") != "hold" and (
+                "blog" not in so or vd.get("reason") == "email-blank" and "email" not in so):
+            cells["O11"] = "unknown"
+            notes.append("O11 not verified: capture website/email to determine the reason")
+        else:
+            cells["O11"] = "warn" if vd.get("reason") else "fail"
+            notes.append(f"O11 not verified: {vd.get('reason') or 'no reason code'}")
     else:
         cells["O11"] = "unknown"
     done = all(v in ("pass", "warn", "n/a") for v in cells.values())
     return {"org": login, "tier": _tier(row), "cells": cells, "done": "yes" if done else "no", "notes": notes,
-            "reads": snapshot_reads(login), "checked": date.today().isoformat()}
+            "reads": snapshot_reads(login), "checked": date.today().isoformat(),
+            "logs": [] if has_registry else ["needs-input:registry"]}
 
 
 def as_tsv(r: dict, header: bool = False) -> str:
@@ -1988,7 +2096,8 @@ def register(sub) -> None:
 def estate_from_args(args) -> Estate:
     from .config import load_brand
     brand = load_brand(getattr(args, "config", None))
-    resolver = Resolver.from_paths(brand, args.registry, args.approved, args.approved_yaml, args.actions, require_registry=True)
+    resolver = Resolver.from_paths(brand, args.registry, args.approved, args.approved_yaml, args.actions,
+                                   require_registry=args.action not in ("health", "doctor"))
     estate = Estate(brand, resolver, flags=load_flags(args.decisions or _default_decisions()))
     load_metas(args.meta_dir, estate)
     return estate
@@ -2048,6 +2157,6 @@ def cmd_org(args):
             print(as_tsv(row, args.header) if args.org_doctor_format == "tsv" else as_md(row, args.header))
             return None, OK
         return {"command": "org", "action": "doctor", "owner": row["org"], "result": "done" if row["done"] == "yes" else "open",
-                **row, "logs": []}, OK
+                **row}, OK
     append_jobs(args.jobs, res.get("jobs") or [])
     return res, code
