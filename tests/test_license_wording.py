@@ -260,3 +260,37 @@ def test_upgrade_private_marked_section_keeps_authored_paragraph(make_ctx, tmp_p
     assert "All rights reserved" not in out
     assert readme.preservation(text, out, removed) == []
     assert "needs-input:license-wording" in ctx.logs
+
+
+# --- review round 3: fenced/indented authored examples survive, preserve mode is gated too (issue 36) ---
+def _libre(make_ctx, tmp_path, **kw):
+    kw.setdefault("license", None)
+    kw.setdefault("visibility", "private")
+    return make_ctx(repo_dir=tmp_path, owner="LibreEvolve", repo="thing", created_at="2025-01-01T00:00:00Z", **kw)
+
+
+def test_upgrade_keeps_fenced_example_with_blank_lines(make_ctx, tmp_path):
+    ctx = _libre(make_ctx, tmp_path)
+    ex = "```text\n\nProprietary. Copyright (c) 2025 Example. All rights reserved.\n\n```"
+    text = _readme_with_license(ex)
+    out, removed = readme.upgrade(ctx, text)
+    assert ex in out and not any("Proprietary" in r for r in removed)
+    assert readme.preservation(text, out, removed) == []
+
+
+def test_upgrade_keeps_indentation_of_authored_code_after_generated_row(make_ctx, tmp_path):
+    ctx = make_ctx(repo_dir=tmp_path, owner="Acme-Labs", repo="thing", license="MIT")
+    code = "    SPDX-License-Identifier: MIT\n    Documented as literal text."
+    text = _readme_with_license(RV["t2_mit"].replace("<Brand>", "Acme") + "\n\n" + code)
+    out, removed = readme.upgrade(ctx, text)
+    assert code in out and FACTUAL_MIT in out
+    assert "Acme" not in out.split("## License")[1]
+
+
+def test_preserve_mode_gates_unmarked_generated_license_row(make_ctx, tmp_path):
+    ctx = _libre(make_ctx, tmp_path)
+    text = _readme_with_license("Proprietary. Copyright (c) 2025 Example. All rights reserved.")
+    text = text.replace("Run it.", "Run it. " + "x" * 16000)  # over 15,000 bytes: preserve mode
+    out, removed = readme.upgrade(ctx, text)
+    assert "All rights reserved" not in out and "needs-input:license-wording" in ctx.logs
+    assert "Run it. xxx" in out
