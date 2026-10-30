@@ -3,10 +3,20 @@
 Synthetic data only: the owner 'Pick-Your-AI' is the T3 owner already used by test_allow_t3_global.py. Ordering is
 driven by threading.Event and join(timeout=...) only; no time.sleep races.
 
-Status: these are regression guards, not a fix. The fix is commit be5cb14 (ContextVar sign-off), already in the base
-efc43c9, so these tests pass on that base. Evidence that they catch the old behaviour: with config.py's sign-off
-replaced by a process-wide module global (same public API, same tests), all 5 tests fail (test 1 reports
-'allowed' == 'refused'). Reproduced in a scratch copy; the committed config.py is unchanged.
+Status: these are regression guards, not a red-green fix. The fix is commit be5cb14 (ContextVar sign-off), already in
+the base efc43c9, so these tests pass on that base by design. They are meant to fail if the sign-off becomes a
+process-wide global again.
+
+Mutation evidence (re-run on the committed tree; config.py restored afterwards with git checkout, not committed):
+a mutant config.py that keeps the same public API (set_t3_signed_off returns the prior value as its token,
+reset_t3_signed_off restores it) but stores the sign-off in a module global makes all 5 tests fail:
+  - test 1 fails on its B-outcome assertion (a thread that never signed off is 'allowed', not 'refused');
+  - test 2 and test 4 fail because the main thread / host sees True from the other thread;
+  - test 3 fails only in the full-file run, because test 2 leaves the global set to True (run alone it passes
+    on the mutant, which is itself the leak: the sign-off outlives its thread);
+  - test 5 fails on the 'global _T3_SIGNED_OFF' source check and the ContextVar type check.
+To reproduce, swap such a mutant into scripts/ctshowcase/config.py, run
+`python -m pytest -q tests/test_t3_concurrency.py`, expect "5 failed", then restore config.py.
 """
 from __future__ import annotations
 
