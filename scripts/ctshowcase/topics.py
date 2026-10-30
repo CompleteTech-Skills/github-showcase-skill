@@ -81,9 +81,15 @@ def membership_topics(ctx: RepoContext, also_in: list[str]) -> tuple[list[str], 
     return orgs, topics_, logs
 
 
-def merge(ctx: RepoContext, also_in: list[str] | None = None) -> dict:
+def _org_extra(ctx: RepoContext) -> set[str]:
+    """Topics the org has approved as extras (task 92). Until that lands, no topic is approved."""
+    return set()
+
+
+def merge(ctx: RepoContext, also_in: list[str] | None = None, prune: bool = False) -> dict:
     """§5.6 merge. `also_in` (org logins, from the registry or `--also-in`) adds the §5.3a org membership topics; when
-    it is None, the metadata's own `also_in` list is used (empty when absent)."""
+    it is None, the metadata's own `also_in` list is used (empty when absent). Existing topics outside the vocabulary
+    are kept as extras (additive, logged `review-remove:TOPIC`) unless `prune` restores the legacy removal."""
     t = standard("topics")
     meta = ctx.meta
     owner, slug = ctx.owner, ctx.repo
@@ -106,6 +112,7 @@ def merge(ctx: RepoContext, also_in: list[str] | None = None) -> dict:
 
     # step 1-2: alias then drop
     surviving = []
+    extras_kept: list[str] = []
     for x in current:
         a = alias(x)
         low_owner = owner.lower()
@@ -115,9 +122,11 @@ def merge(ctx: RepoContext, also_in: list[str] | None = None) -> dict:
             continue
         if a in t["type_topics"] and a != typ:
             continue
-        if a not in vocab and a != cve_vendor:
-            continue
         if private and a in t["private_banned"]:
+            continue
+        if a not in vocab and a != cve_vendor:
+            if not prune and a not in extras_kept:
+                extras_kept.append(a)
             continue
         if a not in surviving:
             surviving.append(a)
@@ -184,7 +193,19 @@ def merge(ctx: RepoContext, also_in: list[str] | None = None) -> dict:
     tech = [x for x in dict.fromkeys(tech) if x not in proposed][:3]
     proposed += tech
     proposed = list(dict.fromkeys(proposed))
-    proposed = proposed[:limit]
+    core = proposed[:limit]
+    proposed = core
+    if not prune:
+        # additive default: existing out-of-vocabulary topics fill the room left by the required set; they never
+        # displace a required topic and never affect the domain/tech ranking above
+        extras = [x for x in extras_kept if x not in core]
+        room = limit - len(core)
+        kept = extras[:max(room, 0)]
+        proposed = core + kept
+        approved = _org_extra(ctx)
+        for x in extras:
+            if x not in approved:
+                logs.append(f"review-remove:{x}")
     minimum = t["min_private"] if private else t["min_public"]
     if len(proposed) < minimum:
         logs.append("topics-short")

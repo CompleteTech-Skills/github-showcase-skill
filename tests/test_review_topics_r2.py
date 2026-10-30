@@ -56,7 +56,7 @@ def test_cve_vendor_topic_is_proposed_under_new_login(renamed_ctx):
 def test_vendor_rule_stays_scoped_to_the_security_org(renamed_ctx):
     ctx = renamed_ctx(SEC_RENAME, owner="Northwind-Trading-Co", repo=CVE_REPO, description=CVE_DESC,
                       topics=["northwind"])
-    p = merge(ctx)["proposed"]
+    p = merge(ctx, prune=True)["proposed"]
     assert "northwind" not in p
 
 
