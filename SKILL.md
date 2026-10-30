@@ -188,7 +188,7 @@ lint svg --kind intro|card|tile|plate|divider FILE...
 lint readme [README.md] [--variant auto]
 lint banner [docs/images/banner.png]
 lint all
-lint public-leak FILE... [--meta-dir DIR] [--registry FILE] [--decisions FILE] [--org ORG[,ORG]]
+lint public-leak FILE... [--denylist FILE] [--meta-dir DIR] [--registry FILE] [--decisions FILE] [--org ORG[,ORG]]
 lint prose [FILE...] [--text TEXT]... [--prose-kind text|description|tagline] [--preserved] [--allow WORD]...
 contact-sheet INPUT... --out PATH [--mode grid|stack|avatar] [--tile W] [--cols N] [--gap 24]
               [--widths 1012,390] [--mask none|circle|rounded] [--labels] [--title TEXT]
@@ -247,7 +247,7 @@ content sidebar --facts FILE [--packages FILE]... [--current FILE] [--repo OWNER
 | `intro` | Renders the profile intro (animated only for the personal profile and T1 flagship orgs; `.still` reduced-motion frame). | `--out` |
 | `footer` | Prints the decision 18 footer between `showcase:footer` markers, or checks that the README ends with it; `--check --online` also HEADs both raw logo URLs and fails (`fail:offline`) unless both return 200 (the Phase 4.0 hard gate). `--org OWNER` answers `exempt`, `exempt:footer` or `hold` for an org outside the footer's scope; for the watching org, `--check` still reads the README (its `.github` gets the footer, and `--org` cannot tell it from a fork). | stdout |
 | `readme` | Scaffolds, upgrades or refreshes the header marker blocks; never drops a line (multiset check). `--bootstrap` fills a template body only while its marker's sha256 still matches (a person's edit makes the block theirs). | `README.md` with `--write`; `CONTRIBUTING.md` with `--bootstrap` |
-| `lint` | SVG rules, README rules (R7 plus decisions 13 and 18) and banner PNG checks; `public-leak` checks any public file the run writes against the estate's private set (private slugs and names under every login of the owner, members-only pins, internal notes from the org rows, the registry's top-level notes and judge_changes and the profile's internal keys; OPS-03), reading the private registry and `--meta-dir` only; `prose` runs the CQ-17 checks on text the run writes (§1.2 brand strings, no emoji, no placeholders, the §4.1 formula for descriptions and taglines, typos when the optional `codespell` is installed; `--preserved` text only warns). | nothing |
+| `lint` | SVG rules, README rules (R7 plus decisions 13 and 18) and banner PNG checks; `public-leak` checks any public file the run writes against the estate's private set (private slugs and names under every login of the owner, members-only pins, internal notes from the org rows, the registry's top-level notes and judge_changes and the profile's internal keys; OPS-03), reading the private registry and `--meta-dir` only (or, with `--denylist FILE`, only the listed slugs and names, with partial coverage: see the table in references/org.md); `prose` runs the CQ-17 checks on text the run writes (§1.2 brand strings, no emoji, no placeholders, the §4.1 formula for descriptions and taglines, typos when the optional `codespell` is installed; `--preserved` text only warns). | nothing |
 | `contact-sheet` | Lays outputs out the way GitHub shows them, on `#0d1117` and `#ffffff` (proofing surfaces, not asset variants). `--org ORG --cross-surface` is the G4 gate: the org avatar at 32 px, a hero banner, a repo card, the social preview and the org banner on one labelled sheet; a missing surface is logged `needs-input:cross-surface:<surface>` (result `incomplete`). | `PATH.on-github-dark.png`, `PATH.on-github-light.png` |
 | `doctor` | Prints the definition-of-done row: `R1`–`R11`, `banner`, `icon`, `card`, `footer`, `done`. No network. `--estate` classifies every repository in `--meta-dir` that `registry/estate.yaml` does not list with `decisions/POLICY.md` (`keep`, `move`, `archive`, `delete`, `merge`, `rename`, `rename-default-branch`; never acted on) and diffs the template-managed files of template-born checkouts against the current template (bump PRs are proposals). | `--out` (merges its own entries into `NEW_PROPOSALS.yaml`; others stay) |
 | `new` | Plans a repository from the template: the `gh repo create OWNER/NAME --template CompleteTech-LLC/completetech-repo-template --private` writer job, then `adopt` on it (naming N1–N4 and the §5.4 type are checked first; the watching org, placeholder orgs and refused owners exit 2). | `--records`, `--jobs` |
@@ -256,6 +256,17 @@ content sidebar --facts FILE [--packages FILE]... [--current FILE] [--repo OWNER
 | `org` | Decisions 5, 8, 9, 14, 15, 18, 20 and 23: the org profile README from the registry's public slice (leak-checked), the personal CompleteDotTech README with `profile --user` (kit order, leak-checked against the whole estate), About payload, pin and star List plan, label jobs for every repository homed in the org, `.github` health cells, and the O-check row. | `--out-dir` (profile only, after the leak check; an existing hand-made profile also needs a `profile-retemplate` approval), `--jobs` |
 | `project` | Decision 23, STANDARD §13: capture query, template spec, board lint (O10), two-stage copy plan (structure only, nothing deleted, mutations inline), board README, and the private Estate board. | `--out`, `--files-dir`, `--jobs` |
 | `content` | Audit gaps CQ-04, RP-09 (links), RP-07, CQ-08 (language bar), RP-06, RP-01, CQ-13 (Actions), RP-03, RP-10 (images), RP-05 (sidebar), RT-04 (repo icon) and R10 (`content social`: the 1280×640 repository social preview, STANDARD §9.5, in the same family design, plus with `--job` its browser upload job). | `--report`, `--jobs`, `--out`, `--out-dir`, `--preview`, `--cache` |
+
+`lint public-leak FILE... --denylist FILE` (one `owner/repo` or bare name per line) runs with no registry, estate bundle or `--meta-dir`; without `--denylist` the registry is still required (exit 4). Hits give the kind and line only, never the denylist entry. Coverage is partial:
+
+| Check | Registry mode | `--denylist` mode |
+|---|---|---|
+| Private slugs and distinctive names | Every private repository of the estate | Listed slugs and bare names only |
+| Members-only pins | Covered | Not covered |
+| Internal notes | Covered | Not covered |
+| Unlisted private repositories | Covered | Not covered |
+
+An exit 0 in denylist mode is not an OPS-03 pass; see [references/org.md](references/org.md).
 
 `--type` replaces type detection with a §5.4 type (logged `type-override:<type>`); use it only when neither a checkout nor a captured file tree is available, for example with registry metadata. Without a tree, the type is provisional (`needs-input:file-tree`); a README link to a root `SKILL.md` still counts as rule 5.
 

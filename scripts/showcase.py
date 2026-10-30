@@ -736,14 +736,44 @@ def cmd_lint(args):
     return None, CHECK_FAILED if bad else OK
 
 
+def _redact_hit(hit: str, text: str) -> list[str]:
+    """`kind:payload` -> `kind:L<line>` for every line naming the payload (L0 when none does, e.g. a wrapped note)."""
+    kind, _, payload = hit.partition(":")
+    needle = (payload.split("/", 1)[-1] if kind == "private-name" else payload).lower()
+    lines = [n for n, line in enumerate(text.splitlines(), 1) if needle in line.lower()]
+    return [f"{kind}:L{n}" for n in lines or [0]]
+
+
 def lint_public_leak(args) -> list[dict]:
     """OPS-03: no private slug, distinctive private name, members-only pin or internal note in any public file the run
     writes. Wraps the `org profile` leak check with the whole estate's private set (or --org ORG[,ORG]); needs the
     private registry (read only) and the repositories' metadata (--meta-dir) to tell public from private."""
-    from ctshowcase.org import Estate, estate_leak_scope, load_flags, load_metas, public_leaks, _default_decisions
+    from ctshowcase.org import (Estate, denylist_leaks, estate_leak_scope, load_denylist, load_flags, load_metas,
+                                public_leaks, _default_decisions)
     from ctshowcase.resolver import Resolver
     if not args.files:
         raise ShowcaseError("lint public-leak needs FILE...", log="usage")
+    den = None
+    if getattr(args, "denylist", None):
+        den = load_denylist(args.denylist)
+        if not args.registry:  # registry-free: the listed entries only, no estate, no brand, no metadata
+            ignored = [f"ignored-in-denylist-mode:{flag}" for flag, dest in (
+                ("--meta-dir", "meta_dir"), ("--decisions", "decisions"), ("--org", "org"), ("--approved", "approved"),
+                ("--approved-yaml", "approved_yaml"), ("--actions", "actions")) if getattr(args, dest, None)]
+            logs = ["registry-free:denylist-only",
+                    "coverage:denylist-entries-only (not the full estate private set, internal notes or members-only pins)"]
+            logs += ignored
+            out = []
+            for f in args.files:
+                p = Path(f)
+                if not p.is_file():
+                    out.append({"file": f, "result": "fail", "hits": [], "fails": ["file not found"], "logs": logs,
+                                "mode": "denylist"})
+                    continue
+                hits = denylist_leaks(p.read_text(encoding="utf-8", errors="replace"), *den)
+                out.append({"file": f, "result": "fail" if hits else "pass", "hits": hits, "logs": logs,
+                            "mode": "denylist"})
+            return out
     b = brand(args)
     res = Resolver.from_paths(b, args.registry, args.approved, args.approved_yaml, args.actions, require_registry=True)
     estate = Estate(b, res, flags=load_flags(args.decisions or _default_decisions()))
@@ -757,8 +787,19 @@ def lint_public_leak(args) -> list[dict]:
         p = Path(f)
         if not p.is_file():
             out.append({"file": f, "result": "fail", "hits": [], "fails": ["file not found"], "logs": logs})
+            if den:
+                out[-1]["mode"] = "registry+denylist"
             continue
-        hits = public_leaks(p.read_text(encoding="utf-8", errors="replace"), scope)
+        text = p.read_text(encoding="utf-8", errors="replace")
+        hits = public_leaks(text, scope)
+        if den:  # --denylist unions with the registry result; it never narrows an explicit --registry
+            # Registry hits carry slugs and names, which may also be denylist entries: with --denylist active every
+            # payload is redacted to `kind:L<line>`, the same no-echo form the denylist hits use.
+            hits = sorted({r for h in hits for r in _redact_hit(h, text)} | set(denylist_leaks(text, *den)),
+                          key=lambda h: (int(h.rsplit("L", 1)[1]), h))
+            out.append({"file": f, "result": "fail" if hits else "pass", "hits": hits, "logs": logs,
+                        "mode": "registry+denylist"})
+            continue
         out.append({"file": f, "result": "fail" if hits else "pass", "hits": hits, "logs": logs})
     return out
 
@@ -1150,6 +1191,9 @@ def parser() -> argparse.ArgumentParser:
     for flag in ("--approved", "--approved-yaml", "--actions"):
         s.add_argument(flag, help="public-leak: approval files for the org resolver (default: the bundle's)")
     s.add_argument("--org", help="public-leak: limit the private set to ORG[,ORG] (default: every registry org)")
+    s.add_argument("--denylist", help="public-leak: text file of private slugs (owner/repo) and bare names, one per line, "
+                                      "# comments; checks FILE... without the private registry (partial coverage, see "
+                                      "references/org.md)")
     s.add_argument("--prose-kind", choices=("text", "description", "tagline"), default="text",
                    help="prose: text (README, org and profile prose), or one description / tagline per FILE or --text")
     s.add_argument("--text", action="append", help="prose: check this text (repeatable)")
