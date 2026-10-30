@@ -284,7 +284,7 @@ def test_bootstrap_contributing_rewrites_only_the_template_links(brand):
 
 # ------------------------------------------------------------------------------------------ current login
 def test_social_preview_and_nav_line_name_the_current_login(fixture_meta, fonts):
-    b = _renamed_brand("CompleTetech-Security", "CompleteTech-Security")
+    b = load_brand()  # the row is keyed by the current login; the old one is a former slug
     ctx = RepoContext(b, normalize(fixture_meta("CompleTetech-Security__php2shell-check")), None)
     sc, info = social.social_layout(ctx, fonts)
     texts = [n.text for n in sc.nodes if isinstance(n, social.Text)]

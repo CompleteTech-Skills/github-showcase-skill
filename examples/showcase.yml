@@ -2,7 +2,7 @@
 # All keys are optional and change content only; colours and fonts always come from
 # references/brand.yaml and are rejected here. This example reproduces the golden
 # php2shell-check banner: two CVE key chips, one attribute chip and a short subtitle.
-for: CompleTetech-Security/php2shell-check   # these overrides apply only to this repository (a copy ignores them)
+for: CompleteTech-Security/php2shell-check   # these overrides apply only to this repository (a copy ignores them)
 type: null                # a §5.4 type (cli, library, web-app, ...) while the file tree cannot show it yet; logged
 icon: assets/icon.png
 subtitle: "Passive PHP2Shell exposure triage for websites"

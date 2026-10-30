@@ -40,7 +40,7 @@ Starred values are approximate until the estate planner re-measures them and pub
 | CompleteTech-LLC | cloud puff, blank document sheet, gear, chat bubble |
 | CompleteTech-Skills | envelope with open flap, document sheet with blank ruled lines, coin stack, scroll with gold wax seal, certificate with gold ribbon rosette |
 | CompleteTech-LLC-AI-Research | telescope aimed at a cluster of glowing node spheres |
-| `CompleTetech-Security` | shield over rack server units, blank tag cards; one tag card in `#E11D48` as the finding |
+| `CompleteTech-Security` | shield over rack server units, blank tag cards; one tag card in `#E11D48` as the finding |
 | CompleteTech-Infrastructure | rack server unit, plug-in cube, cloud puff, circuit board |
 | CompleteTech-Commerce | bar-chart panel, coin stack, briefcase, magnifier |
 | CompleteTech-Creative | film reel, microphone, open book, chat bubble |

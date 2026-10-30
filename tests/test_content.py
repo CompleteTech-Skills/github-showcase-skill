@@ -59,7 +59,7 @@ def resolver(brand, *ids, registry=None):
 def test_lookups_follow_approved_renames(brand):
     r = resolver(brand, "org-001", "org-003", "org-005")
     assert C.current_login(r, "CompleTetech-Security") == "CompleteTech-Security"
-    assert C.brand_key(r, "CompleteTech-Security") == "CompleTetech-Security"
+    assert C.brand_key(r, "CompleteTech-Security") == "CompleteTech-Security"  # org-001 is done: the row is keyed by the new login
     assert C.org_row(r, brand, "CompleteTech-Security", require=True)["eyebrow"] == "SECURITY"
     assert C.org_style(r, brand, "CompleteTech-TCG")["name"] == brand.style("CompleteTech-Pokemon")["name"]
     assert r.owner_status("CompleteTech-Following") == "watching"  # the exemption survives the rename
@@ -76,7 +76,7 @@ def test_load_resolver_from_files(brand):
     r = C.load_resolver(brand, FIX / "registry.min.yaml", FIX / "approved.empty.txt", FIX / "approved.tcg.yaml",
                         FIX / "estate-actions.json")
     assert C.current_login(r, "CompleteTech-Pokemon") == "CompleteTech-TCG"
-    assert C.current_login(r, "CompleTetech-Security") == "CompleTetech-Security"  # org-001 is not approved here
+    assert C.current_login(r, "CompleTetech-Security") == "CompleteTech-Security"  # former_slugs: the old login resolves without an approval
     assert C.in_estate(r, NW)
 
 

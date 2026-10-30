@@ -443,25 +443,6 @@
    "nav_name": "AI Ascension",
    "tier": "T2"
   },
-  "CompleTetech-Security": {
-   "banner_category": "SECURITY TOOLS",
-   "brand_topic": "completetech",
-   "description": "Offline, dependency-free CVE version checkers for network appliances and Node.js. A CompleteTech LLC organization.",
-   "display_name": "CompleteTech Security",
-   "eyebrow": "SECURITY",
-   "family": "completetech",
-   "family_topics": [
-    "security",
-    "cve"
-   ],
-   "flagship": true,
-   "footer": true,
-   "former_slugs": [],
-   "license_chip": "AGPL-3.0 or commercial",
-   "mark": "assets/orgs/CompleTetech-Security/mark.png",
-   "nav_name": "CompleteTech Security",
-   "tier": "T1"
-  },
   "CompleteDotTech": {
    "brand_topic": "completetech",
    "description": null,
@@ -670,6 +651,27 @@
    "former_slugs": [],
    "mark": "assets/orgs/CompleteTech-Pokemon/mark.png",
    "nav_name": "CompleteTech TCG",
+   "tier": "T1"
+  },
+  "CompleteTech-Security": {
+   "banner_category": "SECURITY TOOLS",
+   "brand_topic": "completetech",
+   "description": "Offline, dependency-free CVE version checkers for network appliances and Node.js. A CompleteTech LLC organization.",
+   "display_name": "CompleteTech Security",
+   "eyebrow": "SECURITY",
+   "family": "completetech",
+   "family_topics": [
+    "security",
+    "cve"
+   ],
+   "flagship": true,
+   "footer": true,
+   "former_slugs": [
+    "CompleTetech-Security"
+   ],
+   "license_chip": "AGPL-3.0 or commercial",
+   "mark": "assets/orgs/CompleteTech-Security/mark.png",
+   "nav_name": "CompleteTech Security",
    "tier": "T1"
   },
   "CompleteTech-Skills": {

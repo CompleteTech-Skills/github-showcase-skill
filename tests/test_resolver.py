@@ -24,7 +24,7 @@ def test_approved_tsv_rename_resolves_brand_row_and_slugs(brand):
     r = R.Resolver(brand, {}, approvals(rows=[("org-rename", "CompleTetech-Security", "*", "CompleteTech-Security")]))
     assert r.canonical("CompleTetech-Security") == "CompleteTech-Security"
     assert r.canonical("completetech-security") == "CompleteTech-Security"
-    assert r.brand_key("CompleteTech-Security") == "CompleTetech-Security"
+    assert r.brand_key("CompleteTech-Security") == "CompleteTech-Security"
     row = r.brand_org("CompleteTech-Security")
     assert row["owner"] == "CompleteTech-Security" and row["display_name"] == "CompleteTech Security" and row["known"]
     assert r.slug("CompleTetech-Security/php2shell-check") == "CompleteTech-Security/php2shell-check"
@@ -32,9 +32,10 @@ def test_approved_tsv_rename_resolves_brand_row_and_slugs(brand):
 
 
 def test_unapproved_rename_changes_nothing(brand):
-    r = R.Resolver(brand, {}, approvals(ids=[]))  # org-001 exists but is not approved
-    assert r.canonical("CompleTetech-Security") == "CompleTetech-Security"
-    assert r.summary()["renames"] == {}
+    r = R.Resolver(brand, {}, approvals(ids=[]))  # org-005 exists but is not approved
+    assert r.canonical("CompleteTech-Pokemon") == "CompleteTech-Pokemon"
+    assert r.canonical("CompleTetech-Security") == "CompleteTech-Security"  # org-001 is done: former_slugs covers it
+    assert r.summary()["renames"] == {"completetech-security": "CompleteTech-Security"}  # only the finished org-001 rename
 
 
 def test_approved_ids_keep_watching_exemption_and_disclaimer(brand):
