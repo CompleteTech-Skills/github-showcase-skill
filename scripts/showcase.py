@@ -456,7 +456,7 @@ def cmd_readme(args):
         if args.format == "text":
             sys.stdout.write(diff)
             if managed:  # the text form has no logs line: say why this is only a preview
-                print("readme: " + " ".join(l for l in ctx.logs if "readme-managed" in l), file=sys.stderr)
+                print("readme: " + " ".join(x for x in ctx.logs if "readme-managed" in x), file=sys.stderr)
             return None, OK
         res["diff"] = diff
     return res, OK
