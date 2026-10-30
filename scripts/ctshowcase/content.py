@@ -1828,7 +1828,7 @@ def org_glyph(text: str, owner: str) -> str | None:
     return None
 
 
-def icon_colours(ctx, text: str, org: dict, resolver: Resolver) -> dict:
+def icon_colours(ctx, text: str, org: dict, resolver: Resolver, *, require_palette: bool = True) -> dict:
     """Keep estate palettes explicit; the bundled template uses the committed brand tokens."""
     family = org_style(resolver, ctx.brand, ctx.owner)["name"]
     colours = family_colours(text, org["brand_key"], family, resolver.aliases(ctx.owner))
@@ -1836,6 +1836,8 @@ def icon_colours(ctx, text: str, org: dict, resolver: Resolver) -> dict:
         tokens = ctx.style["tokens"]
         missing = [key for key in ("icon_ink", "icon_spark") if not tokens.get(key)]
         if missing:
+            if not require_palette:
+                return colours
             raise NeedsInput("icon-palette", "selected brand config needs " + ", ".join(missing) +
                              " tokens for the bundled prompt; add them or pass --art-direction FILE "
                              "with a family palette")
@@ -1876,7 +1878,7 @@ def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = Non
     org["canonical"], org["current"] = org["brand_key"], current_login(resolver, owner)
     family = org_style(resolver, ctx.brand, owner)["name"]
     logins = [org["canonical"], *resolver.aliases(owner)]  # ART_DIRECTION may name the org by any of its logins (CQ-03)
-    colours = icon_colours(ctx, art_text, org, resolver)
+    colours = icon_colours(ctx, art_text, org, resolver, require_palette=option.upper() == "A")
     org_mark = next((g for g in (org_glyph(art_text, x) for x in logins) if g), None)
     facts = {"repository": f"{org['current']}/{repo}", "description": ctx.meta.get("description") or "",
              "type": ctx.det.get("type"), "category": ctx.det.get("category"), "topics": ctx.meta.get("topics") or [],

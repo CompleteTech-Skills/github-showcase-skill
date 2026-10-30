@@ -158,3 +158,31 @@ def test_legacy_config_keeps_normalize_and_check_usable(missing, brand, tmp_path
     assert C.main([*common, "prompt", "--art-direction", str(ROOT / "tests/fixtures/content/ART_DIRECTION.min.md")]) == 1
     result = json.loads(capsys.readouterr().out)
     assert result["result"] == "needs-writer"
+
+
+@pytest.mark.parametrize("explicit_art_direction", [False, True])
+def test_legacy_config_option_b_does_not_require_glyph_inks(explicit_art_direction, brand, tmp_path):
+    import yaml
+    from ctshowcase.config import schema_errors
+
+    raw = copy.deepcopy(brand.raw)
+    for family in [raw["defaults"], *raw["families"].values()]:
+        for token in ("icon_ink", "icon_spark"):
+            family.get("tokens", {}).pop(token, None)
+    assert schema_errors(raw) == []
+    config, meta = tmp_path / "legacy-brand.yaml", tmp_path / "meta.json"
+    config.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    glyph, output = tmp_path / "glyph.json", tmp_path / "prompt.md"
+    glyph.write_text(json.dumps({"subject": "A tray holding an envelope.", "objects": "A tray and envelope."}),
+                     encoding="utf-8")
+    args = [sys.executable, str(ROOT / "scripts/showcase.py"), "--config", str(config), "--meta", str(meta),
+            "--no-repo-dir", "content", "icon", "prompt", "--option", "B", "--glyph", str(glyph),
+            "--out", str(output)]
+    if explicit_art_direction:
+        args += ["--art-direction", str(C.SKILL_ART_DIRECTION)]
+    proc = subprocess.run(args, capture_output=True)
+    assert proc.returncode == 0, proc.stdout.decode("utf-8", errors="replace")
+    result = json.loads(proc.stdout.decode("utf-8"))
+    assert result["result"] == "ok" and result["missing"] == []
+    assert "A tray holding an envelope." in output.read_text(encoding="utf-8")

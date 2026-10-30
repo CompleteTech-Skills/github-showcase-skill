@@ -47,9 +47,10 @@ None by default. `links --online` and `images --online` make cached, rate-limite
 
 For an older custom `--config` that omits `icon_ink` or `icon_spark`, normalization
 and checking still run their other QA checks, with `needs-input:icon-palette` in
-the logs and no family-ink comparison. The bundled prompt needs both tokens and
-exits 4 with their names; add them to the custom config or pass an explicit
+the logs and no family-ink comparison. The bundled option A glyph prompt needs
+both tokens and exits 4 with their names; add them to the custom config or pass an explicit
 `--art-direction FILE` with a family palette. The shipped config supplies both
-tokens for every family.
+tokens for every family. Option B uses the illustration palette and does not
+require these glyph tokens, whether art direction is selected implicitly or explicitly.
 
 All actions run on a checkout and a metadata file alone. The registry and approvals refine the result when present (a renamed org's packages and links resolve to its current login; a registry `language:` override reaches the chip); without them the resolver uses `references/brand.yaml` and treats nothing as approved. `icon prompt`, `icon normalize` and `icon check` default to the skill's bundled [art-direction.md](art-direction.md), regardless of the working directory. Option A uses its repository glyph template and the family's `brand.yaml` tokens; option B uses its illustration template. Pass `--art-direction FILE` to select an explicit art direction file (relative paths resolve from the current directory), including an estate-format file with `(b) Family palette` and `(d) Shared prompt template` sections. A missing selected file reports `needs-input:art-direction` and names that path; `prompt` exits 4, while normalization and QA log the missing palette and continue their other checks.
