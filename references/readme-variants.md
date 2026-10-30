@@ -225,6 +225,8 @@ Placement: the final paragraph of `## About`; Variant E: the final line of `## C
 | 7 | Private, none of the above | Proprietary. Copyright (c) CREATED-YEAR CompleteTech LLC. All rights reserved. (TouchedByAnAgent until decided: `Proprietary. All rights reserved.`) |
 | 8 | Public, no license file | Omit `## License`; log `needs-input:license` (licenses are added only from the approved list). |
 
+The reserved-names sentence (rows 3, 4, 5, 6) and the copyright line (row 7) are written only when the org row in brand.yaml sets `license_wording`; otherwise only the factual license line is written (public) or the row is omitted (private) and `needs-input:license-wording` is logged.
+
 Never modify, rename or delete an existing LICENSE, NOTICE or COPYING file.
 
 ## Footer (decision 18; always the last block)
