@@ -369,7 +369,10 @@ def _license_paragraphs(body: str) -> list[tuple[str, bool]]:
                 paras.append((cur, False))
                 cur = []
             continue
-        if m and not cur:
+        if m:  # a fence opens even right after prose (CommonMark): flush the prose so the example stays code
+            if cur:
+                paras.append((cur, False))
+                cur = []
             fence = m.group(1)
         cur.append(ln)
     if cur:
@@ -381,11 +384,12 @@ def _license_paragraphs(body: str) -> list[tuple[str, bool]]:
     return out
 
 
-def split_generated_license(body: str) -> tuple[list[str], str]:
+def split_generated_license(body: str, unmarked_private: bool = True) -> tuple[list[str], str]:
     """Split a License section body into (lines this tool generated, authored remainder). Generated: the one paragraph
     after a `showcase:license` mark (the mark goes too), and any paragraph that is exactly a row the tool wrote (private
     "Proprietary..." or a public rights-sentence row). Every other paragraph is authored and survives verbatim,
-    including fenced examples and indented code (stripped copies are used only for classification) (issue 36)."""
+    including fenced examples and indented code (stripped copies are used only for classification). With
+    `unmarked_private` False an unmarked "Proprietary..." paragraph is owner-authored, not tool output (issue 36)."""
     gen: list[str] = []
     keep: list[str] = []
     after_mark = False
@@ -401,7 +405,7 @@ def split_generated_license(body: str) -> tuple[list[str], str]:
             after_mark = True
             continue
         marked = p.startswith(LICENSE_MARK + "\n")
-        if marked or after_mark or GENERATED_PRIVATE.fullmatch(p) or any(x.fullmatch(p) for x in pubs):
+        if marked or after_mark or (unmarked_private and GENERATED_PRIVATE.fullmatch(p)) or any(x.fullmatch(p) for x in pubs):
             if marked:
                 gen.append(LICENSE_MARK)
                 p = p[len(LICENSE_MARK):].strip()
@@ -418,15 +422,22 @@ def regenerate_license(ctx: RepoContext, name: str, body: str, removed: list[str
     (heading included, or "" when nothing remains), or None when the body has no generated text (issue 36)."""
     if (ctx.org.get("license_wording") or "").strip():
         return None
-    gen_lines, authored = split_generated_license(body)
+    omitted = license_omitted(ctx)
+    gen_lines, authored = split_generated_license(body, unmarked_private=not omitted)
     if not gen_lines:
+        # nothing to replace, but the wording is still missing: keep logging it on every run (issue 36)
+        if omitted:
+            ctx.log("needs-input:license-wording")
+        elif ctx.public:
+            license_section(ctx)  # logs needs-input:license-wording itself
         return None
-    if license_omitted(ctx):
+    if omitted:
         removed += gen_lines
         ctx.log("needs-input:license-wording")
         return f"## {name}\n\n{authored}" if authored else ""
     if ctx.public and (lic := license_section(ctx)):
-        new_body = "\n\n".join(x for x in [lic[1], authored] if x)
+        fact = (LICENSE_MARK + "\n" if LICENSE_MARK in gen_lines else "") + lic[1]  # keep the row managed
+        new_body = "\n\n".join(x for x in [fact, authored] if x)
         removed += [ln for ln in gen_lines if ln not in new_body]
         return f"## {lic[0]}\n\n{new_body}"
     return None
@@ -436,7 +447,7 @@ def gate_managed_license(ctx: RepoContext, text: str, removed: list[str]) -> str
     """Upgrade of a README that already has a managed `showcase:license` section: without org `license_wording` the
     rights sentence is replaced by the factual line (public) or the section is dropped (private). Orgs with wording
     are untouched. Lines that go are recorded in `removed` as intentional (issue 36)."""
-    if (ctx.org.get("license_wording") or "").strip() or LICENSE_MARK not in masked(text):
+    if (ctx.org.get("license_wording") or "").strip() or _mark_index(text) < 0:
         return text
     new = license_block(ctx, text)
     if new != text:
@@ -979,11 +990,21 @@ def reorder_lead(ctx: RepoContext, text: str) -> str:
 LICENSE_MARK = "<!-- showcase:license -->"
 
 
+def _mark_index(text: str) -> int:
+    """Offset of the first `showcase:license` mark outside fenced, inline and indented code, or -1."""
+    m = masked(text)
+    for hit in re.finditer(re.escape(LICENSE_MARK), m):
+        lead = m[m.rfind("\n", 0, hit.start()) + 1:hit.start()]
+        if lead.strip() or (len(lead) < 4 and "\t" not in lead):
+            return hit.start()
+    return -1
+
+
 def license_block(ctx: RepoContext, text: str) -> str:
     """Rewrite the paragraph after `<!-- showcase:license -->` (and its H2) from license_section(), with or without a
     LICENSE file: a private repository reads "Proprietary...", a Security repository gets "## Licensing". When the
     section cannot be derived (needs-input), the existing text stays."""
-    i = masked(text).find(LICENSE_MARK)  # the first mark outside code (a documented example is left alone)
+    i = _mark_index(text)  # the first mark outside code (a documented example is left alone)
     if i < 0:
         return text
     lic = license_section(ctx)
