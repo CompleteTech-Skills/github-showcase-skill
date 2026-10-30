@@ -408,7 +408,7 @@ def cmd_readme(args):
             # never-drop-a-line check; if that check objects, only the marker goes and the header blocks refresh.
             ctx.log("bootstrap:edited")
             base_text = readme.drop_pristine(before)
-            after, removed = readme.upgrade(ctx, base_text)
+            after, removed = readme.upgrade(ctx, base_text, regroup=not args.no_regroup)
             if readme.preservation(base_text, after, removed):
                 ctx.log("readme-shrink")
                 after, removed = readme.header_only(ctx, base_text), []
@@ -417,13 +417,15 @@ def cmd_readme(args):
     else:
         if mode == "auto":
             mode = "scaffold" if len([ln for ln in before.splitlines() if ln.strip()]) < 3 else "upgrade"
+        if args.no_regroup and mode == "scaffold":
+            raise ShowcaseError("--no-regroup applies to upgrade mode, not scaffold", log="usage")
         removed = []
         if mode == "scaffold":
             after = readme.scaffold(ctx, before)
         elif mode == "header":
             after = readme.header_only(ctx, before)
         else:
-            after, removed = readme.upgrade(ctx, before)
+            after, removed = readme.upgrade(ctx, before, regroup=not args.no_regroup)
             problems = readme.preservation(before, after, removed)
             if problems:
                 return base("readme", ctx, result="fail", mode=mode, problems=problems[:20],
@@ -441,8 +443,8 @@ def cmd_readme(args):
         if contrib_new is not None:
             (rd / "CONTRIBUTING.md").write_text(contrib_new, encoding="utf-8")
     if args.records and changed:
-        records.append(args.records, [records.record(ctx.owner, ctx.repo, "readme", "README.md", before, after,
-                                                     f"§7 variant {ctx.det['variant']} ({mode})")])
+        note = f"§7 variant {ctx.det['variant']} ({mode})" + (" no-regroup" if args.no_regroup else "")
+        records.append(args.records, [records.record(ctx.owner, ctx.repo, "readme", "README.md", before, after, note)])
     res = base("readme", ctx, result="changed" if changed else "unchanged", mode="bootstrap" if args.bootstrap else mode,
                variant=ctx.det["variant"], written=bool(args.write and changed))
     if args.diff or not args.write:
@@ -1029,6 +1031,9 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--diff", action="store_true")
     s.add_argument("--records")
     s.add_argument("--bootstrap", action="store_true")
+    s.add_argument("--no-regroup", action="store_true",
+                   help="upgrade mode only: keep every authored heading and body in place; change only the showcase:* "
+                        "marker blocks")
     s.add_argument("--badges", choices=("shields", "local"), default="shields",
                    help="local renders badges offline to docs/images/badges/*.svg (profile READMEs)")
     s.set_defaults(func=cmd_readme)

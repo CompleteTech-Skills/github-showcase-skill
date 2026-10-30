@@ -594,8 +594,11 @@ def drop_old_footer(text: str, brand) -> tuple[str, list[str]]:
     return body[:m.start()].rstrip() + "\n", [ln for ln in tail.splitlines() if ln.strip()]
 
 
-def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
-    """Return (new text, header lines removed). Raises nothing; callers run the shrink checks."""
+def upgrade(ctx: RepoContext, text: str, regroup: bool = True) -> tuple[str, list[str]]:
+    """Return (new text, header lines removed). Raises nothing; callers run the shrink checks. `regroup=False` is
+    the header-only path of `readme --no-regroup` (see no_regroup)."""
+    if not regroup:
+        return no_regroup(ctx, text)
     variant = ctx.det["variant"]
     rv = standard("readme-variants")
     if variant in ("G", "H"):
@@ -799,6 +802,55 @@ def header_only(ctx: RepoContext, text: str) -> str:
             return wrap(b, re.sub(r"\n{3,}", "\n\n", gen[b]))
         return m.group(0)
     return license_block(ctx, reorder_lead(ctx, _sub_blocks(text, sub)))
+
+
+def _block_names(text: str) -> set[str]:
+    """The showcase marker block names outside code."""
+    return {m.group(1) for m in find_blocks(MARK, text)}
+
+
+def _place(text: str, anchor: str, block: str, before: bool) -> str:
+    """Put `block` directly before or after the `anchor` marker block; authored text is not moved. Without an anchor
+    the block goes to the very top."""
+    hits = [m for m in find_blocks(MARK, text) if m.group(1) == anchor]
+    if not hits:
+        return block + "\n\n" + text
+    m = hits[0]
+    if before:
+        return _seam(text[:m.start()], block + "\n\n" + text[m.start():])
+    return _seam(text[:m.end()], "\n\n" + block + text[m.end():])
+
+
+def no_regroup(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
+    """`readme --no-regroup`: a header-only upgrade. Every authored heading and body stays in place and in its own
+    words; only the showcase:* marker blocks change. Existing blocks are refreshed by header_only. A missing hero
+    banner or nav line is added (both on top in the §7.1 order, or one next to the block that already exists), and
+    an unmarked or drifted footer is replaced by the marked one, as upgrade() does. Adds no heading, License section,
+    badge or tagline block. Idempotent: no_regroup(ctx, after) == (after, [])."""
+    text = normalize_text(text)
+    if ctx.det["variant"] in ("G", "H"):
+        return callout_only(ctx, text), []
+    after = header_only(ctx, text)
+    removed: list[str] = []
+    names = _block_names(after)
+    nav_block = wrap("nav", nav_line(ctx))
+    # the body header_only gives the banner: empty while the checkout has no banner image (never a broken image)
+    no_image = ctx.repo_dir is not None and not (ctx.repo_dir / "docs" / "images" / "banner.png").is_file()
+    banner_block = wrap("banner", "" if no_image else banner_html(ctx))
+    # the same banner rule as upgrade()'s preserve branch: no hero when the owner keeps it out or the art is exempt
+    banner_wanted = not (ctx.preserve_unchanged() or ctx.art_status()["banner"] is not None)
+    if "banner" not in names and "nav" not in names:
+        parts = lead(ctx, banner_block, nav_block) if banner_wanted else [nav_block]
+        after = "\n\n".join(parts) + "\n\n" + after
+    elif "banner" not in names and banner_wanted:
+        after = _place(after, "nav", banner_block, before=not nav_first(ctx))
+    elif "nav" not in names:
+        after = _place(after, "banner", nav_block, before=nav_first(ctx))
+    if footer_wanted(ctx) and "footer" not in names:
+        body, old_footer = drop_old_footer(after, ctx.brand)  # an unmarked or drifted footer is replaced
+        removed += old_footer
+        after = body.rstrip("\n") + "\n\n" + footermod.block(ctx.brand) + "\n"
+    return after, removed
 
 
 def _seam(left: str, right: str) -> str:
