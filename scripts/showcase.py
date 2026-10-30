@@ -130,10 +130,11 @@ def _check_assume(args) -> None:
 
 def _assume_line(args, rd, owner, repo) -> str | None:
     """origin-renamed:OLD->OWNER/REPO when --assume-repo changed the slug a run describes from a checkout (else None).
-    OLD is the checkout's origin slug (or 'unknown' when it has none). Metadata-only runs (no checkout) log nothing."""
-    if not getattr(args, "assume_repo", None) or rd is None or not owner or not repo:
+    OLD is the checkout's origin slug, or 'unknown' when there is no checkout or it has no origin (metadata-only runs
+    are logged too, review B1)."""
+    if not getattr(args, "assume_repo", None) or not owner or not repo:
         return None
-    old = getattr(args, "_assumed_from", None) or _origin_slug(rd) or "unknown"
+    old = getattr(args, "_assumed_from", None) or (_origin_slug(rd) if rd is not None else None) or "unknown"
     if _same_slug(args, old, f"{owner}/{repo}"):
         return None
     return f"origin-renamed:{old}->{owner}/{repo}"
@@ -171,6 +172,10 @@ def repo_dir(args) -> Path | None:
         want = f"{m.get('owner')}/{m.get('repo')}"
         have = _origin_slug(rd)
         assumed = getattr(args, "assume_repo", None)
+        if assumed and (m.get("owner") in UNSPECIFIED_IDENTITY or m.get("repo") in UNSPECIFIED_IDENTITY):
+            # metadata that names no owner or repo takes its identity from the override (as _check_assume() accepts):
+            # compare the checkout against the override, never against the 'unknown' placeholder (review A, B2)
+            want = assumed
         if have and not _same_slug(args, want, have):
             if assumed and _same_slug(args, want, assumed):
                 args._assumed_from = have  # a renamed repository whose origin was not updated: logged by context()
@@ -1319,11 +1324,21 @@ def _main(argv=None) -> int:
         args.format = "text" if args.command in GENERATORS else "json"
     try:
         _check_assume(args)
+        content_report = None
+        if getattr(args, "assume_repo", None) and getattr(args, "content_action", None) in ("links", "images"):
+            # content._finish() serialises --report before returning: hold the path back so the saved report carries
+            # the origin-renamed audit line too, identical to stdout (review B3)
+            content_report, args.report = getattr(args, "report", None), None
         obj, code = args.func(args)
         if getattr(args, "content_action", None) in ("links", "images") and isinstance(obj, dict):
             line = _assume_line(args, getattr(args, "_rd_checked", None), obj.get("owner"), obj.get("repo"))
             if line:
                 obj["logs"] = list(obj.get("logs") or []) + [line]
+            if content_report:
+                rp = Path(content_report)
+                rp.parent.mkdir(parents=True, exist_ok=True)
+                rp.write_text(json.dumps(obj, indent=1, ensure_ascii=False, default=str) + "\n",
+                             encoding="utf-8")
     except ShowcaseError as exc:
         obj = {"command": args.command, "result": "refused" if exc.code == USAGE and exc.log in ("hold", "t3-signoff", "exempt")
                else exc.log.split(":")[0], "error": str(exc), "logs": [exc.log]}

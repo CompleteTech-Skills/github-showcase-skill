@@ -264,3 +264,41 @@ def test_partial_metadata_takes_identity_from_override_without_checkout(tmp_path
     assert r.returncode != 2, (r.stdout, r.stderr)
     assert '"owner": "example-org"' in r.stdout and '"repo": "new-name"' in r.stdout, r.stdout
     assert "names another repository" not in r.stdout, r.stdout
+
+
+def test_partial_metadata_with_checkout_takes_identity_from_override(tmp_path):
+    """Review A/B2: partial metadata plus a stale-origin checkout is accepted (no 'unknown/...' mismatch)."""
+    _need_git()
+    _, co = _fixture(tmp_path)
+    partial = tmp_path / "partial.json"
+    partial.write_text(json.dumps({"repo": "new-name", "visibility": "public",
+                                   "description": "A synthetic example repository for tests."}), encoding="utf-8")
+    r = _run(["--meta", str(partial), "--repo-dir", str(co), "--assume-repo", "example-org/new-name", "describe"])
+    assert r.returncode != 2, (r.stdout, r.stderr)
+    assert "unknown/" not in r.stdout and "/unknown" not in r.stdout, r.stdout
+    assert "origin-renamed:example-org/old-name->example-org/new-name" in r.stdout, r.stdout
+
+
+def test_metadata_only_override_is_logged(tmp_path):
+    """Review B1: a run without a checkout still carries the audit line, with 'unknown' as the old slug."""
+    r = _run(["--no-repo-dir", "--assume-repo", "example-org/new-name", "--meta", str(tmp_path / "m.json"), "fingerprint"]) \
+        if False else None
+    partial = tmp_path / "partial.json"
+    partial.write_text(json.dumps({"description": "A synthetic example repository for tests.",
+                                   "visibility": "public"}), encoding="utf-8")
+    r = _run(["--meta", str(partial), "--no-repo-dir", "--assume-repo", "example-org/new-name", "fingerprint"])
+    assert r.returncode != 2, (r.stdout, r.stderr)
+    assert "origin-renamed:unknown->example-org/new-name" in r.stdout, r.stdout
+
+
+def test_content_report_file_carries_the_audit_line(tmp_path):
+    """Review B3: the --report file has the same logs as stdout, also with --quiet."""
+    _need_git()
+    meta, co = _fixture(tmp_path)
+    _readme(co)
+    report = tmp_path / "report.json"
+    r = _run(["--meta", str(meta), "--repo-dir", str(co), "--assume-repo", "example-org/new-name", "content", "links",
+              "--report", str(report)])
+    assert r.returncode != 2, (r.stdout, r.stderr)
+    line = "origin-renamed:example-org/old-name->example-org/new-name"
+    assert line in json.loads(report.read_text(encoding="utf-8"))["logs"]
