@@ -2187,7 +2187,7 @@ def icon_qa(data: bytes, *, card: str, ink: list[str] | None = None, org_mark: P
         w, h, colour = validate_png(data)
     except ValueError as exc:
         add("png", False, str(exc))
-        return {"result": "fail", "checks": checks}
+        return {"result": "fail", "checks": checks, **({"logs": []} if ocr else {})}
     add("png", True)
     add("size", (w, h) == (ICON_PX, ICON_PX), f"{w}x{h}")
     add("bytes", len(data) <= ICON_BUDGET, f"{len(data)} <= {ICON_BUDGET}")

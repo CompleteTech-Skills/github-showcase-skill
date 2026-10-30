@@ -985,3 +985,11 @@ def test_icon_ocr_cli_logs(capsys, tmp_path, brand, monkeypatch):
     code_ocr, res = run_content(capsys, *check, "--ocr")
     assert code_ocr == code and res["result"] == plain["result"], (plain, res)
     assert "needs-input:ocr-unavailable" in res["logs"], res
+
+
+def test_icon_ocr_malformed_png_keeps_logs_key(monkeypatch):
+    # an unreadable PNG returns before the OCR step; with ocr=True the shape still carries `logs` (empty)
+    monkeypatch.setattr(C, "_tesseract", lambda: None)
+    qa = C.icon_qa(b"bad", card="#0B1020", ocr=True)
+    assert qa["result"] == "fail" and qa["logs"] == [], qa
+    assert "logs" not in C.icon_qa(b"bad", card="#0B1020")
