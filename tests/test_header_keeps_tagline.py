@@ -425,3 +425,21 @@ def test_refreshing_the_tagline_never_excuses_a_lost_authored_line(make_ctx, tmp
     assert not R.preservation(TEXT, out, removed)
     assert R.preservation(TEXT, out.replace("Run it.", ""), removed)
     assert R.preservation(TEXT, out.replace("Run it.", ""), removed + [TAGLINE])
+
+
+def test_cli_upgrade_refresh_keeps_an_authored_bold_line_beside_the_block(tmp_path):
+    # refreshing the tagline block excuses only the block's own old lines: a bold line the owner wrote beside the
+    # block (before ## Usage) survives a changed description, and the run still passes the never-delete check
+    import json
+    from conftest import meta_dict, run_cli
+    warning = "**Operators must retain this escalation policy.**"
+    text = TEXT.replace("## Usage", warning + "\n\n## Usage")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "README.md").write_text(text, encoding="utf-8")
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict(description=NEW_DESC)), encoding="utf-8")
+    p = run_cli("--meta", meta, "--repo-dir", repo, "readme", "--write")
+    assert p.returncode == 0, p.stdout + p.stderr
+    after = (repo / "README.md").read_text(encoding="utf-8")
+    assert warning in after and TAGLINE not in after and _tagline_body(after) == f"**{NEW_DESC}**"

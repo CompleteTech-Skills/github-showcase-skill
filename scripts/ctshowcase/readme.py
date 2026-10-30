@@ -678,8 +678,12 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
             is_hdr = is_header_line(ln) or bold
             if preserve:  # additive only: just an old nav line is replaced
                 is_hdr = s_.startswith("**") and " · " in s_ and not "".join(keep_pre).strip()
+            elif bold and not is_header_line(ln) and old_tag is not None:
+                # a tagline block already exists: this bold line is authored text beside it, never an old tagline
+                keep_pre.append(ln)
+                continue
             elif bold and not is_header_line(ln) and not desc:
-                if carry or (old_tag or "").strip() or fallback_only:
+                if carry or fallback_only:
                     # the tagline block already has a line, or (an untouched template copy whose template taglines
                     # are unknown) the block rule would empty any line moved into it: this one stays authored text
                     keep_pre.append(ln)
