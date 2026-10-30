@@ -2,7 +2,6 @@
 
 Synthetic repositories and topics only."""
 import copy
-import json
 import sys
 
 import pytest
@@ -95,5 +94,5 @@ def test_cli_prune_flag_is_wired(monkeypatch):
     import inspect
     src = inspect.getsource(showcase.cmd_topics)
     assert "prune=args.prune" in src
-    ns = showcase.argparse.ArgumentParser  # parser construction lives in main(); check the flag is declared
+    # parser construction lives in main(); check the flag is declared
     assert '"--prune"' in inspect.getsource(showcase)

@@ -1,5 +1,8 @@
 """Schema contract for the per-org `topics_extra` key (E5.1.2).
 
+Tests that pass on the base too (valid list, empty list, key optional) are intentional regression guards for the accept path;
+the reject-path tests are the ones that fail on the base.
+
 Length and charset are enforced by the schema only; merge() ignores invalid entries defensively (see test_topics_additive.py).
 """
 import json
