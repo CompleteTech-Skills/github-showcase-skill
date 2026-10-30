@@ -351,16 +351,51 @@ def _generated_public() -> list[re.Pattern]:
     return pats
 
 
+def _license_paragraphs(body: str) -> list[tuple[str, bool]]:
+    """Split a License body into (raw paragraph, is_code). Blank lines inside a fenced block do not split it, and a
+    fenced or indented-code paragraph is never generated text. The raw slice keeps its indentation (issue 36)."""
+    paras: list[tuple[list[str], bool]] = []
+    cur: list[str] = []
+    fence = ""
+    for ln in body.split("\n"):
+        m = re.match(r"^ {0,3}(`{3,}|~{3,})", ln)
+        if fence:
+            cur.append(ln)
+            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) and not ln.strip().strip(fence[0]):
+                fence = ""
+            continue
+        if not ln.strip():
+            if cur:
+                paras.append((cur, False))
+                cur = []
+            continue
+        if m and not cur:
+            fence = m.group(1)
+        cur.append(ln)
+    if cur:
+        paras.append((cur, False))
+    out = []
+    for lines, _ in paras:
+        code = bool(re.match(r"^ {0,3}(`{3,}|~{3,})", lines[0])) or lines[0].startswith(("    ", "\t"))
+        out.append(("\n".join(lines), code))
+    return out
+
+
 def split_generated_license(body: str) -> tuple[list[str], str]:
     """Split a License section body into (lines this tool generated, authored remainder). Generated: the one paragraph
     after a `showcase:license` mark (the mark goes too), and any paragraph that is exactly a row the tool wrote (private
-    "Proprietary..." or a public rights-sentence row). Every other paragraph is authored and survives (issue 36)."""
-    paras = [p.strip() for p in re.split(r"\n\s*\n", body) if p.strip()]
+    "Proprietary..." or a public rights-sentence row). Every other paragraph is authored and survives verbatim,
+    including fenced examples and indented code (stripped copies are used only for classification) (issue 36)."""
     gen: list[str] = []
     keep: list[str] = []
     after_mark = False
     pubs = _generated_public()
-    for p in paras:
+    for raw, code in _license_paragraphs(body):
+        p = raw.strip()
+        if code:
+            keep.append(raw)
+            after_mark = False
+            continue
         if p == LICENSE_MARK:
             gen.append(p)
             after_mark = True
@@ -373,8 +408,28 @@ def split_generated_license(body: str) -> tuple[list[str], str]:
             gen += [ln for ln in p.splitlines() if ln.strip()]
             after_mark = False
             continue
-        keep.append(p)
+        keep.append(raw)
     return gen, "\n\n".join(keep)
+
+
+def regenerate_license(ctx: RepoContext, name: str, body: str, removed: list[str]) -> str | None:
+    """Without org `license_wording`, replace a generated rights row in an existing License section body: public becomes
+    the factual line, private drops the generated text; authored paragraphs stay verbatim. Returns the section text
+    (heading included, or "" when nothing remains), or None when the body has no generated text (issue 36)."""
+    if (ctx.org.get("license_wording") or "").strip():
+        return None
+    gen_lines, authored = split_generated_license(body)
+    if not gen_lines:
+        return None
+    if license_omitted(ctx):
+        removed += gen_lines
+        ctx.log("needs-input:license-wording")
+        return f"## {name}\n\n{authored}" if authored else ""
+    if ctx.public and (lic := license_section(ctx)):
+        new_body = "\n\n".join(x for x in [lic[1], authored] if x)
+        removed += [ln for ln in gen_lines if ln not in new_body]
+        return f"## {lic[0]}\n\n{new_body}"
+    return None
 
 
 def gate_managed_license(ctx: RepoContext, text: str, removed: list[str]) -> str:
@@ -797,6 +852,12 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
         if intro:
             out.append(intro)
         for h, b in sections:
+            if h.strip().lower() in ("license", "licensing", "licence") and b.strip():
+                regen = regenerate_license(ctx, h.strip(), b, removed)
+                if regen is not None:
+                    if regen:
+                        out.append(regen)
+                    continue
             out.append(f"## {h}\n{b.rstrip()}" if b.strip() else f"## {h}")
         if not any(h.strip().lower() in ("license", "licensing", "licence") for h, _ in sections):
             lic = license_section(ctx)
@@ -837,18 +898,10 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
     if existing_notes or notes:
         nb = "\n\n".join(x for x in ([existing_notes] if existing_notes else []) + notes)
         out.append(f"## Notes\n\n{nb}")
-    gen_lines, authored = split_generated_license(license_body[1]) if license_body else ([], "")
-    no_wording = not (ctx.org.get("license_wording") or "").strip()
-    if license_body and no_wording and gen_lines and license_omitted(ctx):
-        removed += gen_lines  # generated private rights text goes; authored paragraphs stay under their heading
-        ctx.log("needs-input:license-wording")
-        if authored:
-            out.append(f"## {license_body[0]}\n\n{authored}")
-    elif license_body and no_wording and gen_lines and ctx.public and (lic := license_section(ctx)):
-        # a rights sentence this tool wrote earlier becomes the factual line; authored paragraphs stay (issue 36)
-        new_body = "\n\n".join(x for x in [lic[1], authored] if x)
-        removed += [ln for ln in gen_lines if ln not in new_body]
-        out.append(f"## {lic[0]}\n\n{new_body}")
+    regen = regenerate_license(ctx, license_body[0], license_body[1], removed) if license_body else None
+    if regen is not None:
+        if regen:
+            out.append(regen)
     elif license_body:
         if license_omitted(ctx):  # authored text is never dropped: keep it and flag the missing wording (issue 36)
             ctx.log("needs-input:license-wording")
