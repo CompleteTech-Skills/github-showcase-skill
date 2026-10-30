@@ -188,25 +188,25 @@ def row(ctx: RepoContext) -> dict:
     # The drift logs are optional: an unreadable README or sidecar adds no log and never changes the row or exit code.
     live = (ctx.meta.get("description") or "").strip()
     if rd and live:
-        if (rd / "README.md").is_file():
-            try:
-                tag = tagline_text((rd / "README.md").read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                tag = None
-            if tag is not None and not _same_words(tag, live):
-                logs.append("drift:tagline-description")
+        # every filesystem access (existence checks included) sits inside the handlers: a denied stat() is not a usage error
+        try:
+            readme = rd / "README.md"
+            tag = tagline_text(readme.read_text(encoding="utf-8")) if readme.is_file() else None
+        except (OSError, ValueError):
+            tag = None
+        if tag is not None and not _same_words(tag, live):
+            logs.append("drift:tagline-description")
         side = rd / "docs" / "images"
-        if (side / fp.SIDECAR).is_file():
-            try:
-                data = fp.read_sidecar(side)
-            except (OSError, ValueError):
-                data = {}
-            outputs = data.get("outputs") if isinstance(data, dict) else None
-            for rec in (outputs.values() if isinstance(outputs, dict) else []):
-                st = rec.get("staged_description") if isinstance(rec, dict) else None
-                if isinstance(st, dict) and st.get("sha256") != fp.description_sha256(live):
-                    logs.append("drift:staged-description")
-                    break
+        try:
+            data = fp.read_sidecar(side) if (side / fp.SIDECAR).is_file() else {}
+        except (OSError, ValueError):
+            data = {}
+        outputs = data.get("outputs") if isinstance(data, dict) else None
+        for rec in (outputs.values() if isinstance(outputs, dict) else []):
+            st = rec.get("staged_description") if isinstance(rec, dict) else None
+            if isinstance(st, dict) and st.get("sha256") != fp.description_sha256(live):
+                logs.append("drift:staged-description")
+                break
     return {"repo": f"{ctx.owner}/{ctx.repo}", "type": ctx.det["type"], "variant": ctx.det["variant"], "cells": cells,
             "done": "yes" if done else "no", "logs": sorted(set(logs + ctx.logs))}
 

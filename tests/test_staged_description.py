@@ -333,6 +333,31 @@ def test_doctor_unreadable_sidecar_keeps_row(tmp_path, monkeypatch, capsys):
     assert out == base_out  # the TSV row (no drift log in TSV output) is unchanged
 
 
+def test_doctor_denied_sidecar_stat_keeps_row(tmp_path, monkeypatch, capsys):
+    # regression (review E5.2.3 B P2): a denied stat() of the optional sidecar is log-only, never a usage error
+    import pathlib
+    import sys
+    import showcase
+    rd = _repo(tmp_path)
+    p = run_cli("--meta", META, "--repo-dir", rd, "--format", "json", "banner",
+                "--out", rd / "docs/images/banner.png", "--description", "Staged sentence.")
+    assert p.returncode == 0, p.stderr
+    base_rc = showcase.main(["--meta", str(META), "--repo-dir", str(rd), "doctor", "--header"])
+    base_out = capsys.readouterr().out
+    real = pathlib.Path.is_file
+
+    def guarded(self):
+        # only the drift check in doctor.py is under test; pnglint's own sidecar stat predates E5.2.3
+        if self.name == ".showcase.json" and sys._getframe(1).f_code.co_filename.endswith("doctor.py"):
+            raise PermissionError(13, "denied")
+        return real(self)
+    monkeypatch.setattr(pathlib.Path, "is_file", guarded)
+    rc = showcase.main(["--meta", str(META), "--repo-dir", str(rd), "doctor", "--header"])
+    out = capsys.readouterr().out
+    assert rc == base_rc
+    assert out == base_out
+
+
 def test_staged_record_stores_digest_and_keeps_inputs_text(tmp_path):
     # the claim in CHANGELOG and fingerprint.description_sha256: each output record adds a digest; inputs.description
     # still carries the rendered text (fingerprint inputs are not changed by this task)
