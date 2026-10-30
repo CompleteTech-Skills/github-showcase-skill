@@ -620,9 +620,10 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
     old_tag = blocks.get("tagline")
     if preserve and old_tag is not None:
         # additive only, so the tagline block stays where it is, its body decided by the header rule (tagline_body)
+        # an inherited tagline emptied here stays as an empty block: its lines are excluded from the check by
+        # preservation() while the block exists in the output, so they are not credited in `removed` (a credit would
+        # also hide an identical authored line elsewhere in the README)
         tag = tagline_body(ctx, old_tag, text)
-        if old_tag.strip() and not tag:  # an inherited tagline, emptied on purpose (not a lost line)
-            removed += [ln for ln in old_tag.splitlines() if ln.strip()]
         body, _ = _strip_markers(text, keep={"tagline": tag})
         if want_footer:
             body, _ = drop_old_footer(body, ctx.brand)  # its lines are already in `removed`
@@ -731,14 +732,12 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
             out.append(footermod.block(ctx.brand))
         return "\n\n".join(x for x in out if x) + "\n", removed
     else:
-        if carry:  # an unmarked tagline with no description: it moves into the block (the move is not a lost line)
+        if carry:  # an unmarked tagline with no description: it moves into the block, or is emptied when inherited
             old_tag = carry[0].strip()
-            removed.remove(carry[0])
+            # the carried line stays credited in `removed`: its copy inside the generated tagline block is excluded
+            # from the output count, so the credit is what records the intentional move (see
+            # test_readme_refresh_tagline: test_unmarked_tagline_moved_into_block_is_not_lost)
         new_tag = tagline_body(ctx, old_tag, text)
-        if old_tag and old_tag.strip() and not new_tag:
-            # an inherited tagline is emptied (header mode does the same): its lines are dropped on purpose, so the
-            # never-delete check must not report them as lost
-            removed += [ln for ln in old_tag.splitlines() if ln.strip()]
         out.append(header(ctx, tagline=new_tag))
         co = callout(ctx)
         if co and co not in intro:
@@ -984,7 +983,8 @@ def preservation(before: str, after: str, removed: list[str]) -> list[str]:
                       if ln.strip() and not ln.strip().startswith("<!-- showcase:"))
     for r in removed:
         b_lines[r.strip()] -= 1
-    a_lines = Counter(ln.strip() for ln in after.splitlines() if ln.strip())
+    # the output side ignores the same generated contents: generated text must not satisfy an authored line's count
+    a_lines = Counter(ln.strip() for ln in _unguarded(after, kept).splitlines() if ln.strip())
     for ln, n in b_lines.items():
         if n <= 0:
             continue

@@ -13,6 +13,13 @@ Which tests reproduce the bug and which are guards (checked against the base com
   exemption to them): test_user_line_outside_blocks_still_guarded, test_generated_block_removed_from_output_still_guarded,
   test_template_body_block_is_never_excluded, test_marker_example_in_code_fence_stays_guarded and
   test_header_mode_unchanged (the documented `--mode header` fallback, which never runs the shrink check).
+- Review follow-up (the first version of the fix let generated text satisfy an authored line's count, and credited
+  the emptied inherited tagline a second time, so an identical authored line could vanish unreported):
+  test_generated_text_does_not_satisfy_a_dropped_authored_line FAILS on the base 2be04ac and on the first fix (the
+  dropped authored bold line is not reported). test_inherited_tagline_credit_does_not_hide_identical_authored_line
+  PASSES on the base (which reported it) and FAILED on the first fix, so it guards that regression.
+  test_unmarked_tagline_moved_into_block_is_not_lost is the intentional move that the output-side exclusion would
+  otherwise report; it PASSES on the base and must stay clean.
 A guard failing on the new code means the exemption is too broad; a guard passing on the base is expected.
 """
 import json
@@ -100,3 +107,45 @@ def test_header_mode_unchanged(make_ctx, tmp_path):
     out = R.header_only(ctx, TEXT)
     assert "**A brand new description.**" in out
     assert OLD not in out
+
+
+def test_generated_text_does_not_satisfy_a_dropped_authored_line(make_ctx, tmp_path):
+    # the second `## Notes` replaces the first one (upgrade keeps only the last), so the authored bold line in the
+    # first section is lost. Its text equals the new generated tagline, which must not count as the authored copy.
+    authored = "**Run the Northwind triage agent.**"
+    text = (
+        "# Support Triage Agent\n\n<!-- showcase:tagline:start -->\n**Old tagline here.**\n"
+        "<!-- showcase:tagline:end -->\n\n## Usage\n\nRun it.\n\n"
+        "## Notes\n\n" + authored + "\n\n## Notes\n\nKeep this other note.\n\n## License\n\nMIT\n"
+    )
+    ctx = make_ctx(tmp_path, description="Run the Northwind triage agent.")
+    out, removed = R.upgrade(ctx, text)
+    assert "Keep this other note." in out
+    problems = R.preservation(text, out, removed)
+    assert any(p.startswith("lost line: " + authored) for p in problems), problems
+
+
+def test_inherited_tagline_credit_does_not_hide_identical_authored_line(make_ctx, tmp_path):
+    # the inherited tagline is emptied (no description, template tagline known). Its line is excluded from the check
+    # while the empty block stays, so an identical authored line in the first `## Notes` is still guarded.
+    inherited = "**Start a Northwind repository.**"
+    text = (
+        "# Support Triage Agent\n\n<!-- showcase:tagline:start -->\n" + inherited + "\n<!-- showcase:tagline:end -->\n\n"
+        "## Usage\n\nRun it.\n\n## Notes\n\n" + inherited + "\n\n## Notes\n\nKeep this other note.\n\n"
+        "## License\n\nMIT\n"
+    )
+    ctx = make_ctx(tmp_path, description="", template_taglines=[inherited])
+    out, removed = R.upgrade(ctx, text)
+    assert inherited not in out and "Keep this other note." in out
+    problems = R.preservation(text, out, removed)
+    assert any(p.startswith("lost line: " + inherited) for p in problems), problems
+
+
+def test_unmarked_tagline_moved_into_block_is_not_lost(make_ctx, tmp_path):
+    # no description and no template tagline: the unmarked bold line moves into the tagline block (intentional move)
+    line = "**Keep this tagline for now.**"
+    text = "# Support Triage Agent\n\n" + line + "\n\n## Usage\n\nRun it.\n\n## License\n\nMIT\n"
+    ctx = make_ctx(tmp_path, description="")
+    out, removed = R.upgrade(ctx, text)
+    assert "<!-- showcase:tagline:start -->\n" + line + "\n<!-- showcase:tagline:end -->" in out
+    assert R.preservation(text, out, removed) == []
