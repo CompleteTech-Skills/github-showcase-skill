@@ -1989,6 +1989,10 @@ def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = Non
         for k, v in slots.items():
             if v is not None:
                 prompt = prompt.replace("{" + k + "}", str(v))
+    # older art-direction files (including the previous bundled one, via --art-direction) say "Produce four
+    # candidates" / "4 candidates"; the request is one image, so the prompt and the provenance must agree
+    prompt = re.sub(r"\bProduce (?:four|4) candidates\.", "Produce one image.", prompt, flags=re.I)
+    prompt = re.sub(r"\b(?:four|4) candidates\b", "1 image", prompt, flags=re.I)
     missing = sorted(set(re.findall(r"\{([A-Z_]+)\}", prompt)))
     ink = colours.get("INK") or []
     return {"prompt": prompt, "missing": missing, "invalid": invalid, "facts": facts, "option": option.upper(),

@@ -1,5 +1,6 @@
 """The installed skill's icon defaults work without the private estate bundle."""
 import json
+from pathlib import Path
 import copy
 import os
 import subprocess
@@ -205,3 +206,18 @@ def test_legacy_config_option_b_does_not_require_glyph_inks(explicit_art_directi
     result = json.loads(proc.stdout.decode("utf-8"))
     assert result["result"] == "ok" and result["missing"] == []
     assert "A tray holding an envelope." in output.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("option", ["A", "B"])
+def test_previous_bundled_template_via_override_still_asks_for_one_image(option, brand, make_ctx):
+    """The pre-#61 bundled file said 'Produce four candidates.'; as an explicit --art-direction override it must not
+    leave the prompt requesting four while provenance records one image."""
+    from ctshowcase.resolver import Resolver
+
+    old = (Path(__file__).parent / "fixtures" / "content" / "ART_DIRECTION.previous-bundled.md").read_text(encoding="utf-8")
+    assert "Produce four candidates." in old
+    result = C.icon_prompt(make_ctx(owner="CompleteTech-Skills"), Resolver(brand, {}, {}), old, GLYPH, option,
+                           skill_art=(old if option == "B" else None))
+    assert "four candidates" not in result["prompt"].lower()
+    assert "Produce one image." in result["prompt"]
+    assert "- Requested: 1 image; seed: not supported." in C.prompt_markdown(result)
