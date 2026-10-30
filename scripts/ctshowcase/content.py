@@ -2050,6 +2050,8 @@ def normalize_icon(img, ground: str = "auto", card: str | None = None, pixel_art
             from .color import luminance
             from .iconbox import DARK_PLATE
             lab = _lab_cache()
+            # Measured: pure black versus the dark card colour is dE 16.5 (> CONTENT_DE 12), so it is NOT
+            # near-card and stays a night tile (kept). Pale grounds are keyed out by luminance (> DARK_PLATE).
             near_card = card is not None and _de(lab(hexrgb(gnd)), lab(hexrgb(card))) <= CONTENT_DE
             night_tile = (not near_card) and luminance(gnd) < DARK_PLATE
             mode = "keep" if night_tile else "transparent"
