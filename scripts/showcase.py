@@ -368,7 +368,10 @@ def cmd_footer(args):
                 # a fork (GitHub's flag or a `-fork` slug, detect.is_fork rule 1) is exempt from metadata alone, before
                 # any captured rendering config is parsed; only the rest needs the context
                 from ctshowcase.detect import is_fork
-                why = "exempt:watching-fork" if is_fork(m) else RepoContext(b, m, None).footer_status()
+                # `--type` is part of the verdict (RepoContext honours it), so the shortcut applies only without it
+                tov = getattr(args, "type_override", None)
+                why = ("exempt:watching-fork" if not tov and is_fork(m)
+                       else RepoContext(b, m, None, type_override=tov).footer_status())
             else:
                 # no RepoContext: building one parses the captured rendering config, which this check must not
                 # depend on (a malformed `.github/showcase.yml` in the metadata is not a footer verdict)
