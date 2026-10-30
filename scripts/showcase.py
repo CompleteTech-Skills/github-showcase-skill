@@ -342,7 +342,8 @@ def cmd_footer(args):
     from ctshowcase import footer
     b = brand(args)
     # the watching org's exemption covers only its forks, which `--org` cannot tell from its `.github` (which gets the
-    # footer): `--check` reads the README there instead of answering `exempt` (fail closed)
+    # footer): `--check` reads the README there instead of answering `exempt` (fail closed). With `--check --meta FILE`
+    # the owner comes from the metadata instead (the branch below), so the same answers hold without `--org`.
     if args.org and not (args.check and b.owner_status(args.org) == "watching"):
         status = b.owner_status(args.org)
         if status in ("excluded", "hold", "t3"):
@@ -354,6 +355,18 @@ def cmd_footer(args):
             return {"command": "footer", "owner": args.org, "result": "hold", "logs": ["hold"]}, OK
         if fv is False:
             return {"command": "footer", "owner": args.org, "result": "exempt", "logs": ["exempt:footer"]}, OK
+    if not args.org and args.check and args.meta:
+        # the owner's `footer` setting from the metadata, answered as `--org` would (no checkout, cwd or network read)
+        from ctshowcase.context import RepoContext
+        from ctshowcase.meta import load_file
+        m = load_file(args.meta)
+        owner = m.get("owner")
+        if owner and owner != "unknown":
+            b.check_owner(owner)  # raises Refused (exit 2) for excluded, hold and unsigned T3 owners
+            why = RepoContext(b, m, None).footer_status()
+            if why:  # the footer does not apply
+                res = "hold" if why.startswith("hold") else "exempt"
+                return {"command": "footer", "owner": owner, "result": res, "logs": [why]}, OK
     if args.online and not args.check:
         raise ShowcaseError("--online goes with --check README.md", log="usage")
     if args.check:
