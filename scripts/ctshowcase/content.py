@@ -2348,6 +2348,8 @@ def _ctx(args, cli, resolver):
 
 def _finish(args, obj: dict, code: int):
     jobs = list(obj.get("jobs") or []) + ([obj["job"]] if obj.get("job") else [])
+    from .signoff import stamp
+    stamp(jobs)  # before any serialization (--jobs, --report): a no-op unless --require-t3-signoff
     if getattr(args, "jobs", None) and jobs:  # writer jobs only; unapproved proposals stay in the report
         from .records import append
         append(args.jobs, jobs)
@@ -2369,9 +2371,9 @@ def cmd_content(args, cli=None):
     resolver = _resolver(args, cli)
     head = {"command": "content", "action": act}
     if act == "social":
-        owner, _, _ = _owner_repo(args, cli, None)
+        owner, srepo, _ = _owner_repo(args, cli, None)
         if owner:
-            resolver.check_owner(owner, allow_hold=args.allow_hold)
+            resolver.check_owner(owner, allow_hold=args.allow_hold, repo=srepo)
         obj, code = cli.cmd_social(args)
         obj = dict(head, **{k: v for k, v in obj.items() if k != "command"}, alias_of="social-preview")
         if args.job and obj.get("result") == "ok":
@@ -2391,7 +2393,7 @@ def cmd_content(args, cli=None):
             raise ShowcaseError(f"content {act} needs a checkout (--repo-dir)", log="usage")
         owner, repo, _ = _owner_repo(args, cli, rd)
         if owner:
-            resolver.check_owner(owner)
+            resolver.check_owner(owner, repo=repo)
         tree = Tree(rd)
         readme = displayed_readme(tree, args.readme_path)
         files = list(args.files) or markdown_files(tree, readme)
@@ -2421,7 +2423,7 @@ def cmd_content(args, cli=None):
         return _finish(args, obj, _code(obj["result"]))
     if act == "linguist":
         ctx = _ctx(args, cli, resolver)
-        resolver.check_owner(ctx.owner)
+        resolver.check_owner(ctx.owner, repo=ctx.repo)
         tree = Tree(ctx.repo_dir) if ctx.repo_dir else None
         override = dict(ctx.override)
         if args.language:
@@ -2430,7 +2432,7 @@ def cmd_content(args, cli=None):
         return _finish(args, {**head, "owner": ctx.owner, "repo": ctx.repo, **res, "logs": ctx.logs + res["logs"]}, OK)
     if act == "actions":
         ctx = _ctx(args, cli, resolver)
-        resolver.check_owner(ctx.owner)
+        resolver.check_owner(ctx.owner, repo=ctx.repo)
         wf_files, root_files, readme = {}, (), ""
         if ctx.repo_dir:
             tree = Tree(ctx.repo_dir)
@@ -2484,7 +2486,7 @@ def _cmd_sidebar(args, cli, resolver, head):
     keyed = isinstance(facts, dict) and facts and all(isinstance(k, str) and "/" in k for k in facts)
     if not keyed:
         ctx = _ctx(args, cli, resolver)
-        resolver.check_owner(ctx.owner)
+        resolver.check_owner(ctx.owner, repo=ctx.repo)
         res = sidebar_plan(ctx.meta, facts, resolver=resolver, packages=pk,
                            current=current.get(f"{ctx.owner}/{ctx.repo}") or current or None)
         obj = dict(head, owner=ctx.owner, repo=ctx.repo, **{k: v for k, v in res.items() if k != "logs"},
@@ -2496,8 +2498,10 @@ def _cmd_sidebar(args, cli, resolver, head):
         if args.only and not (resolver.same(o, args.only.split("/")[0]) and r.lower() == args.only.split("/")[1].lower()):
             continue
         try:
-            resolver.check_owner(o)
+            resolver.check_owner(o, repo=r)
         except Refused as exc:
+            if str(exc.log or "").startswith("t3-signoff:"):
+                raise  # a sign-off refusal must reach the exit-2 handler, never read as a pass with the repo skipped
             skipped.append({"repo": full, "why": exc.log})
             continue
         meta = dict((f or {}).get("meta") or {}, owner=o, repo=r)
@@ -2518,7 +2522,7 @@ def _cmd_sidebar(args, cli, resolver, head):
 def _cmd_icon(args, cli, resolver, head):
     from PIL import Image
     ctx = _ctx(args, cli, resolver)
-    resolver.check_owner(ctx.owner)
+    resolver.check_owner(ctx.owner, repo=ctx.repo)
     # decision 12: the same applicability as banner, card, lint all and doctor (RepoContext.art_status); only
     # watching-org forks and a placeholder org's `.github` are exempt. Forks outside the watching org, backups and
     # `.github` repositories need their own icon. The resolver also sees the renames and placeholders passed here.

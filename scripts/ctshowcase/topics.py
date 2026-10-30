@@ -65,7 +65,7 @@ def membership_topics(ctx: RepoContext, also_in: list[str]) -> tuple[list[str], 
         if status in ("excluded", "hold"):
             logs.append(f"exempt:also-in:{org}")
             continue
-        if status == "t3" and not t3_signed_off():
+        if status == "t3" and not t3_signed_off(org):
             logs.append(f"t3-signoff:also-in:{org}")
             continue
         known, topic = org_topic(ctx.brand, org)

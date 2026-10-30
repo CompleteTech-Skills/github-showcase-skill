@@ -20,6 +20,8 @@ def append(path: str | Path | None, recs: list[dict]) -> None:
     """Append JSON lines (change records or scripts/writer.py jobs) to PATH, creating its directory."""
     if not path or not recs:
         return
+    from .signoff import stamp
+    stamp(recs)  # only under --require-t3-signoff: writer jobs of a signed-off T3 owner carry signoff_id
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     with p.open("a", encoding="utf-8") as fh:

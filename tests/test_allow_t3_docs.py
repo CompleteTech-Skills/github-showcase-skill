@@ -65,10 +65,20 @@ def test_help_text_matches_docs():
     )
     assert result.returncode == 0, result.stderr
     assert "--allow-t3" in result.stdout
-    fragment = "[--quiet] [--allow-t3] [--version]"
+    # issue 23 adds the opt-in --require-t3-signoff right after --allow-t3; the synopsis must keep up with --help
+    fragment = "[--quiet] [--allow-t3] [--require-t3-signoff] [--version]"
     help_usage = " ".join(result.stdout.split())
     skill = _read("SKILL.md")
     ref = skill[skill.index("## Command Reference"):]
     synopsis = next(line for line in ref.splitlines() if line.startswith("python3 <skill-dir>/scripts/showcase.py"))
     assert fragment in help_usage, help_usage
     assert fragment in " ".join(synopsis.split()), synopsis
+
+
+def test_skill_documents_require_t3_signoff_beside_allow_t3():
+    """Epic 22 integration: the sign-off paragraph (issue 31) names the opt-in record check (issue 23) and its codes."""
+    skill = _read("SKILL.md")
+    para = skill[skill.index(MARKER):].split("\n\n", 1)[0]
+    assert "--require-t3-signoff" in para, para
+    for code in ("t3-signoff:missing", "t3-signoff:expired", "t3-signoff:scope"):
+        assert code in para, code

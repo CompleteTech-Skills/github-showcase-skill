@@ -174,6 +174,12 @@ def _slug(owner: str) -> str:
     return "me" if is_user(owner) else owner
 
 
+def _t3_granted(owner: str) -> bool:
+    """True unless `--require-t3-signoff` is on and no valid sign-off record covers the owner (signoff.py)."""
+    from . import signoff
+    return signoff.granted(owner)
+
+
 def _gate_target(resolver: Resolver | None, owner: str, *, allow_t3: bool = False) -> str:
     """Targets of a write: never T3 without sign-off, never excluded or HOLD. Returns the resolved login."""
     if is_user(owner):
@@ -188,6 +194,9 @@ def _gate_target(resolver: Resolver | None, owner: str, *, allow_t3: bool = Fals
     if st == "t3" and not allow_t3:
         raise Refused(f"{owner} is T3: reading its project is fine, changing anything needs co-owner sign-off",
                       log="t3-signoff")
+    if st == "t3":  # registers the grant so writer jobs carry signoff_id; refuses t3-signoff:<why>; no-op unless the flag is on
+        from . import signoff
+        signoff.require(owner, None, resolver.aliases(owner))
     return resolver.canonical(owner)
 
 
@@ -1092,7 +1101,7 @@ def estate_orgs(resolver: Resolver, *, allow_t3: bool = False) -> list[dict]:
         except NeedsInput:
             continue
         tier = str(row.get("tier") or "").split()[0]
-        if tier == "T3" and not allow_t3:
+        if tier == "T3" and not (allow_t3 and _t3_granted(key)):
             continue
         if tier in TIER_COLOR:
             out.append({"login": resolver.canonical(key), "name": row.get("display_name") or key, "tier": tier})

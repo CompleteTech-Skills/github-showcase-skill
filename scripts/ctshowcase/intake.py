@@ -50,7 +50,7 @@ def adopt(ctx, resolver=None, *, approval_id: str | None = None, fresh: bool = F
     from .content import sidebar_plan, social_job
     from .org import label_ops_argv
     owner, repo = ctx.owner, ctx.repo
-    status = ctx.brand.check_owner(owner)  # excluded, HOLD and T3 owners refuse (exit 2)
+    status = ctx.brand.check_owner(owner, repo=repo)  # excluded, HOLD and T3 owners refuse (exit 2)
     if ctx.style.get("hold") or (resolver.family_hold(owner) if resolver else False):  # as showcase.cmd_adopt refuses
         raise Refused(f"{owner} family is on hold: adopt plans nothing for it", log="hold")
     full = f"{resolver.canonical(owner) if resolver else owner}/{repo}"
@@ -193,7 +193,7 @@ def new_plan(brand, slug: str, type_: str, *, template: str = TEMPLATE_REPO, des
     if not m:
         raise ShowcaseError("new needs OWNER/NAME", log="usage")
     owner, name = m.group(1), m.group(2)
-    status = brand.check_owner(owner)
+    status = brand.check_owner(owner, repo=name)
     if status == "watching":
         raise ShowcaseError(f"{owner} is the watching org: it holds forks only, never new repositories", log="exempt")
     if resolver is not None and resolver.is_placeholder(owner):
