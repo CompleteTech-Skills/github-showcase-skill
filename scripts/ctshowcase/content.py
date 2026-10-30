@@ -2146,8 +2146,22 @@ def _tesseract() -> str | None:
     return shutil.which("tesseract")
 
 
+def _flatten_on_card(png: bytes, card: str) -> bytes:
+    """The icon composited on the real card colour, as it is seen on the card. Flattening on white would erase white
+    lettering on a dark card before OCR; an unreadable PNG is returned unchanged."""
+    from PIL import Image
+    try:
+        im = Image.open(io.BytesIO(png)).convert("RGBA")
+        flat = Image.alpha_composite(Image.new("RGBA", im.size, _hex_rgba(card)), im).convert("RGB")
+        buf = io.BytesIO()
+        flat.save(buf, "PNG")
+        return buf.getvalue()
+    except (OSError, ValueError):
+        return png
+
+
 def _ocr_words(png: bytes, exe: str) -> list[str] | None:
-    """The words of 2+ alphanumerics tesseract reads from the icon flattened on white, or None when the tool cannot run
+    """The words of 2+ letters or digits (Unicode-aware) tesseract reads from the icon (opaque callers pass it already flattened), or None when the tool cannot run
     (OSError, timeout or a non-zero exit). Single characters and punctuation are noise and are ignored."""
     from PIL import Image
     try:
@@ -2163,7 +2177,7 @@ def _ocr_words(png: bytes, exe: str) -> list[str] | None:
         return None
     if done.returncode != 0:
         return None
-    return re.findall(r"[A-Za-z0-9]{2,}", done.stdout)
+    return re.findall(r"[^\W_]{2,}", done.stdout)
 
 
 def icon_qa(data: bytes, *, card: str, ink: list[str] | None = None, org_mark: Path | None = None,
@@ -2260,7 +2274,7 @@ def icon_qa(data: bytes, *, card: str, ink: list[str] | None = None, org_mark: P
                            "no-text stays a manual review (needs-input:ocr-unavailable)"})
             logs.append("needs-input:ocr-unavailable")
         else:
-            words = _ocr_words(data, exe)
+            words = _ocr_words(_flatten_on_card(data, card), exe)
             if words is None:
                 checks.append({"check": "no-text", "result": "manual",
                                "detail": "tesseract failed: no-text stays a manual review"})

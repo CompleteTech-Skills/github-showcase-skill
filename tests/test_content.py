@@ -814,6 +814,18 @@ def test_icon_strict_flag_and_family_key(capsys, tmp_path, brand):
     code, res = run_content(capsys, "--config", cfg, *check, "--out", other, *art, *NO_ESTATE)
     assert code == 1 and res["result"] == "fail" and _check_result(res["qa"], "family-ink") == "fail", res
 
+    # normalize: --strict (or the family key) fails with exit 1 and writes nothing; without either it writes the file
+    cand = tmp_path / "cand.png"
+    _candidate(card, ink=(139, 92, 246)).save(cand)
+    norm = ("--meta", meta, "--no-repo-dir", "content", "icon", "normalize", "--in", cand)
+    out_n = tmp_path / "norm" / "icon.png"
+    code, res = run_content(capsys, *norm, "--out", out_n, "--strict", *art, *NO_ESTATE)
+    assert code == 1 and res["out"] is None and "art-fail:icon-qa" in res["logs"] and not out_n.exists(), res
+    code, res = run_content(capsys, "--config", cfg, *norm, "--out", out_n, *art, *NO_ESTATE)
+    assert code == 1 and res["out"] is None and not out_n.exists(), res
+    code, res = run_content(capsys, *norm, "--out", out_n, *art, *NO_ESTATE)
+    assert code == 0 and res["result"] == "warn" and out_n.is_file(), res
+
 
 def test_schema_accepts_icon_strict_family_ink(brand):
     import copy
@@ -973,6 +985,34 @@ def test_ocr_words_filters_noise(monkeypatch):
         raise subprocess.TimeoutExpired(cmd="tesseract", timeout=60)
     monkeypatch.setattr(C.subprocess, "run", timeout)
     assert C._ocr_words(png, "tesseract") is None
+
+
+def test_ocr_words_keeps_unicode_text(monkeypatch):
+    # review B: the ASCII-only filter dropped recognised text such as "ete" with accents
+    from types import SimpleNamespace
+    from PIL import Image
+    png = _png(Image.new("RGBA", (64, 64), (0, 0, 0, 0)))
+    word = "été"
+    monkeypatch.setattr(C.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=0, stdout=word + "\n x\n"))
+    assert C._ocr_words(png, "tesseract") == [word]
+
+
+def test_icon_ocr_sees_white_lettering_on_dark_card(monkeypatch):
+    # review B: flattening on white erased transparent white text before OCR; it must be flattened on the card colour
+    from PIL import Image
+    card = "#0B1020"
+    img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+    img.paste((255, 255, 255, 255), (20, 20, 44, 44))
+    seen = {}
+
+    def fake(png, exe):
+        im = Image.open(io.BytesIO(png)).convert("RGB")
+        seen["colours"] = {c for _, c in im.getcolors()}
+        return []
+    monkeypatch.setattr(C, "_tesseract", lambda: "tesseract")
+    monkeypatch.setattr(C, "_ocr_words", fake)
+    C.icon_qa(_png(img), card=card, ocr=True)
+    assert (255, 255, 255) in seen["colours"] and (11, 16, 32) in seen["colours"], seen
 
 
 def test_icon_ocr_cli_logs(capsys, tmp_path, brand, monkeypatch):
