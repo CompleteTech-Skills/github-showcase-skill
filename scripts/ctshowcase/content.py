@@ -1834,6 +1834,11 @@ def icon_colours(ctx, text: str, org: dict, resolver: Resolver) -> dict:
     colours = family_colours(text, org["brand_key"], family, resolver.aliases(ctx.owner))
     if _section(text, "Repository glyph prompt template") and not _section(text, "(b) Family palette"):
         tokens = ctx.style["tokens"]
+        missing = [key for key in ("icon_ink", "icon_spark") if not tokens.get(key)]
+        if missing:
+            raise NeedsInput("icon-palette", "selected brand config needs " + ", ".join(missing) +
+                             " tokens for the bundled prompt; add them or pass --art-direction FILE "
+                             "with a family palette")
         colours.update(family_label=family, LINE_NAME="family icon ink", LINE_HEX=tokens["icon_ink"],
                        CORE_HEX=tokens["title"], GLOW_HEX=tokens["accent_mid"],
                        SPARK_NAME="family icon spark", SPARK_HEX=tokens["icon_spark"],
@@ -2566,8 +2571,8 @@ def _cmd_icon(args, cli, resolver, head):
     try:
         art = load_art_direction(args.art_direction)
         ink = icon_colours(ctx, art, org, resolver).get("INK") or []
-    except NeedsInput:
-        ctx.log("needs-input:art-direction")
+    except NeedsInput as exc:
+        ctx.log(exc.log)
     rd = ctx.repo_dir
     siblings = [p.name for p in (rd / "assets").glob("icon*")] if rd and (rd / "assets").is_dir() else []
     if args.icon_action == "normalize":

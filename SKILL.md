@@ -140,6 +140,10 @@ for option B. Palette values come from `references/brand.yaml`; documented famil
 seeds are used when available, otherwise the prompt uses the tool's default seed. Use
 `--art-direction FILE` to select another file; relative paths use the current
 directory, and missing files report `needs-input:art-direction` with the selected path.
+Older custom configs without `icon_ink`/`icon_spark` keep normalization and checks
+available (family-ink QA is skipped with `needs-input:icon-palette`). The bundled
+prompt names the missing tokens with exit 4; add them or pass an explicit palette
+through `--art-direction`.
 
 ```bash
 S=<skill-dir>/scripts/showcase.py

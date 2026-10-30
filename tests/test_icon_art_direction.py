@@ -1,5 +1,6 @@
 """The installed skill's icon defaults work without the private estate bundle."""
 import json
+import copy
 import os
 import subprocess
 import sys
@@ -124,3 +125,36 @@ def test_bundled_prompt_has_a_valid_seed_instruction(owner, seed, brand, make_ct
     expected = f"Use seed {seed} when supported." if seed else "Use the tool's default seed."
     assert expected in result["prompt"]
     assert "seed not set" not in result["prompt"]
+
+
+@pytest.mark.parametrize("missing", [("icon_ink",), ("icon_spark",), ("icon_ink", "icon_spark")])
+def test_legacy_config_keeps_normalize_and_check_usable(missing, brand, tmp_path, capsys):
+    import yaml
+    from ctshowcase.config import schema_errors
+
+    raw = copy.deepcopy(brand.raw)
+    for family in [raw["defaults"], *raw["families"].values()]:
+        for token in missing:
+            family.get("tokens", {}).pop(token, None)
+    assert schema_errors(raw) == []
+    config = tmp_path / "legacy-brand.yaml"
+    config.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    source, output = tmp_path / "candidate.png", tmp_path / "icon.png"
+    glyph_image(brand.style("Northwind-Trading-Co")["tokens"]["icon_ink"]).save(source)
+    common = ["--config", str(config), "--meta", str(meta), "--no-repo-dir", "content", "icon"]
+    for action, extra in (("normalize", ["--in", str(source)]), ("check", [])):
+        assert C.main([*common, action, "--out", str(output), *extra]) == 0
+        result = json.loads(capsys.readouterr().out)
+        assert result["result"] == "pass"
+        assert "needs-input:icon-palette" in result["logs"]
+        assert not any(cell["check"] == "family-ink" for cell in result["qa"]["checks"])
+    assert C.main([*common, "prompt"]) == 4
+    result = json.loads(capsys.readouterr().out)
+    assert result["logs"] == ["needs-input:icon-palette"]
+    assert all(token in result["error"] for token in missing)
+    # Explicit estate-format palettes continue to work with the same valid legacy config.
+    assert C.main([*common, "prompt", "--art-direction", str(ROOT / "tests/fixtures/content/ART_DIRECTION.min.md")]) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["result"] == "needs-writer"
