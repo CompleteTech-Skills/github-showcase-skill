@@ -72,3 +72,15 @@ def test_legacy_url_matching_is_limited_to_configured_asset_files(brand):
     assert readme._footer_logo_url(LEGACY + "logo.png", current)
     assert readme._footer_logo_url(LEGACY.replace("/main/", "/release/") + "logo-dark.png?v=2", current)
     assert not readme._footer_logo_url(LEGACY + "partner-logo.png", current)
+
+
+def test_authored_content_inside_footer_markers_is_not_exempt(brand, tmp_path):
+    current = relocated(brand)
+    ctx = RepoContext(current, normalize(meta_dict()), tmp_path)
+    before = readme.scaffold(ctx).replace(
+        footer.END, "Authored partner acknowledgement.\n" + footer.END
+    )
+    after, removed = readme.upgrade(ctx, before)
+    assert "Authored partner acknowledgement." not in removed
+    assert any("Authored partner acknowledgement." in problem
+               for problem in readme.preservation(before, after, removed))
