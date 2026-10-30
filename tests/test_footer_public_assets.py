@@ -75,6 +75,8 @@ def test_legacy_url_matching_is_limited_to_configured_asset_files(brand):
     assert readme._footer_logo_url(LEGACY + "logo.png", current)
     assert readme._footer_logo_url(LEGACY.replace("/main/", "/release/") + "logo-dark.png?v=2", current)
     assert not readme._footer_logo_url(LEGACY + "partner-logo.png", current)
+    assert readme._footer_logo_url("assets/logo.png", current)
+    assert not readme._footer_logo_url("assets/partner-logo.png", current)
 
 
 def test_authored_content_inside_footer_markers_is_not_exempt(brand, tmp_path):
@@ -192,3 +194,25 @@ def test_callout_replaces_removed_footer_despite_authored_company_credit(brand, 
     written = (tmp_path / "README.md").read_text(encoding="utf-8")
     assert credit in written
     assert footer.markup(ctx.brand) in written
+
+
+def test_public_historical_local_footer_upgrades_through_cli(brand, fixture_meta, tmp_path):
+    before = (ROOT / "tests/fixtures/readmes/CompleTetech-Security__php2shell-check.md").read_text(encoding="utf-8")
+    path = tmp_path / "README.md"
+    path.write_text(before, encoding="utf-8")
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(fixture_meta("CompleTetech-Security__php2shell-check")), encoding="utf-8")
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--write")
+    assert result.returncode == 0, result.stdout + result.stderr
+    after = path.read_text(encoding="utf-8")
+    assert after.count("Built by") == 1
+    assert footer.check(brand, after)[0] == "pass"
+    assert 'src="assets/logo.png"' not in after
+    assert run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--write").returncode == 0
+    assert path.read_text(encoding="utf-8") == after
+
+
+def test_historical_local_logo_is_not_an_additional_authored_image(brand):
+    modern = footer.markup(brand)
+    extra = '<img src="assets/logo.png" alt="CompleteTech LLC">'
+    assert not readme.is_footer_copy(modern.replace("</p>", extra + "\n</p>"), brand)

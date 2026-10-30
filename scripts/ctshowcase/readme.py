@@ -527,12 +527,13 @@ FOOTER_ATTR = re.compile(r"""\b(src|srcset|alt)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^
 
 def _footer_logo_url(url: str, brand) -> bool:
     """`url` is one of the decision 18 footer's own logo files (brand footer `logo_light_url` or `logo_dark_url`),
-    including explicitly configured legacy URLs, or drifted only in scheme, branch, query or the github.com
+    including explicitly configured legacy URLs and repository-relative paths, or drifted only in scheme, branch, query or the github.com
     blob/raw form of the same file."""
     url = url.strip().split("#", 1)[0].split("?", 1)[0]
     footer = brand.raw["footer"]
     urls = [footer[key] for key in ("logo_light_url", "logo_dark_url")]
     urls.extend(footer.get("legacy_logo_urls", []))
+    urls.extend(footer.get("legacy_logo_paths", []))
     for want in urls:
         if url == want:
             return True
@@ -555,6 +556,8 @@ def is_footer_copy(block: str, brand) -> bool:
     import html
     f, company = brand.raw["footer"], brand.strings["company"]
     credit = {f"{f['line_prefix']} {company}", f"{f['line_prefix']} {company} {f['line_suffix']}"}
+    image_tags = [m for m in FOOTER_TAG.finditer(block) if m.group(1).lower() in ("img", "source")
+                  and not m.group(0).startswith("</")]
 
     def tag_ok(m: re.Match) -> bool:
         name, attrs = m.group(1).lower(), m.group(2)
@@ -563,12 +566,20 @@ def is_footer_copy(block: str, brand) -> bool:
         if name == "a":
             return "complete.tech" in attrs.lower()
         sources = []
+        local_source = False
+        company_alt = False
         for a in FOOTER_ATTR.finditer(attrs):  # an alt label never proves image ownership
             key = a.group(1).lower()
             val = html.unescape(next(g for g in a.groups()[1:] if g is not None)).strip()
+            if key == "alt" and val in (company, f["alt"]):
+                company_alt = True
             if key in ("src", "srcset"):
                 parts = [p.split()[0] for p in val.split(",") if p.split()]
                 sources.append(bool(parts) and all(_footer_logo_url(u, brand) for u in parts))
+                local_source |= any(u.split("?", 1)[0].split("#", 1)[0] in f.get("legacy_logo_paths", [])
+                                    for u in parts)
+        if local_source and (name != "img" or len(image_tags) != 1 or not company_alt):
+            return False  # historical local footer is one company image, never an extra image
         return bool(sources) and all(sources)
 
     for line in block.splitlines():

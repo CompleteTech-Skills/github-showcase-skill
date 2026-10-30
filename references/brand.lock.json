@@ -405,6 +405,9 @@
  "footer": {
   "alt": "CompleteTech LLC",
   "href": "https://www.complete.tech",
+  "legacy_logo_paths": [
+   "assets/logo.png"
+  ],
   "legacy_logo_urls": [
    "https://raw.githubusercontent.com/CompleteTech-LLC/.github/main/brand/logo.png",
    "https://raw.githubusercontent.com/CompleteTech-LLC/.github/main/brand/logo-dark.png"

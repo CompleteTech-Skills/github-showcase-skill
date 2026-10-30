@@ -349,7 +349,18 @@
    "properties": {
     "legacy_logo_urls": {
      "type": "array",
-     "items": {"type": "string", "pattern": "^https://"},
+     "items": {
+      "type": "string",
+      "pattern": "^https://"
+     },
+     "uniqueItems": true
+    },
+    "legacy_logo_paths": {
+     "type": "array",
+     "items": {
+      "type": "string",
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9_./-]+$"
+     },
      "uniqueItems": true
     }
    },

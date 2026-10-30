@@ -39,6 +39,9 @@ footer:
   legacy_logo_urls:
     - https://raw.githubusercontent.com/CompleteTech-LLC/.github/main/brand/logo.png
     - https://raw.githubusercontent.com/CompleteTech-LLC/.github/main/brand/logo-dark.png
+  # Historical single-image footer used this repository-relative logo path.
+  legacy_logo_paths:
+    - assets/logo.png
   alt: CompleteTech LLC
   width: 200
   line_prefix: Built by
