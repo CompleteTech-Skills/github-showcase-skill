@@ -58,6 +58,8 @@ def _need_git():
 
 
 def test_stale_origin_is_rejected_by_default(tmp_path):
+    # REGRESSION GUARD, intentionally also green on base 2be04ac: the default (no flag) must keep rejecting a stale
+    # origin with exit 2. Every test that exercises --assume-repo or the new message fails on base (18 of 20 do).
     _need_git()
     meta, co = _fixture(tmp_path)
     r = _describe(meta, co)
@@ -68,6 +70,7 @@ def test_stale_origin_is_rejected_by_default(tmp_path):
 
 
 def test_same_name_other_case_is_accepted(tmp_path):
+    # REGRESSION GUARD, intentionally also green on base 2be04ac: case-different origins stay accepted by default.
     _need_git()
     meta, co = _fixture(tmp_path)
     subprocess.run(["git", "-C", str(co), "remote", "set-url", "origin",
