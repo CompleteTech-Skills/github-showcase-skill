@@ -13,9 +13,11 @@ they do not demonstrate a new feature.
 
 Non-vacuity evidence (E6.2.3 review, check 3): 051c559 is an ancestor of base 8373122, so the feature is already on
 the base. To confirm these tests are not vacuous, three mutations of ctshowcase/org.py were each run against a scratch
-copy of HEAD and each made this file fail (1 failed, 12 passed): dropping the bare-name word boundary in
-denylist_leaks, dropping the `#` comment stripping in load_denylist, and returning an empty list instead of
-needs-input for an empty denylist.
+copy of HEAD and each made this file fail (1 failed, 12 passed): dropping the leading lookbehind of the bare-name boundary in
+denylist_leaks ('my-ledgerx', 'a.ledgerx'), dropping its trailing lookahead ('ledgerxyz', 'ledgerx-x'), dropping the `#`
+comment stripping in load_denylist, and returning an empty list instead of needs-input for an empty denylist. (A
+first draft of the miss operand only had 'my-ledgerx-x', which the trailing lookahead alone rejected, so the leading
+lookbehind mutation survived; the operands above were added so each half is pinned.)
 """
 import json
 import os
@@ -83,7 +85,7 @@ def test_denylist_flags_listed_slug_without_registry(tmp_path):
 def test_denylist_bare_name_hits_on_word_boundary_only(tmp_path):
     deny = _write(tmp_path, "deny.txt", "ledgerx\n")  # short: leak_check's distinctiveness rule would skip it
     hit = _write(tmp_path, "hit.md", "ledgerx powers it\n")
-    miss = _write(tmp_path, "miss.md", "ledgerxyz and my-ledgerx-x\n")
+    miss = _write(tmp_path, "miss.md", "ledgerxyz and my-ledgerx and ledgerx-x and a.ledgerx\n")
     proc = lint(tmp_path, hit, "--denylist", deny)
     assert proc.returncode == CHECK_FAILED
     assert rows(proc)[0]["hits"] == ["denied-name:ledgerx"]
