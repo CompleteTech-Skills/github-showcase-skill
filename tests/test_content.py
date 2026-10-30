@@ -754,3 +754,285 @@ def test_add_parser_registers_every_action():
     content = sub.choices["content"]
     acts = next(a for a in content._actions if isinstance(a, argparse._SubParsersAction))
     assert set(acts.choices) == set(C.ACTIONS)
+
+
+# ---------------------------------------------------------------------------------------------------
+# icon family ink: warn by default, fail with --strict or the family key icon_strict_family_ink (E3.2.1)
+# ---------------------------------------------------------------------------------------------------
+def _check_result(qa, name):
+    return next((c["result"] for c in qa["checks"] if c["check"] == name), None)
+
+
+def test_icon_family_ink_warns_by_default_and_fails_when_strict(brand):
+    card = brand.style(NW)["tokens"]["card_fill"]
+    img = C.normalize_icon(_candidate(card, ink=(0, 90, 221)), "transparent", card)[0]
+    data = C.icon_bytes(img)[0]
+    qa = C.icon_qa(data, card=card, ink=["#8B5CF6", "#22D3EE"])
+    assert _check_result(qa, "family-ink") == "warn" and qa["result"] == "warn", qa
+    qa = C.icon_qa(data, card=card, ink=["#8B5CF6", "#22D3EE"], strict=True)
+    assert _check_result(qa, "family-ink") == "fail" and qa["result"] == "fail", qa
+    assert "dominant ink" in next(c for c in qa["checks"] if c["check"] == "family-ink")["detail"]
+    qa = C.icon_qa(data, card=card, ink=["#0858D8"], strict=True)
+    assert _check_result(qa, "family-ink") == "pass", qa
+    # without a family palette the check is not emitted at all, so strict changes nothing
+    qa = C.icon_qa(data, card=card, strict=True)
+    assert _check_result(qa, "family-ink") is None
+
+
+def test_icon_strict_flag_and_family_key(capsys, tmp_path, brand):
+    import copy
+    import yaml
+    card = brand.style(NW)["tokens"]["card_fill"]
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    old = tmp_path / "old-blue" / "assets" / "icon.png"
+    old.parent.mkdir(parents=True)
+    old.write_bytes(C.icon_bytes(C.normalize_icon(_candidate(card, ink=(0, 90, 221)), "transparent", card)[0])[0])
+    other = tmp_path / "other" / "assets" / "icon.png"
+    other.parent.mkdir(parents=True)
+    other.write_bytes(C.icon_bytes(C.normalize_icon(_candidate(card, ink=(139, 92, 246)), "transparent", card)[0])[0])
+    check = ("--meta", meta, "--no-repo-dir", "content", "icon", "check")
+    art = ("--art-direction", FIX / "ART_DIRECTION.min.md")
+
+    # the old Northwind blue is the family ink: pass with or without --strict
+    code, res = run_content(capsys, *check, "--out", old, *art, *NO_ESTATE)
+    assert code == 0 and res["result"] == "pass", res
+    code, res = run_content(capsys, *check, "--out", old, "--strict", *art, *NO_ESTATE)
+    assert code == 0 and res["result"] == "pass", res
+
+    # a non-family ink: warn by default (exit 0), fail with --strict (exit 1)
+    code, res = run_content(capsys, *check, "--out", other, *art, *NO_ESTATE)
+    assert code == 0 and res["result"] == "warn" and _check_result(res["qa"], "family-ink") == "warn", res
+    code, res = run_content(capsys, *check, "--out", other, "--strict", *art, *NO_ESTATE)
+    assert code == 1 and res["result"] == "fail" and _check_result(res["qa"], "family-ink") == "fail", res
+
+    # the family key turns the strict behaviour on for the Northwind family, without the flag
+    raw = copy.deepcopy(brand.raw)
+    raw["families"]["completetech"]["icon_strict_family_ink"] = True
+    cfg = tmp_path / "brand-strict.yaml"
+    cfg.write_text(yaml.safe_dump(raw, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    code, res = run_content(capsys, "--config", cfg, *check, "--out", other, *art, *NO_ESTATE)
+    assert code == 1 and res["result"] == "fail" and _check_result(res["qa"], "family-ink") == "fail", res
+
+    # normalize: --strict (or the family key) fails with exit 1 and writes nothing; without either it writes the file
+    cand = tmp_path / "cand.png"
+    _candidate(card, ink=(139, 92, 246)).save(cand)
+    norm = ("--meta", meta, "--no-repo-dir", "content", "icon", "normalize", "--in", cand)
+    out_n = tmp_path / "norm" / "icon.png"
+    code, res = run_content(capsys, *norm, "--out", out_n, "--strict", *art, *NO_ESTATE)
+    assert code == 1 and res["out"] is None and "art-fail:icon-qa" in res["logs"] and not out_n.exists(), res
+    code, res = run_content(capsys, "--config", cfg, *norm, "--out", out_n, *art, *NO_ESTATE)
+    assert code == 1 and res["out"] is None and not out_n.exists(), res
+    code, res = run_content(capsys, *norm, "--out", out_n, *art, *NO_ESTATE)
+    assert code == 0 and res["result"] == "warn" and out_n.is_file(), res
+
+
+def test_schema_accepts_icon_strict_family_ink(brand):
+    import copy
+    from ctshowcase.config import schema_errors
+    raw = copy.deepcopy(brand.raw)
+    raw["families"]["completetech"]["icon_strict_family_ink"] = True
+    assert schema_errors(raw) == []
+    raw["families"]["completetech"]["icon_strict_family_ink"] = "yes"
+    assert schema_errors(raw) != []
+
+
+# ---------------------------------------------------------------------------------------------------
+# configurable contrast floor (E3.2.2): default 3.0, `--min-contrast` > family key `icon_min_contrast` > 3.0
+# ---------------------------------------------------------------------------------------------------
+CONTRAST_INK = (122, 141, 176)  # ~3.1:1 on the card: between the 3.0 default floor and the 4.5 recommendation
+
+
+def test_icon_min_contrast_default_3_and_configurable(brand):
+    from ctshowcase.color import contrast
+    card = brand.style(NW)["tokens"]["card_fill"]
+    img = C.normalize_icon(_candidate(card, ink=CONTRAST_INK), "transparent", card)[0]
+    data = C.icon_bytes(img)[0]
+    qa = C.icon_qa(data, card=card)
+    assert _check_result(qa, "contrast-on-card") == "pass", qa
+    detail = next(c["detail"] for c in qa["checks"] if c["check"] == "contrast-on-card")
+    assert detail.endswith("(>= 3:1)"), detail
+    # self-check: the measured ink lies between the default floor and the recommended one
+    ratio = contrast(qa["dominant_ink"], card)
+    assert 3.0 < ratio < 4.5, ratio
+    qa = C.icon_qa(data, card=card, min_contrast=4.5)
+    assert _check_result(qa, "contrast-on-card") == "fail" and qa["result"] == "fail", qa
+    detail = next(c["detail"] for c in qa["checks"] if c["check"] == "contrast-on-card")
+    assert "(>= 4.5:1)" in detail, detail
+    # an explicit 3.0 is the default
+    assert C.icon_qa(data, card=card, min_contrast=3.0)["checks"] == C.icon_qa(data, card=card)["checks"]
+
+
+def test_icon_contrast_floor_helper():
+    from ctshowcase.errors import ShowcaseError
+    assert C.icon_contrast_floor(None, None) == 3.0
+    assert C.icon_contrast_floor(4.5, None) == 4.5
+    assert C.icon_contrast_floor(None, 4.5) == 4.5
+    assert C.icon_contrast_floor(3.5, 4.5) == 3.5  # the CLI value wins over the family key
+    for bad in (0.5, 22, True, "x"):
+        with pytest.raises(ShowcaseError) as exc:
+            C.icon_contrast_floor(bad, None)
+        assert exc.value.log == "usage" and exc.value.code == 2, bad
+    with pytest.raises(ShowcaseError):
+        C.icon_contrast_floor(None, 22)
+
+
+def test_icon_min_contrast_cli(capsys, tmp_path, brand):
+    card = brand.style(NW)["tokens"]["card_fill"]
+    img = C.normalize_icon(_candidate(card, ink=CONTRAST_INK), "transparent", card)[0]
+    out = write(tmp_path, {"repo/assets/icon.png": C.icon_bytes(img)[0]}) / "repo" / "assets" / "icon.png"
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    check = ("--meta", meta, "--no-repo-dir", "content", "icon", "check", "--out", out,
+             "--art-direction", FIX / "ART_DIRECTION.min.md", *NO_ESTATE)
+    code, res = run_content(capsys, *check, "--min-contrast", "4.5")
+    assert code == 1 and res["result"] == "fail", res
+    code, res = run_content(capsys, *check)
+    assert code == 0 and res["result"] in ("pass", "warn"), res
+    code, res = run_content(capsys, *check, "--min-contrast", "30")
+    assert code == 2, res
+
+
+def test_schema_icon_min_contrast(brand):
+    import copy
+    from ctshowcase.config import schema_errors
+    raw = copy.deepcopy(brand.raw)
+    raw["families"]["completetech"]["icon_min_contrast"] = 4.5
+    assert schema_errors(raw) == []
+    raw["families"]["completetech"]["icon_min_contrast"] = 0.5
+    assert schema_errors(raw) != []
+    raw["families"]["completetech"]["icon_min_contrast"] = 22
+    assert schema_errors(raw) != []
+
+
+# ---------------------------------------------------------------------------------------------------
+# optional OCR no-text check (E3.2.3): off by default, `--ocr` uses tesseract on PATH when installed
+# ---------------------------------------------------------------------------------------------------
+MANUAL_NO_TEXT = "OCR and the 48 px org sheet are reviewed (f.3, g)"
+
+
+def _no_text(qa):
+    return next(c for c in qa["checks"] if c["check"] == "no-text")
+
+
+def test_icon_ocr_off_by_default_keeps_manual(brand):
+    # Regression guard: the no-flag output must equal today's manual entry. The
+    # kwdefault assertion pins that --ocr exists and defaults OFF (it fails on base).
+    assert C.icon_qa.__kwdefaults__["ocr"] is False
+    card = brand.style(NW)["tokens"]["card_fill"]
+    data = C.icon_bytes(C.normalize_icon(_candidate(card), "transparent", card)[0])[0]
+    qa = C.icon_qa(data, card=card)
+    assert "logs" not in qa
+    assert _no_text(qa) == {"check": "no-text", "result": "manual", "detail": MANUAL_NO_TEXT}
+
+
+def test_icon_ocr_unavailable_logs_and_skips(brand, monkeypatch):
+    card = brand.style(NW)["tokens"]["card_fill"]
+    data = C.icon_bytes(C.normalize_icon(_candidate(card), "transparent", card)[0])[0]
+    monkeypatch.setattr(C, "_tesseract", lambda: None)
+    off = C.icon_qa(data, card=card)
+    qa = C.icon_qa(data, card=card, ocr=True)
+    assert _no_text(qa)["result"] == "manual", qa
+    assert "tesseract not installed" in _no_text(qa)["detail"]
+    assert qa["logs"] == ["needs-input:ocr-unavailable"], qa
+    assert qa["result"] == off["result"]
+
+
+def test_icon_ocr_found_text_warns_or_fails_strict(brand, monkeypatch):
+    card = brand.style(NW)["tokens"]["card_fill"]
+    data = C.icon_bytes(C.normalize_icon(_candidate(card), "transparent", card)[0])[0]
+    monkeypatch.setattr(C, "_tesseract", lambda: "tesseract")
+    monkeypatch.setattr(C, "_ocr_words", lambda png, exe: ["HELLO", "A1"])
+    qa = C.icon_qa(data, card=card, ocr=True)
+    assert _no_text(qa)["result"] == "warn" and _no_text(qa)["detail"].startswith("OCR found text: HELLO"), qa
+    assert qa["logs"] == [] and qa["result"] == "warn"
+    qa = C.icon_qa(data, card=card, ocr=True, strict=True)
+    assert _no_text(qa)["result"] == "fail" and qa["result"] == "fail", qa
+
+
+def test_icon_ocr_clean_passes(brand, monkeypatch):
+    card = brand.style(NW)["tokens"]["card_fill"]
+    data = C.icon_bytes(C.normalize_icon(_candidate(card), "transparent", card)[0])[0]
+    monkeypatch.setattr(C, "_tesseract", lambda: "tesseract")
+    monkeypatch.setattr(C, "_ocr_words", lambda png, exe: [])
+    qa = C.icon_qa(data, card=card, ocr=True)
+    assert _no_text(qa) == {"check": "no-text", "result": "pass", "detail": "OCR found no text"}, qa
+    assert qa["logs"] == []
+
+
+def test_icon_ocr_tool_failure(brand, monkeypatch):
+    card = brand.style(NW)["tokens"]["card_fill"]
+    data = C.icon_bytes(C.normalize_icon(_candidate(card), "transparent", card)[0])[0]
+    monkeypatch.setattr(C, "_tesseract", lambda: "tesseract")
+    monkeypatch.setattr(C, "_ocr_words", lambda png, exe: None)
+    qa = C.icon_qa(data, card=card, ocr=True)
+    assert _no_text(qa)["result"] == "manual" and "stays a manual review" in _no_text(qa)["detail"], qa
+    assert "needs-input:ocr-failed" in qa["logs"]
+
+
+def test_ocr_words_filters_noise(monkeypatch):
+    import subprocess
+    from types import SimpleNamespace
+    from PIL import Image
+    png = _png(Image.new("RGBA", (64, 64), (0, 0, 0, 0)))
+    monkeypatch.setattr(C.subprocess, "run",
+                        lambda *a, **k: SimpleNamespace(returncode=0, stdout="\n x . HI 4 ab\n"))
+    assert C._ocr_words(png, "tesseract") == ["HI", "ab"]
+    monkeypatch.setattr(C.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=1, stdout="HI"))
+    assert C._ocr_words(png, "tesseract") is None
+
+    def timeout(*a, **k):
+        raise subprocess.TimeoutExpired(cmd="tesseract", timeout=60)
+    monkeypatch.setattr(C.subprocess, "run", timeout)
+    assert C._ocr_words(png, "tesseract") is None
+
+
+def test_ocr_words_keeps_unicode_text(monkeypatch):
+    # review B: the ASCII-only filter dropped recognised text such as "ete" with accents
+    from types import SimpleNamespace
+    from PIL import Image
+    png = _png(Image.new("RGBA", (64, 64), (0, 0, 0, 0)))
+    word = "été"
+    monkeypatch.setattr(C.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=0, stdout=word + "\n x\n"))
+    assert C._ocr_words(png, "tesseract") == [word]
+
+
+def test_icon_ocr_sees_white_lettering_on_dark_card(monkeypatch):
+    # review B: flattening on white erased transparent white text before OCR; it must be flattened on the card colour
+    from PIL import Image
+    card = "#0B1020"
+    img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+    img.paste((255, 255, 255, 255), (20, 20, 44, 44))
+    seen = {}
+
+    def fake(png, exe):
+        im = Image.open(io.BytesIO(png)).convert("RGB")
+        seen["colours"] = {c for _, c in im.getcolors()}
+        return []
+    monkeypatch.setattr(C, "_tesseract", lambda: "tesseract")
+    monkeypatch.setattr(C, "_ocr_words", fake)
+    C.icon_qa(_png(img), card=card, ocr=True)
+    assert (255, 255, 255) in seen["colours"] and (11, 16, 32) in seen["colours"], seen
+
+
+def test_icon_ocr_cli_logs(capsys, tmp_path, brand, monkeypatch):
+    card = brand.style(NW)["tokens"]["card_fill"]
+    img = C.normalize_icon(_candidate(card), "transparent", card)[0]
+    out = write(tmp_path, {"repo/assets/icon.png": C.icon_bytes(img)[0]}) / "repo" / "assets" / "icon.png"
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    check = ("--meta", meta, "--no-repo-dir", "content", "icon", "check", "--out", out,
+             "--art-direction", FIX / "ART_DIRECTION.min.md", *NO_ESTATE)
+    monkeypatch.setattr(C, "_tesseract", lambda: None)
+    code, plain = run_content(capsys, *check)
+    code_ocr, res = run_content(capsys, *check, "--ocr")
+    assert code_ocr == code and res["result"] == plain["result"], (plain, res)
+    assert "needs-input:ocr-unavailable" in res["logs"], res
+
+
+def test_icon_ocr_malformed_png_keeps_logs_key(monkeypatch):
+    # an unreadable PNG returns before the OCR step; with ocr=True the shape still carries `logs` (empty)
+    monkeypatch.setattr(C, "_tesseract", lambda: None)
+    qa = C.icon_qa(b"bad", card="#0B1020", ocr=True)
+    assert qa["result"] == "fail" and qa["logs"] == [], qa
+    assert "logs" not in C.icon_qa(b"bad", card="#0B1020")
