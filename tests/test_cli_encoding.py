@@ -66,3 +66,11 @@ def test_main_supports_redirected_text_streams(monkeypatch):
     monkeypatch.setattr(sys, "stderr", io.StringIO())
     assert showcase.main(["footer", "--raw"]) == 0
     assert " · Innovation at Every Integration" in output.getvalue()
+
+
+def test_quality_gate_decodes_cli_utf8_under_legacy_locale():
+    result = subprocess.run(
+        [sys.executable, "-c", "from scripts import validate_quality; validate_quality.gate_labels()"],
+        cwd=ROOT, env=dict(os.environ, PYTHONIOENCODING="cp1252:strict", PYTHONUTF8="0"), capture_output=True)
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    assert b"labels.yml ok" in result.stdout
