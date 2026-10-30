@@ -348,6 +348,7 @@ orgs:
     family_topics: []
     footer: true
     # license_wording: the legal holder name the owner approved for rights claims; absent = write no claim (issue 36)
+    # Data-only field (task 37): tests land with task 39, consumption with task 38; no behaviour changes here.
     license_wording: CompleteTech LLC
     flagship: true
   CompleteTech-Skills:
