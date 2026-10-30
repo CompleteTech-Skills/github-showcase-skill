@@ -1976,6 +1976,9 @@ def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = Non
                         prompt)
         prompt = re.sub(r"\b4 candidates\b", "1 image", prompt)
         prompt = prompt.replace("seed {SEED} if the tool supports seeds", "seed: {SEED}")
+        # legacy "Use seed {SEED} when supported." would assert a seed (or "not supported") unconditionally
+        prompt = re.sub(r"Use seed \{SEED\}(?: (?:when|if) (?:supported|the tool supports seeds))?\.",
+                        "{SEED_INSTRUCTION}", prompt, flags=re.I)
         prompt = re.sub(r"The pipeline downsamples your image[^.]*\.",
                         "The lock pass traces your image into the compositor, which renders the flat 1024 × 1024 px "
                         "assets/icon.png in the family light-surface inks.", prompt)
@@ -2584,9 +2587,9 @@ def _cmd_icon(args, cli, resolver, head):
         skill_art = SKILL_ART_DIRECTION.read_text(encoding="utf-8") if args.option == "B" else None
         res = icon_prompt(ctx, resolver, art, glyph, args.option, lang, skill_art, args.seed)
         md = prompt_markdown(res)
-        result = "needs-writer" if res["missing"] else "ok"
+        result = "needs-writer" if (res["missing"] or res["invalid"]) else "ok"
         out = None
-        if args.out and not res["missing"]:
+        if args.out and not res["missing"] and not res["invalid"]:
             out = Path(args.out)
             out.parent.mkdir(parents=True, exist_ok=True)
             out.write_text(md, encoding="utf-8")

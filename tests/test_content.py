@@ -804,3 +804,24 @@ def test_size_class_help_lists_every_key():
     assert text.endswith("(case-insensitive)")
     for key in C.SIZE_CLASSES:
         assert key in text
+
+
+def test_icon_prompt_cli_invalid_size_class_blocks_out_even_without_a_size_placeholder(monkeypatch, tmp_path, capsys):
+    """A custom template with a literal size (no {SIZE_CLASS}) must still not be written for an invalid size_class."""
+    monkeypatch.chdir(tmp_path)
+    art = C.load_art_direction().replace("{SIZE_CLASS}", "WIDE")
+    art_file = tmp_path / "art.md"
+    art_file.write_text(art, encoding="utf-8")
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    glyph = tmp_path / "glyph.json"
+    glyph.write_text(json.dumps({"glyph_name": "Inbox", "glyph_description": "An open tray.",
+                                 "spark_placement": "inside the tray", "size_class": "medium"}), encoding="utf-8")
+    out = tmp_path / "prompt.md"
+    args = ["--meta", str(meta), "--no-repo-dir", "content", "icon", "prompt", "--option", "A",
+            "--glyph", str(glyph), "--art-direction", str(art_file), "--out", str(out)]
+    assert C.main(args) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["result"] == "needs-writer"
+    assert "SIZE_CLASS" in result["invalid"]
+    assert not out.exists()

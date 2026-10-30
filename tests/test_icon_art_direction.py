@@ -235,3 +235,18 @@ def test_explicit_seed_is_requested_even_when_a_custom_template_has_no_seed_plac
     assert "- Requested: 1 image; seed: 4242." in C.prompt_markdown(result)
     plain = C.icon_prompt(make_ctx(owner="CompleteTech-Skills"), Resolver(brand, {}, {}), art, GLYPH, "A")
     assert "seed" not in plain["prompt"].lower()
+
+
+def test_legacy_conditional_seed_clause_in_a_custom_template_is_normalised(brand, make_ctx):
+    """'Use seed {SEED} when supported.' must not assert a seed (or 'not supported') the caller never requested."""
+    from ctshowcase.resolver import Resolver
+
+    art = C.load_art_direction()
+    art = re.sub(r"[^\n]*\{SEED(?:_INSTRUCTION)?\}[^\n]*", "", art)
+    art = art.rstrip() + "\n\nUse seed {SEED} when supported.\n"
+    ctx = make_ctx(owner="CompleteTech-Skills")
+    plain = C.icon_prompt(ctx, Resolver(brand, {}, {}), art, GLYPH, "A")
+    assert "seed" not in plain["prompt"].lower()
+    seeded = C.icon_prompt(ctx, Resolver(brand, {}, {}), art, GLYPH, "A", seed=4242)
+    assert "Use seed 4242." in seeded["prompt"]
+    assert "when supported" not in seeded["prompt"]
