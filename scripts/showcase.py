@@ -79,7 +79,13 @@ def _gate_origin_owner(args, have: str) -> None:
     """--assume-repo must never launder an excluded/hold/T3 origin owner past the approval gate: the owner the checkout
     actually belongs to is checked exactly as it would be without the override (Refused, exit 2)."""
     try:
-        brand(args, prefer_lock=True).check_owner(have.split("/")[0], allow_t3=getattr(args, "allow_t3", False))
+        b = brand(args, prefer_lock=True)
+        b.check_owner(have.split("/")[0], allow_t3=getattr(args, "allow_t3", False))
+        # a family-level hold lives in the family style, not owners.hold: the origin owner's family is gated too,
+        # with the same --allow-hold approval the command would need under its original identity
+        if b.resolver().family_hold(have.split("/")[0]) and not getattr(args, "allow_hold", False):
+            raise Refused(f"{have.split('/')[0]} family is on hold; pass --allow-hold (--assume-repo does not lift it)",
+                          log="hold")
     except Refused:
         raise
     except ShowcaseError:  # no brand data to gate against: nothing further to refuse here
@@ -1291,6 +1297,14 @@ def _main(argv=None) -> int:
         if args.format == "text" and not args.quiet:
             print(f"{args.command}: {obj['error']}", file=sys.stderr)
             return code
+    note = getattr(args, "_assume_note", None)
+    if note:  # one shared path: every command that accepted the override logs it, whatever it does with ctx.logs
+        if obj is not None:
+            logs = list(obj.get("logs") or [])
+            if note not in logs:
+                obj["logs"] = logs + [note]
+        elif not getattr(args, "_assume_note_written", False):
+            sys.stderr.write(note + chr(10))
     if obj is not None:
         emit(args, obj)
     return code
