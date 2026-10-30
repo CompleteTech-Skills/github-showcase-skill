@@ -392,3 +392,33 @@ def test_readme_record_without_repository_id_keeps_foreign_art_provable(tmp_path
     copied = {"banner.png": {"sha256": "x", "repository_id": 1111}}
     assert foreign({**copied, "README.md": {"staged_description": _staged(STAGED)}}) == "true"  # what the code writes
     assert foreign({**copied, "README.md": {"staged_description": _staged(STAGED), "repository_id": 4242}}) == "false"
+
+
+def test_spec_literal_readme_sidecar_would_hide_unrendered_art(tmp_path):
+    # Evidence for declining the literal "write_sidecar whenever docs/images exists" reading (E5.2.2 R4 B, both items).
+    # Reproduced on the spec's own call: with an empty docs/images and no sidecar, `fp.write_sidecar(..., 'README.md', ...)`
+    # stamps a fingerprint for banner/card nobody rendered, so `fingerprint` flips from changed=true (render them) to
+    # changed=false and the Action skips the art. On an existing sidecar it would also re-stamp inputs/fingerprint from
+    # the STAGED meta, marking art rendered from the live About as current for the staged sentence. So the code merges
+    # only the README record into an existing sidecar and otherwise logs staged-description-unrecorded.
+    rd = _repo(tmp_path)
+    imgs = rd / "docs" / "images"
+    imgs.mkdir(parents=True)
+
+    def changed():
+        f = run_cli("--meta", META, "--repo-dir", rd, "--format", "json", "fingerprint", "--out-dir", imgs)
+        assert f.returncode == 0, f.stderr
+        return _json(f)["changed"]
+
+    assert changed() is True  # nothing rendered yet
+    p = run_cli("--meta", META, "--repo-dir", rd, "--format", "json", "readme", "--mode", "scaffold", "--write",
+                "--description", STAGED)
+    assert p.returncode == 0, p.stderr
+    assert changed() is True and not (rd / SIDE).exists()  # what the code does: art still reads as needing a render
+    # the literal reading, using the config hash a real render stamps (taken from a banner render in a scratch copy)
+    scratch = _repo(tmp_path / "scratch")
+    assert run_cli("--meta", META, "--repo-dir", scratch, "--format", "json", "banner",
+                   "--out", scratch / "docs/images/banner.png").returncode == 0
+    cfg = _sidecar(scratch)["config_sha256"]
+    fp.write_sidecar(imgs, fp.inputs(merged(META, None), rd), cfg, "README.md", {"staged_description": _staged(STAGED)})
+    assert changed() is False  # banner/card were never rendered, yet the art now reads as current
