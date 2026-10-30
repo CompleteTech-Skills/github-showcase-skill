@@ -55,7 +55,7 @@ Every surface uses one **dark** design on both GitHub themes (decision 21): navy
 | A set must be reviewed the way GitHub shows it | `contact-sheet` |
 | Coverage must be reported or a repository verified as done | `lint all`, then `doctor` |
 
-Do not use it for accounts outside the estate. Excluded owners (BunsDev, GoZippy, h-mascot, lmvdz, GalaxyRuler, and per decisions 1 and 2 MetatronAngelAgent and PrompDev) and T3 owners before co-owner sign-off (Pick-Your-AI, Jevelopers-neatHack-2026) are refused with exit 2.
+Do not use it for accounts outside the estate. Excluded owners (BunsDev, GoZippy, h-mascot, lmvdz, GalaxyRuler, and per decisions 1 and 2 MetatronAngelAgent and PrompDev) are refused with exit 2, and T3 owners before co-owner sign-off (Pick-Your-AI, Jevelopers-neatHack-2026) are refused with exit 2 unless the global `--allow-t3` is passed for that run.
 
 ## Boundaries
 
@@ -111,6 +111,8 @@ python3 $S --meta /tmp/meta.json doctor --header
 
 Checks (`describe`, `topics`, `labels`, `readme`, `footer`, `meta`, `fingerprint`, `config`) print one JSON object with `command`, `owner`, `repo`, `result` and `logs[]`; `lint` prints one JSON line per file; `org`, `project`, `enterprise` and `content` print one JSON object with `action` (`org doctor --doctor-format tsv|md` prints a row). Generators (`banner`, `card`, `org-banner`, `org-tile`, `intro`, `contact-sheet`) print a short text summary by default; pass the global `--format json` (before the command) for the same JSON object. `doctor` prints a TSV row (`--format json|md` after `doctor`). In text mode a refusal goes to stderr. Log codes are the standard's: `needs-input:<detail>`, `art-fail`, `topics-short`, `label-conflict`, `label-referenced`, `label-rewrite-first`, `needs-input:label-references` (a rename held because §6.4 rule 0 needs a checkout: re-plan with `--repo-dir`), `readme-shrink`, `dead-link`, `exempt`, `hold`, `t3-signoff`, `archived`, plus `needs-input:metadata` (a failed metadata capture, exit 4), `needs-input:file-tree` (no checkout and no tree in the metadata, so the type is provisional), `needs-input:visibility`, `needs-input:banner-chips` (fewer than two chips), `needs-input:key-chip` (no gold chip: the type category would repeat the eyebrow), `needs-input:subtitle` (no one-line subtitle: add `subtitle:`), `type-override:<type>`, `type-config:<type>` (from `.github/showcase.yml`) and `bootstrap:edited`.
 
+**Co-owner sign-off (`--allow-t3`).** `--allow-t3` is a global option placed before the command (`python3 $S --allow-t3 --meta meta.json banner`). It applies to every repository command, generator, `lint` and the `org`, `project` and `content` groups, not only `meta`; `meta`, `org` and `project` also accept it after the command name. Pass it only for one explicitly approved invocation, after an approved `t3-metadata` or `t3-signoff` row. Without it a T3 owner (Pick-Your-AI, Jevelopers-neatHack-2026) is refused: exit 2, result `refused`, log `t3-signoff`. Three commands never refuse a T3 owner and need no flag: repository `doctor` always admits T3 owners (the code passes `allow_t3=True`; it still refuses excluded owners, log `exempt`, and HOLD owners, log `hold`) and forces the R7 cell to `hold` only without `--allow-t3` (with the flag R7 is evaluated normally); `meta` without `--from-gh` only normalizes a local file (only `--from-gh` is gated, and it never checks eligibility); and `fingerprint` never checks the owner. With the flag, excluded owners (log `exempt`) and HOLD owners (log `hold`) are still refused by repository commands and generators; the flag lifts only the T3 refusal. The org actions `about`, `pins`, `health` and `doctor` admit a HOLD org with or without the flag (they pass `allow_hold`), so the HOLD refusal does not apply to them. It holds for that one invocation only and is off again afterwards; it is never read from a config file or environment.
+
 ## Orgs, Projects, the Enterprise and Content
 
 CLI stdout and stderr use UTF-8, including redirected Windows output, raw footer markup,
@@ -163,7 +165,7 @@ python3 $S --meta meta.json content links --base-ref origin/main --diff     # in
 ## Command Reference
 
 ```text
-python3 <skill-dir>/scripts/showcase.py [--config PATH] [--repo-dir DIR | --no-repo-dir] [--meta FILE] [--type TYPE] [--format json|text] [--quiet] [--version] <command> [options]
+python3 <skill-dir>/scripts/showcase.py [--config PATH] [--repo-dir DIR | --no-repo-dir] [--meta FILE] [--type TYPE] [--format json|text] [--quiet] [--allow-t3] [--version] <command> [options]
 
 meta --from-gh OWNER/REPO [--out FILE] [--allow-t3]
 fingerprint [--out-dir docs/images] [--github-output]
