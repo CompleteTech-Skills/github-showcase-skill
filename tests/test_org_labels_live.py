@@ -23,8 +23,11 @@ def listing(name, **extra):
 
 def fake_api(monkeypatch, pages, *, forms=False, empty_labels=False):
     calls = []
+    real_run = subprocess.run
 
     def run(argv, **kwargs):
+        if argv[0] == "git":
+            return real_run(argv, **kwargs)
         calls.append(argv)
         assert argv[:4] == ["gh", "api", "-X", "GET"]
         assert kwargs["encoding"] == "utf-8"
@@ -118,10 +121,11 @@ def test_live_references_release_only_after_local_forms_are_rewritten(brand, mon
     fake_api(monkeypatch, [[listing(".github"), listing("one")]], forms=True)
     estate = O.Estate(brand, Resolver(brand))
     O.capture_label_repos(estate, N)
+    estate.meta(f"{N}/one").update(files=[], files_complete=True)
     gh = tmp_path / N / ".github"
     repo = tmp_path / N / "one"
-    gh.mkdir(parents=True)
-    repo.mkdir()
+    init_checkout(gh, f"{N}/.github")
+    init_checkout(repo, f"{N}/one")
     form = gh / ".github" / "ISSUE_TEMPLATE" / "bug.yml"
     form.parent.mkdir(parents=True)
     form.write_text("name: Bug\nlabels: [bug]\n", encoding="utf-8")
@@ -313,3 +317,76 @@ def test_cli_pending_transfer_checks_current_owner_defaults(tmp_path, source_lab
         assert not renames and row["result"] == "needs-input"
         if source_labels == "bug":
             assert row["rewrite_first"][0]["repo"] == f"{source}/.github"
+
+
+def sparse_form_checkout(path, full):
+    init_checkout(path, full)
+    form = path / ".github/ISSUE_TEMPLATE/bug.yml"
+    form.parent.mkdir(parents=True)
+    form.write_text("name: Bug\nlabels: [bug]\n", encoding="utf-8")
+    source = path / "src/main.py"
+    source.parent.mkdir()
+    source.write_text("pass\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(path), "add", "."], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(path), "-c", "user.name=Test", "-c", "user.email=test@example.com",
+                    "commit", "-m", "Synthetic forms"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(path), "sparse-checkout", "init", "--cone"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(path), "sparse-checkout", "set", "src"], check=True, capture_output=True)
+    assert not form.exists()
+    return ".github/ISSUE_TEMPLATE/bug.yml"
+
+
+@pytest.mark.parametrize("capture_lists_form", [False, True])
+def test_sparse_member_checkout_does_not_release_missing_reference(brand, tmp_path, capture_lists_form):
+    form = sparse_form_checkout(tmp_path / N / "member", f"{N}/member")
+    gh = tmp_path / N / ".github"
+    init_checkout(gh, f"{N}/.github")
+    estate = O.Estate(brand, Resolver(brand, {"orgs": {N: {"final_repos": ["member"]}}}), {
+        "member": dict(listing("member"), labels=[{"name": "bug", "color": "ff0000"}],
+                       files=[form] if capture_lists_form else [], files_complete=True),
+        ".github": dict(listing(".github"), files=[], files_complete=True),
+    })
+    result, _ = O.labels_plan(estate, N, checkouts=str(tmp_path), dot_github=str(gh))
+    assert result["repos"][0]["result"] == "needs-input"
+    assert not any("--name" in j.get("argv", []) for j in result["jobs"])
+
+
+@pytest.mark.parametrize("source", [N, "Northwind-Labs"])
+def test_sparse_default_checkout_uses_index_not_visible_files(brand, tmp_path, source):
+    repo = tmp_path / N / "member"
+    init_checkout(repo, f"{source}/member")
+    sparse_form_checkout(tmp_path / source / ".github", f"{source}/.github")
+    target_defaults = tmp_path / N / ".github"
+    if source != N:
+        init_checkout(target_defaults, f"{N}/.github")
+    approvals = {"rows": set(), "ids": {"move-member"}, "answers": {}, "extra": [], "actions": [
+        {"id": "move-member", "action": "transfer", "owner": source, "repo": "member", "target_owner": N},
+    ]} if source != N else None
+    estate = O.Estate(brand, Resolver(brand, {"orgs": {N: {"final_repos": ["member"]}}}, approvals), {
+        "member": {"owner": source, "repo": "member", "labels": [{"name": "bug", "color": "ff0000"}],
+                   "files": [], "files_complete": True},
+        ".github": dict(listing(".github"), files=[], files_complete=True),
+    })
+    result, _ = O.labels_plan(estate, N, checkouts=str(tmp_path), dot_github=str(target_defaults))
+    assert result["repos"][0]["result"] == "needs-input"
+    assert not any("--name" in j.get("argv", []) for j in result["jobs"])
+
+
+@pytest.mark.parametrize("missing", [".github/ISSUE_TEMPLATE/bug.yml", "docs/README.md"])
+def test_index_distinguishes_missing_reference_from_unrelated_file(brand, tmp_path, missing):
+    repo = tmp_path / N / "member"
+    init_checkout(repo, f"{N}/member")
+    tracked = repo / missing
+    tracked.parent.mkdir(parents=True)
+    tracked.write_text("name: Bug\nlabels: [bug]\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True, capture_output=True)
+    tracked.unlink()  # the index still contains it, while the capture deliberately knows no files
+    gh = tmp_path / N / ".github"
+    init_checkout(gh, f"{N}/.github")
+    estate = O.Estate(brand, Resolver(brand, {"orgs": {N: {"final_repos": ["member"]}}}), {
+        "member": dict(listing("member"), labels=[{"name": "bug", "color": "ff0000"}], files=[], files_complete=True),
+        ".github": dict(listing(".github"), files=[], files_complete=True),
+    })
+    result, _ = O.labels_plan(estate, N, checkouts=str(tmp_path), dot_github=str(gh))
+    expected = "needs-input" if missing.startswith(".github/") else "plan"
+    assert result["repos"][0]["result"] == expected

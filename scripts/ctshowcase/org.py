@@ -1607,6 +1607,45 @@ def star_list_plan(estate: Estate, org: str, *, lists_capture: dict | None = Non
 # =====================================================================================================
 # labels (STANDARD §6.1): the labels module per repository, dry-run plans only
 # =====================================================================================================
+def _label_checkout_evidence(directory: Path, meta: dict | None, *, defaults_only: bool = False) -> tuple[Path | None, dict]:
+    """Use a checkout only when its captured and indexed reference files are actually present.
+
+    Sparse checkouts and local deletions must not turn a missing form into evidence that no form exists.
+    Unrelated omitted files do not matter; package.json matters for a member's Renovate configuration.
+    """
+    from . import labels as labelsmod
+    evidence = dict(meta or {})
+    captured, _ = _captured_files(evidence)
+    paths = {p for p, value in captured.items() if value is not None and value is not False}
+    try:
+        proc = subprocess.run(["git", "-C", str(directory), "ls-files", "--cached", "-z"],
+                              capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10)
+        indexed = proc.returncode == 0
+        if indexed:
+            paths.update(p for p in proc.stdout.split("\0") if p)
+    except (OSError, subprocess.SubprocessError):
+        indexed = False
+    relevant = (labelsmod.default_form_file if defaults_only
+                else lambda p: labelsmod.reference_file(p) or p.lower() == "package.json")
+    try:
+        complete = indexed and all((directory / p).is_file() for p in paths if relevant(p))
+    except OSError:
+        complete = False
+    if complete:
+        return directory, evidence
+    evidence.update(files=sorted(paths), files_complete=False)
+    return None, evidence
+
+
+def _covered_label_defaults(defaults: dict, meta: dict | None) -> dict:
+    """Retain an unverified default-form hold when a supplied checkout omits relevant files."""
+    from . import labels as labelsmod
+    if defaults.get("dir") is None:
+        return defaults
+    directory, evidence = _label_checkout_evidence(defaults["dir"], meta, defaults_only=True)
+    return defaults if directory is not None else labelsmod.defaults_source(defaults["repo"], meta=evidence)
+
+
 def _label_api(path: str, *, pages: bool = False, optional: bool = False):
     """Read GitHub only; --slurp preserves page boundaries so malformed/incomplete output is never a plan."""
     argv = ["gh", "api", "-X", "GET", path] + (["--paginate", "--slurp"] if pages else [])
@@ -1727,6 +1766,7 @@ def labels_plan(estate: Estate, org: str, *, allow_t3: bool = False, checkouts: 
     defaults = labelsmod.defaults_source(f"{login}/.github", meta=estate.meta(f"{login}/.github"))
     if dot_github:
         defaults = labelsmod.defaults_for(login, "_member_", path=dot_github, resolver=estate.resolver)
+        defaults = _covered_label_defaults(defaults, estate.meta(f"{login}/.github"))
     checkout_root = Path(checkouts) if checkouts else None
     if checkout_root is not None and not checkout_root.is_dir():
         raise ShowcaseError("--checkouts must be a directory containing ORG/REPO checkouts", log="usage")
@@ -1762,26 +1802,30 @@ def labels_plan(estate: Estate, org: str, *, allow_t3: bool = False, checkouts: 
             # no checkout here: §6.4 rule 0 runs against the captured file lists of the repository and of the org's
             # .github (its default issue forms apply to a repository without forms of its own); unproven renames are held
             repo_dir = checkout_root / login / n if checkout_root is not None else None
+            member_meta = m
             if repo_dir is not None and repo_dir.is_dir():
                 origin = labelsmod._checkout_origin(repo_dir)
                 if (not origin or origin[1].lower() != current_name.lower()
                         or not estate.resolver.same(origin[0], current_owner)):
                     raise ShowcaseError(f"--checkouts entry for {full} must have its matching GitHub origin", log="usage")
+                repo_dir, member_meta = _label_checkout_evidence(repo_dir, m)
             else:
                 repo_dir = None
             repo_defaults = defaults
             if current_name == ".github":
-                repo_defaults = labelsmod.defaults_source(full, repo_dir=repo_dir, meta=m)
+                repo_defaults = labelsmod.defaults_source(full, repo_dir=repo_dir, meta=member_meta)
             elif not estate.resolver.same(current_owner, login):
                 # A pending transfer is still governed by its current owner's inherited forms.
                 source_dir = checkout_root / current_owner / ".github" if checkout_root is not None else None
                 if source_dir is not None and source_dir.is_dir():
                     repo_defaults = labelsmod.defaults_for(current_owner, current_name, path=source_dir,
                                                            resolver=estate.resolver)
+                    repo_defaults = _covered_label_defaults(repo_defaults, estate.meta(f"{current_owner}/.github"))
                 else:
                     repo_defaults = labelsmod.defaults_source(f"{current_owner}/.github",
                                                              meta=estate.meta(f"{current_owner}/.github"))
-            ops, lg = labelsmod.plan(existing, repo_dir, files=m.get("files"), complete=m.get("files_complete") is True,
+            ops, lg = labelsmod.plan(existing, repo_dir, files=member_meta.get("files"),
+                                     complete=member_meta.get("files_complete") is True,
                                      defaults=repo_defaults)
         writes = sorted((o for o in ops if o["op"] != "skip"), key=lambda o: o["op"] == "create")
         logs += lg
