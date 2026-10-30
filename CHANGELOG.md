@@ -27,6 +27,7 @@ All notable changes to `github-showcase-skill` are recorded here. Versions follo
 - `content social` renders the personal-profile capstone and backup repositories wherever R10 and the `adopt` upload job include them; it previously exempted them, so the planned upload had no image. Where R10 leaves them out (the archive org, an archived capture) they stay exempt.
 - Label job plans include a per-repository `labels:OWNER/REPO` group for writer reconciliation. Explicit orchestrator groups are preserved.
 - `adopt` withholds jobs and change records for an archived capture, with instructions to re-capture inside the approved unarchive/polish/re-archive cycle. Security jobs are emitted only for active eligible repositories.
+- Global `--allow-t3` (before the command) signs off a T3 co-owned repository for one invocation across every repository command, generator, `doctor`, `lint` and the `org` and `project` groups, not only `meta`. The default still refuses T3 owners (exit 2, `t3-signoff`); excluded and HOLD owners stay refused. Pick Your AI also gets its own palette, mark and attribution (PR #20).
 
 ## 1.0.0 — 2026-10-26
 

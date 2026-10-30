@@ -14,7 +14,7 @@ python3 $S org health  ORG [--dot-github CHECKOUT]                  # O4: §8.1 
 python3 $S org doctor  ORG --snapshot org-snapshot.json [--dot-github CHECKOUT] [--avatar avatar.png] [--doctor-format tsv|json|md] [--header]
 ```
 
-Every action takes `ORG` (any former login resolves, see below), `--registry`, `--meta-dir`, `--decisions`, `--approved`, `--approved-yaml`, `--actions`, `--allow-t3` and `--jobs FILE` (append the writer jobs as JSON lines).
+Every action takes `ORG` (any former login resolves, see below), `--registry`, `--meta-dir`, `--decisions`, `--approved`, `--approved-yaml`, `--actions`, `--allow-t3` and `--jobs FILE` (append the writer jobs as JSON lines). The global `--allow-t3` (before the command) is equivalent.
 
 | Action | Reads | Emits | Writes |
 |---|---|---|---|
