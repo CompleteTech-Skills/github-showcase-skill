@@ -164,3 +164,23 @@ def test_supplied_registry_missing_org_is_not_a_registry_free_run(tmp_path, acti
     assert proc.returncode == 4
     assert "needs-input:org" in result["logs"]
     assert "needs-input:registry" not in result["logs"]
+
+
+def test_positive_partial_snapshot_tree_is_not_suppressed_by_partial_metadata(brand):
+    snap = snapshot(brand)
+    snap["repos"][0]["files_complete"] = False
+    estate = O.Estate(brand, Resolver(brand))
+    estate.add_meta({"owner": ORG, "repo": ".github", "visibility": "public", "files": [],
+                     "files_complete": False})
+    result = O.doctor(estate, ORG, snap)
+    assert result["cells"]["O9"] == "pass"
+    assert result["cells"]["O4"] == "unknown"
+    assert estate.meta(f"{ORG}/.github")["files_complete"] is False
+
+
+@pytest.mark.parametrize("captured", [{}, {"blog": "https://www.complete.tech"}])
+def test_unverified_missing_reason_inputs_are_unknown(brand, captured):
+    snap = {"org": {"is_verified": False, **captured}}
+    result = O.doctor(O.Estate(brand, Resolver(brand)), "CompleteTech-LLC", snap)
+    assert result["cells"]["O11"] == "unknown"
+    assert not any("blog-other-domain" in note or "email-blank" in note for note in result["notes"])

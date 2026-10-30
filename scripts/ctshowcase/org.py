@@ -1848,7 +1848,8 @@ def _snap_org(snap: dict) -> dict:
             "is_verified": o.get("is_verified", gql.get("isVerified")), "avatar_url": o.get("avatar_url", gql.get("avatarUrl")),
             "pinned": [n.get("nameWithOwner") for n in ((gql.get("pinnedItems") or {}).get("nodes") or []) if n]
             if gql.get("pinnedItems") is not None else snap.get("pinned_public")}
-    return {k: v for k, v in fields.items() if k not in ("name", "description") or k in o or k in gql}
+    captured = {"name": "name", "description": "description", "blog": "websiteUrl", "email": "email"}
+    return {k: v for k, v in fields.items() if k not in captured or k in o or captured[k] in gql}
 
 
 def _partial_profile_checks(estate: Estate, row: dict, so: dict, text: str | None) -> tuple[dict, list[str]]:
@@ -1893,10 +1894,20 @@ def doctor(estate: Estate, org: str, snap: dict, *, repo_dir: str | Path | None 
                              "fork": m.get("isFork", m.get("fork")), "archived": m.get("isArchived", m.get("archived")),
                              "description": m.get("description"), "stargazers_count": m.get("stargazerCount", 0),
                              "pushed_at": m.get("pushedAt")})
-        elif "files" in m and (existing.get("files") is None or
-                               m.get("files_complete") is True and existing.get("files_complete") is not True):
-            # Keep richer metadata; supplement its absent/incomplete tree with the captured tree as one unit.
-            estate.add_meta({**existing, "files": m["files"], "files_complete": m.get("files_complete", False)})
+        elif "files" in m:
+            current_files, current_complete = _captured_files(existing)
+            incoming_files, incoming_complete = _captured_files(m)
+            if not current_complete:
+                if incoming_complete:
+                    evidence = {"files": m["files"], "files_complete": True}
+                else:
+                    # Partial trees can prove presence, never the absence of an unlisted file.
+                    merged = dict(current_files)
+                    for path, value in incoming_files.items():
+                        if value is not None and value is not False and merged.get(path) in (None, False):
+                            merged[path] = value
+                    evidence = {"files": merged, "files_complete": False}
+                estate.add_meta({**existing, **evidence})
     so = _snap_org(snap)
     cells: dict[str, str] = {}
     notes: list[str] = []
@@ -1982,8 +1993,13 @@ def doctor(estate: Estate, org: str, snap: dict, *, repo_dir: str | Path | None 
         vd = (want.get("verified_domain") or {}) if has_registry else verified_domain(
             so.get("blog") or "", so.get("email"), _verified_domains(),
             hold=r.family_hold(org) or r.owner_status(org) == "hold")
-        cells["O11"] = "warn" if vd.get("reason") else "fail"
-        notes.append(f"O11 not verified: {vd.get('reason') or 'no reason code'}")
+        if not has_registry and vd.get("reason") != "hold" and (
+                "blog" not in so or vd.get("reason") == "email-blank" and "email" not in so):
+            cells["O11"] = "unknown"
+            notes.append("O11 not verified: capture website/email to determine the reason")
+        else:
+            cells["O11"] = "warn" if vd.get("reason") else "fail"
+            notes.append(f"O11 not verified: {vd.get('reason') or 'no reason code'}")
     else:
         cells["O11"] = "unknown"
     done = all(v in ("pass", "warn", "n/a") for v in cells.values())

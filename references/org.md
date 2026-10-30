@@ -52,8 +52,8 @@ For an org known to `brand.yaml`, `org health ORG --dot-github CHECKOUT` checks 
 | O3 profile | Captured/checkout README emptiness and links to captured private repositories, including known former logins | Required listings and internal notes from the registry; a detected violation is `fail`, otherwise `needs-input:registry` |
 | O4 health | Checkout or captured `.github` file evidence | Missing file input is `unknown` |
 | O6 pins | No desired pin order can be inferred | `needs-input:registry` |
-| O9 banner | Checkout or the `.github` entry's `files` in snapshot `repos`, supplementing missing/incomplete metadata trees, with brand applicability rules | Missing file input is `unknown` |
-| O11 verified | Captured verified status; an unverified org gets the existing reason code from captured website/email, configured enterprise domains and known HOLD status | Missing status is `unknown`; unavailable registry-specific desired fields are not inferred |
+| O9 banner | Checkout or the `.github` entry's `files` in snapshot `repos`, supplementing missing/incomplete metadata trees, with brand applicability rules; partial trees add positive evidence without asserting completeness | Missing file input is `unknown` |
+| O11 verified | Captured verified status; an unverified org gets the existing reason code from captured website/email, configured enterprise domains and known HOLD status | Missing status or uncaptured fields needed to determine the reason are `unknown`; absent fields are not treated as captured empty values |
 
 These partial checks never certify the full org standard or a public profile's full privacy review. With a registry row, the existing full assessment and pin-order checks remain in effect. A supplied or automatically discovered registry that lacks the requested org still exits 4 with `needs-input:org`; it does not trigger registry-free mode. Every command remains read-only; `health` and `doctor` emit no writer jobs.
 
