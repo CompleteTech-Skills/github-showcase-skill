@@ -1189,6 +1189,13 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main(argv=None) -> int:
+    # Redirected Windows streams can start as cp1252 even when their consumers
+    # expect UTF-8. Configure before argparse, which also writes help and errors.
+    # StringIO and embedding hosts may replace either stream without reconfigure.
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8")
     args = parser().parse_args(argv)
     if args.format is None:
         args.format = "text" if args.command in GENERATORS else "json"
