@@ -83,12 +83,14 @@ def membership_topics(ctx: RepoContext, also_in: list[str]) -> tuple[list[str], 
 
 def _org_extra(ctx: RepoContext) -> set[str]:
     """Org-approved topics from the org row's `topics_extra` (task 92). Only lowercase strings matching the standard's
-    drop_valid pattern count; anything else is ignored. An approved topic is only ever one already on the repo."""
-    pattern = re.compile(standard("topics")["drop_valid"])
+    drop_valid pattern count; non-string entries and a non-list value are ignored, and an org without the key gets an
+    empty set (unchanged behaviour). An approved topic is only ever one already on the repo: it never invents topics
+    and never overrides the hard drops in merge() (noise, owner name, type mismatch, private_banned)."""
+    drop_valid = re.compile(standard("topics")["drop_valid"])
     raw = ctx.org.get("topics_extra") or []
     if not isinstance(raw, list):
         return set()
-    return {x.lower() for x in raw if isinstance(x, str) and pattern.match(x.lower())}
+    return {x.lower() for x in raw if isinstance(x, str) and drop_valid.match(x.lower())}
 
 
 def merge(ctx: RepoContext, also_in: list[str] | None = None, prune: bool = False) -> dict:
@@ -104,7 +106,8 @@ def merge(ctx: RepoContext, also_in: list[str] | None = None, prune: bool = Fals
     current = list(meta.get("topics") or [])
     extra = _org_extra(ctx)
     vocab = set(t["brand_topics"]) | set(t["family_topics"]) | set(t["type_topics"]) | set(t["featured"]) | \
-        set(t["allowed"]) | set(t["domain"]) | extra
+        set(t["allowed"]) | set(t["domain"])
+    vocab |= extra  # org-approved topics (topics_extra) pass the vocabulary check; they are not extra-kept
     private = meta.get("visibility") == "private"
     # owner identity through the shared resolver (CQ-03): an approved org rename (CompleTetech-Security ->
     # CompleteTech-Security) or a re-cased login must not change the repository's required topics
@@ -199,7 +202,7 @@ def merge(ctx: RepoContext, also_in: list[str] | None = None, prune: bool = Fals
         if fw:
             tech.append(fw)
             break
-    tech_vocab = set(t["featured"]) | set(t["allowed"]) | extra
+    tech_vocab = set(t["featured"]) | set(t["allowed"]) | extra  # approved existing topics may take a tech slot
     tech += [x for x in surviving if x in tech_vocab]
     tech = [x for x in dict.fromkeys(tech) if x not in proposed][:3]
     proposed += tech

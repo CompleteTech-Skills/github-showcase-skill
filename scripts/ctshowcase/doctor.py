@@ -52,7 +52,7 @@ def row(ctx: RepoContext) -> dict:
     cells["R2"] = "fail" if any(c["result"] == "fail" for c in chk) else "pass"
     tp = topicsmod.merge(ctx)
     cells["R3"] = ("warn" if "topics-short" in tp["logs"] else "pass") if tp["equal_as_set"] else "fail"
-    logs += [l for l in tp["logs"] if l.startswith("review-remove:")]  # advisory: R3 stays pass
+    logs += [line for line in tp["logs"] if line.startswith("review-remove:")]  # advisory: R3 stays pass
     hp = ctx.meta.get("homepage") or ""
     cells["R4"] = "pass" if not hp or ctx.meta.get("homepage_status") == 200 else (
         "unknown" if ctx.meta.get("homepage_status") is None else "warn")
