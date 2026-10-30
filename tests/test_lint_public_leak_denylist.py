@@ -4,6 +4,12 @@ Every name here is synthetic (organisation `Northwind-Trading-Co`, repositories 
 `Northwind-Trading-Co/private-pricing-engine`). No real private repository, organisation or e-mail is used, and no
 test reads a private registry: the registry-free runs point SHOWCASE_ESTATE_ROOT at an empty directory and the
 bootstrap below removes the sibling-estate fallback, so only the explicit synthetic root can be seen.
+
+Baseline note (E6 review, check 3): the `--denylist` behaviour under test was added before this file (051c559,
+E6.2.1), and this file lands with no production change (E6.2.3). These are characterization tests that pin the
+existing behaviour, so they are expected to PASS on the base 8373122 too. Verified by exporting 8373122 to a temp
+directory, copying this file in and running it: 13 passed. A regression in the denylist path is what they catch;
+they do not demonstrate a new feature.
 """
 import json
 import os
