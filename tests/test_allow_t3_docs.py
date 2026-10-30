@@ -29,9 +29,19 @@ def test_skill_documents_refusals():
     skill = _read("SKILL.md")
     assert MARKER in skill
     assert "t3-signoff" in skill
-    window = skill[skill.index(MARKER):][:1200]
+    window = skill[skill.index(MARKER):][:2400]
     assert "excluded" in window, window
     assert "HOLD" in window, window
+
+
+def test_skill_states_which_commands_do_not_enforce_owner_eligibility():
+    """doctor forces R7=hold only without the flag; local meta and fingerprint never refuse (verified in code/tests)."""
+    skill = _read("SKILL.md")
+    para = skill[skill.index(MARKER):].split("\n\n", 1)[0]
+    assert "only without `--allow-t3`" in para, para
+    assert "evaluated normally" in para, para
+    assert "`fingerprint`" in para and "--from-gh" in para, para
+    assert "with or without the flag, with the R7" not in para
 
 
 def test_changelog_unreleased_lists_flag():
