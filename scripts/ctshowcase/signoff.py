@@ -26,7 +26,8 @@ from .errors import Refused
 
 SIGNOFF_FILE = "t3-signoffs.yaml"
 _REQUIRE = False
-_GRANTED: dict[str, dict] = {}  # lowercase login -> the record that granted it, for stamping this run's writer jobs
+_GRANTED: dict[str, list[dict]] = {}  # lowercase login -> the records that granted it, for stamping this run's writer jobs
+_ALIASES: dict[str, set[str]] = {}  # lowercase login -> every login of its org, filled by Resolver.aliases under the flag
 
 
 def env_required() -> bool:
@@ -44,6 +45,24 @@ def required() -> bool:
 
 def reset() -> None:
     _GRANTED.clear()
+    _ALIASES.clear()
+
+
+def register_aliases(logins: list[str]) -> None:
+    """Remember that these logins name one org, so a record under a former login still matches wherever the owner is
+    re-checked (doctor rows, org and project helpers) without each caller passing the aliases again."""
+    group = {x.lower() for x in logins if x}
+    for x in list(group):
+        group |= _ALIASES.get(x, set())
+    for x in group:
+        _ALIASES[x] = group
+
+
+def _expand(owners: list[str]) -> list[str]:
+    out = {o.lower() for o in owners if o}
+    for o in list(out):
+        out |= _ALIASES.get(o, set())
+    return sorted(out)
 
 
 def load_records(root: Path | None = None) -> list[dict]:
@@ -85,7 +104,10 @@ def evaluate(owners: list[str], repo: str | None = None, today: _dt.date | None 
     today = today or _dt.date.today()
     logins = {o.lower() for o in owners if o}
     recs = load_records() if records is None else records
-    mine = [r for r in recs if r.get("approved") is True and str(r.get("owner") or "").lower() in logins]
+    logins = set(_expand(list(logins)))
+    # a record with no id cannot be carried onto writer jobs, so it never authorizes anything
+    mine = [r for r in recs if r.get("approved") is True and str(r.get("id") or "").strip()
+            and str(r.get("owner") or "").lower() in logins]
     if not mine:
         return None, "missing"
     scoped = [r for r in mine if _covers(r, repo)]
@@ -101,7 +123,7 @@ def granted(owner: str, repo: str | None = None, aliases: list[str] | None = Non
     """True when sign-off is not required, or a valid record covers the owner (and repository). Never raises."""
     if not _REQUIRE:
         return True
-    rec, _ = evaluate([owner, *(aliases or [])], repo)
+    rec, _ = evaluate([owner, *(aliases or [])], repo)  # evaluate also expands the aliases Resolver.aliases registered
     return rec is not None
 
 
@@ -114,14 +136,16 @@ def require(owner: str, repo: str | None = None, aliases: list[str] | None = Non
     if rec is None:
         raise Refused(f"{owner}{'/' + repo if repo else ''} is T3 and --require-t3-signoff is set: "
                       f"no valid sign-off record ({why})", log=f"t3-signoff:{why}")
-    for login in logins:
-        _GRANTED[login.lower()] = rec
+    for login in _expand(logins):
+        _GRANTED.setdefault(login, []).append(rec)
     return rec
 
 
 def record_for(owner: str, repo: str | None = None) -> dict | None:
-    rec = _GRANTED.get((owner or "").lower())
-    return rec if rec is not None and _covers(rec, repo) else None
+    for rec in _GRANTED.get((owner or "").lower(), []):
+        if _covers(rec, repo):
+            return rec
+    return None
 
 
 def stamp(jobs):

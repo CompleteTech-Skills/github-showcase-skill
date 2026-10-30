@@ -221,6 +221,9 @@ class Resolver:
             if x.lower() not in seen:
                 seen.add(x.lower())
                 uniq.append(x)
+        from . import signoff
+        if signoff.required():  # --require-t3-signoff: a record under any login of the org matches wherever it is re-checked
+            signoff.register_aliases(uniq)
         return uniq
 
     def same(self, a: str, b: str) -> bool:
@@ -284,7 +287,8 @@ class Resolver:
                 return st
         return None
 
-    def check_owner(self, login: str, *, allow_t3: bool = False, allow_hold: bool = False) -> str | None:
+    def check_owner(self, login: str, *, allow_t3: bool = False, allow_hold: bool = False,
+                    repo: str | None = None) -> str | None:
         """Refuse excluded, hold and (unless signed off) T3 orgs under any of their logins; return the status."""
         from .config import t3_signed_off
         from .errors import Refused
@@ -295,9 +299,9 @@ class Resolver:
             raise Refused(f"{login} is on HOLD", log="hold")
         if st == "t3" and not (allow_t3 or t3_signed_off()):
             raise Refused(f"{login} is T3; needs co-owner sign-off", log="t3-signoff")
-        if st == "t3" and t3_signed_off():
+        if st == "t3":
             from . import signoff
-            signoff.require(login, None, self.aliases(login))  # no-op unless --require-t3-signoff
+            signoff.require(login, repo, self.aliases(login))  # no-op unless --require-t3-signoff
         return st
 
     def family_hold(self, login: str) -> bool:

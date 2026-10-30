@@ -191,9 +191,12 @@ def _gate_target(resolver: Resolver | None, owner: str, *, allow_t3: bool = Fals
         raise Refused(f"{owner} is out of scope; no project writes", log="exempt")
     if st == "hold" or resolver.family_hold(owner):
         raise Refused(f"{owner} is on HOLD", log="hold")
-    if st == "t3" and not (allow_t3 and _t3_granted(owner)):
+    if st == "t3" and not allow_t3:
         raise Refused(f"{owner} is T3: reading its project is fine, changing anything needs co-owner sign-off",
                       log="t3-signoff")
+    if st == "t3":  # registers the grant so writer jobs carry signoff_id; refuses t3-signoff:<why>; no-op unless the flag is on
+        from . import signoff
+        signoff.require(owner, None, resolver.aliases(owner))
     return resolver.canonical(owner)
 
 

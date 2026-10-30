@@ -507,7 +507,7 @@ def cmd_labels(args):
         sys.stdout.write(labels.emit_yml())
         return None, OK
     ctx = context(args)
-    ctx.brand.check_owner(ctx.owner)
+    ctx.brand.check_owner(ctx.owner, repo=ctx.repo)
     # the gates `org labels` applies (labels.md Scope): a family on hold is refused like banner and card
     if (ctx.style.get("hold") or ctx.brand.resolver().family_hold(ctx.owner)) and not args.allow_hold:
         raise ShowcaseError(f"{ctx.owner} family is on hold: labels are not applied; pass --allow-hold", log="hold")
@@ -595,7 +595,7 @@ def cmd_meta(args):
         status = brand(args, prefer_lock=True).owner_status(owner)
         if status in ("excluded", "hold", "t3"):
             # raises Refused (exit 2); --allow-t3 only after an approved t3-metadata or t3-signoff row
-            brand(args, prefer_lock=True).check_owner(owner, allow_t3=args.allow_t3)
+            brand(args, prefer_lock=True).check_owner(owner, allow_t3=args.allow_t3, repo=args.from_gh.split("/")[1] if "/" in args.from_gh else None)
         m = M.from_gh(args.from_gh)
     else:
         rd = repo_dir(args)

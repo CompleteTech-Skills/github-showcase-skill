@@ -117,7 +117,7 @@ def test_writer_jobs_carry_the_signoff_id(tmp_path):
     rec = {"id": "t3s-8", "owner": OWNER, "repos": ["*"], "approved": True, "expires": "2099-12-31"}
     signoff.set_required(True)
     try:
-        signoff._GRANTED[OWNER.lower()] = rec
+        signoff._GRANTED[OWNER.lower()] = [rec]
         out = tmp_path / "jobs.jsonl"
         append(out, [{"id": "a", "phase": "p", "kind": "repo-settings", "repo": f"{OWNER}/x", "argv": []},
                      {"id": "b", "phase": "p", "kind": "repo-settings", "repo": f"{OWNER}/y", "argv": [],
@@ -158,3 +158,76 @@ def test_evaluate_scope_rules(repo, expect):
     recs = [{"id": "s", "owner": OWNER, "repos": ["a", "x/b"], "approved": True, "expires": "2099-01-01"}]
     rec, why = signoff.evaluate([OWNER], repo, records=recs)
     assert why == expect and (rec is None) == (expect is not None)
+
+
+# --- review round: repository scope threading, ids, aliases, project gate, doctor renderers ---------------------
+
+@pytest.mark.parametrize("argv", [("labels", "--plan"), ("content", "linguist"), ("content", "actions")])
+def test_repo_scoped_record_is_honoured_by_repository_commands(tmp_path, argv):
+    """Regression: only gate_owner/doctor passed the repo, so a repo-scoped record hit t3-signoff:scope elsewhere."""
+    b = _bundle(tmp_path, [{"id": "t3s-9", "repos": ["northwind-synthetic"]}])
+    r = _run(tmp_path, b, "--require-t3-signoff", "--allow-t3", *argv)
+    assert "t3-signoff" not in _out(r), _out(r)
+    other = _bundle(tmp_path / "o", [{"id": "t3s-9", "repos": ["some-other-repo"]}])
+    r = _run(tmp_path, other, "--require-t3-signoff", "--allow-t3", *argv)
+    assert r.returncode == 2 and "t3-signoff:scope" in _out(r), _out(r)
+
+
+def test_record_without_an_id_never_authorizes(tmp_path):
+    from ctshowcase import signoff
+    rec = {"owner": OWNER, "repos": ["*"], "approved": True, "expires": "2099-12-31"}
+    assert signoff.evaluate([OWNER], None, records=[rec]) == (None, "missing")
+    assert signoff.evaluate([OWNER], None, records=[dict(rec, id="  ")]) == (None, "missing")
+    assert signoff.evaluate([OWNER], None, records=[dict(rec, id="t3s-1")])[1] is None
+
+
+def test_alias_record_matches_every_later_check(tmp_path, monkeypatch):
+    """A record under a former login must satisfy the secondary helpers (config/org/project/doctor), not just the gate."""
+    from ctshowcase import signoff
+    from ctshowcase.config import set_t3_signed_off, t3_signed_off
+    from ctshowcase.org import _t3_granted as org_granted
+    from ctshowcase.project import _t3_granted as project_granted
+    b = _bundle(tmp_path, [{"id": "t3s-10", "owner": "Old-Login"}])
+    monkeypatch.setenv("SHOWCASE_ESTATE_ROOT", str(b))
+    signoff.set_required(True)
+    set_t3_signed_off(True)
+    try:
+        assert not t3_signed_off("New-Login")  # nothing links the logins yet
+        signoff.register_aliases(["New-Login", "Old-Login"])  # what Resolver.aliases does under the flag
+        assert t3_signed_off("New-Login") and org_granted("New-Login") and project_granted("New-Login")
+    finally:
+        set_t3_signed_off(False)
+        signoff.set_required(False)
+        signoff.reset()
+
+
+def test_project_gate_registers_the_grant_and_reports_the_reason(tmp_path, monkeypatch):
+    from ctshowcase import signoff
+    from ctshowcase.errors import Refused
+    from ctshowcase.project import _gate_target
+    from ctshowcase.resolver import Resolver
+    from ctshowcase.config import Brand
+    brand = Brand({"owners": {"t3": [OWNER]}}, ROOT / "references" / "brand.yaml")
+    resolver = Resolver(brand, {}, None)
+    signoff.set_required(True)
+    try:
+        monkeypatch.setenv("SHOWCASE_ESTATE_ROOT", str(_bundle(tmp_path / "ok", [{"id": "t3s-11"}])))
+        assert _gate_target(resolver, OWNER, allow_t3=True) == OWNER
+        assert signoff.record_for(OWNER, None)["id"] == "t3s-11"  # so stamp() can put it on the writer job
+        signoff.reset()
+        monkeypatch.setenv("SHOWCASE_ESTATE_ROOT", str(_bundle(tmp_path / "old", [{"id": "t3s-12", "expires": "2000-01-01"}])))
+        with pytest.raises(Refused) as exc:
+            _gate_target(resolver, OWNER, allow_t3=True)
+        assert exc.value.log == "t3-signoff:expired"
+    finally:
+        signoff.set_required(False)
+        signoff.reset()
+
+
+def test_default_doctor_renderers_show_the_signoff_id(tmp_path):
+    b = _bundle(tmp_path, [{"id": "t3s-13"}])
+    for fmt in ("tsv", "md"):
+        r = _run(tmp_path, b, "--require-t3-signoff", "--allow-t3", "doctor", "--format", fmt)
+        assert "t3s-13" in r.stdout, _out(r)
+        plain = _run(tmp_path, b, "--allow-t3", "doctor", "--format", fmt)
+        assert "t3s-13" not in plain.stdout and "signoff_id" not in plain.stdout  # off: output unchanged

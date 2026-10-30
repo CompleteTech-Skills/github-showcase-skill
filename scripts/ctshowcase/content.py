@@ -2421,7 +2421,7 @@ def cmd_content(args, cli=None):
         return _finish(args, obj, _code(obj["result"]))
     if act == "linguist":
         ctx = _ctx(args, cli, resolver)
-        resolver.check_owner(ctx.owner)
+        resolver.check_owner(ctx.owner, repo=ctx.repo)
         tree = Tree(ctx.repo_dir) if ctx.repo_dir else None
         override = dict(ctx.override)
         if args.language:
@@ -2430,7 +2430,7 @@ def cmd_content(args, cli=None):
         return _finish(args, {**head, "owner": ctx.owner, "repo": ctx.repo, **res, "logs": ctx.logs + res["logs"]}, OK)
     if act == "actions":
         ctx = _ctx(args, cli, resolver)
-        resolver.check_owner(ctx.owner)
+        resolver.check_owner(ctx.owner, repo=ctx.repo)
         wf_files, root_files, readme = {}, (), ""
         if ctx.repo_dir:
             tree = Tree(ctx.repo_dir)
@@ -2484,7 +2484,7 @@ def _cmd_sidebar(args, cli, resolver, head):
     keyed = isinstance(facts, dict) and facts and all(isinstance(k, str) and "/" in k for k in facts)
     if not keyed:
         ctx = _ctx(args, cli, resolver)
-        resolver.check_owner(ctx.owner)
+        resolver.check_owner(ctx.owner, repo=ctx.repo)
         res = sidebar_plan(ctx.meta, facts, resolver=resolver, packages=pk,
                            current=current.get(f"{ctx.owner}/{ctx.repo}") or current or None)
         obj = dict(head, owner=ctx.owner, repo=ctx.repo, **{k: v for k, v in res.items() if k != "logs"},
@@ -2518,7 +2518,7 @@ def _cmd_sidebar(args, cli, resolver, head):
 def _cmd_icon(args, cli, resolver, head):
     from PIL import Image
     ctx = _ctx(args, cli, resolver)
-    resolver.check_owner(ctx.owner)
+    resolver.check_owner(ctx.owner, repo=ctx.repo)
     # decision 12: the same applicability as banner, card, lint all and doctor (RepoContext.art_status); only
     # watching-org forks and a placeholder org's `.github` are exempt. Forks outside the watching org, backups and
     # `.github` repositories need their own icon. The resolver also sees the renames and placeholders passed here.

@@ -118,7 +118,7 @@ class Brand:
             raise Refused(f"{owner} is on HOLD", log="hold")
         if status == "t3" and not (allow_t3 or t3_signed_off()):
             raise Refused(f"{owner} is T3; needs co-owner sign-off", log="t3-signoff")
-        if status == "t3" and t3_signed_off():
+        if status == "t3":
             from . import signoff
             signoff.require(owner, repo, self.aliases(owner))  # no-op unless --require-t3-signoff
         return status
