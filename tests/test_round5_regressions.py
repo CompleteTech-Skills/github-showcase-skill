@@ -50,7 +50,7 @@ def test_also_in_adds_membership_topics_after_family(make_ctx):
     from ctshowcase import topics
     ctx = make_ctx(topics=["completetech-llc"], description="Run the Northwind triage agent for support tickets.")
     r = topics.merge(ctx, ["CompleteTech-Skills", "Northwind-Trading-Co", "romgenie-following-repos", "Pick-Your-AI",
-                           "No-Such-Org-Here"])
+                           "No-Such-Org-Here"], prune=True)
     p = r["proposed"]
     assert p[0] == "completetech" and p[1] == "completetech-skills" and p[2] == ctx.det["type"]
     assert "completetech-llc" not in p  # no alias: an LLC membership topic is never collapsed into the brand

@@ -487,7 +487,7 @@ def cmd_topics(args):
         from ctshowcase.resolver import Resolver
         res = Resolver.from_paths(ctx.brand, None if args.registry == "auto" else args.registry, require_registry=True)
         also_in = topics.registry_also_in(res, ctx.owner, ctx.repo)
-    r = topics.merge(ctx, also_in)
+    r = topics.merge(ctx, also_in, prune=args.prune)
     if args.records and not r["equal_as_set"]:
         records.append(args.records, [records.record(ctx.owner, ctx.repo, "topics", "topics", r["current"], r["proposed"],
                                                      "§5.6 merge")])
@@ -1042,6 +1042,8 @@ def parser() -> argparse.ArgumentParser:
     s = sub.add_parser("topics", help="§5.6 topic merge proposal")
     s.add_argument("--records")
     s.add_argument("--gh", action="store_true")
+    s.add_argument("--prune", action="store_true",
+                   help="legacy: propose removing existing topics outside the vocabulary (default is additive, removals are logged as review-remove:TOPIC)")
     g = s.add_mutually_exclusive_group()
     g.add_argument("--also-in", metavar="ORG[,ORG]",
                    help="§5.3a: add one org membership topic per also_in org (after the family topics; never the home org's)")
