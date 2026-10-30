@@ -147,3 +147,38 @@ def test_main_restores_the_caller_sign_off_value(capsys):
         assert t3_signed_off() is True
     finally:
         reset_t3_signed_off(token)
+
+
+def test_two_concurrent_threads_have_independent_sign_off_at_the_owner_gate(brand):
+    """Acceptance: one thread signed off and one not behave independently; the unsigned one is refused for a T3 owner.
+
+    Each thread sets its own state explicitly, so this also runs where threads inherit the caller's context. The barrier
+    makes both threads hold their state at the same time before either calls the gate."""
+    import threading
+    from ctshowcase.config import reset_t3_signed_off, set_t3_signed_off, t3_signed_off
+    from ctshowcase.errors import Refused
+    barrier = threading.Barrier(2, timeout=10)
+    out: dict[str, tuple] = {}
+
+    def worker(name, signed):
+        token = set_t3_signed_off(signed)
+        try:
+            barrier.wait()  # both states are live at once
+            try:
+                result = ("passed", brand.check_owner("Pick-Your-AI"))
+            except Refused as exc:
+                result = ("refused", exc.log)
+            barrier.wait()  # neither resets until both have checked
+            out[name] = (*result, t3_signed_off())
+        finally:
+            reset_t3_signed_off(token)
+
+    threads = [threading.Thread(target=worker, args=("signed", True)),
+               threading.Thread(target=worker, args=("unsigned", False))]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert out["signed"] == ("passed", "t3", True), out
+    assert out["unsigned"] == ("refused", "t3-signoff", False), out
+    assert t3_signed_off() is False
