@@ -1,9 +1,11 @@
 """Regression guards for `footer --check README.md --meta FILE` (E2.3.1).
 
-These tests PASS on the base commit 2be04ac by design: each pins behaviour that the --meta change must not alter
+Most tests here PASS on the base commit 2be04ac by design: each pins behaviour that the --meta change must not alter
 (the default `--check` path, an applying owner's README check, an unknown owner, `--meta` without `--check`, and the
-watching org's `.github`, which still gets its README checked). They are kept apart from tests/test_footer_meta.py,
-whose tests all fail on base, so that a reviewer can see which tests detect the change.
+watching org's `.github`, which still gets its README checked). EXCEPTION: the org-row tests
+(test_org_row_footer_hold_matches_org_verdict, test_org_row_footer_false_matches_org_verdict) and the malformed-config
+tests DO detect the change: on base `--meta` is ignored there, so the first two fail (fail:missing, exit 1). Base
+failures in total: 7 in test_footer_meta.py plus those 2.
 
 Synthetic metadata only: owners are public org rows of references/brand.yaml; repository names are invented.
 """
@@ -89,3 +91,13 @@ def test_malformed_captured_rendering_config_does_not_change_the_footer_verdict(
                                 "manifests": {".github/showcase.yml": "- not\n- a mapping\n"}}), encoding="utf-8")
     code, out = _footer("footer", "--check", _readme(tmp_path, with_footer=True), "--meta", str(meta))
     assert code == 0 and out["result"] == "pass", out
+
+
+def test_watching_fork_with_malformed_captured_config_is_still_exempt(tmp_path):
+    """Reviewer B: the fork exemption is decided from metadata before the captured config is parsed."""
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps({"owner": "romgenie-following-repos", "repo": "synthetic-tool", "fork": True,
+                                "_synthetic": True,
+                                "manifests": {".github/showcase.yml": "- not" + chr(10) + "- a mapping" + chr(10)}}), encoding="utf-8")
+    code, out = _footer("footer", "--check", _readme(tmp_path), "--meta", str(meta))
+    assert (code, out["result"], out["logs"]) == (0, "exempt", ["exempt:watching-fork"]), out
