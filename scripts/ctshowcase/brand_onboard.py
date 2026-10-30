@@ -22,13 +22,28 @@ TIERS = ("T1", "T1-user", "T2", "T2-R", "T3")
 DARK_MAX = 0.1  # relative luminance ceiling: dark designs are the estate standard (decision 21)
 
 
+YAML_WORDS = {"y", "n", "yes", "no", "on", "off", "true", "false", "null"}  # YAML 1.1 booleans and null (any case)
+
+
+def q(s) -> str:
+    """A YAML double-quoted scalar."""
+    return json.dumps(str(s), ensure_ascii=False)
+
+
+def key(s) -> str:
+    """A generated key or reference: plain when YAML reads it back as the same string, quoted otherwise. A login or family
+    such as `No`, `on` or `123` unquoted is a boolean or an integer, and the lookups then fail (E6.1.5 review)."""
+    s = str(s)
+    plain = re.match(r"^[A-Za-z][A-Za-z0-9-]*$", s) and s.lower() not in YAML_WORDS
+    return s if plain else q(s)
+
+
 def _block_family(name: str, label: str, accent: str, background: str) -> list[str]:
-    q = lambda s: json.dumps(s, ensure_ascii=False)  # noqa: E731 - YAML double-quoted scalar
     # the attribute chip is the accent tinted 25% into the background: derived, so no colour literal lives in code and a
     # new family never inherits CompleteTech's blue chip
     tint = hexstr(mix(background, accent, 0.25))
     return [
-        f"  {name}:",
+        f"  {key(name)}:",
         "    measured: false   # new family: art is refused until its colours are measured (--allow-unmeasured)",
         f"    company_label: {q(label)}",
         f'    canvas: {{kind: flat, color: "{background}"}}',
@@ -50,10 +65,9 @@ def _block_family(name: str, label: str, accent: str, background: str) -> list[s
 
 
 def _block_org(name: str, family: str, tier: str, display: str) -> list[str]:
-    q = lambda s: json.dumps(s, ensure_ascii=False)  # noqa: E731
     return [
-        f"  {name}:",
-        f"    family: {family}",
+        f"  {key(name)}:",
+        f"    family: {key(family)}",
         "    former_slugs: []",
         f"    tier: {tier}",
         f"    display_name: {q(display)}",
@@ -139,11 +153,18 @@ def cmd_add_org(args):
         raise ShowcaseError(f"org login {args.name!r}: use letters, digits and single hyphens", log="usage")
     if not (args.display_name or "").strip():
         raise ShowcaseError("--display-name must not be empty", log="usage")
-    raw = load_brand(args.config).raw
-    if args.family not in raw.get("families", {}):
+    brand = load_brand(args.config)
+    if args.family not in brand.raw.get("families", {}):
         raise ShowcaseError(f"family {args.family!r} is not in brand.yaml; run `brand add-family` first", log="usage")
-    if any(name.lower() == args.name.lower() for name in raw.get("orgs", {})):
-        raise ShowcaseError(f"org {args.name!r} already exists in brand.yaml", log="usage")
+    # the shared resolver: a former_slugs alias of an existing org is the same org, so it is refused too (CQ-03)
+    existing = brand.resolver().brand_key(args.name)
+    if existing is not None:
+        raise ShowcaseError(f"org {args.name!r} already exists in brand.yaml (as {existing!r}, or one of its former_slugs)",
+                            log="usage")
+    # a T3 org is co-owned: it needs its owners.t3 sign-off first. add-org never edits owners:, so the refusal is the gate
+    if args.tier == "T3" and brand.owner_status(args.name) != "t3":
+        raise ShowcaseError(f"{args.name} is T3 (co-owned): add it to owners.t3 by hand after co-owner sign-off, then rerun; "
+                            "add-org never edits owners:", log="t3-signoff")
     block = _block_org(args.name, args.family, args.tier, args.display_name.strip())
 
     def check(brand: Brand):

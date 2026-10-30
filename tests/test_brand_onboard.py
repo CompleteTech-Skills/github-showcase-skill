@@ -107,3 +107,59 @@ def test_strict_owner_accepts_the_onboarded_org(cfg, tmp_path):
     # the owner gate refuses with exit 2 and a "refused" result; an onboarded org passes it (the synthetic repo has no
     # file tree, so doctor reports needs-input, which is not a refusal)
     assert r.returncode != 2 and "refused" not in r.stdout and "unknown-org" not in r.stdout, r.stdout
+
+
+# ----------------------------------------------------------------------------------------------- review regressions (E6.1.5)
+def test_yaml_looking_names_stay_strings(cfg):
+    """`No` and `123` are a YAML boolean and integer when unquoted, and `no` as a family key failed the config check."""
+    assert _cli(cfg, "brand", "add-family", "no", "--company-label", "No Co", "--accent", "#22D3EE",
+                "--background", "#0B1020", "--write").returncode == 0
+    assert _cli(cfg, "brand", "add-org", "No", "--family", "no", "--display-name", "Acme Widgets", "--write").returncode == 0
+    assert _cli(cfg, "brand", "add-org", "123", "--family", "completetech", "--display-name", "Acme Widgets",
+                "--write").returncode == 0
+    raw = _raw(cfg)
+    assert raw["families"]["no"]["measured"] is False
+    assert raw["orgs"]["No"]["family"] == "no" and raw["orgs"]["123"]["family"] == "completetech"
+    assert C.schema_errors(raw) == []
+
+
+def test_t3_org_is_refused_without_owner_signoff(cfg):
+    """A T3 org is co-owned. add-org never edits owners:, so without an owners.t3 entry the command must refuse; before
+    this check an org added as T3 had no owner status and the --strict-owner gate passed it."""
+    assert _cli(cfg, *ADD_FAMILY, "--write").returncode == 0
+    owners_before = _raw(cfg)["owners"]
+    r = _cli(cfg, "brand", "add-org", "Acme-Widgets", "--family", "acme-widgets", "--display-name", "Acme Widgets",
+             "--tier", "T3", "--write")
+    out = json.loads(r.stdout)
+    assert r.returncode == 2 and out["result"] == "refused" and "t3-signoff" in out["logs"], r.stdout
+    raw = _raw(cfg)
+    assert "Acme-Widgets" not in raw["orgs"] and raw["owners"] == owners_before
+
+
+def test_t3_org_is_accepted_after_owner_signoff_and_owners_stay_unchanged(cfg):
+    assert _cli(cfg, *ADD_FAMILY, "--write").returncode == 0
+    text = cfg.read_text(encoding="utf-8")
+    signed = text.replace("t3: [Pick-Your-AI, Jevelopers-neatHack-2026]",
+                          "t3: [Pick-Your-AI, Jevelopers-neatHack-2026, Acme-Widgets]", 1)
+    assert signed != text  # the hand-reviewed sign-off row is the precondition
+    cfg.write_text(signed, encoding="utf-8")
+    owners_before = _raw(cfg)["owners"]
+    r = _cli(cfg, "brand", "add-org", "Acme-Widgets", "--family", "acme-widgets", "--display-name", "Acme Widgets",
+             "--tier", "T3", "--write")
+    assert r.returncode == 0, r.stdout
+    raw = _raw(cfg)
+    assert raw["orgs"]["Acme-Widgets"]["tier"] == "T3" and raw["owners"] == owners_before
+
+
+def test_former_slug_alias_of_an_existing_org_is_refused(cfg):
+    """`Acme-Legacy` is a former login of Acme-Widgets, so it is the same org and must not get a second row."""
+    assert _cli(cfg, *ADD_FAMILY, "--write").returncode == 0
+    assert _cli(cfg, *ADD_ORG, "--write").returncode == 0
+    text = cfg.read_text(encoding="utf-8")
+    start = text.index("\n  Acme-Widgets:\n")
+    at = text.index("former_slugs: []", start)
+    cfg.write_text(text[:at] + "former_slugs: [Acme-Legacy]" + text[at + len("former_slugs: []"):], encoding="utf-8")
+    before = cfg.read_bytes()
+    r = _cli(cfg, "brand", "add-org", "Acme-Legacy", "--family", "acme-widgets", "--display-name", "Legacy", "--write")
+    assert r.returncode != 0 and "already exists" in json.loads(r.stdout)["error"], r.stdout
+    assert cfg.read_bytes() == before
