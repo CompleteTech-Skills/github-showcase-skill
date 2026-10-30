@@ -2243,6 +2243,8 @@ def add_parser(sub, cli=None):
     a.add_argument("--allow-unmeasured", action="store_true")
     a.add_argument("--allow-hold", action="store_true")
     a.add_argument("--job", action="store_true", help="also emit the writer browser job that uploads it")
+    a.add_argument("--description", dest="staged_description", metavar="TEXT", default=None,
+                   help="render from this proposed one-sentence description instead of the live GitHub one (logged staged-description; the live About text is not changed; apply it with the writer queue)")
 
     a = cs.add_parser("icon", parents=[common], help="repo icon (RT-04): prompt file, normalize a candidate, QA check")
     a.add_argument("icon_action", choices=("prompt", "normalize", "check"))
