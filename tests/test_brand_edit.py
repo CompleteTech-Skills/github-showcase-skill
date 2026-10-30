@@ -267,3 +267,52 @@ def test_strict_owner_gates_full_name_only_metadata(tmp_path):
             str(ROOT / "examples" / "estate" / "registry" / "estate.yaml")]
     r = run(*base, "--strict-owner")
     assert r.returncode == 2 and "t3-signoff" in r.stdout + r.stderr, (r.stdout, r.stderr)
+
+
+# -- review round: owners.hold under estate strict mode, explicit 'unknown' login, YAML layout edge cases ----------
+def _with_owner_hold(cfg, owner):
+    cfg.write_text(cfg.read_text(encoding="utf-8").replace("  t3: [", f"  hold: [{owner}]\n  t3: [", 1), encoding="utf-8")
+
+
+def test_strict_owner_estate_refuses_owners_hold_like_single_repo(tmp_path, cfg):
+    _with_owner_hold(cfg, "Northwind-Trading-Co")
+    d = _estate_two_metas(tmp_path, ["Northwind-Trading-Co"])
+    reg = str(ROOT / "examples" / "estate" / "registry" / "estate.yaml")
+    r = run("--config", str(cfg), "doctor", "--estate", "--meta-dir", str(d), "--registry", reg, "--strict-owner")
+    assert r.returncode == 2 and "HOLD" in r.stdout + r.stderr, (r.stdout, r.stderr)
+    meta = tmp_path / "one.json"
+    meta.write_text(json.dumps(dict(META, owner="Northwind-Trading-Co", repo="x")), encoding="utf-8")
+    s = run("--config", str(cfg), "--meta", str(meta), "--no-repo-dir", "doctor", "--strict-owner")
+    assert s.returncode == 2  # same verdict as the single-repo gate
+
+
+def test_strict_owner_estate_gates_an_explicit_login_named_unknown(tmp_path):
+    d = _estate_two_metas(tmp_path, ["unknown"])
+    reg = str(ROOT / "examples" / "estate" / "registry" / "estate.yaml")
+    r = run("doctor", "--estate", "--meta-dir", str(d), "--registry", reg, "--strict-owner")
+    assert r.returncode == 2 and "unknown-org" in r.stdout + r.stderr, (r.stdout, r.stderr)
+
+
+def test_add_org_t3_with_trailing_comment_on_owners_t3(cfg):
+    cfg.write_text(cfg.read_text(encoding="utf-8").replace("Jevelopers-neatHack-2026]", "Jevelopers-neatHack-2026]  # co-owned", 1),
+                   encoding="utf-8")
+    r = run("--config", str(cfg), *ORG[:2], "Acme-Coowned", "--family", "completetech", "--tier", "T3",
+            "--display-name", "Acme Coowned", "--write")
+    assert r.returncode == 0, (r.stdout, r.stderr)
+    text = cfg.read_text(encoding="utf-8")
+    assert "Acme-Coowned" in text and "# co-owned" in text
+
+
+def test_add_org_when_orgs_is_the_last_section(cfg):
+    lines = cfg.read_text(encoding="utf-8").split("\n")
+    i = next(k for k, ln in enumerate(lines) if ln.startswith("orgs:"))
+    j = next(k for k in range(i + 1, len(lines)) if lines[k][:1].isalpha())
+    moved = lines[i:j]
+    rest = lines[:i] + lines[j:]
+    while rest and rest[-1] == "":
+        rest.pop()
+    cfg.write_text("\n".join(rest + [""] + moved).rstrip("\n") + "\n", encoding="utf-8")
+    r = run("--config", str(cfg), *ORG[:2], "Acme-Last", "--family", "completetech", "--tier", "T1",
+            "--display-name", "Acme Last", "--write")
+    assert r.returncode == 0, (r.stdout, r.stderr)
+    assert "Acme-Last" in cfg.read_text(encoding="utf-8")

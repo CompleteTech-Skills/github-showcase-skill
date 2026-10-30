@@ -825,7 +825,7 @@ def strict_owner_gate(b, owner, allow_hold=False, resolver=None) -> None:
     a former slug passes exactly as it does in estate_doctor."""
     from ctshowcase.errors import Refused
     if resolver is not None:
-        resolver.check_owner(owner, allow_hold=True)  # excluded/T3 under any login; hold is decided below
+        resolver.check_owner(owner)  # excluded/owners.hold/T3 under any login (never waived); family hold is decided below
         known = resolver.brand_key(owner) is not None or b.org(owner)["known"]
         on_hold = resolver.family_hold(owner)
     else:
@@ -875,8 +875,13 @@ def cmd_doctor(args):
                 except ShowcaseError:
                     continue
                 o = n.get("owner")
-                # same skips as intake.estate_doctor; an ownerless meta normalises to the literal 'unknown'
-                if not o or o == "unknown" or b.owner_status(o) == "excluded" or resolver.is_placeholder(o):
+                ro = m.get("owner")
+                ro = ro.get("login") if isinstance(ro, dict) else ro
+                # same skips as intake.estate_doctor; only a meta with NO owner/full_name normalises to the placeholder
+                # 'unknown' (an explicit login named 'unknown' is a real login and is gated like any other)
+                if not ro and not m.get("full_name"):
+                    continue
+                if not o or b.owner_status(o) == "excluded" or resolver.is_placeholder(o):
                     continue
                 owners.add(o)
             for o in sorted(owners):

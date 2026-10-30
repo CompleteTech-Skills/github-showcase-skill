@@ -109,7 +109,7 @@ def add_t3_owner(text: str, owner: str) -> str:
     for i in range(top + 1, len(lines)):
         if re.match(r"^[A-Za-z_]", lines[i]):
             break
-        m = re.match(r"^(  t3:\s*\[)(.*)(\]\s*)$", lines[i])
+        m = re.match(r"^(  t3:\s*\[)([^\]#]*)(\]\s*(?:#.*)?)$", lines[i])
         if m:
             items = [x for x in (m.group(2).strip(),) if x]
             lines[i] = f"{m.group(1)}{', '.join(items + [_q(owner)])}{m.group(3)}"
@@ -126,10 +126,8 @@ def insert(text: str, section: str, block: list[str]) -> str:
     if len(starts) != 1:
         raise ConfigError(f"brand.yaml must have exactly one top-level `{section}:` key")
     nxt = next((i for i in range(starts[0] + 1, len(lines)) if re.match(r"^[A-Za-z_]", lines[i])), None)
-    if nxt is None:
-        raise ConfigError(f"cannot find the key after `{section}:` in brand.yaml")
-    j = nxt
-    while j > starts[0] + 1 and lines[j - 1].startswith("#"):  # comments that introduce the next key stay with it
+    j = len(lines) if nxt is None else nxt  # the last top-level section ends at end of file
+    while nxt is not None and j > starts[0] + 1 and lines[j - 1].startswith("#"):  # comments that introduce the next key stay with it
         j -= 1
     while j > starts[0] + 1 and lines[j - 1].strip() == "":
         j -= 1
