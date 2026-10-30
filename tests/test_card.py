@@ -77,6 +77,8 @@ def test_card_chip_flags_match_banner(tmp_path):
 
 
 def test_card_chip_flags_default_unchanged(tmp_path, brand, fonts):
+    # Deliberate regression guard: it passes on the base too (no flags => byte-identical
+    # output is the contract), unlike the other chip tests which fail on base.
     from ctshowcase.context import RepoContext
     from ctshowcase.meta import normalize
     out = tmp_path / "card.svg"
