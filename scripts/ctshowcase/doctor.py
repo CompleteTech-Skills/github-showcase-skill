@@ -61,7 +61,7 @@ def _cell(code: str) -> str:
     return "n/a" if code.startswith("exempt") else "hold"
 
 
-def row(ctx: RepoContext) -> dict:
+def row(ctx: RepoContext, skill_verdict: bool = False) -> dict:
     cells: dict[str, str] = {}
     logs: list[str] = []
     rd = ctx.repo_dir
@@ -182,18 +182,34 @@ def row(ctx: RepoContext) -> dict:
         if re.search(r"<!-- showcase:checklist:start -->.*- \[ \].*<!-- showcase:checklist:end -->",
                      (rd / "README.md").read_text(encoding="utf-8"), re.S):
             logs.append("checklist: open")
-    return {"repo": f"{ctx.owner}/{ctx.repo}", "type": ctx.det["type"], "variant": ctx.det["variant"], "cells": cells,
-            "done": "yes" if done else "no", "logs": sorted(set(logs + ctx.logs))}
+    res = {"repo": f"{ctx.owner}/{ctx.repo}", "type": ctx.det["type"], "variant": ctx.det["variant"], "cells": cells,
+           "done": "yes" if done else "no", "logs": sorted(set(logs + ctx.logs))}
+    if skill_verdict:
+        sc, pend = verdict(cells)
+        res["skill_complete"] = sc
+        res["owner_pending"] = pend
+    return res
+
+
+# opt-in columns (row(..., skill_verdict=True)); absent from the output unless the row carries skill_complete
+_VERDICT_COLS = ["skill_complete", "owner_pending"]
+
+
+def _verdict_vals(r: dict) -> list[str]:
+    if "skill_complete" not in r:
+        return []
+    return [r["skill_complete"], ",".join(r["owner_pending"]) or "-"]
 
 
 def as_tsv(r: dict, header: bool = False) -> str:
-    cols = ["owner/repo", "type", "variant", *COLUMNS, "done"]
-    line = "\t".join([r["repo"], r["type"], r["variant"], *[r["cells"][c] for c in COLUMNS], r["done"]])
+    cols = ["owner/repo", "type", "variant", *COLUMNS, "done", *(_VERDICT_COLS if "skill_complete" in r else [])]
+    vals = [r["repo"], r["type"], r["variant"], *[r["cells"][c] for c in COLUMNS], r["done"], *_verdict_vals(r)]
+    line = "\t".join(vals)
     return ("\t".join(cols) + "\n" if header else "") + line
 
 
 def as_md(r: dict, header: bool = False) -> str:
-    cols = ["owner/repo", "type", "variant", *COLUMNS, "done"]
-    vals = [r["repo"], r["type"], r["variant"], *[r["cells"][c] for c in COLUMNS], r["done"]]
+    cols = ["owner/repo", "type", "variant", *COLUMNS, "done", *(_VERDICT_COLS if "skill_complete" in r else [])]
+    vals = [r["repo"], r["type"], r["variant"], *[r["cells"][c] for c in COLUMNS], r["done"], *_verdict_vals(r)]
     head = ("| " + " | ".join(cols) + " |\n|" + "---|" * len(cols) + "\n") if header else ""
     return head + "| " + " | ".join(vals) + " |"
