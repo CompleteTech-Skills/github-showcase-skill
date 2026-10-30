@@ -205,6 +205,26 @@ def test_fingerprint_escaped_detect_tuned_key(tmp_path):
     assert _fp(base, tmp_path) != _fp(grown, tmp_path)
 
 
+def test_fingerprint_flow_style_escaped_key(tmp_path):
+    # Review finding (E4.4.4 B): `{"detect\x5ftuned": true}` is a flow mapping with an escaped key that enables tuning.
+    # The escaped-key check must also match after `{` or `,`. Adding data.csv moves tuned workspace -> dataset while the
+    # untuned type stays dataset, so only type_tuned can move the fingerprint (checkout and metadata-only inputs).
+    text = '{"detect\x5ftuned": true}\n'
+    nested = 'subtitle: x\nk: {"a\x5fb": 1, "detect\x5ftuned": true}\n'
+    base = dict(NORTHWIND, files=["planning/a.json", "src/build.py"],
+                file_sizes={"planning/a.json": 9000, "src/build.py": 1000})
+    grown = dict(base, files=base["files"] + ["data.csv"], file_sizes=dict(base["file_sizes"], **{"data.csv": 1500}))
+    _write_override(tmp_path, text)
+    assert fingerprint.inputs(base, tmp_path)["type_tuned"] == "workspace"
+    assert _fp(base, tmp_path) != _fp(grown, tmp_path)
+
+    def meta_fp(m, body):
+        meta = dict(m, manifests={".github/showcase.yml": body})
+        return fingerprint.fingerprint(fingerprint.inputs(meta, None), "cfg")
+    assert meta_fp(base, text) != meta_fp(grown, text)
+    assert meta_fp(base, nested) != meta_fp(grown, nested)
+
+
 def test_fingerprint_scoped_away_override_follows_untuned_type(tmp_path):
     # `for:` names another repository, so RepoContext drops this override and renders the untuned type. Growing
     # src/build.py moves the untuned type dataset -> workspace; the fingerprint must change even though the tuned type

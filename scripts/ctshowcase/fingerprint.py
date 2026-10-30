@@ -77,8 +77,8 @@ def inputs(meta: dict, repo_dir: str | Path | None) -> dict:
     # renderer uses. An override that never names the key records only `type`, exactly as before.
     flag_text = override_text if rd is not None else _manifest_override_text(meta)
     # A double-quoted YAML key may spell the name with escapes ("detect\x5ftuned"), so a backslash inside a quoted
-    # mapping key counts as possibly naming it. A backslash in a value (a Windows path in `subtitle:`) does not.
-    names_flag = "detect_tuned" in flag_text or bool(re.search(r'^\s*"[^"\n]*\\[^"\n]*"\s*:', flag_text, re.M))
+    # mapping key (at a line start or after a flow `{` or `,`) counts as possibly naming it. A backslash in a value (a Windows path in `subtitle:`) does not.
+    names_flag = "detect_tuned" in flag_text or bool(re.search(r'(?:^|[{,])\s*"[^"\n]*\\[^"\n]*"\s*:', flag_text, re.M))
     try:  # the detected type picks the README variant and the eyebrow: a new type (code landed) regenerates
         from .detect import detect
         from .facts import RepoFacts
