@@ -187,6 +187,8 @@ def maybe_sidecar(ctx, out: Path, record: dict) -> None:
         # fingerprint inputs, so the fingerprint is unchanged.
         if isinstance(ctx.meta.get("id"), int) and not isinstance(ctx.meta.get("id"), bool):
             record = dict(record, repository_id=ctx.meta["id"])
+        if getattr(ctx, "staged_description", None) is not None:  # E5.2.2: what this output was rendered from
+            record = dict(record, staged_description=fp.staged_record(ctx.staged_description))
         fp.write_sidecar(out.parent, inp, ctx.brand.sha256, out.name, record)
 
 
@@ -463,6 +465,17 @@ def cmd_readme(args):
     if args.records and changed:
         records.append(args.records, [records.record(ctx.owner, ctx.repo, "readme", "README.md", before, after,
                                                      f"§7 variant {ctx.det['variant']} ({mode})")])
+    if args.write and getattr(ctx, "staged_description", None) is not None:
+        # E5.2.2: the README was rendered from the staged sentence; record it beside the art's sidecar. Never create docs/images.
+        imgs = rd / "docs" / "images"
+        if imgs.is_dir():
+            from ctshowcase import fingerprint as fp
+            record = {"staged_description": fp.staged_record(ctx.staged_description)}
+            if isinstance(ctx.meta.get("id"), int) and not isinstance(ctx.meta.get("id"), bool):
+                record["repository_id"] = ctx.meta["id"]
+            fp.write_sidecar(imgs, fp.inputs(ctx.meta, rd), ctx.brand.sha256, "README.md", record)
+        else:
+            ctx.log("staged-description-unrecorded")
     res = base("readme", ctx, result="changed" if changed else "unchanged", mode="bootstrap" if args.bootstrap else mode,
                variant=ctx.det["variant"], written=bool(args.write and changed))
     if args.diff or not args.write:

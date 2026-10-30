@@ -74,6 +74,16 @@ def fingerprint(inp: dict, cfg_sha: str) -> str:
     return hashlib.sha256(canonical({"inputs": inp, "skill_version": __version__, "config_sha256": cfg_sha}).encode()).hexdigest()
 
 
+def description_sha256(text: str) -> str:
+    """sha256 of the stripped UTF-8 text: the hash a `--description` (staged) sentence is recorded under."""
+    return hashlib.sha256(text.strip().encode("utf-8")).hexdigest()
+
+
+def staged_record(text: str) -> dict:
+    """The `staged_description` object an output record carries when it was rendered with `--description`."""
+    return {"text": text, "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()}
+
+
 def read_sidecar(out_dir: Path) -> dict:
     p = out_dir / SIDECAR
     if p.is_file():
