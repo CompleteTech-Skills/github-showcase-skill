@@ -1,0 +1,14 @@
+{
+  "owner": "Northwind-Trading-Co",
+  "repo": "field-app-ios",
+  "files": [
+    "ios/FieldApp.xcodeproj/project.pbxproj",
+    "ios/FieldApp/App.swift",
+    "README.md"
+  ],
+  "file_sizes": {
+    "ios/FieldApp.xcodeproj/project.pbxproj": 1200,
+    "ios/FieldApp/App.swift": 400,
+    "README.md": 300
+  }
+}
