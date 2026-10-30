@@ -285,7 +285,7 @@ def _gate(estate: Estate, org: str, *, allow_t3=False, allow_hold=False,
     if r.family_hold(org) and not allow_hold:
         from .errors import Refused
         raise Refused(f"{login} is on HOLD (STANDARD §12.5 #4): only the decision 18 footer is built", log="hold")
-    reg = r.registry_org(org) if require_registry or r.registry_key(org) is not None else {}
+    reg = r.registry_org(org) if require_registry or r.registry else {}
     return login, row, reg
 
 

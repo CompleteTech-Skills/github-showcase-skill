@@ -1,6 +1,7 @@
 """Registry-free org checks use only synthetic local captures."""
 import json
 import os
+import shutil
 import subprocess
 import sys
 
@@ -146,3 +147,20 @@ def test_unverified_snapshot_has_available_reason_without_registry(brand, org, r
     result = O.doctor(O.Estate(brand, Resolver(brand)), org, snap)
     assert result["cells"]["O11"] == "warn"
     assert f"O11 not verified: {reason}" in result["notes"]
+
+
+@pytest.mark.parametrize("action", ["health", "doctor"])
+@pytest.mark.parametrize("discovered", [False, True])
+def test_supplied_registry_missing_org_is_not_a_registry_free_run(tmp_path, action, discovered):
+    registry = ROOT / "tests/fixtures/org/registry.yaml"
+    if discovered:
+        destination = tmp_path / "registry/estate.yaml"
+        destination.parent.mkdir()
+        shutil.copyfile(registry, destination)
+        args = []
+    else:
+        args = ["--registry", str(registry)]
+    proc, result = cli(tmp_path, action, "CompleteTech-Skills", *args)
+    assert proc.returncode == 4
+    assert "needs-input:org" in result["logs"]
+    assert "needs-input:registry" not in result["logs"]
