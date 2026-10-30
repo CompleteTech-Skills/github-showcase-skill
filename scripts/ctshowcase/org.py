@@ -1852,6 +1852,24 @@ def _snap_org(snap: dict) -> dict:
     return {k: v for k, v in fields.items() if k not in captured or k in o or captured[k] in gql}
 
 
+def _known_repo_names(estate: Estate, full: str) -> set[str]:
+    """All repository and owner names connected by the run's known rename/transfer actions."""
+    resolver = estate.resolver
+    edges = [(resolver.slug(after), resolver.slug(before))
+             for after, (before, _action) in getattr(resolver, "_repo_before", {}).items()]
+    names = {resolver.slug(full).lower(): resolver.slug(full)}
+    pending = list(names.values())
+    while pending:
+        current = pending.pop().lower()
+        for after, before in edges:
+            for source, target in ((after, before), (before, after)):
+                if source.lower() == current and target.lower() not in names:
+                    names[target.lower()] = target
+                    pending.append(target)
+    return {f"{alias}/{name.split('/', 1)[1]}" for name in names.values()
+            for alias in resolver.aliases(name.split("/", 1)[0])}
+
+
 def _partial_profile_checks(estate: Estate, row: dict, so: dict, text: str | None) -> tuple[dict, list[str]]:
     """Check known identity and captured private links without inventing a registry's desired state."""
     cells, notes = {}, []
@@ -1868,7 +1886,7 @@ def _partial_profile_checks(estate: Estate, row: dict, so: dict, text: str | Non
             public.add(m["_repo"].lower())
             descriptions.append(m.get("description") or "")
         elif estate.visibility(m["_full"]) != "unknown":
-            private.update(f"{alias}/{m['_repo']}" for alias in estate.resolver.aliases(m["_owner"]))
+            private.update(_known_repo_names(estate, m["_full"]))
     hits = leak_check(text, private, [], public, _logins(estate), descriptions) if text is not None else []
     cells["O3"] = "fail" if hits or text is not None and not text.strip() else "needs-input:registry"
     notes += [f"O3 leak: {hit}" for hit in hits]

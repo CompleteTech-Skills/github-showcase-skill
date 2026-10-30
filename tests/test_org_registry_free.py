@@ -1,4 +1,5 @@
 """Registry-free org checks use only synthetic local captures."""
+import copy
 import json
 import os
 import shutil
@@ -9,6 +10,7 @@ import pytest
 
 from conftest import ROOT
 from ctshowcase import org as O
+from ctshowcase.config import Brand
 from ctshowcase.resolver import Resolver
 
 ORG = "Northwind-Trading-Co"
@@ -282,3 +284,35 @@ def test_private_dot_github_fails_health_for_all_snapshot_aliases(brand, visibil
         estate.add_meta({"owner": ORG, "repo": ".github"})
     result = O.doctor(estate, ORG, {"repos": [repo]})
     assert result["cells"]["O4"] == "fail"
+
+
+@pytest.mark.parametrize("metadata_name", ["old-private-project", "new-private-project"])
+@pytest.mark.parametrize("linked_name", ["old-private-project", "new-private-project"])
+@pytest.mark.parametrize("owner", [ORG, "Old-Northwind"])
+def test_private_repository_rename_names_are_all_checked(brand, metadata_name, linked_name, owner):
+    raw = copy.deepcopy(brand.raw)
+    raw["orgs"][ORG]["former_slugs"] = ["Old-Northwind"]
+    renamed_brand = Brand(raw, brand.path)
+    approvals = {"rows": set(), "ids": set(), "answers": {}, "extra": [], "actions": [
+        {"id": "rename-private", "action": "rename", "owner": ORG,
+         "repo": "old-private-project", "new_name": "new-private-project"}]}
+    estate = O.Estate(renamed_brand, Resolver(renamed_brand, approvals=approvals))
+    estate.add_meta({"owner": owner, "repo": metadata_name, "visibility": "private"})
+    snap = {"repos": [{"name": "new-private-project", "visibility": "PRIVATE"}],
+            "profile_readme": f"See https://github.com/{owner}/{linked_name}"}
+    result = O.doctor(estate, owner, snap)
+    assert result["cells"]["O3"] == "fail"
+    assert any("private-slug" in note for note in result["notes"])
+
+
+@pytest.mark.parametrize("linked_name", ["old-private-project", "middle-private-project", "new-private-project"])
+def test_private_repository_rename_chain_is_checked(brand, linked_name):
+    actions = [{"id": "first", "action": "rename", "owner": ORG, "repo": "old-private-project",
+                "new_name": "middle-private-project"},
+               {"id": "second", "action": "rename", "owner": ORG, "repo": "middle-private-project",
+                "new_name": "new-private-project"}]
+    approvals = {"rows": set(), "ids": set(), "answers": {}, "extra": [], "actions": actions}
+    estate = O.Estate(brand, Resolver(brand, approvals=approvals))
+    estate.add_meta({"owner": ORG, "repo": "old-private-project", "visibility": "private"})
+    result = O.doctor(estate, ORG, {"profile_readme": f"https://github.com/{ORG}/{linked_name}"})
+    assert result["cells"]["O3"] == "fail"
