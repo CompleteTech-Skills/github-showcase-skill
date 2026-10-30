@@ -111,3 +111,14 @@ Excluded owners and T3 orgs without `--allow-t3` (co-owner sign-off) exit 2 in e
 - Never pin before everything else in the org is final; pins are browser steps.
 - Never create `.github-private`, and never list a private repository on a public profile.
 - Never commit a public file the run wrote without `showcase.py lint public-leak FILE... --meta-dir DIR`: the same leak check `profile` runs, against every registry org's private set (or `--org ORG[,ORG]`); without metadata every repository counts as private, so it fails closed.
+
+
+`lint public-leak` has two modes. `--denylist FILE` (one `owner/repo` slug or bare name per line, `#` comments) runs with no registry, estate bundle or `--meta-dir`; those flags are ignored and logged `ignored-in-denylist-mode:FLAG`. Hits name only the kind and the scanned file's line (`denied-slug:L3`, `denied-name:L5`, `private-name:L3`), never the denylist entry. Without `--denylist` the command is unchanged and exits 4 (`needs-input:registry`) with no registry. An exit 0 in denylist mode is not an OPS-03 pass.
+
+| Check | Registry mode | `--denylist` mode |
+|---|---|---|
+| Private slugs and distinctive private names | Every private repository of the estate | Listed slugs and listed bare names only (`.git` clone URLs included) |
+| Members-only pins | Covered | Not covered |
+| Internal notes (org rows, top-level notes, `judge_changes`, profile internal keys) | Covered | Not covered |
+| Unlisted private repositories | Covered, from `--meta-dir` visibility | Not covered |
+| Needs | Registry and `--meta-dir` | A hand-written denylist |

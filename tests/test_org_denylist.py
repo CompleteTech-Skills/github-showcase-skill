@@ -66,12 +66,13 @@ def test_denylist_leaks_slug_and_private_name_hits():
     slugs = {"Northwind-Trading-Co/private-pricing-engine"}
     text = "See https://github.com/Northwind-Trading-Co/private-pricing-engine and private-pricing-engine."
     hits = O.denylist_leaks(text, slugs, set())
-    assert "private-slug:Northwind-Trading-Co/private-pricing-engine" in hits
+    assert hits[0] == "denied-slug:L1"  # kinds and lines only: private entries are never echoed
+    assert not any("pricing" in h.lower() for h in hits)
 
 
 def test_denylist_leaks_bare_name_has_no_distinctiveness_requirement():
     # 'ledger' is short and plain: leak_check would not flag it, but the operator listed it explicitly.
-    assert O.denylist_leaks("The ledger module ships.", set(), {"Ledger"}) == ["denied-name:Ledger"]
+    assert O.denylist_leaks("The ledger module ships.", set(), {"Ledger"}) == ["denied-name:L1"]
     assert O.leak_check("The ledger module ships.", {"northwind/ledger"}, [], set()) == []
 
 
@@ -81,8 +82,8 @@ def test_denylist_leaks_bare_name_respects_boundaries_and_owner_positions():
     assert O.denylist_leaks("the ledger.v2 tag", set(), names) == []
     assert O.denylist_leaks("see github.com/ledger/readme", set(), names) == []
     assert O.denylist_leaks("the ledger-based tool", set(), names) == []  # hyphen continues the token: not the name
-    assert O.denylist_leaks("the ledger tool", set(), names) == ["denied-name:ledger"]
-    assert O.denylist_leaks("the LEDGER tool", set(), names) == ["denied-name:ledger"]
+    assert O.denylist_leaks("the ledger tool", set(), names) == ["denied-name:L1"]
+    assert O.denylist_leaks("the LEDGER tool", set(), names) == ["denied-name:L1"]
 
 
 def test_denylist_leaks_clean_text_has_no_hits():
@@ -103,7 +104,7 @@ def test_cli_denylist_only_runs_without_registry_and_fails_on_hit(tmp_path):
     rows = _rows(p)
     assert p.returncode == CHECK_FAILED
     assert rows[0]["result"] == "pass" and rows[0]["mode"] == "denylist"
-    assert rows[1]["result"] == "fail" and rows[1]["hits"] == ["denied-name:ledger"]
+    assert rows[1]["result"] == "fail" and rows[1]["hits"] == ["denied-name:L1"]
     assert "registry-free:denylist-only" in rows[0]["logs"]
     assert any(x.startswith("coverage:denylist-entries-only") for x in rows[0]["logs"])
 
@@ -168,6 +169,35 @@ def test_cli_denylist_unions_with_explicit_registry(tmp_path):
                 "--meta-dir", estate / "meta", "--denylist", deny)
     row = _rows(p)[0]
     assert p.returncode == CHECK_FAILED and row["result"] == "fail" and row["mode"] == "registry+denylist"
-    assert "denied-name:widget-quotes-v9" in row["hits"]
-    assert any("private-pricing-engine" in h for h in row["hits"])
+    assert "denied-name:L1" in row["hits"]  # the denylist hit is redacted
+    assert any("private-pricing-engine" in h for h in row["hits"])  # the registry hit keeps its legacy form
+    assert "widget-quotes-v9" not in " ".join(row["hits"])
     assert row["hits"] == sorted(set(row["hits"]))
+
+
+# ---- review regressions (E6/#112): no echo, .git clone URLs, owner boundary -----------------------------------------
+
+def _hits(text, slugs=(), names=()):
+    return O.denylist_leaks(text, set(slugs), set(names))
+
+
+def test_cli_denylist_never_echoes_private_entries(tmp_path):
+    deny = _write(tmp_path, "deny.txt", "northwind/secret-tool-2\nledger-x\n")
+    leak = _write(tmp_path, "leak.md", "ok\nThe secret-tool-2 service and ledger-x.\n")
+    p = run_cli("lint", "public-leak", leak, "--denylist", deny)
+    assert p.returncode == CHECK_FAILED
+    assert "northwind" not in p.stdout and "secret-tool-2" not in p.stdout.replace("secret-tool-2 service", "")
+    assert "ledger-x" not in p.stdout
+    assert _rows(p)[0]["hits"] == ["denied-name:L2", "private-name:L2"]
+
+
+def test_denylist_matches_git_clone_urls():
+    assert _hits("git clone https://github.com/northwind/hidden-tool.git", ["northwind/hidden-tool"]) == ["denied-slug:L1"]
+    assert _hits("git clone git@github.com:northwind/hidden-tool.git", names=["hidden-tool"]) == ["denied-name:L1"]
+    assert _hits("see hidden-tool.git.md", names=["hidden-tool"]) == []
+
+
+def test_denylist_slug_needs_whole_owner_token():
+    assert _hits("https://github.com/notnorthwind/app", ["northwind/app"]) == []
+    assert _hits("https://github.com/northwind/app", ["northwind/app"]) == ["denied-slug:L1"]
+    assert _hits("https://github.com/x.northwind/app", ["northwind/app"]) == []

@@ -663,15 +663,24 @@ def load_denylist(path: str) -> tuple[set[str], set[str]]:
 
 
 def denylist_leaks(text: str, slugs: set[str], names: set[str]) -> list[str]:
-    """`lint public-leak --denylist` for one file: the listed slugs (leak_check's private-slug and private-name hits)
-    and the listed bare names (`denied-name:NAME`, no distinctiveness test: the operator listed them explicitly)."""
-    hits = list(leak_check(text, slugs, [], set(), frozenset(), ()))
-    low = text.lower()
-    bare = re.sub(r"(github\.com|githubusercontent\.com)/[a-z0-9-]+", r"\1/_", low)
-    for name in names:
-        if re.search(rf"(?<![a-z0-9._-]){re.escape(name.lower())}(?![a-z0-9_-]|\.[a-z0-9])", bare):
-            hits.append(f"denied-name:{name}")
-    return sorted(set(hits))
+    """`lint public-leak --denylist` for one file. Hits name only the kind and the scanned file's line number
+    (`denied-slug:L3`, `denied-name:L5`, `private-name:L3`): the denylist is private, so its entries are never echoed.
+    Matching is denylist-specific (the legacy leak_check is untouched): a slug needs a whole owner token, a terminal
+    `.git` clone suffix still counts, and bare names have no distinctiveness test (the operator listed them)."""
+    hits: set[str] = set()
+    slug_res = [re.compile(rf"(?<![a-z0-9_.-]){re.escape(x.lower())}(?:\.git)?(?![a-z0-9_-])(?!\.[a-z0-9])") for x in slugs]
+    name_res = [re.compile(rf"(?<![a-z0-9._-]){re.escape(x.lower())}(?:\.git)?(?![a-z0-9_-])(?!\.[a-z0-9])")
+                for x in names]
+    for n, line in enumerate(text.splitlines(), 1):
+        low = line.lower()
+        bare = re.sub(r"(github\.com|githubusercontent\.com)/[a-z0-9-]+", r"/_", low)
+        if any(r.search(low) for r in slug_res):
+            hits.add(f"denied-slug:L{n}")
+        if any(r.search(bare) for r in name_res):
+            hits.add(f"denied-name:L{n}")
+        if slugs and any(h.startswith("private-name:") for h in leak_check(line, slugs, [], set(), frozenset(), ())):
+            hits.add(f"private-name:L{n}")
+    return sorted(hits, key=lambda h: (int(h.rsplit("L", 1)[1]), h))
 
 
 def _badge_colour(brand, style: dict) -> str:
