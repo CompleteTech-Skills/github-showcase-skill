@@ -959,10 +959,29 @@ def nonws(s: str) -> int:
     return len(re.sub(r"\s", "", s))
 
 
+GENERATED_BLOCKS = ("banner", "nav", "tagline", "badges", "footer")
+
+
+def _unguarded(text: str, kept: set[str]) -> str:
+    """`text` with the contents of every generated block whose marker block is still in the output (`kept`) removed.
+    Those lines are regenerated from the current description and metadata, so losing them is not a lost line. Any
+    other block (`template-body`, `checklist`) and any block absent from the output stays guarded."""
+    parts, pos = [], 0
+    for m in find_blocks(MARK, text):
+        if m.group(1) in GENERATED_BLOCKS and m.group(1) in kept:
+            parts.append(text[pos:m.start()] + "\n")
+            pos = m.end()
+    parts.append(text[pos:])
+    return "".join(parts)
+
+
 def preservation(before: str, after: str, removed: list[str]) -> list[str]:
-    """Every original non-header line survives (heading lines may be renamed); size drop <= 10%."""
+    """Every original non-header line survives (heading lines may be renamed); size drop <= 10%. The contents of the
+    generated marker blocks (`GENERATED_BLOCKS`) are exempt while the same block still exists in `after`."""
     problems = []
-    b_lines = Counter(ln.strip() for ln in before.splitlines() if ln.strip() and not ln.strip().startswith("<!-- showcase:"))
+    kept = {m.group(1) for m in find_blocks(MARK, after)}
+    b_lines = Counter(ln.strip() for ln in _unguarded(before, kept).splitlines()
+                      if ln.strip() and not ln.strip().startswith("<!-- showcase:"))
     for r in removed:
         b_lines[r.strip()] -= 1
     a_lines = Counter(ln.strip() for ln in after.splitlines() if ln.strip())

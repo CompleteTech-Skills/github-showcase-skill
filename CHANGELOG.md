@@ -27,6 +27,7 @@ All notable changes to `github-showcase-skill` are recorded here. Versions follo
 - `content social` renders the personal-profile capstone and backup repositories wherever R10 and the `adopt` upload job include them; it previously exempted them, so the planned upload had no image. Where R10 leaves them out (the archive org, an archived capture) they stay exempt.
 - Label job plans include a per-repository `labels:OWNER/REPO` group for writer reconciliation. Explicit orchestrator groups are preserved.
 - `adopt` withholds jobs and change records for an archived capture, with instructions to re-capture inside the approved unarchive/polish/re-archive cycle. Security jobs are emitted only for active eligible repositories.
+- `readme --mode upgrade` (the default, and `auto` when it picks upgrade) no longer fails with `readme-shrink` after the About description changes: the never-drop-a-line check ignores the contents of the generated `banner`, `nav`, `tagline`, `badges` and `footer` marker blocks while the same block still exists in the output, so the stale tagline is refreshed; every line outside those blocks, in other blocks (`template-body`) or in a block that vanishes is still guarded.
 
 ## 1.0.0 — 2026-10-26
 
