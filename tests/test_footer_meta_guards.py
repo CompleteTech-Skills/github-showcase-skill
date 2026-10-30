@@ -1,11 +1,18 @@
-"""Regression guards for `footer --check README.md --meta FILE` (E2.3.1).
+"""Tests for `footer --check README.md --meta FILE` (E2.3.1) that are NOT claim tests.
 
-Most tests here PASS on the base commit 2be04ac by design: each pins behaviour that the --meta change must not alter
-(the default `--check` path, an applying owner's README check, an unknown owner, `--meta` without `--check`, and the
-watching org's `.github`, which still gets its README checked). EXCEPTION: the org-row tests
-(test_org_row_footer_hold_matches_org_verdict, test_org_row_footer_false_matches_org_verdict) and the malformed-config
-tests DO detect the change: on base `--meta` is ignored there, so the first two fail (fail:missing, exit 1). Base
-failures in total: 7 in test_footer_meta.py plus those 2.
+Measured against the base commit 2be04ac (new tests dropped into a base checkout): 16 tests in this file and
+test_footer_meta.py, 10 fail on base and 6 pass on base.
+
+Pass on base, by design (regression guards: they pin behaviour the --meta change must not alter):
+  test_watching_org_dot_github_still_checks_the_readme, test_footer_applying_owner_still_checks_the_readme,
+  test_unknown_owner_falls_through_to_the_readme_check, test_meta_without_check_prints_the_markup_unchanged,
+  test_default_check_without_meta_is_unchanged, and
+  test_malformed_captured_rendering_config_does_not_change_the_footer_verdict (it guards against a RepoContext
+  regression for an applying owner; base ignores --meta, so it passes there too).
+
+Fail on base (they detect the change, because base ignores --meta): the 7 tests in test_footer_meta.py plus
+  test_org_row_footer_hold_matches_org_verdict, test_org_row_footer_false_matches_org_verdict and
+  test_watching_fork_with_malformed_captured_config_is_still_exempt (fail:missing, exit 1 on base).
 
 Synthetic metadata only: owners are public org rows of references/brand.yaml; repository names are invented.
 """
