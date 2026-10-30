@@ -257,7 +257,7 @@ def test_recipe_provenance_never_records_absolute_path():
     # absolute path holds the local user name. Provenance records the file name or a
     # $CODEX_HOME-relative path only.
     section = _recipe(_text())
-    step = next(l for l in section.splitlines() if l.startswith("4. "))
+    step = next(ln for ln in section.splitlines() if ln.startswith("4. "))
     assert "$CODEX_HOME" in step
     assert "file name" in step
     assert "never record the absolute path" in step.lower()
