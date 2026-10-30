@@ -82,7 +82,7 @@ def test_fingerprint_and_meta_log_the_override_and_use_the_assumed_identity(tmp_
     # with --meta: fingerprint exits 0 and carries the note in its logs
     r = _run_cmd(rd, *flag, "fingerprint", meta=meta)
     assert r.returncode == 0, (r.stdout, r.stderr)
-    assert any(l.startswith("assume-repo:northwind-synthetic/new-name") for l in json.loads(r.stdout)["logs"])
+    assert any(line.startswith("assume-repo:northwind-synthetic/new-name") for line in json.loads(r.stdout)["logs"])
     # without --meta: the stale origin slug is replaced for fingerprint and meta alike, and the note is emitted
     r = _run_cmd(rd, *flag, "--format", "json", "fingerprint")
     assert json.loads(r.stdout)["repo"] == "new-name", (r.stdout, r.stderr)
