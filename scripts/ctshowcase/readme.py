@@ -455,7 +455,7 @@ def fork_callout(ctx: RepoContext) -> str | None:
 BANNER_BLOCK = re.compile(re.escape(start("banner")) + r".*?" + re.escape(end("banner")) + r"\n*", re.S)
 
 
-def callout_only(ctx: RepoContext, text: str) -> str:
+def callout_only(ctx: RepoContext, text: str, removed: list[str] | None = None) -> str:
     """Variants G and H (§7.4): the hero banner block, then the callout (unless one is already there), then the body
     unchanged, then the decision 18 footer. Nothing else changes. Watching-org forks never reach here (`readme`
     exempts them). Review q27 "Full CompleteTech treatment" (brand.yaml readme.fork_readme: full) means the fork
@@ -482,8 +482,18 @@ def callout_only(ctx: RepoContext, text: str) -> str:
     elif m:
         lead_banner = text.lstrip("\n")[:m.end()].rstrip("\n") + "\n\n"
     out = lead_banner + out.lstrip("\n")
-    if footer_wanted(ctx) and footermod.check(ctx.brand, out)[0] == "fail:missing":
-        out = out.rstrip("\n") + "\n\n" + footermod.block(ctx.brand) + "\n"
+    if footer_wanted(ctx):
+        # G/H preserve the upstream body, but our recognized footer can still
+        # follow configured publication changes. Never replace authored credits.
+        removed = removed if removed is not None else []
+        for match in reversed(find_blocks(MARK, out)):
+            if match.group(1) == "footer" and is_footer_copy(match.group(2), ctx.brand):
+                removed.extend(line for line in match.group(2).splitlines() if line.strip())
+                out = out[:match.start()] + footermod.block(ctx.brand) + out[match.end():]
+        out, old_footer = drop_old_footer(out, ctx.brand)
+        removed.extend(old_footer)
+        if old_footer or footermod.check(ctx.brand, out)[0] == "fail:missing":
+            out = out.rstrip("\n") + "\n\n" + footermod.block(ctx.brand) + "\n"
     return out
 
 
@@ -517,10 +527,13 @@ FOOTER_ATTR = re.compile(r"""\b(src|srcset|alt)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^
 
 def _footer_logo_url(url: str, brand) -> bool:
     """`url` is one of the decision 18 footer's own logo files (brand footer `logo_light_url` or `logo_dark_url`),
-    as configured or drifted only in scheme, branch, query or the github.com blob/raw form of the same file."""
+    including explicitly configured legacy URLs, or drifted only in scheme, branch, query or the github.com
+    blob/raw form of the same file."""
     url = url.strip().split("#", 1)[0].split("?", 1)[0]
-    for key in ("logo_light_url", "logo_dark_url"):
-        want = brand.raw["footer"][key]
+    footer = brand.raw["footer"]
+    urls = [footer[key] for key in ("logo_light_url", "logo_dark_url")]
+    urls.extend(footer.get("legacy_logo_urls", []))
+    for want in urls:
         if url == want:
             return True
         m = re.match(r"^https://raw\.githubusercontent\.com/([^/]+)/([^/]+)/[^/]+/(.+)$", want)
@@ -536,7 +549,7 @@ def _footer_logo_url(url: str, brand) -> bool:
 def is_footer_copy(block: str, brand) -> bool:
     """Every line of `block` is a line of the decision 18 footer or a drifted copy of one: only centring, link, logo,
     `<br>`/`<sub>` markup, with complete.tech links, the footer's own logo image (its src or srcset is the brand footer
-    logo URL or a drifted form of it, or its alt is exactly the company) and as text only the credit line ("Built by
+    logo URL or a drifted form of it) and as text only the credit line ("Built by
     <company>", optionally with the suffix). A sponsor or partner image (whatever its file name), a thanks line or
     any other authored text makes it not a footer copy, so it is never removed."""
     import html
@@ -549,15 +562,14 @@ def is_footer_copy(block: str, brand) -> bool:
             return True
         if name == "a":
             return "complete.tech" in attrs.lower()
-        for a in FOOTER_ATTR.finditer(attrs):  # never a file name that merely contains "logo"
+        sources = []
+        for a in FOOTER_ATTR.finditer(attrs):  # an alt label never proves image ownership
             key = a.group(1).lower()
             val = html.unescape(next(g for g in a.groups()[1:] if g is not None)).strip()
-            if key == "alt" and val in (company, f["alt"]):
-                return True
-            parts = [p.split()[0] for p in val.split(",") if p.split()]
-            if key in ("src", "srcset") and parts and all(_footer_logo_url(u, brand) for u in parts):
-                return True
-        return False
+            if key in ("src", "srcset"):
+                parts = [p.split()[0] for p in val.split(",") if p.split()]
+                sources.append(bool(parts) and all(_footer_logo_url(u, brand) for u in parts))
+        return bool(sources) and all(sources)
 
     for line in block.splitlines():
         if not line.strip():
@@ -591,11 +603,16 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
     variant = ctx.det["variant"]
     rv = standard("readme-variants")
     if variant in ("G", "H"):
-        return callout_only(ctx, normalize_text(text)), []
+        removed: list[str] = []
+        return callout_only(ctx, normalize_text(text), removed), removed
     text = normalize_text(text)
     body, blocks = _strip_markers(text)
     want_footer = footer_wanted(ctx)
     removed: list[str] = []
+    if want_footer and blocks.get("footer") and is_footer_copy(blocks["footer"], ctx.brand):
+        # A configured publication-path change replaces only our recognized footer,
+        # not authored credits or partner images inside a similarly named block.
+        removed += [ln for ln in blocks["footer"].splitlines() if ln.strip()]
     if want_footer:  # an unmarked or drifted footer at the end is replaced by the marked one, never kept beside it
         body, old_footer = drop_old_footer(body, ctx.brand)
         removed += old_footer

@@ -243,6 +243,9 @@ def test_shield_keeps_the_existing_escapes():
 # ------------------------------------------------------------------------------------------ README: one footer
 def test_upgrade_replaces_an_old_footer_instead_of_adding_a_second(brand, fixture_meta, tmp_path):
     src = (ROOT / "tests/fixtures/readmes/CompleTetech-Security__php2shell-check.md").read_text(encoding="utf-8")
+    # Only a configured logo URL identifies a replaceable footer; an arbitrary
+    # local asset with the company alt label must remain authored content.
+    src = src.replace('src="assets/logo.png"', f'src="{brand.raw["footer"]["logo_light_url"]}"')
     ctx = RepoContext(brand, normalize(fixture_meta("CompleTetech-Security__php2shell-check")), None)
     out, removed = readme.upgrade(ctx, src)
     assert out.count("Built by") == 1 and out.rstrip().endswith("<!-- showcase:footer:end -->")

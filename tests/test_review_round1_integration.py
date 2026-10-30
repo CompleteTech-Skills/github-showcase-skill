@@ -148,6 +148,9 @@ def test_drop_old_footer_takes_only_footer_lines(brand):
     old = ('<p align="center">\n  <a href="https://complete.tech"><img src="assets/logo.png" alt="CompleteTech LLC" '
            'width="160"></a><br>\n  <sub>Built by <a href="https://complete.tech">CompleteTech LLC</a> · Innovation at '
            "Every Integration</sub>\n</p>\n")
+    # An alt label cannot establish that an unknown local image is ours.
+    assert readme.drop_old_footer("# A\n\n" + old, brand) == ("# A\n\n" + old, [])
+    old = old.replace("assets/logo.png", brand.raw["footer"]["logo_light_url"])
     _, removed = readme.drop_old_footer("# A\n\n" + old, brand)
     assert len(removed) == 4
     authored = old.replace("<br>\n", "<br>\n  Thanks to Acme Corp.<br>\n", 1)
