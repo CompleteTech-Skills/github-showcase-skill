@@ -1618,10 +1618,14 @@ def _star_list_plan(estate: Estate, org: str, *, lists_capture: dict | None = No
         union = sorted(have | {list_id} | targets.get(f.lower(), set()))
         q = (f"mutation {{ updateUserListsForItem(input: {{itemId: {_gql(rid)}, listIds: [{', '.join(_gql(x) for x in union)}]}}) "
              "{ lists { id name } } }")
-        out["jobs"].append(job(f"p{phase}-{login}-list-item-{f.replace('/', '__')}", phase, "star-list",
-                               ["gh", "api", "graphql", "-f", f"query={q}"], org=USER_LOGIN,
-                               note=f"Add {f} to '{name}', keeping its {len(have)} other list(s) and every estate star "
-                                    "List that also takes it (union; never unstar)."))
+        item = job(f"p{phase}-{login}-list-item-{f.replace('/', '__')}", phase, "star-list",
+                   ["gh", "api", "graphql", "-f", f"query={q}"], org=USER_LOGIN,
+                   note=f"Add {f} to '{name}', keeping its {len(have)} other list(s) and every estate star "
+                        "List that also takes it (union; never unstar).")
+        if r.owner_status(f.split("/")[0]) == "t3":  # a T3 favorite carries its own record (signoff.stamp_source)
+            from . import signoff
+            signoff.stamp_source(item, f, r.aliases(f.split("/")[0]))
+        out["jobs"].append(item)
     return dict(out, result="incomplete" if incomplete else "ok", list_id=list_id)
 
 

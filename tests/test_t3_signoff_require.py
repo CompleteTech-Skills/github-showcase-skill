@@ -572,3 +572,95 @@ def test_star_list_jobs_for_a_t3_org_carry_its_signoff(tmp_path, monkeypatch, br
         signoff.restore(run)
         signoff.reset_required(req)
         reset_t3_signed_off(t3)
+
+
+# --- review round 3: evidence for each fixed finding (synthetic records only) ---
+
+def _schema_def(name):
+    return json.loads((ROOT / "references" / "t3-signoff.schema.json").read_text(encoding="utf-8"))["$defs"][name]
+
+
+def _schema_accepts(value, *defs):
+    """The schema's own string patterns (ECMA-262: `^...$` anchored, ASCII digits), applied with `re` so this runs
+    where jsonschema is not installed (test_schema_and_problems_agree_on_the_fixtures skips there)."""
+    import re
+    return any(re.search(_schema_def(d)["pattern"], value, re.ASCII) and not value.endswith("\n") for d in defs)
+
+
+_WHEN = ["2099-12-31", "20991231", "2099-W52-1", "2099-W52", "2099-365", " 2099-12-31", "2099-12-31 ",
+         "2099-12-31T00:00:00Z", "2099-12-31T00:00:00+00:00", "2099-12-31T00:00:00+0000", "2099-12-31 00:00Z",
+         "2099-12-31T00:00:00.5-05:00", "2099-12-31T00:00+00", "2099-12-31T00Z", "20991231T000000Z",
+         "2099-12-31T00:00:00", "2099-12-31garbage", "\u0662\u0660\u0669\u0669-12-31"]
+
+
+@pytest.mark.parametrize("value", _WHEN)
+def test_problems_follow_the_schema_string_patterns(value):
+    """Python 3.11+ fromisoformat accepts compact, week-date and `+00` forms the schema rejects; problems() used to
+    accept them, so --require-t3-signoff granted a record the published schema refuses. Both now agree."""
+    from ctshowcase import signoff
+    base = {"id": "t3s-p", "owner": OWNER, "repos": "*", "approved": True, "approver": "x",
+            "approved_on": "2026-01-15", "expires": "2099-12-31"}
+    exp_ok = not any(p.startswith("expires:") for p in signoff.problems(dict(base, expires=value)))
+    assert exp_ok == _schema_accepts(value, "date", "awareTimestamp"), value
+    on_ok = not any(p.startswith("approved_on:") for p in signoff.problems(dict(base, approved_on=value)))
+    assert on_ok == _schema_accepts(value, "date"), value
+
+
+def test_calendar_impossible_dates_fail_closed_although_the_pattern_matches():
+    """The one deliberate difference from the schema: a pattern-shaped but impossible date never validates."""
+    from ctshowcase import signoff
+    assert _schema_accepts("2099-02-30", "date")
+    rec = {"id": "t3s-c", "owner": OWNER, "repos": "*", "approved": True, "approver": "x",
+           "approved_on": "2026-01-15", "expires": "2099-02-30"}
+    assert signoff.problems(rec) == ["expires: needs a date (YYYY-MM-DD) or a timestamp with a UTC offset"]
+
+
+@pytest.mark.parametrize("field,value", [("expires", "20991231"), ("expires", "2099-W52-1"),
+                                         ("approved_on", "20260115")])
+def test_compact_and_week_dates_refuse_invalid(tmp_path, field, value):
+    vals = {"approved_on": "2026-01-15", "expires": "2099-12-31", field: value}
+    body = (f"  - id: t3s-cmp\n    owner: {OWNER}\n    repos: ['*']\n    approved: true\n    approver: x\n"
+            f"    approved_on: '{vals['approved_on']}'\n    expires: '{vals['expires']}'\n")
+    r = _run(tmp_path, _raw_bundle(tmp_path, body), "--require-t3-signoff", "--allow-t3", "describe")
+    assert r.returncode == 2 and "t3-signoff:invalid" in _out(r) and field in _out(r), _out(r)
+
+
+def test_mixed_type_unknown_keys_refuse_invalid(tmp_path):
+    """`unexpected: true` beside `7: unexpected`: sorting str and int keys raised TypeError out of showcase.main()."""
+    body = (f"  - id: t3s-mix\n    owner: {OWNER}\n    repos: ['*']\n    approved: true\n    approver: x\n"
+            "    approved_on: 2026-01-15\n    expires: 2099-12-31\n    unexpected: true\n    7: unexpected\n")
+    r = _run(tmp_path, _raw_bundle(tmp_path, body), "--require-t3-signoff", "--allow-t3", "describe")
+    assert r.returncode == 2 and "t3-signoff:invalid" in _out(r) and "unknown field" in _out(r), _out(r)
+    assert "Traceback" not in _out(r), _out(r)
+
+
+def test_t1_star_list_item_for_a_t3_favorite_carries_the_favorites_signoff(tmp_path, monkeypatch, brand):
+    """A T1 org's List featuring a T3 org's repository: the favorite passed _t3_held via granted(), which registers no
+    grant, and star_list_plan stamped only the T1 org, so the updateUserListsForItem job had no signoff_id."""
+    from ctshowcase import org as O, signoff
+    from ctshowcase.config import reset_t3_signed_off, set_t3_signed_off
+    from ctshowcase.resolver import Resolver
+    t1, fav = "Northwind-Trading-Co", f"{OWNER}/northwind-synthetic"
+    reg = {"orgs": {t1: {"star_list": {"name": "Misc", "description": ""}, "favorites": [{"full_name": fav}]}}}
+    est = O.Estate(brand, Resolver(brand, reg, {"rows": set(), "ids": set(), "answers": {}, "actions": [], "extra": []}),
+                   metas={"m": {"owner": OWNER, "repo": "northwind-synthetic", "visibility": "public"}})
+    lists = json.loads((ROOT / "tests" / "fixtures" / "org" / "star-lists.json").read_text(encoding="utf-8"))
+    monkeypatch.setenv("SHOWCASE_T3_SIGNOFF_FILE",
+                       str(_file(_bundle(tmp_path, [{"id": "t3s-fav", "repos": ["northwind-synthetic"]}]))))
+    t3 = set_t3_signed_off(True)
+    req = signoff.set_required(True)
+    run = signoff.reset()
+    try:
+        assert est.resolver.owner_status(t1) != "t3"
+        res = O.star_list_plan(est, t1, lists_capture=lists, allow_t3=True, repo_ids={fav: "R_synthetic"})
+        items = [j for j in res["jobs"] if "list-item" in j["id"]]
+        assert len(items) == 1 and items[0]["org"] == O.USER_LOGIN, res
+        assert items[0]["signoff_id"] == "t3s-fav" and items[0]["approval_id"] == "t3s-fav", items
+        signoff.reset_required(req)
+        req = signoff.set_required(False)  # without the flag nothing is stamped (behaviour unchanged)
+        plain = O.star_list_plan(est, t1, lists_capture=lists, allow_t3=True, repo_ids={fav: "R_synthetic"})
+        assert all("signoff_id" not in j for j in plain["jobs"]), plain["jobs"]
+    finally:
+        signoff.restore(run)
+        signoff.reset_required(req)
+        reset_t3_signed_off(t3)

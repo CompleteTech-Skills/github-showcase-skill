@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import os
+import re
 from contextvars import ContextVar, Token
 from pathlib import Path
 
@@ -149,22 +150,37 @@ def load_records(path: str | Path | None = None) -> list[dict]:
     return [r for r in items if isinstance(r, dict)]
 
 
+# The string forms references/t3-signoff.schema.json permits ($defs.date and $defs.awareTimestamp), checked before
+# parsing. Python 3.11+ fromisoformat also accepts compact (`20991231`), week (`2099-W52-1`) and hour-only offset
+# (`+00`) forms that the schema rejects, so without these the tool would grant a record an external validator of the
+# estate bundle refuses (tests/test_t3_signoff_require.py::test_problems_follow_the_schema_string_patterns, which runs
+# without jsonschema). ASCII digits only, like the schema's ECMA-262 `\d`. The one deliberate difference: a
+# calendar-impossible date that matches the pattern (`2099-02-30`) still fails to parse here, so the tool is stricter
+# than the schema there and fails closed.
+_DATE_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", re.ASCII)
+_AWARE_TS_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}:?[0-9]{2})",
+                          re.ASCII)
+
+
 def _parse_when(v) -> _dt.date | _dt.datetime | None:
-    """A date, or a timezone-aware timestamp. A naive timestamp is ambiguous, so it never parses (fail closed)."""
+    """A date, or a timezone-aware timestamp. A naive timestamp is ambiguous, so it never parses (fail closed).
+    A string must match the schema's date or awareTimestamp pattern in full (no surrounding whitespace) first."""
     if isinstance(v, _dt.datetime):
         return v if v.tzinfo is not None else None
     if isinstance(v, _dt.date):
         return v
     if not isinstance(v, str):
         return None
-    s = v.strip()
-    # the whole value must parse: `2099-12-31garbage` is not a date, so it never validates (fail closed)
+    # the whole value must match and parse: `2099-12-31garbage` is not a date, so it never validates (fail closed)
+    if _DATE_RE.fullmatch(v):
+        try:
+            return _dt.date.fromisoformat(v)
+        except ValueError:
+            return None
+    if not _AWARE_TS_RE.fullmatch(v):
+        return None
     try:
-        return _dt.date.fromisoformat(s)
-    except ValueError:
-        pass
-    try:
-        ts = _dt.datetime.fromisoformat(s)
+        ts = _dt.datetime.fromisoformat(v.replace("Z", "+00:00"))  # `Z` for Python < 3.11
     except ValueError:
         return None
     return ts if ts.tzinfo is not None else None
@@ -194,7 +210,11 @@ def problems(rec: dict) -> list[str]:
         out.append("expires: needs a date (YYYY-MM-DD) or a timestamp with a UTC offset")
     if "note" in rec and rec["note"] is not None and not isinstance(rec["note"], str):
         out.append("note: needs a string")
-    extra = sorted(set(rec) - {"id", "owner", "repos", "approved", "approver", "approved_on", "expires", "note"})
+    # key=str: YAML keys need not be strings (`7: x` beside `unexpected: true`), and sorting mixed types raised
+    # TypeError out of showcase.main() instead of refusing t3-signoff:invalid
+    # (tests/test_t3_signoff_require.py::test_mixed_type_unknown_keys_refuse_invalid)
+    extra = sorted(set(rec) - {"id", "owner", "repos", "approved", "approver", "approved_on", "expires", "note"},
+                   key=lambda k: (type(k).__name__, str(k)))
     if extra:
         out.append("unknown field(s): " + ", ".join(map(str, extra)))
     return out
@@ -318,9 +338,28 @@ def stamp(items, owner: str | None = None):
             continue
         full = str(j.get("repo") or "")
         who = owner or j.get("org") or j.get("owner") or (full.split("/")[0] if "/" in full else "")
-        rec = record_for(str(who), full or None)
-        if rec is not None and rec.get("id"):
-            j["signoff_id"] = str(rec["id"])
-            if is_job:
-                j.setdefault("approval_id", str(rec["id"]))
+        _put(j, record_for(str(who), full or None))
     return items
+
+
+def _put(j: dict, rec: dict | None) -> None:
+    if rec is not None and rec.get("id"):
+        j["signoff_id"] = str(rec["id"])
+        if "phase" in j:
+            j.setdefault("approval_id", str(rec["id"]))
+
+
+def stamp_source(job: dict, full: str, aliases: list[str] | None = None) -> dict:
+    """Under the flag, stamp a writer job that names another owner's T3 repository FULL (OWNER/NAME) with the record
+    covering that repository. A star-List item job (org.star_list_plan) targets the personal account for some org's
+    List, so neither the target nor the org's grant names the record that let the favorite through
+    (org._t3_held checks it with granted(), which does not register a grant). It is evaluated here instead. The
+    repository's record wins over the List org's: the item job is what puts the T3 repository in public; the org's own
+    grant was enforced at the command gate and stays on its List create/describe jobs. No-op when off, when the job
+    already carries a signoff_id or when no valid record covers FULL (the favorite is then held and has no job)."""
+    if not required() or not isinstance(job, dict) or "signoff_id" in job or "/" not in (full or ""):
+        return job
+    owner, name = full.split("/", 1)
+    rec, _ = evaluate([owner, *(aliases or [])], name)
+    _put(job, rec)
+    return job
