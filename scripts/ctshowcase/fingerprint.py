@@ -76,9 +76,9 @@ def inputs(meta: dict, repo_dir: str | Path | None) -> dict:
     # the key at all, both the untuned and the tuned type are recorded: a change to either regenerates, whichever one the
     # renderer uses. An override that never names the key records only `type`, exactly as before.
     flag_text = override_text if rd is not None else _manifest_override_text(meta)
-    # A valid double-quoted YAML key may spell the name with escapes ("detect\x5ftuned"), so a backslash in the text is
-    # treated conservatively as possibly naming the key (recording the tuned type too costs at most one extra regeneration).
-    names_flag = "detect_tuned" in flag_text or "\\" in flag_text
+    # A double-quoted YAML key may spell the name with escapes ("detect\x5ftuned"), so a backslash inside a quoted
+    # mapping key counts as possibly naming it. A backslash in a value (a Windows path in `subtitle:`) does not.
+    names_flag = "detect_tuned" in flag_text or bool(re.search(r'^\s*"[^"\n]*\\[^"\n]*"\s*:', flag_text, re.M))
     try:  # the detected type picks the README variant and the eyebrow: a new type (code landed) regenerates
         from .detect import detect
         from .facts import RepoFacts
@@ -93,6 +93,8 @@ def inputs(meta: dict, repo_dir: str | Path | None) -> dict:
            "icon_sha256": _sha(icon), "override_sha256": _sha(override)}
     if names_flag:
         out["type_tuned"] = tuned_type
+        if rd is None:  # metadata-only: no override file to hash, so the captured text stands in for override_sha256
+            out["override_text_sha256"] = hashlib.sha256(flag_text.encode("utf-8")).hexdigest()
     return out
 
 

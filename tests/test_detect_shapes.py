@@ -226,6 +226,26 @@ def test_fingerprint_manifest_override_without_checkout():
     assert fingerprint.inputs(meta, None)["type_tuned"] == "workspace"
 
 
+def test_fingerprint_manifest_flag_toggle_changes_fingerprint():
+    # Metadata-only: toggling detect_tuned false -> true in the captured override must move the fingerprint.
+    def fp(text):
+        meta = dict(NORTHWIND, files=["planning/plan.json", "src/build.py"],
+                    file_sizes={"planning/plan.json": 9000, "src/build.py": 1000},
+                    manifests={".github/showcase.yml": text})
+        return fingerprint.fingerprint(fingerprint.inputs(meta, None), "cfg")
+    assert fp("detect_tuned: false\n") != fp("detect_tuned: true\n")
+
+
+def test_fingerprint_backslash_in_value_keeps_base_inputs(tmp_path):
+    # A backslash in a value (not a quoted key) must not add type_tuned: defaults stay unchanged.
+    base = dict(NORTHWIND, files=["planning/plan.json", "src/build.py"],
+                file_sizes={"planning/plan.json": 9000, "src/build.py": 1000})
+    _write_override(tmp_path, 'subtitle: "Parses C:\\\\Windows paths"\n')
+    assert "type_tuned" not in fingerprint.inputs(base, tmp_path)
+    _write_override(tmp_path, '"detect\\x5ftuned": true\n')
+    assert "type_tuned" in fingerprint.inputs(base, tmp_path)
+
+
 def test_fingerprint_unchanged_without_detect_tuned_key(tmp_path):
     # No key named: the inputs are exactly today's, so a default repository's fingerprint does not move.
     base = dict(NORTHWIND, files=["planning/plan.json", "src/build.py"],
