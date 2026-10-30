@@ -58,4 +58,13 @@ def test_assume_repo_naming_another_repository_is_still_refused(tmp_path):
 
 def test_assume_repo_must_be_owner_slash_repo(tmp_path):
     rd, meta = _checkout(tmp_path)
-    assert _run(rd, meta, "--assume-repo", "nonsense").returncode == 2
+    # Exit 2 alone is vacuous: an unknown flag also exits 2 on the base. Assert the flag exists (usage text) and that the
+    # failure is this flag's own OWNER/REPO validation message, not argparse's "unrecognized arguments".
+    assert "--assume-repo" in subprocess.run([*SHOWCASE, "--help"], cwd=ROOT, capture_output=True, text=True,
+                                             encoding="utf-8").stdout
+    for bad in ("nonsense", "a/b/c", "/repo", "owner/"):
+        r = _run(rd, meta, "--assume-repo", bad)
+        out = r.stdout + r.stderr
+        assert r.returncode == 2, (bad, out)
+        assert "--assume-repo expects OWNER/REPO" in out, (bad, out)
+        assert "unrecognized arguments" not in out, (bad, out)
