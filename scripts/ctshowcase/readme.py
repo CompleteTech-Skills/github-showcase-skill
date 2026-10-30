@@ -16,6 +16,9 @@ from .detect import standard
 from .mdcode import code_spans, find_blocks, masked  # noqa: F401  (code_spans: re-exported for callers)
 
 MARK = re.compile(r"<!-- showcase:([a-z-]+):start -->\n?(.*?)\n?<!-- showcase:\1:end -->", re.S)
+# blocks the skill itself regenerates on every run; their bodies may change without a line being lost. template-body
+# (the owner's text) and license or unknown names are never listed here, so their lines stay guarded.
+GENERATED_BLOCKS = frozenset({"banner", "nav", "tagline", "badges", "footer"})
 EMOJI = re.compile("[\U0001F000-\U0001FAFF☀-➿⬀-⯿️‍]")
 SHIELDS = "https://img.shields.io/badge/"
 BOM = "\ufeff"
@@ -959,10 +962,24 @@ def nonws(s: str) -> int:
     return len(re.sub(r"\s", "", s))
 
 
+def _guard_text(before: str, after: str) -> str:
+    """`before` (LF) without the generated marker blocks that `after` still holds: their bodies are regenerated, so
+    their old lines are not lost. A block missing from `after`, or one not in GENERATED_BLOCKS, stays in the text."""
+    keep = GENERATED_BLOCKS & {m.group(1) for m in find_blocks(MARK, after.replace("\r\n", "\n"))}
+    text = before.replace("\r\n", "\n")
+    out, pos = [], 0
+    for m in find_blocks(MARK, text):
+        if m.group(1) in keep:
+            out.append(text[pos:m.start()])
+            pos = m.end()
+    return "".join(out) + text[pos:]
+
+
 def preservation(before: str, after: str, removed: list[str]) -> list[str]:
     """Every original non-header line survives (heading lines may be renamed); size drop <= 10%."""
     problems = []
-    b_lines = Counter(ln.strip() for ln in before.splitlines() if ln.strip() and not ln.strip().startswith("<!-- showcase:"))
+    b_lines = Counter(ln.strip() for ln in _guard_text(before, after).splitlines()
+                      if ln.strip() and not ln.strip().startswith("<!-- showcase:"))
     for r in removed:
         b_lines[r.strip()] -= 1
     a_lines = Counter(ln.strip() for ln in after.splitlines() if ln.strip())
