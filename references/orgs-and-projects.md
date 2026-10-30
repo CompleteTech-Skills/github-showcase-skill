@@ -2,6 +2,8 @@
 
 Decision 23 extends this skill to organizations and GitHub Projects. The skill itself stays read-only toward GitHub: it generates the art and text, checks it, and prints the commands; the orchestrator's single writer queue (and the browser, for UI-only settings) applies them. This page holds the rules; the commands are in [org.md](org.md) (`showcase.py org`) and [projects.md](projects.md) (`showcase.py project`). Profile README structure is in [profile-readmes.md](profile-readmes.md); the org identity table (name, description, eyebrow) is in [estate-standard.md](estate-standard.md).
 
+To add an organization that is not part of the CompleteTech family, follow the [non-CompleteTech onboarding sequence](../ONBOARDING.md#onboard-a-non-completetech-organization). It adds the family and the organization to `references/brand.yaml` with dry-run-first `brand add-family` and `brand add-org` commands, then checks them with `config` and `doctor --strict-owner`. The `owners:` section is not changed by `add-org`, and a T3 co-owned organization still needs sign-off and the global `--allow-t3` flag.
+
 ## Org About fields
 
 Values come only from the org identity table; agents never compose an org name or description.

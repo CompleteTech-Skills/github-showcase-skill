@@ -60,6 +60,52 @@ Read [SKILL.md](SKILL.md), select `github-showcase-skill` using your agent's ski
 
 For a new repository, start from `completetech-repo-template`: its workflow calls this skill's composite Action, which bootstraps the README for the detected type and keeps the banner and card current.
 
+## Onboard a non-CompleteTech organization
+
+Use this sequence to add an organization outside the CompleteTech family (the example uses the synthetic `Acme-Widgets` org and the `acme-widgets` family). Every step is read-only toward GitHub and edits only `references/brand.yaml`; run the commands from the skill root.
+
+1. **Preview the family (dry run).** Dry run is the default, so this prints the diff and writes nothing:
+
+   ```bash
+   python scripts/showcase.py brand add-family acme-widgets --company-label "Acme Widgets" --accent '#22D3EE' --background '#0B1020'
+   ```
+
+2. **Write the family.** Repeat the command with `--write`:
+
+   ```bash
+   python scripts/showcase.py brand add-family acme-widgets --company-label "Acme Widgets" --accent '#22D3EE' --background '#0B1020' --write
+   ```
+
+   A new family starts with `measured: false`, so art for it is refused until its colours are measured. Pass `--allow-unmeasured` to generate art before then. The footer defaults to `hold` until real logo URLs exist. `--write` regenerates `references/brand.lock.json`.
+
+3. **Preview the organization (dry run).**
+
+   ```bash
+   python scripts/showcase.py brand add-org Acme-Widgets --family acme-widgets --display-name "Acme Widgets" --tier T2
+   ```
+
+4. **Write the organization.** Repeat the command with `--write`:
+
+   ```bash
+   python scripts/showcase.py brand add-org Acme-Widgets --family acme-widgets --display-name "Acme Widgets" --tier T2 --write
+   ```
+
+   `add-org` never edits the `owners:` section of `brand.yaml`; review that section by hand if the org's owner status must change.
+
+5. **Check the configuration.** The result should be `pass`:
+
+   ```bash
+   python scripts/showcase.py config
+   ```
+
+6. **Check the owner gate.** `--strict-owner` applies the same owner gate as the banner, card and social preview:
+
+   ```bash
+   python scripts/showcase.py doctor --strict-owner
+   ```
+
+A T3 organization is co-owned, so it still needs co-owner sign-off before its repositories are generated. Sign-off is an approved `t3-signoff` row in the approvals file, and the global `--allow-t3` flag must be passed for each run. The global flag goes **before** the subcommand, for example `python scripts/showcase.py --allow-t3 doctor --strict-owner`, not after it.
+
 ## Branding and handoff
 
 Use the committed CompleteTech LLC brand files and the practical, evidence-led voice described in [README.md](README.md). The code license does not grant logo, seal or signature rights: follow [BRAND_ASSETS.md](BRAND_ASSETS.md). Do not replace or republish private artwork or fonts. Every surface uses the dark design (decision 21); do not add light variants.

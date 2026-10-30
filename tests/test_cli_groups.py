@@ -189,3 +189,17 @@ def test_owner_status_survives_a_rename(brand):
     b = Brand(raw, brand.path)
     assert b.owner_status(watching + "-renamed") == "watching" and b.owner_status(watching) == "watching"
     assert b.org(watching)["owner"] == watching + "-renamed"
+
+
+# ----------------------------------------------------------------------------------------------- brand onboarding (E6.1.5)
+def test_brand_group_registered():
+    p = cli("brand", "--help")
+    assert p.returncode == 0, p.stderr
+    assert "add-family" in p.stdout and "add-org" in p.stdout
+
+
+def test_existing_command_groups_still_registered():
+    p = cli("--help")
+    assert p.returncode == 0, p.stderr
+    for name in ("org", "project", "enterprise", "content", "doctor", "config"):
+        assert re.search(rf"^\s+{name}\b", p.stdout, re.M), name
