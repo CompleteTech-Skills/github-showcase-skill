@@ -265,6 +265,19 @@ def tagline_body(ctx: RepoContext, existing: str | None = None, text: str = "") 
     return existing
 
 
+def _replaced_lines(old: str | None, new: str) -> list[str]:
+    """The lines of a generated tagline block body that its new body no longer holds: they leave together with the
+    block's old content, so they are not lost authored lines (lines outside marker blocks are never listed here)."""
+    keep = Counter(ln.strip() for ln in new.splitlines() if ln.strip())
+    gone = []
+    for ln in (old or "").splitlines():
+        if ln.strip() and keep.get(ln.strip(), 0) <= 0:
+            gone.append(ln)
+        elif ln.strip():
+            keep[ln.strip()] -= 1
+    return gone
+
+
 def header(ctx: RepoContext, keep_banner: str | None = None, title: str | None = None,
            tagline: str | None = None) -> str:
     """The §7.2 header. `tagline` is the tagline block body a caller already decided with tagline_body() (the body it
@@ -621,8 +634,7 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
     if preserve and old_tag is not None:
         # additive only, so the tagline block stays where it is, its body decided by the header rule (tagline_body)
         tag = tagline_body(ctx, old_tag, text)
-        if old_tag.strip() and not tag:  # an inherited tagline, emptied on purpose (not a lost line)
-            removed += [ln for ln in old_tag.splitlines() if ln.strip()]
+        removed += _replaced_lines(old_tag, tag)  # emptied or refreshed on purpose (not a lost line)
         body, _ = _strip_markers(text, keep={"tagline": tag})
         if want_footer:
             body, _ = drop_old_footer(body, ctx.brand)  # its lines are already in `removed`
@@ -735,10 +747,9 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
             old_tag = carry[0].strip()
             removed.remove(carry[0])
         new_tag = tagline_body(ctx, old_tag, text)
-        if old_tag and old_tag.strip() and not new_tag:
-            # an inherited tagline is emptied (header mode does the same): its lines are dropped on purpose, so the
-            # never-delete check must not report them as lost
-            removed += [ln for ln in old_tag.splitlines() if ln.strip()]
+        # an emptied (inherited) or refreshed (changed description) tagline: header mode does the same, so its old
+        # lines are dropped on purpose and the never-delete check must not report them as lost
+        removed += _replaced_lines(old_tag, new_tag)
         out.append(header(ctx, tagline=new_tag))
         co = callout(ctx)
         if co and co not in intro:

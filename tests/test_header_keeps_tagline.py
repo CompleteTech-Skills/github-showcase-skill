@@ -391,3 +391,37 @@ def test_upgrade_keeps_an_owner_bold_line_in_a_pristine_copy(make_ctx, tmp_path)
     for later in (R.bootstrap(ctx, out), R.header_only(ctx, out), R.header_only(ctx, R.bootstrap(ctx, out)), again):
         assert own in later
     assert R.preservation(out, again, removed2) == []
+
+
+# -- a changed description refreshes the tagline block (issue 68) ----------------------------------------------------
+NEW_DESC = "Run the Northwind triage agent."
+
+
+def test_cli_upgrade_refreshes_the_tagline_for_a_changed_description(tmp_path):
+    # default `readme --write` (upgrade) with a description that differs from the block: the block's old line leaves
+    # together with its generated content, so the never-delete check passes instead of readme-shrink; the same holds
+    # in preserve mode (README over 15000 bytes). Lines outside the marker blocks are still never dropped.
+    import json
+    from conftest import meta_dict, run_cli
+    for name, text in (("normal", TEXT), ("preserve", BIG)):
+        repo = tmp_path / name
+        repo.mkdir()
+        (repo / "README.md").write_text(text, encoding="utf-8")
+        meta = tmp_path / f"meta-{name}.json"
+        meta.write_text(json.dumps(meta_dict(description=NEW_DESC)), encoding="utf-8")
+        p = run_cli("--meta", meta, "--repo-dir", repo, "readme", "--write")
+        assert p.returncode == 0, p.stdout + p.stderr
+        out = json.loads(p.stdout)
+        assert out["result"] == "changed" and "readme-shrink" not in out["logs"], (name, out)
+        after = (repo / "README.md").read_text(encoding="utf-8")
+        assert _tagline_body(after) == f"**{NEW_DESC}**" and TAGLINE not in after, name
+        assert "Run it." in after, name
+
+
+def test_refreshing_the_tagline_never_excuses_a_lost_authored_line(make_ctx, tmp_path):
+    # only the tagline block's own old lines are excused; an authored line that disappears is still reported
+    ctx = make_ctx(tmp_path, description=NEW_DESC)
+    out, removed = R.upgrade(ctx, TEXT)
+    assert not R.preservation(TEXT, out, removed)
+    assert R.preservation(TEXT, out.replace("Run it.", ""), removed)
+    assert R.preservation(TEXT, out.replace("Run it.", ""), removed + [TAGLINE])

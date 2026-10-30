@@ -10,6 +10,7 @@ All notable changes to `github-showcase-skill` are recorded here. Versions follo
 
 ### Fixed
 
+- `readme --mode upgrade` (the default of `readme --write`) with a description that differs from the `showcase:tagline` block now refreshes the block instead of failing `readme-shrink` (exit 1, README unchanged): the block's old lines leave together with its generated content, in the rebuilt header and in preserve mode alike. Lines outside generated marker blocks are still never dropped.
 - Windows contributor tests now use explicit UTF-8, native path basenames, a platform-independent read-only metadata stub, and Git Bash with stdin-safe Action scripts. All 15 issue #9 failures are individually documented; the full suite now runs in Windows, Linux and macOS CI.
 - Lint accepts file operands after options on older Python 3.12 versions while continuing to reject unrecognized options.
 - The Action's optional render arguments support macOS Bash 3.2, including an empty argument array with `set -u`.
