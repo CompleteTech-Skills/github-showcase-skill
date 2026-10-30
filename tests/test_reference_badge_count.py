@@ -62,3 +62,34 @@ def test_reference_images_still_require_alt_and_existing_local_files(make_ctx, t
                             "[ci-status]: docs/images/badges/missing.svg")
     assert any(failure.startswith("R7 image without alt text") for failure in result["fails"])
     assert "R7 local image does not resolve: docs/images/badges/missing.svg" in result["fails"]
+
+
+@pytest.mark.parametrize("usage", [
+    f'<img src={URL} alt="CI">',
+    f'<img SRC="{URL}" alt="CI">',
+    f"<IMG ALT='CI' SRC='{URL}'>",
+    f'<img\nalt="CI > build"\nsrc="{URL}">',
+    f'![CI [build]]({URL} "Build status")',
+    f'![CI [build [latest]]]({URL})',
+    "![CI [build]][ci]",
+    "![CI [build [latest]]][ci]",
+])
+def test_valid_html_and_balanced_markdown_badges_count(make_ctx, tmp_path, usage):
+    result = lint_reference(make_ctx, tmp_path, usage, f"[ci]: {URL}")
+    assert not any("badge" in failure or "without alt" in failure for failure in result["fails"]), result
+
+
+@pytest.mark.parametrize("usage", [
+    f'&lt;img src="{URL}" alt="CI"&gt;',
+    f'```html\n<img src={URL} alt="CI">\n```',
+    '<img alt="CI"',
+    f'<span title="![CI]({URL})">Build status</span>',
+    f'\\![CI [build]]({URL})',
+])
+def test_nonrendered_html_and_markdown_badges_do_not_count(make_ctx, tmp_path, usage):
+    result = lint_reference(make_ctx, tmp_path, usage, f"[ci]: {URL}")
+    assert "R7 2-4 header badges required (found 1)" in result["fails"]
+
+
+def test_unfinished_html_at_end_has_no_image():
+    assert readmelint._images(f'<img src="{URL}"', "") == []
