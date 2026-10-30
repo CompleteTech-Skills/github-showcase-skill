@@ -299,3 +299,33 @@ def test_action_prepare_ignores_staged_description_key(tmp_path):
                        capture_output=True, text=True)
     assert p.returncode == 0, p.stderr
     assert p.stdout.strip() == "false"
+
+
+def test_readme_write_keeps_art_fingerprint(tmp_path):
+    # Review finding (E5.2.2 A): a README-only staged write must not move the art's recorded fingerprint. banner.png
+    # was rendered from the live About, so the sidecar keeps that fingerprint and inputs; only outputs['README.md'] changes.
+    rd = _repo(tmp_path)
+    assert run_cli("--meta", META, "--repo-dir", rd, "--format", "json", "banner",
+                   "--out", rd / "docs/images/banner.png").returncode == 0
+    before = _sidecar(rd)
+    p = run_cli("--meta", META, "--repo-dir", rd, "--format", "json", "readme", "--mode", "scaffold", "--write",
+                "--description", STAGED)
+    assert p.returncode == 0, p.stderr
+    after = _sidecar(rd)
+    assert after["fingerprint"] == before["fingerprint"]
+    assert after["inputs"] == before["inputs"]
+    assert after["config_sha256"] == before["config_sha256"]
+    assert after["outputs"]["banner.png"] == before["outputs"]["banner.png"]
+    assert after["outputs"]["README.md"]["staged_description"] == _staged(STAGED)
+    # the art still answers as up to date against the live About: the gate does not regenerate it
+    f = run_cli("--meta", META, "--repo-dir", rd, "--format", "json", "fingerprint", "--out-dir", rd / "docs/images")
+    assert f.returncode == 0, f.stderr
+    assert _json(f)["changed"] is False
+
+
+def test_staged_record_strips_padded_text_and_hash_matches_text():
+    # Review finding (E5.2.2 B): the recorded hash must be the hash of the recorded text, stripped the same way
+    padded = "  " + STAGED + "\n"
+    rec = fp.staged_record(padded)
+    assert rec == {"text": STAGED, "sha256": hashlib.sha256(STAGED.encode("utf-8")).hexdigest()}
+    assert rec["sha256"] == fp.description_sha256(padded) == fp.staged_record(STAGED)["sha256"]

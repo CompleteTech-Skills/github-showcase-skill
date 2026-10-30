@@ -473,7 +473,12 @@ def cmd_readme(args):
             record = {"staged_description": fp.staged_record(ctx.staged_description)}
             if isinstance(ctx.meta.get("id"), int) and not isinstance(ctx.meta.get("id"), bool):
                 record["repository_id"] = ctx.meta["id"]
-            fp.write_sidecar(imgs, fp.inputs(ctx.meta, rd), ctx.brand.sha256, "README.md", record)
+            # A README-only write must not move the art's recorded fingerprint: keep the sidecar's own inputs and
+            # config hash, so banner.png and card.svg still answer for the sentence they were rendered from.
+            old = fp.read_sidecar(imgs)
+            inp = old.get("inputs") or fp.inputs(ctx.meta, rd)
+            cfg = old.get("config_sha256") or ctx.brand.sha256
+            fp.write_sidecar(imgs, inp, cfg, "README.md", record)
         else:
             ctx.log("staged-description-unrecorded")
     res = base("readme", ctx, result="changed" if changed else "unchanged", mode="bootstrap" if args.bootstrap else mode,

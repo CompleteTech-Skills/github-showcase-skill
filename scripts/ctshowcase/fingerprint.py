@@ -80,8 +80,12 @@ def description_sha256(text: str) -> str:
 
 
 def staged_record(text: str) -> dict:
-    """The `staged_description` object an output record carries when it was rendered with `--description`."""
-    return {"text": text, "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()}
+    """The `staged_description` object an output record carries when it was rendered with `--description`.
+
+    The text is recorded stripped, and the hash is `description_sha256` of that same stripped text, so `sha256` always
+    verifies `text` (a caller passing padded text gets the same record as one passing the stripped sentence)."""
+    stripped = text.strip()
+    return {"text": stripped, "sha256": description_sha256(stripped)}
 
 
 def read_sidecar(out_dir: Path) -> dict:
