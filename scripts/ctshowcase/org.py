@@ -282,7 +282,7 @@ def _gate(estate: Estate, org: str, *, allow_t3=False, allow_hold=False,
     r.check_owner(org, allow_t3=allow_t3, allow_hold=allow_hold)
     login = r.canonical(org)
     row = r.brand_org(org)
-    if row.get("tier") == "T3" and not allow_t3:
+    if row.get("tier") == "T3" and not (allow_t3 and _t3_granted(login)):
         from .errors import Refused
         raise Refused(f"{login} is T3; needs co-owner sign-off", log="t3-signoff")
     if r.family_hold(org) and not allow_hold:
@@ -290,6 +290,12 @@ def _gate(estate: Estate, org: str, *, allow_t3=False, allow_hold=False,
         raise Refused(f"{login} is on HOLD (STANDARD §12.5 #4): only the decision 18 footer is built", log="hold")
     reg = r.registry_org(org) if require_registry or r.registry else {}
     return login, row, reg
+
+
+def _t3_granted(owner: str, repo: str | None = None) -> bool:
+    """True unless `--require-t3-signoff` is on and no valid sign-off record covers the owner (signoff.py)."""
+    from . import signoff
+    return signoff.granted(owner, repo)
 
 
 def _tier(row: dict) -> str:
@@ -311,7 +317,7 @@ def _star_entry(estate: Estate, org: str, reg: dict) -> dict | None:
 def _star_held(estate: Estate, org: str, allow_t3: bool = False) -> str | None:
     from .config import t3_signed_off
     st = estate.resolver.owner_status(org)
-    if st == "t3" and (allow_t3 or t3_signed_off()):
+    if st == "t3" and (allow_t3 or t3_signed_off()) and _t3_granted(org):
         st = None  # co-owner sign-off lifts the T3 hold (decision 12); HOLD and excluded stay held
     if st in ("t3", "hold", "excluded"):
         return st
@@ -361,7 +367,8 @@ def public_favorites(estate: Estate, reg: dict, *, allow_t3: bool = False) -> tu
 
 def _t3_held(estate: Estate, full: str, allow_t3: bool) -> bool:
     """A repository of a T3 org (any of its logins) before co-owner sign-off: never named on a public profile."""
-    return not allow_t3 and "/" in (full or "") and estate.resolver.owner_status(full.split("/")[0]) == "t3"
+    return "/" in (full or "") and estate.resolver.owner_status(full.split("/")[0]) == "t3" \
+        and not (allow_t3 and _t3_granted(full.split("/")[0], full.split("/")[1]))
 
 
 def public_slice(estate: Estate, org: str, lists_capture: dict | None = None, *,
@@ -1022,7 +1029,7 @@ def user_slice(estate: Estate, login: str, *, allow_t3: bool = False) -> tuple[d
             st = r.owner_status(o)
             if r.is_placeholder(o) or st == "excluded":
                 continue  # q71: placeholder orgs are left out
-            if st == "t3" and not allow_t3:
+            if st == "t3" and not (allow_t3 and _t3_granted(o)):
                 logs.append(f"t3-signoff:{o}")
                 continue
             try:

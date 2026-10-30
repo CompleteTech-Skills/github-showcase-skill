@@ -89,7 +89,7 @@ def row(ctx: RepoContext) -> dict:
         logs += rl.get("logs", [])
     else:
         cells["R7"] = "unknown" if not rd else "fail"
-    if ctx.brand.owner_status(ctx.owner) == "t3" and not t3_signed_off():
+    if ctx.brand.owner_status(ctx.owner) == "t3" and not t3_signed_off(ctx.owner, ctx.repo):
         cells["R7"] = "hold"  # T3: no README change before co-owner sign-off (lint readme refuses)
     lic = ctx.meta.get("license")
     cells["R8"] = "pass" if lic or not ctx.public else "warn"
@@ -162,8 +162,14 @@ def row(ctx: RepoContext) -> dict:
         if re.search(r"<!-- showcase:checklist:start -->.*- \[ \].*<!-- showcase:checklist:end -->",
                      (rd / "README.md").read_text(encoding="utf-8"), re.S):
             logs.append("checklist: open")
-    return {"repo": f"{ctx.owner}/{ctx.repo}", "type": ctx.det["type"], "variant": ctx.det["variant"], "cells": cells,
-            "done": "yes" if done else "no", "logs": sorted(set(logs + ctx.logs))}
+    row = {"repo": f"{ctx.owner}/{ctx.repo}", "type": ctx.det["type"], "variant": ctx.det["variant"], "cells": cells,
+           "done": "yes" if done else "no", "logs": sorted(set(logs + ctx.logs))}
+    from . import signoff
+    rec = signoff.record_for(ctx.owner, ctx.repo)
+    if rec is not None:  # only under --require-t3-signoff with a valid record: show which sign-off lifted the hold
+        row["signoff_id"] = str(rec.get("id") or "")
+        row["signoff_expires"] = str(rec.get("expires") or "")
+    return row
 
 
 def as_tsv(r: dict, header: bool = False) -> str:

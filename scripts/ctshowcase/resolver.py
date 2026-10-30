@@ -295,6 +295,9 @@ class Resolver:
             raise Refused(f"{login} is on HOLD", log="hold")
         if st == "t3" and not (allow_t3 or t3_signed_off()):
             raise Refused(f"{login} is T3; needs co-owner sign-off", log="t3-signoff")
+        if st == "t3" and t3_signed_off():
+            from . import signoff
+            signoff.require(login, None, self.aliases(login))  # no-op unless --require-t3-signoff
         return st
 
     def family_hold(self, login: str) -> bool:

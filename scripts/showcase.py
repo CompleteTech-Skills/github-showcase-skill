@@ -137,7 +137,7 @@ def base(cmd, ctx=None, **kw) -> dict:
 
 def gate_owner(ctx, allow_hold=False) -> str | None:
     """Refuse excluded/hold/T3 (exit 2); return 'watching' for the watching org."""
-    status = ctx.brand.check_owner(ctx.owner)
+    status = ctx.brand.check_owner(ctx.owner, repo=ctx.repo)
     if ctx.style.get("hold") and not allow_hold:
         raise ShowcaseError(f"{ctx.owner} family is on hold; pass --allow-hold", log="hold")
     return status
@@ -842,7 +842,7 @@ def cmd_doctor(args):
                                    template_dir=args.template_dir, checkouts=args.checkouts, out=args.out)
         return res, OK
     ctx = context(args)
-    ctx.brand.check_owner(ctx.owner, allow_t3=True)
+    ctx.brand.check_owner(ctx.owner, allow_t3=True, repo=ctx.repo)
     r = doctor.row(ctx)
     fmt = args.doctor_format
     if fmt == "tsv":
@@ -950,6 +950,10 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--quiet", action="store_true")
     p.add_argument("--allow-t3", action="store_true",
                    help="treat a T3 (co-owned) owner as signed off for this run: every repository command and generator, not just `meta`; pass only when a t3-metadata or t3-signoff row is approved (default: T3 owners are refused, exit 2)")
+    p.add_argument("--require-t3-signoff", action="store_true",
+                   help="opt-in (env SHOWCASE_REQUIRE_T3_SIGNOFF=1): honour --allow-t3 only when a valid, unexpired sign-off record "
+                        "in the estate bundle (decisions/t3-signoffs.yaml) covers the owner and repository; otherwise exit 2 "
+                        "(t3-signoff:missing|expired|scope). Default off: --allow-t3 behaves as before")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__} ({STANDARD})")
     sub = p.add_subparsers(dest="command", required=True, metavar="<command>")
 
@@ -1193,11 +1197,14 @@ def parser() -> argparse.ArgumentParser:
 def main(argv=None) -> int:
     """Run one invocation. `--allow-t3` holds only for this call: the previous value is restored on every exit."""
     from ctshowcase.config import set_t3_signed_off, t3_signed_off
-    previous = t3_signed_off()
+    from ctshowcase import signoff
+    previous, previous_required = t3_signed_off(), signoff.required()
     try:
         return _main(argv)
     finally:
         set_t3_signed_off(previous)
+        signoff.set_required(previous_required)
+        signoff.reset()
 
 
 def _main(argv=None) -> int:
@@ -1222,12 +1229,14 @@ def _main(argv=None) -> int:
         cli.error("unrecognized arguments: " + " ".join(remaining))
     from ctshowcase.config import set_t3_signed_off
     set_t3_signed_off(getattr(args, "allow_t3", False))
+    from ctshowcase import signoff
+    signoff.set_required(getattr(args, "require_t3_signoff", False) or signoff.env_required())
     if args.format is None:
         args.format = "text" if args.command in GENERATORS else "json"
     try:
         obj, code = args.func(args)
     except ShowcaseError as exc:
-        obj = {"command": args.command, "result": "refused" if exc.code == USAGE and exc.log in ("hold", "t3-signoff", "exempt")
+        obj = {"command": args.command, "result": "refused" if exc.code == USAGE and (exc.log in ("hold", "t3-signoff", "exempt") or exc.log.startswith("t3-signoff:"))
                else exc.log.split(":")[0], "error": str(exc), "logs": [exc.log]}
         code = exc.code
         if args.format == "text" and not args.quiet:
@@ -1241,6 +1250,8 @@ def _main(argv=None) -> int:
             print(f"{args.command}: {obj['error']}", file=sys.stderr)
             return code
     if obj is not None:
+        if signoff.required() and isinstance(obj.get("jobs"), list):
+            signoff.stamp(obj["jobs"])
         emit(args, obj)
     return code
 

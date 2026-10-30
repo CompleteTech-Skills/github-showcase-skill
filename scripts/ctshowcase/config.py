@@ -51,7 +51,12 @@ def set_t3_signed_off(value: bool) -> None:
     _T3_SIGNED_OFF = bool(value)
 
 
-def t3_signed_off() -> bool:
+def t3_signed_off(owner: str | None = None, repo: str | None = None) -> bool:
+    """The run's `--allow-t3`. With an owner and `--require-t3-signoff`, also needs a valid sign-off record
+    (ctshowcase/signoff.py); without the opt-in flag the answer is the bare flag, as before."""
+    if owner is not None and _T3_SIGNED_OFF:
+        from . import signoff
+        return signoff.granted(owner, repo)
     return _T3_SIGNED_OFF
 
 
@@ -104,7 +109,7 @@ class Brand:
                     return status
         return None
 
-    def check_owner(self, owner: str, *, allow_t3: bool = False) -> str | None:
+    def check_owner(self, owner: str, *, allow_t3: bool = False, repo: str | None = None) -> str | None:
         """Raise Refused for excluded/hold/T3 owners; return 'watching' or None."""
         status = self.owner_status(owner)
         if status == "excluded":
@@ -113,6 +118,9 @@ class Brand:
             raise Refused(f"{owner} is on HOLD", log="hold")
         if status == "t3" and not (allow_t3 or t3_signed_off()):
             raise Refused(f"{owner} is T3; needs co-owner sign-off", log="t3-signoff")
+        if status == "t3" and t3_signed_off():
+            from . import signoff
+            signoff.require(owner, repo, self.aliases(owner))  # no-op unless --require-t3-signoff
         return status
 
     def org(self, owner: str) -> dict:
