@@ -18,7 +18,8 @@ from .mdcode import code_spans, find_blocks, masked  # noqa: F401  (code_spans: 
 MARK = re.compile(r"<!-- showcase:([a-z-]+):start -->\n?(.*?)\n?<!-- showcase:\1:end -->", re.S)
 EMOJI = re.compile("[\U0001F000-\U0001FAFF☀-➿⬀-⯿️‍]")
 SHIELDS = "https://img.shields.io/badge/"
-GENERATED_BADGES = re.compile(r"<!-- showcase:badges:generated sha256=([0-9a-f]{64}) -->\n(.*)", re.S)
+GENERATED_BADGES = re.compile(r"<!-- showcase:badges:generated sha256=([0-9a-f]{64})"
+                              r"(?: replaces=([0-9a-f]{64}))? -->\n(.*)", re.S)
 BOM = "\ufeff"
 
 
@@ -233,26 +234,78 @@ def badge_body(ctx: RepoContext, existing: str | None = None) -> str:
     """Refresh owned rows; a missing or changed digest makes a J block authored."""
     if ctx.det["variant"] != "J":
         return badges_html(ctx) if ctx.det["variant"] == "F" else badges_md(ctx)
-    # Before the profile type existed, the generator emitted only the remaining derived rows.
-    # Recognize that exact output so an old one-badge profile can acquire its missing type badge.
-    profile_type = standard("types")["types"]["github-profile"]["badge_category"]
-    legacy = []
-    for alt, url, link in badges(ctx):
-        if alt == f"Type {profile_type}":
-            continue
-        img = f"![{alt}]({url})"
-        legacy.append(f"[{img}]({link})" if link else img)
-    is_legacy = bool(legacy) and existing == "\n".join(legacy)
+    is_legacy = legacy_profile_badges(ctx.brand, existing or "")
     if existing and existing.strip() and not generated_badges(existing) and not is_legacy:
         return existing
     body = badges_md(ctx)
-    return f"<!-- showcase:badges:generated sha256={body_sha(body)} -->\n{body}"
+    previous = GENERATED_BADGES.fullmatch(existing or "")
+    replaced_digest = body_sha(existing) if is_legacy else previous.group(2) if previous else None
+    replaces = f" replaces={replaced_digest}" if replaced_digest else ""
+    return f"<!-- showcase:badges:generated sha256={body_sha(body)}{replaces} -->\n{body}"
+
+
+def legacy_profile_badges(brand, body: str) -> bool:
+    """Recognize the old generator's ordered language/license/CI rows without today's metadata.
+
+    A type row, custom markup, altered alt/URL pair or duplicate kind makes the block authored.
+    Both historical remote and local badge paths are accepted.
+    """
+    lines = body.splitlines()
+    if not 1 <= len(lines) <= 3:
+        return False
+    kinds = []
+    colors = brand.raw["badges"]
+    for line in lines:
+        linked = re.fullmatch(r"\[!\[([^\]]+)\]\((.+)\)\]\((.+)\)", line)
+        plain = re.fullmatch(r"!\[([^\]]+)\]\((.+)\)", line)
+        if linked:
+            alt, url, link = linked.groups()
+        elif plain:
+            alt, url = plain.groups()
+            link = None
+        else:
+            return False
+        suffixes = ["", "?labelColor=1E1E1E"]
+        links = {None}
+        if alt.startswith("License ") and alt[8:]:
+            kind, label, message, color = 1, "license", alt[8:], colors["neutral"]
+        elif alt == "AGPL-3.0 or commercial license":
+            kind, label, message, color = 1, "license", "AGPL-3.0 | commercial", colors["neutral"]
+            links.add("LICENSING.md")
+            suffixes = [""]
+        elif alt.startswith("Language ") and alt[9:]:
+            kind, label, message, color = 0, "language", alt[9:], colors["accent"]
+        elif alt.startswith("Python ") and alt.endswith("+"):
+            kind, label, message, color = 0, "python", alt[7:], colors["accent"]
+            suffixes = ["?logo=python&logoColor=white"]
+        elif alt.startswith("Node ") and alt.endswith("+"):
+            kind, label, message, color = 0, "node", alt[5:], colors["accent"]
+            suffixes = ["?logo=nodedotjs&logoColor=white"]
+        elif alt in ("CI", "Tests"):
+            ci = re.fullmatch(r"https://github\.com/[A-Za-z0-9-]+/\.github/actions/workflows/([^/?#]+\.ya?ml)/badge\.svg", url)
+            if not ci or link != url.removesuffix("/badge.svg"):
+                return False
+            name = ci.group(1)
+            expected = "Tests" if "test" in name else "CI" if "ci" in name else None
+            if alt != expected:
+                return False
+            kinds.append(2)
+            continue
+        else:
+            return False
+        urls = {f"{SHIELDS}{label}-{shield(message)}-{color}{suffix}" for suffix in suffixes}
+        slug = re.sub(r"[^a-z0-9]+", "-", f"{label}-{message}".lower()).strip("-")
+        urls.add(f"docs/images/badges/{slug}.svg")
+        if url not in urls or link not in links:
+            return False
+        kinds.append(kind)
+    return kinds == sorted(set(kinds))
 
 
 def generated_badges(body: str) -> bool:
     """The digest proves that the generated badge rows have not been edited."""
     match = GENERATED_BADGES.fullmatch(body)
-    return bool(match and match.group(1) == body_sha(match.group(2)))
+    return bool(match and match.group(1) == body_sha(match.group(3)))
 
 
 def nav_first(ctx: RepoContext) -> bool:
@@ -997,10 +1050,18 @@ def nonws(s: str) -> int:
 
 def preservation(before: str, after: str, removed: list[str]) -> list[str]:
     """Every original non-header line survives (heading lines may be renamed); size drop <= 10%."""
-    # Digest-verified generated badge rows are owned output, like their markers. They may be replaced;
-    # unmarked legacy rows remain protected and must actually survive in the refreshed output.
+    # A new generated block can explicitly identify the legacy body it replaced. This binds the
+    # one-time migration exemption to exact old content, not arbitrary authored rows elsewhere.
+    replacements = set()
+    for block in find_blocks(MARK, after):
+        if block.group(1) == "badges" and generated_badges(block.group(2)):
+            match = GENERATED_BADGES.fullmatch(block.group(2))
+            if match.group(2):
+                replacements.add(match.group(2))
+
     def omit_owned_badges(m):
-        return wrap("badges", "") if m.group(1) == "badges" and generated_badges(m.group(2)) else m.group(0)
+        owned = generated_badges(m.group(2)) or body_sha(m.group(2)) in replacements
+        return wrap("badges", "") if m.group(1) == "badges" and owned else m.group(0)
 
     before = _sub_blocks(before, omit_owned_badges)
     problems = []

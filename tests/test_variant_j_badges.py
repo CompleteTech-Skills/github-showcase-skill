@@ -238,3 +238,50 @@ def test_local_badge_prose_and_code_examples_do_not_count(make_ctx, tmp_path, me
     path = tmp_path / "README.md"
     path.write_text(text, encoding="utf-8")
     assert "R7 2-4 header badges required (found 1)" in readmelint.lint(ctx, path)["fails"]
+
+
+@pytest.mark.parametrize("mode", ["upgrade", "header"])
+@pytest.mark.parametrize("scenario", ["local", "local-to-remote", "license", "local-license", "owner", "language"])
+def test_legacy_badges_migrate_independently_of_current_metadata(make_ctx, tmp_path, mode, scenario):
+    ctx = profile_context(make_ctx, tmp_path, license="Apache-2.0" if "license" in scenario else "MIT")
+    if scenario in ("local", "local-to-remote"):
+        legacy = "![License MIT](docs/images/badges/license-mit.svg)"
+    elif scenario == "local-license":
+        legacy = "![License MIT](docs/images/badges/license-mit.svg)"
+    elif scenario == "owner":
+        (tmp_path / ".github/workflows").mkdir(parents=True)
+        (tmp_path / ".github/workflows/ci.yml").write_text("name: CI\n", encoding="utf-8")
+        legacy = ("![License MIT](https://img.shields.io/badge/license-MIT-64748B)\n"
+                  "[![CI](https://github.com/Old-Northwind/.github/actions/workflows/ci.yml/badge.svg)]"
+                  "(https://github.com/Old-Northwind/.github/actions/workflows/ci.yml)")
+    elif scenario == "language":
+        legacy = ("![Language JavaScript](https://img.shields.io/badge/language-JavaScript-1E3A8A)\n"
+                  "![License MIT](https://img.shields.io/badge/license-MIT-64748B)")
+    else:
+        legacy = "![License MIT](https://img.shields.io/badge/license-MIT-64748B)"
+    ctx.local_badges = scenario.startswith("local") and scenario != "local-to-remote"
+    before = readme.wrap("badges", legacy) + "\n\nAuthored paragraph to retain.\n"
+    if mode == "upgrade":
+        after, removed = readme.upgrade(ctx, before)
+    else:
+        after, removed = readme.header_only(ctx, before), []
+    body = badge_block(after)
+    assert "type-github-profile.svg" in body if ctx.local_badges else "type-GitHub%20profile-" in body
+    if "license" in scenario:
+        assert "apache" in body.lower()
+        assert "license-MIT-" not in body and "license-mit.svg" not in body
+    assert "Old-Northwind" not in body and "JavaScript" not in body
+    assert "Authored paragraph to retain." in after
+    assert readme.preservation(before, after, removed) == []
+    again = readme.upgrade(ctx, after)[0] if mode == "upgrade" else readme.header_only(ctx, after)
+    assert again == after
+
+
+def test_legacy_like_authored_custom_badge_block_stays_owned_by_author(make_ctx, tmp_path):
+    ctx = profile_context(make_ctx, tmp_path)
+    authored = ("![Type Community](https://img.shields.io/badge/type-Community-005ADD)\n"
+                "![License MIT](https://img.shields.io/badge/license-MIT-64748B)")
+    before = readme.wrap("badges", authored)
+    after, removed = readme.upgrade(ctx, before)
+    assert badge_block(after) == authored
+    assert readme.preservation(before, after, removed) == []
