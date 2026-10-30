@@ -81,6 +81,10 @@ def membership_topics(ctx: RepoContext, also_in: list[str]) -> tuple[list[str], 
     return orgs, topics_, logs
 
 
+# topics.md "Topic safety": never listed, kept or approved, even via an org's topics_extra (base removed them as
+# out-of-vocabulary; the additive default must not start preserving them)
+FORBIDDEN_TOPICS = frozenset({"nsfw", "adult"})
+
 GITHUB_MAX_TOPICS = 20  # GitHub's hard limit; the curated 10/8 maximums apply to the generated set only
 
 
@@ -91,7 +95,7 @@ def _org_extra(ctx: RepoContext) -> set[str]:
     raw = ctx.org.get("topics_extra")
     if not isinstance(raw, list):
         return set()
-    return {x for x in raw if isinstance(x, str) and re.fullmatch(pat, x)}
+    return {x for x in raw if isinstance(x, str) and re.fullmatch(pat, x) and x not in FORBIDDEN_TOPICS}
 
 
 def _retain(core: list[str], extras_kept: list[str], approved: set[str], logs: list[str],
@@ -135,6 +139,7 @@ def merge(ctx: RepoContext, also_in: list[str] | None = None, prune: bool = Fals
     typ = ctx.det["type"]
     logs: list[str] = []
     current = list(meta.get("topics") or [])
+    excluded: set[str] = set()  # family topics the org config explicitly excludes for this repo (removed, never kept)
     approved = _org_extra(ctx)
     vocab = set(t["brand_topics"]) | set(t["family_topics"]) | set(t["type_topics"]) | set(t["featured"]) | \
         set(t["allowed"]) | set(t["domain"])
@@ -156,7 +161,7 @@ def merge(ctx: RepoContext, also_in: list[str] | None = None, prune: bool = Fals
     for x in current:
         a = alias(x)
         low_owner = owner.lower()
-        if not re.match(t["drop_valid"], a) or re.match(t["drop_noise"], a):
+        if not re.match(t["drop_valid"], a) or re.match(t["drop_noise"], a) or a in FORBIDDEN_TOPICS:
             continue
         if (a == low_owner or a.startswith(low_owner + "-")) and a not in t["brand_topics"]:
             continue
@@ -190,8 +195,13 @@ def merge(ctx: RepoContext, also_in: list[str] | None = None, prune: bool = Fals
         """Additive finalization: in-vocabulary topics the curated selection cut (domain/tech caps, fork parent) are
         clean and accurate, so they are kept silently; out-of-vocabulary extras keep the review-remove log. Without
         `prune`, nothing clean is ever listed in `remove`; what cannot fit GitHub's 20 is `held` (blocks the PUT)."""
-        cut = [] if prune else [x for x in surviving if x not in core]
-        out, held = _retain(core, cut + extras_kept, approved | set(cut), logs, current)
+        silent = set(t["domain"]) | set(t["featured"]) | set(t["allowed"]) | set(t.get("touchedbyanagent_domain") or []) |             ({cve_vendor} if cve_vendor else set())
+        cut = [] if prune else [x for x in surviving if x not in core and x in silent]
+        # other in-vocabulary topics outside the generated set (another org's brand topic, out-of-scope family or type
+        # topics, membership topics dropped by topics-over) are not known to be accurate: kept but logged for review,
+        # unless the org config explicitly excludes them (family_topics_omit/_except/_scope), which removes them
+        other = [] if prune else [x for x in surviving if x not in core and x not in silent and x not in excluded]
+        out, held = _retain(core, cut + other + extras_kept, approved | set(cut), logs, current)
         if held:
             logs.append("needs-input:topics-over-limit")
         return out, held
@@ -218,6 +228,7 @@ def merge(ctx: RepoContext, also_in: list[str] | None = None, prune: bool = Fals
     fam = [f for f in fam if f not in (org.get("family_topics_omit") or {}).get(slug, [])]
     if slug in (org.get("family_topics_except") or []):
         fam = []
+    excluded.update(set(org.get("family_topics") or []) - set(fam))
     proposed += fam
     # §5.3a: org membership topics after the family topics, before the type; they count toward the maximum but are
     # never a brand topic. If brand + family + org + type alone exceed it, org topics drop from the end of also_in.

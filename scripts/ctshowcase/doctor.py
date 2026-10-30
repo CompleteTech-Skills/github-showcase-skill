@@ -53,7 +53,7 @@ def row(ctx: RepoContext) -> dict:
     tp = topicsmod.merge(ctx)
     # org-approved topics_extra are kept without a log; an unreviewed out-of-vocabulary topic is a warn, not a pass
     review = any(x.startswith("review-remove:") for x in tp["logs"])
-    cells["R3"] = ("warn" if "topics-short" in tp["logs"] or review else "pass") if tp["equal_as_set"] else "fail"
+    cells["R3"] = ("warn" if "topics-short" in tp["logs"] or review else "pass") if tp["equal_as_set"] and not tp["held"] else "fail"
     hp = ctx.meta.get("homepage") or ""
     cells["R4"] = "pass" if not hp or ctx.meta.get("homepage_status") == 200 else (
         "unknown" if ctx.meta.get("homepage_status") is None else "warn")

@@ -493,11 +493,12 @@ def cmd_topics(args):
     if args.records and writable:
         records.append(args.records, [records.record(ctx.owner, ctx.repo, "topics", "topics", r["current"], r["proposed"],
                                                      "§5.6 merge")])
-    out = base("topics", ctx, result="pass" if r["equal_as_set"] else "fail", **{k: v for k, v in r.items() if k != "logs"},
+    ok = r["equal_as_set"] and not r["held"]  # deferred required topics are not a pass
+    out = base("topics", ctx, result="pass" if ok else "fail", **{k: v for k, v in r.items() if k != "logs"},
                logs=ctx.logs + r["logs"])
     if args.gh and writable:
         out["gh"] = topics.gh_command(ctx.owner, ctx.repo, r["proposed"])
-    return out, OK if r["equal_as_set"] else CHECK_FAILED
+    return out, OK if ok else CHECK_FAILED
 
 
 def cmd_labels(args):

@@ -143,3 +143,55 @@ def test_internal_repo_still_drops_private_banned_topics(brand):
     """Reviewer B: internal is non-public; the private-banned rule must apply to it as it did on base."""
     r = merge(_ctx(brand, topics=["nintendo"], visibility="internal"))
     assert "nintendo" not in r["proposed"]
+
+
+def test_explicitly_excluded_family_topic_is_removed_not_kept(brand):
+    """Reviewer A: family_topics_omit is explicit config, so an excluded family topic stays removable, as on base."""
+    raw = copy.deepcopy(brand.raw)
+    raw["orgs"][OWNER] = dict(raw["orgs"].get(OWNER, {"family": "completetech", "tier": "T1", "display_name": OWNER}),
+                              family_topics=["fam-x"], family_topics_omit={"support-triage-agent": ["fam-x"]})
+    b = Brand(raw, brand.path)
+    from ctshowcase import topics as tm
+    old = tm.standard
+    def std(name):
+        d = dict(old(name))
+        if name == "topics":
+            d["family_topics"] = list(d["family_topics"]) + ["fam-x"]
+        return d
+    tm.standard = std
+    try:
+        r = merge(RepoContext(b, normalize(meta_dict(topics=["fam-x"])), None))
+    finally:
+        tm.standard = old
+    assert "fam-x" in r["remove"] and "fam-x" not in r["proposed"]
+
+
+def test_other_orgs_brand_topic_is_kept_but_logged_for_review(brand):
+    """Reviewer A: an in-vocabulary topic the generator did not select (another org's brand topic) is not known to be
+    accurate: kept, logged review-remove, so doctor R3 is not a silent pass."""
+    d = {"description": "Invoice billing PDF email triage agent for Python."}
+    base = merge(_ctx(brand, topics=[], **d))["proposed"]
+    r = merge(_ctx(brand, topics=base + ["touchedbyanagent"], **d))
+    assert r["remove"] == [] and "review-remove:touchedbyanagent" in r["logs"]
+    assert _r3(_ctx(brand, topics=base + ["touchedbyanagent"], **d)) == "warn"
+
+
+@pytest.mark.parametrize("approved", [False, True])
+def test_forbidden_topic_is_never_kept_even_if_approved(brand, approved):
+    """Reviewer B: topics.md forbids nsfw; neither the additive default nor topics_extra may preserve it."""
+    r = merge(_ctx(brand, extra=["nsfw"] if approved else None, topics=["nsfw", "python"]))
+    assert "nsfw" not in r["proposed"] and "nsfw" in r["remove"]
+    assert not any(x.endswith(":nsfw") for x in r["logs"])
+
+
+def test_deferred_required_topics_are_not_a_pass(brand):
+    """Reviewer B: twenty approved topics defer the required ones (held); equal_as_set alone must not report pass."""
+    topics = [f"custom-{i}" for i in range(20)]
+    ctx = _ctx(brand, extra=topics, topics=topics)
+    r = merge(ctx)
+    assert r["equal_as_set"] and r["held"]
+    assert _r3(ctx) == "fail"
+    sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1] / "scripts"))
+    import inspect
+    import showcase
+    assert 'not r["held"]' in inspect.getsource(showcase.cmd_topics)
