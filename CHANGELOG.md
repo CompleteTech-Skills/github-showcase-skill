@@ -6,6 +6,7 @@ All notable changes to `github-showcase-skill` are recorded here. Versions follo
 
 ### Added
 
+- `banner`, `card`, `readme` and `content social` accept `--description TEXT` to render from a proposed one-sentence description instead of the live GitHub one (logged `staged-description`, off by default; the live About text is not changed, and the change is applied through the writer queue).
 - `org labels ORG --repos-from-gh` plans labels across accessible repositories without the private estate registry, with paginated read-only GitHub capture, optional verified local checkouts, unchanged reference guards, and a documented org-default-forms-first workflow. Registry-backed plans still require the org registry row, and checkout repository names match GitHub case-insensitively, including resolved pending renames. Registry-free runs also isolate lazy brand lookups from estate decision files, and held reference rewrites retain their file/line guidance with an incomplete result. Workflow/labeler/release/Renovate references remain final skips rather than unresolved input requests. Missing Windows device-named checkouts fall back to captured metadata instead of aborting the org plan. Pending transfers check the repository's current owner's default issue forms and hold renames when that evidence is unavailable. Sparse or partially missing checkouts retain reference holds based on captured paths and the Git index, while unrelated omitted files remain allowed.
 
 ### Fixed

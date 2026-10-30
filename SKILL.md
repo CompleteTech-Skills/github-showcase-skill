@@ -109,7 +109,7 @@ python3 $S --meta /tmp/meta.json doctor --header
 | 3 | `art-fail`: text does not fit the fixed size ladder, or the PNG budget cannot be met |
 | 4 | `needs-input` blocks a generator (for example an empty description) |
 
-Checks (`describe`, `topics`, `labels`, `readme`, `footer`, `meta`, `fingerprint`, `config`) print one JSON object with `command`, `owner`, `repo`, `result` and `logs[]`; `lint` prints one JSON line per file; `org`, `project`, `enterprise` and `content` print one JSON object with `action` (`org doctor --doctor-format tsv|md` prints a row). Generators (`banner`, `card`, `org-banner`, `org-tile`, `intro`, `contact-sheet`) print a short text summary by default; pass the global `--format json` (before the command) for the same JSON object. `doctor` prints a TSV row (`--format json|md` after `doctor`). In text mode a refusal goes to stderr. Log codes are the standard's: `needs-input:<detail>`, `art-fail`, `topics-short`, `label-conflict`, `label-referenced`, `label-rewrite-first`, `needs-input:label-references` (a rename held because §6.4 rule 0 needs a checkout: re-plan with `--repo-dir`), `readme-shrink`, `dead-link`, `exempt`, `hold`, `t3-signoff`, `archived`, plus `needs-input:metadata` (a failed metadata capture, exit 4), `needs-input:file-tree` (no checkout and no tree in the metadata, so the type is provisional), `needs-input:visibility`, `needs-input:banner-chips` (fewer than two chips), `needs-input:key-chip` (no gold chip: the type category would repeat the eyebrow), `needs-input:subtitle` (no one-line subtitle: add `subtitle:`), `type-override:<type>`, `type-config:<type>` (from `.github/showcase.yml`) and `bootstrap:edited`.
+Checks (`describe`, `topics`, `labels`, `readme`, `footer`, `meta`, `fingerprint`, `config`) print one JSON object with `command`, `owner`, `repo`, `result` and `logs[]`; `lint` prints one JSON line per file; `org`, `project`, `enterprise` and `content` print one JSON object with `action` (`org doctor --doctor-format tsv|md` prints a row). Generators (`banner`, `card`, `org-banner`, `org-tile`, `intro`, `contact-sheet`) print a short text summary by default; pass the global `--format json` (before the command) for the same JSON object. `doctor` prints a TSV row (`--format json|md` after `doctor`). In text mode a refusal goes to stderr. Log codes are the standard's: `needs-input:<detail>`, `art-fail`, `topics-short`, `label-conflict`, `label-referenced`, `label-rewrite-first`, `needs-input:label-references` (a rename held because §6.4 rule 0 needs a checkout: re-plan with `--repo-dir`), `readme-shrink`, `dead-link`, `exempt`, `hold`, `t3-signoff`, `archived`, `staged-description` (a proposed `--description` renders instead of the live one; the live About text is unchanged), plus `needs-input:metadata` (a failed metadata capture, exit 4), `needs-input:file-tree` (no checkout and no tree in the metadata, so the type is provisional), `needs-input:visibility`, `needs-input:banner-chips` (fewer than two chips), `needs-input:key-chip` (no gold chip: the type category would repeat the eyebrow), `needs-input:subtitle` (no one-line subtitle: add `subtitle:`), `type-override:<type>`, `type-config:<type>` (from `.github/showcase.yml`) and `bootstrap:edited`.
 
 ## Orgs, Projects, the Enterprise and Content
 
@@ -175,15 +175,15 @@ labels --emit-yml
 labels --plan [--references] [--records FILE] [--gh] [--jobs FILE] [--allow-hold]
 banner [--out docs/images/banner.png] [--scale 2] [--icon PATH] [--subtitle TEXT]
        [--key-chip TEXT]... [--chip TEXT]... [--category TEXT] [--allow-unmeasured] [--allow-hold]
-       [--allow-few-chips] [--png-budget 300000]
-card [--out docs/images/card.svg] [--png PATH] [--icon PATH] [--allow-unmeasured] [--allow-hold]
+       [--allow-few-chips] [--png-budget 300000] [--description TEXT]
+card [--out docs/images/card.svg] [--png PATH] [--icon PATH] [--allow-unmeasured] [--allow-hold] [--description TEXT]
 org-banner --org OWNER --out PATH [--illustration PATH]
 org-tile --org OWNER [--avatar PATH] [--illustration PATH] [--out PATH] [--png PATH]
 intro (--profile CompleteDotTech | --org OWNER) [--name TEXT] [--eyebrow TEXT] [--tagline TEXT]
       [--chip key:TEXT] [--chip attr:TEXT]... [--mark PATH] [--height 320|360] [--static] [--out assets/intro.svg]
 footer [--check README.md [--online]] [--org OWNER] [--raw]
 readme [--mode auto|scaffold|upgrade|header] [--variant auto|A|B|C|D|E|F|G|H|I|J]
-       [--write] [--diff] [--records FILE] [--bootstrap]
+       [--write] [--diff] [--records FILE] [--bootstrap] [--description TEXT]
 lint svg --kind intro|card|tile|plate|divider FILE...
 lint readme [README.md] [--variant auto]
 lint banner [docs/images/banner.png]
@@ -220,7 +220,7 @@ project copy-plan --target ORG|@me [--role org|template|estate] [--source OWNER/
     (stage 2 with --jobs needs --files-dir: the REST view bodies the jobs' --input names)
 project readme --capture FILE --owner OWNER [--out FILE]
 project estate-plan [--copied FILE] [--user-id ID] [--source OWNER/N] [--jobs FILE]
-content social [--out PATH] [--title TEXT] [--icon PATH] [--job] [--allow-unmeasured] [--allow-hold]
+content social [--out PATH] [--title TEXT] [--icon PATH] [--job] [--allow-unmeasured] [--allow-hold] [--description TEXT]
 content icon prompt|normalize|check [--option A|B] [--glyph FILE] [--art-direction FILE] [--in PNG]
     [--ground auto|transparent|keep] [--out PATH] [--preview PATH]
 content links [FILE...] [--readme-path PATH] [--base-ref REF] [--online] [--cache FILE] [--strict] [--diff]

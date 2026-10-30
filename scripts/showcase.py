@@ -121,7 +121,19 @@ def context(args, b=None):
     b = b or brand(args)
     rd = repo_dir(args)
     meta = merged(args.meta, str(rd) if rd else None)
-    return RepoContext(b, meta, rd, type_override=getattr(args, "type_override", None))
+    # E5.2.1 `--description`: render from a proposed one-sentence description; the live About text is not changed
+    staged, live = getattr(args, "staged_description", None), None
+    if staged is not None:
+        staged = staged.strip()
+        if not staged:
+            raise ShowcaseError("--description must not be empty", log="usage")
+        live = meta.get("description") or ""
+        meta = dict(meta, description=staged)
+    ctx = RepoContext(b, meta, rd, type_override=getattr(args, "type_override", None))
+    ctx.staged_description, ctx.live_description = staged, live
+    if staged is not None:
+        ctx.log("staged-description")
+    return ctx
 
 
 def base(cmd, ctx=None, **kw) -> dict:
@@ -132,6 +144,14 @@ def base(cmd, ctx=None, **kw) -> dict:
     if ctx is not None:
         d.setdefault("logs", ctx.logs)
     d.setdefault("logs", [])
+    if ctx is not None and getattr(ctx, "staged_description", None) is not None:
+        # exempt paths pass their own `logs=`, which replaces ctx.logs; keep the staged code so the object and the log agree
+        if "staged-description" not in d["logs"]:
+            d["logs"] = list(d["logs"]) + ["staged-description"]
+        d.setdefault("staged_description", {
+            "text": ctx.staged_description,
+            "live_differs": ctx.staged_description != (ctx.live_description or "").strip(),
+        })
     return d
 
 
@@ -966,6 +986,8 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--png-budget", type=int, default=300_000)
     s.add_argument("--allow-few-chips", action="store_true",
                    help="render with fewer than 2 chips (result incomplete, needs-input:banner-chips) instead of exit 4")
+    s.add_argument("--description", dest="staged_description", metavar="TEXT", default=None,
+                   help="render from this proposed one-sentence description instead of the live GitHub one (logged staged-description; the live About text is not changed; apply it with the writer queue)")
     s.set_defaults(func=cmd_banner)
 
     s = sub.add_parser("card", help="repo card SVG (dark only)")
@@ -974,6 +996,8 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--icon")
     s.add_argument("--allow-unmeasured", action="store_true")
     s.add_argument("--allow-hold", action="store_true")
+    s.add_argument("--description", dest="staged_description", metavar="TEXT", default=None,
+                   help="render from this proposed one-sentence description instead of the live GitHub one (logged staged-description; the live About text is not changed; apply it with the writer queue)")
     s.set_defaults(func=cmd_card)
 
     # deprecated alias of the contract name `content social` (same options, same file); added without `help`, so
@@ -984,6 +1008,8 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--icon")
     s.add_argument("--allow-unmeasured", action="store_true")
     s.add_argument("--allow-hold", action="store_true")
+    s.add_argument("--description", dest="staged_description", metavar="TEXT", default=None,
+                   help="render from this proposed one-sentence description instead of the live GitHub one (logged staged-description; the live About text is not changed; apply it with the writer queue)")
     s.set_defaults(func=cmd_social)
 
     s = sub.add_parser("org-banner", help="1600x400 org profile banner JPG (.github/profile/assets/banner.jpg)")
@@ -1031,6 +1057,8 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--bootstrap", action="store_true")
     s.add_argument("--badges", choices=("shields", "local"), default="shields",
                    help="local renders badges offline to docs/images/badges/*.svg (profile READMEs)")
+    s.add_argument("--description", dest="staged_description", metavar="TEXT", default=None,
+                   help="render from this proposed one-sentence description instead of the live GitHub one (logged staged-description; the live About text is not changed; apply it with the writer queue)")
     s.set_defaults(func=cmd_readme)
 
     s = sub.add_parser("describe", help="lint a description against §4.1 and propose keep/edit")
