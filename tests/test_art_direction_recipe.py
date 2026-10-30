@@ -215,3 +215,28 @@ def test_existing_provenance_template_unchanged():
 def test_family_additions_line_present_once():
     lines = [line for line in _text().splitlines() if line.startswith("- Family additions:")]
     assert len(lines) == 1
+
+
+def test_recipe_says_only_public_facts_in_prompts():
+    lowered = _recipe(_text()).lower()
+    assert "only public facts" in lowered
+
+
+def test_recipe_forbids_private_repository_content():
+    lowered = _recipe(_text()).lower()
+    assert "private-repository content" in lowered
+    assert "registry" in lowered
+
+
+def test_recipe_sandbox_note():
+    lowered = _recipe(_text()).lower()
+    assert "generated_images" in lowered
+    assert "access denied" in lowered
+    assert "never commit the raw candidate" in lowered
+
+
+def test_recipe_privacy_and_sandbox_headings():
+    section = _recipe(_text())
+    headings = [line for line in section.splitlines() if line.startswith("### ")]
+    assert any(h.startswith("### Privacy") for h in headings)
+    assert any(h.startswith("### Sandbox") for h in headings)
