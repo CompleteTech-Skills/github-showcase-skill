@@ -2128,9 +2128,10 @@ def _dhash(img, size: int = 16) -> int:
 
 
 def icon_qa(data: bytes, *, card: str, ink: list[str] | None = None, org_mark: Path | None = None,
-            siblings: list[str] | None = None) -> dict:
+            siblings: list[str] | None = None, strict: bool = False) -> dict:
     """Automated icon checks (f.3, art QA): size, budget, alpha, live area, coverage, contrast on the card, family
-    inks, not the org glyph, one file. OCR and the 48 px set sheet stay manual."""
+    inks, not the org glyph, one file. OCR and the 48 px set sheet stay manual. `strict` makes a failing family-ink
+    check fail the icon (default: warn); with no `ink` the family-ink check is not emitted at all."""
     from PIL import Image
     from .color import contrast, hexstr, rgb as hexrgb
     from .pnglint import validate_png
@@ -2190,7 +2191,8 @@ def icon_qa(data: bytes, *, card: str, ink: list[str] | None = None, org_mark: P
         add("contrast-on-card", cr >= 3.0, f"dominant ink {dom} on {card}: {cr:.2f}:1 (>= 3:1)")
         if ink:
             near = min(_de(lab(hexrgb(dom)), lab(hexrgb(x))) for x in ink)
-            add("family-ink", near <= 12, f"dominant ink {dom}, nearest family ink ΔE {near:.1f}", level="warn")
+            add("family-ink", near <= 12, f"dominant ink {dom}, nearest family ink ΔE {near:.1f}",
+                level="fail" if strict else "warn")
     else:
         add("contrast-on-card", False, "no opaque ink")
     if org_mark and Path(org_mark).is_file() and Path(org_mark).stat().st_size > 0:
@@ -2256,6 +2258,8 @@ def add_parser(sub, cli=None):
                                  "(default assets/icon.png in the checkout); check: the icon to check")
     a.add_argument("--preview", help="normalize: also write a 48 px preview on the card colour")
     a.add_argument("--allow-hold", action="store_true", help="work on a family that is on hold (as banner and card)")
+    a.add_argument("--strict", action="store_true", help="fail (not warn) when the dominant ink is not a family ink; "
+                                                         "also set by the family key icon_strict_family_ink")
 
     a = cs.add_parser("links", parents=[common], help="CQ-04: relative links, anchors and remote targets")
     a.add_argument("files", nargs="*", help="Markdown files (default: displayed README, docs/**, .github/*.md, profile)")
@@ -2539,6 +2543,7 @@ def _cmd_icon(args, cli, resolver, head):
     card = ctx.style["tokens"]["card_fill"]
     org = org_row(resolver, ctx.brand, ctx.owner)
     mark = ctx.brand.asset(org.get("mark"))
+    strict = bool(getattr(args, "strict", False) or ctx.style.get("icon_strict_family_ink"))
     if args.icon_action == "prompt":
         art = load_art_direction(args.art_direction)
         glyph = None
@@ -2584,7 +2589,7 @@ def _cmd_icon(args, cli, resolver, head):
         src.load()
         img, info = normalize_icon(src, args.ground, card, pixel_art=bool(ctx.style.get("icon_pixel_art")))
         data, qlogs = icon_bytes(img)
-        qa = icon_qa(data, card=card, ink=ink, org_mark=mark, siblings=siblings)
+        qa = icon_qa(data, card=card, ink=ink, org_mark=mark, siblings=siblings, strict=strict)
         out = Path(args.out) if args.out else cli.default_out(args, "assets/icon.png")
         if qa["result"] == "fail":
             return dict(head, result="fail", out=None, info=info, qa=qa, logs=ctx.logs + qlogs + ["art-fail:icon-qa"],
@@ -2600,7 +2605,7 @@ def _cmd_icon(args, cli, resolver, head):
     if path is None or not path.is_file():
         return dict(head, result="fail", file=str(path) if path else None, logs=ctx.logs + ["needs-input:repo-icon"]), \
             CHECK_FAILED
-    qa = icon_qa(path.read_bytes(), card=card, ink=ink, org_mark=mark, siblings=siblings)
+    qa = icon_qa(path.read_bytes(), card=card, ink=ink, org_mark=mark, siblings=siblings, strict=strict)
     return dict(head, result=qa["result"], file=str(path), qa=qa, logs=ctx.logs), _code(qa["result"])
 
 

@@ -223,6 +223,9 @@
     },
     "icon_pixel_art": {
      "type": "boolean"
+    },
+    "icon_strict_family_ink": {
+     "type": "boolean"
     }
    }
   },
