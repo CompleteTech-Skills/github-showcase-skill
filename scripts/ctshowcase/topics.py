@@ -104,7 +104,9 @@ def merge(ctx: RepoContext, also_in: list[str] | None = None, prune: bool = Fals
     typ = ctx.det["type"]
     logs: list[str] = []
     current = list(meta.get("topics") or [])
-    extra = _org_extra(ctx)
+    # approved topics are canonicalized through the alias map (python3 -> python) so the vocabulary, tech and overflow
+    # checks see the same name the repository's topic is compared under (review B1)
+    extra = {t["aliases"].get(x, x) for x in _org_extra(ctx)}
     vocab = set(t["brand_topics"]) | set(t["family_topics"]) | set(t["type_topics"]) | set(t["featured"]) | \
         set(t["allowed"]) | set(t["domain"])
     vocab |= extra  # org-approved topics (topics_extra) pass the vocabulary check; they are not extra-kept
@@ -153,7 +155,10 @@ def merge(ctx: RepoContext, also_in: list[str] | None = None, prune: bool = Fals
 
     if typ == "fork":
         parent = (meta.get("parent") or {}).get("topics") or []
-        tech = [alias(x) for x in parent if alias(x) in set(t["featured"]) | set(t["allowed"])]
+        # an approved topic counts only when the parent carries it and the fork's own repo already has it (review B2)
+        on_repo = set(surviving)
+        tech = [alias(x) for x in parent if alias(x) in set(t["featured"]) | set(t["allowed"]) or
+                (alias(x) in extra and alias(x) in on_repo)]
         # a fork listed in also_in also carries that org membership topic (§5.1), counted toward the maximum
         proposed = list(dict.fromkeys(["fork"] + m_topics + list(dict.fromkeys(tech))[:4]))[:limit]
         return _result(current, proposed, logs)
@@ -202,8 +207,10 @@ def merge(ctx: RepoContext, also_in: list[str] | None = None, prune: bool = Fals
         if fw:
             tech.append(fw)
             break
-    tech_vocab = set(t["featured"]) | set(t["allowed"]) | extra  # approved existing topics may take a tech slot
-    tech += [x for x in surviving if x in tech_vocab]
+    # standard featured/allowed topics rank ahead of org-approved ones, so an approved topic never displaces a standard
+    # topic from the 3 tech slots; an approved topic beyond the cap is kept by the additive path below (review A)
+    std_tech = set(t["featured"]) | set(t["allowed"])
+    tech += [x for x in surviving if x in std_tech] + [x for x in surviving if x in extra and x not in std_tech]
     tech = [x for x in dict.fromkeys(tech) if x not in proposed][:3]
     proposed += tech
     proposed = list(dict.fromkeys(proposed))
