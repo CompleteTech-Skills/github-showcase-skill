@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-from .mdcode import masked
+from .mdcode import code_spans
 from .readme import normalize_text
 
 WINDOW = 20
@@ -24,6 +24,28 @@ def _front_matter(lines: list[str]) -> list[str] | None:
     return None
 
 
+def _blank_fences(lines: list[str]) -> list[str]:
+    """The window with every fenced-code line (fence lines included) emptied. Fences are recognised on the stripped
+    line, so an indented fence (inside a list item, four spaces or a tab) counts; a closing fence uses the same
+    character, is at least as long and carries nothing else, so a shorter fence inside a longer one stays code."""
+    out, fence = [], None
+    for line in lines:
+        t = line.strip()
+        if fence is None:
+            m = re.match(r"(`{3,}(?=[^`]*$)|~{3,})", t)
+            if m:
+                fence = m.group(1)
+                out.append("")
+                continue
+            out.append(line)
+        else:
+            out.append("")
+            m = re.fullmatch(r"(`{3,}|~{3,})", t)
+            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence):
+                fence = None
+    return out
+
+
 def detect(text: str) -> str | None:
     """'front-matter' or 'header' when the README says it is generated or managed, else None. Returns no file text."""
     lines = normalize_text(text).split("\n")[:WINDOW]
@@ -31,13 +53,19 @@ def detect(text: str) -> str | None:
     if fm is not None:
         if any(GEN_RE.search(line) for line in fm) or FM_FLAG_RE.search("\n".join(fm)):
             return "front-matter"
-    # masked() blanks fenced code (a shorter fence inside a longer one does not close it) and inline code spans, so a
-    # comment shown as an example is not a generated header.
-    # The comment is located on the masked text but its body is read from the original (offsets are identical), so a
-    # warning wrapped in backticks inside a real comment (`<!-- `DO NOT EDIT` -->`) still counts.
-    joined = "\n".join(lines)
-    for m in COMMENT_RE.finditer(masked(joined)):
-        body = joined[m.start(1):m.end(1)].strip()
+    joined = "\n".join(_blank_fences(lines))
+    # Locate comments on the fence-blanked text, then swap each for same-length filler before looking for inline code
+    # spans: a backtick inside a real comment cannot pair with one outside it and hide the closing `-->`, while a
+    # comment wrapped in backticks (a documented example) still sits inside a span and is skipped.
+    comments = list(COMMENT_RE.finditer(joined))
+    filler = joined
+    for m in reversed(comments):
+        filler = filler[:m.start()] + re.sub(r"[^\n]", "x", m.group(0)) + filler[m.end():]
+    spans = code_spans(filler)
+    for m in comments:
+        if any(a <= m.start() < b for a, b in spans):
+            continue
+        body = m.group(1).strip()
         if body.lower().startswith("showcase:"):
             continue
         if GEN_RE.search(body):
