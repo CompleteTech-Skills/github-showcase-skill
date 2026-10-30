@@ -744,6 +744,68 @@ def test_cli_social_alias_emits_upload_job(capsys, tmp_path):
     assert any("Social preview" in s for s in job["steps"]) and any("usesCustomOpenGraphImage" in s for s in job["steps"])
 
 
+def test_content_social_chip_flags(capsys, tmp_path):
+    import showcase
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    out = tmp_path / "social.png"
+    code, res = run_content(capsys, "--format", "json", "--meta", meta, "--no-repo-dir", "content", "social", "--out", out,
+                            "--key-chip", "Email", "--chip", "Python", *NO_ESTATE)
+    assert code == 0 and res["result"] == "ok" and out.is_file()
+    assert res["chips"] == {"key": ["Email"], "attrs": ["Python"]}
+    code, plain = run_content(capsys, "--format", "json", "--meta", meta, "--no-repo-dir", "content", "social",
+                              "--out", tmp_path / "plain.png", *NO_ESTATE)
+    assert code == 0 and "chips" not in plain
+    code, alias = run_content(capsys, "--format", "json", "--meta", meta, "--no-repo-dir", "content", "social",
+                              "--out", tmp_path / "alias.png", "--key-chip", "Email", *NO_ESTATE)
+    assert code == 0 and alias["chips"]["key"] == ["Email"]
+    # the hidden top-level alias still parses the same flags
+    import io
+    import contextlib
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        code = showcase.main(["--format", "json", "--meta", str(meta), "--no-repo-dir", "social-preview",
+                              "--out", str(tmp_path / "old.png"), "--key-chip", "Email"])
+    old = json.loads(buf.getvalue().strip())
+    assert code == 0 and old["chips"] == {"key": ["Email"], "attrs": []}
+
+
+def test_content_social_chip_record_is_not_truncated(capsys, tmp_path):
+    # the record keeps every value given; derive() alone trims keys[:2] and attrs[:3] for the card and banner
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    code, res = run_content(capsys, "--format", "json", "--meta", meta, "--no-repo-dir", "content", "social",
+                            "--out", tmp_path / "many.png", "--key-chip", "k1", "--key-chip", "k2", "--key-chip", "k3",
+                            "--chip", "a1", "--chip", "a2", "--chip", "a3", "--chip", "a4", *NO_ESTATE)
+    assert code == 0 and res["result"] == "ok"
+    assert res["chips"] == {"key": ["k1", "k2", "k3"], "attrs": ["a1", "a2", "a3", "a4"]}
+
+
+def test_social_long_key_chip_fits_or_fails(capsys, make_ctx, fonts, tmp_path):
+    from ctshowcase import social
+    from ctshowcase.errors import ArtFail
+    from ctshowcase.social import S_TW
+    ctx = make_ctx(repo="agentic-email-skill", description="Draft sales email copy.")
+    key = ctx.style["fonts"]["card_chip_attr"]
+    # a long but fitting key steps the line down (28, 24 or 20 px) and stays inside the text column (S_TW)
+    fitting = "Agentic email automation for enterprise inbox workflows"
+    sc, info = social.social_layout(ctx, fonts, keys=[fitting])
+    drawn = [n for n in sc.nodes if getattr(n, "text", None) == fitting]
+    assert len(drawn) == 1 and drawn[0].size in (28, 24, 20)
+    assert fonts.width(key, fitting, drawn[0].size) <= S_TW + 1e-6
+    assert info["chips"] == {"key": [fitting], "attrs": []}
+    # text that cannot fit the column even at 20 px is an art failure, never a clipped line under the icon card
+    with pytest.raises(ArtFail) as exc:
+        social.social_layout(ctx, fonts, keys=["W" * 60])
+    assert exc.value.log == "art-fail:social-category"
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    out = tmp_path / "w.png"
+    code, res = run_content(capsys, "--format", "json", "--meta", meta, "--no-repo-dir", "content", "social",
+                            "--out", out, "--key-chip", "W" * 60, *NO_ESTATE)
+    assert code == 3 and res["result"] == "art-fail" and not out.exists()
+
+
 def test_add_parser_registers_every_action():
     import argparse
     import showcase

@@ -1,4 +1,7 @@
+import pytest
+
 from ctshowcase import chips
+from ctshowcase.errors import USAGE, ShowcaseError
 
 
 def test_cve_extraction_max_two(make_ctx):
@@ -42,3 +45,26 @@ def test_override_replaces(make_ctx, tmp_path):
     (tmp_path / ".github/showcase.yml").write_text("chips: {key: [K1], attrs: [A1, A2]}\n")
     ctx = make_ctx(repo_dir=tmp_path)
     assert chips.derive(ctx) == ([("K1", "override")], [("A1", "override"), ("A2", "override")])
+
+
+def test_clean_cli_chips_blank_is_usage_error():
+    for keys, attrs in ((["  "], None), (None, [""]), (["Email"], [" 	 "])):
+        with pytest.raises(ShowcaseError) as exc:
+            chips.clean_cli_chips(keys, attrs)
+        assert exc.value.log == "usage" and exc.value.code == USAGE
+        assert str(exc.value) == "--key-chip/--chip text must not be blank"
+
+
+def test_clean_cli_chips_empty_and_strip():
+    assert chips.clean_cli_chips([], []) == (None, None)
+    assert chips.clean_cli_chips(None, None) == (None, None)
+    assert chips.clean_cli_chips([" A "], ["  Python  ", "MIT"]) == (["A"], ["Python", "MIT"])
+    # no truncation here: derive() keeps keys[:2] and attrs[:3], as the banner does
+    assert chips.clean_cli_chips(["k1", "k2", "k3"], ["a1", "a2", "a3", "a4"]) == (
+        ["k1", "k2", "k3"], ["a1", "a2", "a3", "a4"])
+
+
+def test_derive_keeps_banner_limits(make_ctx):
+    ctx = make_ctx()
+    keys, attrs = chips.clean_cli_chips(["k1", "k2", "k3"], ["a1", "a2", "a3", "a4"])
+    assert chips.derive(ctx, keys, attrs) == ([("k1", "cli"), ("k2", "cli")], [("a1", "cli"), ("a2", "cli"), ("a3", "cli")])

@@ -36,9 +36,17 @@ def _bar(tok: dict, w: float, h: float) -> Rect:
 
 
 def social_layout(ctx: RepoContext, fonts: Fonts, title: str | None = None, icon: str | None = None,
-                  login: str | None = None) -> tuple[Scene, dict]:
+                  login: str | None = None, keys: list[str] | None = None,
+                  attrs: list[str] | None = None) -> tuple[Scene, dict]:
     """The preview scene. Its footer names the org's current login (`login`, else the brand resolver's), the slug
-    the preview is uploaded to, never a former login."""
+    the preview is uploaded to, never a former login.
+
+    `keys` (from --key-chip) replace the one category line: its first text is drawn there, at 28, 24 or 20 px so it
+    fits the text column (S_TW); a text wider than that at 20 px raises ArtFail("social-category") (exit 3) instead of
+    running under the icon card. `attrs` (from --chip) are recorded in info['chips'] but not drawn, because the
+    1280x640 layout has no chip row (accepted for parity with banner and card). info['chips'] keeps every value given:
+    no truncation here, so the record matches the flags (derive() still keeps keys[:2] and attrs[:3] for the card and
+    banner)."""
     st = ctx.style
     tok, fk = st["tokens"], st["fonts"]
     desc = ctx.require_description()
@@ -69,10 +77,19 @@ def social_layout(ctx: RepoContext, fonts: Fonts, title: str | None = None, icon
     rule_y = max(340, y - t_size * 1.19 + 40)
     sc.add(Rect(S_X, rule_y, 120, 4, tok["accent_deep"], rx=2),
            Circle(S_X + 120 + 6, rule_y + 2, 6, tok["plate_low"], tok["gold_trace"], 3))
-    cat = None if chipmod.fallback_category(ctx) else ctx.det.get("category")
+    if keys:
+        cat = keys[0]
+    else:
+        cat = None if chipmod.fallback_category(ctx) else ctx.det.get("category")
     cy = rule_y + 32
     if cat:
-        sc.add(Text(fk["card_chip_attr"], cat, 28, S_X, cy + 22, tok["accent"]))
+        # Default category (no --key-chip): 28 px, unchanged. A --key-chip text must fit the text column (S_TW).
+        cat_size = 28
+        if keys:
+            cat_size = fonts.fit(fk["card_chip_attr"], cat, (28, 24, 20), S_TW)
+            if cat_size is None:
+                raise ArtFail("social-category", cat)
+        sc.add(Text(fk["card_chip_attr"], cat, cat_size, S_X, cy + 22, tok["accent"]))
         cy += 48
     cap = None
     for size in S_CAPTION:
@@ -93,14 +110,18 @@ def social_layout(ctx: RepoContext, fonts: Fonts, title: str | None = None, icon
     nodes, icon_info, _ = iconbox.plate(ctx, fonts, (x, y0, w, h), 32, 44, icon)
     sc.add(*nodes)
     sc.add(_bar(tok, SW, SH))
-    return sc, {"title_lines": t_lines, "title_size": t_size, "caption_lines": cap[1], "icon": icon_info, "eyebrow": eb,
-                "footer": foot}
+    out = {"title_lines": t_lines, "title_size": t_size, "caption_lines": cap[1], "icon": icon_info, "eyebrow": eb,
+           "footer": foot}
+    if keys or attrs:
+        out["chips"] = {"key": list(keys or []), "attrs": list(attrs or [])}
+    return sc, out
 
 
 def social_render(ctx: RepoContext, fonts: Fonts, title: str | None = None, icon: str | None = None,
-                  login: str | None = None) -> tuple[bytes, str, dict]:
+                  login: str | None = None, keys: list[str] | None = None,
+                  attrs: list[str] | None = None) -> tuple[bytes, str, dict]:
     """(bytes, format, info): PNG within 900 KB, else JPG q85 (STANDARD §9.2)."""
-    sc, info = social_layout(ctx, fonts, title, icon, login)
+    sc, info = social_layout(ctx, fonts, title, icon, login, keys, attrs)
     img = to_png_image(sc, fonts, scale=1)
     data = png_bytes(img)
     if len(data) <= SOCIAL_BUDGET:

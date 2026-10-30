@@ -58,3 +58,48 @@ def test_card_matches_banner_eyebrow(make_ctx, fonts):
     from ctshowcase import banner
     ctx = make_ctx(owner="CompleTetech-Security", repo="x-cve-2026-11111-check", description="Check CVE-2026-11111.")
     assert card.render(ctx, fonts)[2]["eyebrow"] == banner.eyebrow_text(ctx)
+
+
+CHIP_META = FIX / "CompleteTech-Skills__agentic-email-skill.json"
+
+
+def test_card_chip_flags_match_banner(tmp_path):
+    banner = run_cli("--format", "json", "--meta", CHIP_META, "--no-repo-dir", "banner", "--out", tmp_path / "b.png",
+                     "--key-chip", "Email", "--chip", "Python", "--chip", "MIT")
+    assert banner.returncode == 0, banner.stdout + banner.stderr
+    card_run = run_cli("--format", "json", "--meta", CHIP_META, "--no-repo-dir", "card", "--out", tmp_path / "c.svg",
+                       "--key-chip", "Email", "--chip", "Python", "--chip", "MIT")
+    assert card_run.returncode == 0, card_run.stdout + card_run.stderr
+    banner_chips = [c["text"] for c in json.loads(banner.stdout)["chips"]]
+    items = json.loads(card_run.stdout)["items"]
+    labels = [i["label"] for i in items if i["kind"] == "key"] + [i["label"] for i in items if i["kind"] == "attr"]
+    assert labels == banner_chips == ["Email", "Python", "MIT"]
+
+
+def test_card_chip_flags_default_unchanged(tmp_path, brand, fonts):
+    from ctshowcase.context import RepoContext
+    from ctshowcase.meta import normalize
+    out = tmp_path / "card.svg"
+    p = run_cli("--meta", CHIP_META, "--no-repo-dir", "card", "--out", out)
+    assert p.returncode == 0, p.stdout + p.stderr
+    meta = json.loads(CHIP_META.read_text(encoding="utf-8"))
+    ctx = RepoContext(brand, normalize(meta), None)
+    assert out.read_bytes() == card.render(ctx, fonts)[0].encode()
+
+
+def test_card_chip_blank_is_usage_error(tmp_path):
+    out = tmp_path / "card.svg"
+    p = run_cli("--format", "json", "--meta", CHIP_META, "--no-repo-dir", "card", "--out", out, "--chip", "")
+    assert p.returncode == 2
+    obj = json.loads(p.stdout)  # the CLI's own usage result, not argparse's
+    assert obj["logs"] == ["usage"] and obj["error"] == "--key-chip/--chip text must not be blank"
+    assert not out.exists()
+
+
+def test_card_chip_overflow_drops_attrs(make_ctx, fonts):
+    ctx = make_ctx(stargazers_count=0, language="Go", license="MIT")
+    long = ["Extraordinarily long runtime chip label one", "Another enormously long chip label two",
+            "A third long chip label that is wide"]
+    _, _, info = card.render(ctx, fonts, None, None, long)  # no ArtFail: attributes drop from the end
+    assert all(i["x"] + i["w"] <= 400 - 16 + 0.5 for i in info["items"])
+    assert sum(1 for i in info["items"] if i["kind"] == "attr") < len(long)

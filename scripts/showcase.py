@@ -206,9 +206,11 @@ def cmd_banner(args):
 
 def cmd_card(args):
     from ctshowcase import card, svglint
+    from ctshowcase import chips as chipmod
     from ctshowcase.fingerprint import file_record
     from ctshowcase.scene import png_bytes
     from ctshowcase.typeset import Fonts
+    keys, attrs = chipmod.clean_cli_chips(args.key_chip, args.chip)  # a blank --key-chip/--chip is a usage error (exit 2)
     ctx = context(args)
     gate_owner(ctx, args.allow_hold)
     why = ctx.art_status()["card"]
@@ -218,7 +220,7 @@ def cmd_card(args):
     ctx.require_measured(args.allow_unmeasured)
     out = Path(args.out) if args.out else default_out(args, "docs/images/card.svg")
     fonts = Fonts(ctx.brand)
-    svg, scene, info = card.render(ctx, fonts, args.icon)
+    svg, scene, info = card.render(ctx, fonts, args.icon, keys, attrs)
     lint = svglint.lint_bytes("card", svg.encode(), str(out))
     if lint["result"] != "PASS":
         return base("card", ctx, result="fail", lint=lint), CHECK_FAILED
@@ -234,8 +236,10 @@ def cmd_card(args):
 
 
 def cmd_social(args):
+    from ctshowcase import chips as chipmod
     from ctshowcase import social
     from ctshowcase.typeset import Fonts
+    keys, attrs = chipmod.clean_cli_chips(getattr(args, "key_chip", []), getattr(args, "chip", []))
     ctx = context(args)
     # R10 (ctx.social_applicable) includes backups and the personal-profile capstone: render whatever adopt uploads,
     # and keep both exempt wherever R10 leaves them out (the archive org, an archived capture)
@@ -245,7 +249,7 @@ def cmd_social(args):
     ctx.require_measured(args.allow_unmeasured)
     r = getattr(args, "_content_resolver", None)  # set by `content social` from its --registry/--approved* flags
     data, fmt, info = social.social_render(ctx, Fonts(ctx.brand), args.title, args.icon,
-                                           login=r.canonical(ctx.owner) if r else None)
+                                           login=r.canonical(ctx.owner) if r else None, keys=keys, attrs=attrs)
     out = Path(args.out) if args.out else default_out(args, "assets/social-preview.png")
     if fmt == "jpg":
         out = out.with_suffix(".jpg")
@@ -972,6 +976,8 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--out", help="default: <repo-dir>/docs/images/card.svg")
     s.add_argument("--png")
     s.add_argument("--icon")
+    s.add_argument("--key-chip", action="append", default=[])
+    s.add_argument("--chip", action="append", default=[])
     s.add_argument("--allow-unmeasured", action="store_true")
     s.add_argument("--allow-hold", action="store_true")
     s.set_defaults(func=cmd_card)
@@ -982,6 +988,8 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--out", help="default: <repo-dir>/assets/social-preview.png (.jpg when over 900 KB)")
     s.add_argument("--title", help="title text (default: README H1, else the title-cased slug)")
     s.add_argument("--icon")
+    s.add_argument("--key-chip", action="append", default=[])
+    s.add_argument("--chip", action="append", default=[])
     s.add_argument("--allow-unmeasured", action="store_true")
     s.add_argument("--allow-hold", action="store_true")
     s.set_defaults(func=cmd_social)

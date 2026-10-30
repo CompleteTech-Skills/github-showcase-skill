@@ -8,6 +8,7 @@ from __future__ import annotations
 import re
 
 from .context import RepoContext
+from .errors import ShowcaseError
 
 CVE = re.compile(r"CVE-\d{4}-\d{4,}", re.I)
 HTTP_CLIENTS = {"requests", "httpx", "aiohttp", "urllib3", "axios", "node-fetch", "got", "undici"}
@@ -127,6 +128,23 @@ def attr_chips(ctx: RepoContext) -> list[tuple[str, str]]:
         special = ctx.org.get("license_chip")
         out.append((special if special and lic.upper().startswith("AGPL") else lic, "license"))
     return out[:3]
+
+
+def clean_cli_chips(keys, attrs) -> tuple[list[str] | None, list[str] | None]:
+    """Validate the repeatable `--key-chip` / `--chip` values of `banner`, `card` and `content social`.
+
+    Each text is stripped; a blank text is a usage error (exit 2). An empty list becomes None so `derive()` keeps its
+    `if cli_keys` meaning. Nothing is truncated here: `derive()` keeps keys[:2] and attrs[:3], as the banner always did.
+    """
+    def clean(values):
+        out = []
+        for v in values or []:
+            text = str(v).strip()
+            if not text:
+                raise ShowcaseError("--key-chip/--chip text must not be blank", log="usage")
+            out.append(text)
+        return out or None
+    return clean(keys), clean(attrs)
 
 
 def derive(ctx: RepoContext, cli_keys=None, cli_attrs=None, category: str | None = None):

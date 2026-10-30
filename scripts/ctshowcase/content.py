@@ -2240,6 +2240,8 @@ def add_parser(sub, cli=None):
     a.add_argument("--out")
     a.add_argument("--title")
     a.add_argument("--icon")
+    a.add_argument("--key-chip", action="append", default=[])
+    a.add_argument("--chip", action="append", default=[])
     a.add_argument("--allow-unmeasured", action="store_true")
     a.add_argument("--allow-hold", action="store_true")
     a.add_argument("--job", action="store_true", help="also emit the writer browser job that uploads it")
