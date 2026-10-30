@@ -96,7 +96,15 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
     shields = re.findall(r"img\.shields\.io/badge/([^)\"\s]+)", plain)
     header_part = plain.split("\n---\n", 1)[0]
     hb = re.findall(r"img\.shields\.io/badge/([^)\"\s]+)", header_part)
-    nbadges = len(hb) + len(re.findall(r"badge\.svg", header_part))
+    badge_header = _outside_code(header_part)
+    image_sources = [m.group(2) for m in IMG_MD.finditer(badge_header)]
+    for image in IMG_HTML.finditer(badge_header):
+        source = re.search(r"\bsrc\s*=\s*(['\"])(.*?)\1", image.group(1))
+        if source:
+            image_sources.append(source.group(2))
+    svg_badges = sum(bool(re.fullmatch(r"(?:\./)?docs/images/badges/[^/?#]+\.svg(?:[?#].*)?", unquote(src))
+                          or re.search(r"(?:^|/)badge\.svg(?:[?#].*)?$", src)) for src in image_sources)
+    nbadges = len(hb) + svg_badges
     if not preserve:
         from .readme import badges as derivable
         floor = min(2, len(derivable(ctx)))  # a public repo with no licence and no language derives fewer than two

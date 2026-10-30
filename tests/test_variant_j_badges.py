@@ -1,9 +1,14 @@
 """Variant J must derive badges and retain authored badges through refreshes."""
+import json
+import os
 import re
+import subprocess
+import sys
 
 import pytest
 
 from ctshowcase import readme, readmelint
+from conftest import ROOT
 
 
 def profile_context(make_ctx, tmp_path, **kwargs):
@@ -180,3 +185,56 @@ def test_bootstrap_keeps_authored_badges_outside_pristine_body(make_ctx, tmp_pat
     assert readme.bootstrap_state(text) == "pristine"
     after = readme.bootstrap(ctx, text)
     assert badge_block(after) == authored
+
+
+def profile_cli(ctx, tmp_path, *args):
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(ctx.meta), encoding="utf-8")
+    # Isolate these regressions from the separately tracked Windows stdout-encoding defect.
+    env = dict(os.environ, PYTHONIOENCODING="utf-8")
+    result = subprocess.run([sys.executable, str(ROOT / "scripts/showcase.py"), "--meta", str(meta),
+                             "--repo-dir", str(tmp_path), *args], capture_output=True, encoding="utf-8", env=env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    return json.loads(result.stdout)
+
+
+def test_real_template_bootstrap_replaces_inherited_badge(make_ctx, tmp_path):
+    ctx = profile_context(make_ctx, tmp_path)
+    text = (ROOT / "tests/fixtures/template-README.md").read_text(encoding="utf-8")
+    (tmp_path / "README.md").write_text(text, encoding="utf-8")
+    profile_cli(ctx, tmp_path, "readme", "--bootstrap", "--write")
+    actual = (tmp_path / "README.md").read_text(encoding="utf-8")
+    assert "type-Template-" not in badge_block(actual)
+    assert "type-GitHub%20profile-" in badge_block(actual)
+    assert "license-MIT-" in badge_block(actual)
+    assert not any("badge" in f for f in profile_cli(ctx, tmp_path, "lint", "readme")["fails"])
+
+
+@pytest.mark.parametrize("html", [False, True])
+def test_local_profile_badge_plus_ci_passes_lint(make_ctx, tmp_path, html):
+    (tmp_path / ".github/workflows").mkdir(parents=True)
+    (tmp_path / ".github/workflows/ci.yml").write_text("name: CI\n", encoding="utf-8")
+    ctx = profile_context(make_ctx, tmp_path, license=None)
+    profile_cli(ctx, tmp_path, "readme", "--mode", "scaffold", "--badges", "local", "--write")
+    path = tmp_path / "README.md"
+    text = path.read_text(encoding="utf-8")
+    assert "docs/images/badges/type-github-profile.svg" in text
+    if html:
+        text = re.sub(r"!\[([^\]]+)\]\((docs/images/badges/[^)]+)\)",
+                      r'<img src="\2" alt="\1">', text)
+        path.write_text(text, encoding="utf-8")
+    assert not any("badge" in f for f in profile_cli(ctx, tmp_path, "lint", "readme")["fails"])
+
+
+@pytest.mark.parametrize("mention", ["docs/images/badges/type-github-profile.svg",
+                                    "```markdown\n![Example](docs/images/badges/type-github-profile.svg)\n```"])
+def test_local_badge_prose_and_code_examples_do_not_count(make_ctx, tmp_path, mention):
+    (tmp_path / ".github/workflows").mkdir(parents=True)
+    (tmp_path / ".github/workflows/ci.yml").write_text("name: CI\n", encoding="utf-8")
+    ctx = profile_context(make_ctx, tmp_path, license=None)
+    text = readme.scaffold(ctx)
+    body = "\n".join(line for line in badge_block(text).splitlines() if "actions/workflows" in line)
+    text = text.replace(badge_block(text), body + "\n" + mention)
+    path = tmp_path / "README.md"
+    path.write_text(text, encoding="utf-8")
+    assert "R7 2-4 header badges required (found 1)" in readmelint.lint(ctx, path)["fails"]

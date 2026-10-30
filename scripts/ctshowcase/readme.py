@@ -959,8 +959,15 @@ def bootstrap(ctx: RepoContext, text: str) -> str:
             # inherited one is emptied, exactly as header_only decides it
             blocks = {m.group(1): m.group(2) for m in find_blocks(MARK, hm.group(0))}
             old = blocks.get("tagline")
+            existing_badges = blocks.get("badges")
+            category = standard("types")["types"]["template"]["category"]
+            template_badge = (f"![Type {category}]({SHIELDS}type-{shield(category)}-"
+                              f"{ctx.brand.raw['badges']['brand']})")
+            if (h1 and h1.group(1).strip() == TEMPLATE_H1
+                    and (existing_badges or "").strip() == template_badge):
+                existing_badges = None  # this exact badge belongs to the pristine source template
             new_header = header(ctx, title=auto, tagline=tagline_body(ctx, old, text),
-                                existing_badges=blocks.get("badges"))
+                                existing_badges=existing_badges)
             text = new_header + "\n\n" + text[hm.end():].lstrip("\n")
     return header_only(ctx, text)
 
