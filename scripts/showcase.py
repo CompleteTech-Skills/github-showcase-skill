@@ -189,7 +189,7 @@ def cmd_banner(args):
         return base("banner", ctx, result="exempt", logs=[why]), OK
     gate_watching(ctx, args.allow_hold)
     ctx.require_measured(args.allow_unmeasured)
-    ctx.require_description()
+    ctx.require_banner_text(args.subtitle)
     out = Path(args.out) if args.out else default_out(args, "docs/images/banner.png")
     fonts = Fonts(ctx.brand)
     data, info = banner.render(ctx, fonts, scale=args.scale, budget=args.png_budget, subtitle=args.subtitle,

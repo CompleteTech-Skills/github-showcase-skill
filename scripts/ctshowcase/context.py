@@ -114,6 +114,18 @@ class RepoContext:
             raise NeedsInput("description", "the repository has no description")
         return d
 
+    def require_banner_text(self, cli_subtitle: str | None = None) -> str:
+        """#99: the banner needs a description, or a subtitle (`--subtitle` or the repository's `subtitle:`) when the
+        GitHub description is empty. The subtitle path is logged (warning), never an error."""
+        d = (self.meta.get("description") or "").strip()
+        sub = (cli_subtitle or "").strip() or str(self.override.get("subtitle") or "").strip()
+        if d:
+            return d
+        if sub:
+            self.log("description-missing")  # warning, never an error
+            return sub
+        raise NeedsInput("description", "the repository has no description")
+
     # -- which generated surfaces apply ------------------------------------------------------------------
     @property
     def is_fork(self) -> bool:

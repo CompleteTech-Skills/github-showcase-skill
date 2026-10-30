@@ -125,17 +125,21 @@ def layout(ctx: RepoContext, fonts: Fonts, *, subtitle: str | None = None, keys=
     # -- subtitle: every one-line candidate first (26 -> 22); two lines only as the last resort (needs-input:subtitle)
     sub_lines = sub_size = sub_src = None
     desc = (ctx.meta.get("description") or "").strip().rstrip(".")
+    # #99: with no GitHub description, the wrap falls back to the subtitle text (`--subtitle`, then `subtitle:`)
+    fallback = desc or (subtitle or "").strip() or str(ctx.override.get("subtitle") or "").strip()
+    fallback = fallback.rstrip(".")
     for text, src in subtitle_candidates(ctx, subtitle):
         s_ = fonts.fit(fk["subtitle"], text, SUB_SIZES, TW)
         if s_:
             sub_lines, sub_size, sub_src = [text], s_, src
             break
-    if sub_lines is None and desc:
+    if sub_lines is None and fallback:
         for maxl, sizes in ((2, SUB2_SIZES), (3, SUB2_SIZES[-1:])):
             for s_ in sizes:
-                lines = fonts.wrap(fk["subtitle"], desc, s_, TW, maxl, hyphens=False)
+                lines = fonts.wrap(fk["subtitle"], fallback, s_, TW, maxl, hyphens=False)
                 if lines:
-                    sub_lines, sub_size, sub_src = lines, s_, f"description-{maxl}-lines"
+                    kind = "description" if desc else "subtitle"
+                    sub_lines, sub_size, sub_src = lines, s_, f"{kind}-{maxl}-lines"
                     ctx.log("needs-input:subtitle")
                     break
             if sub_lines:
