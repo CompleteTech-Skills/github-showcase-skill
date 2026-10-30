@@ -21,7 +21,9 @@ import html
 import io
 import json
 import re
+import shutil
 import subprocess
+import tempfile
 import time
 import unicodedata
 import urllib.error
@@ -2139,12 +2141,41 @@ def icon_contrast_floor(cli_value, family_value) -> float:
     return float(value)
 
 
+def _tesseract() -> str | None:
+    """The `tesseract` executable on PATH, or None. OCR is optional: this tool never installs it."""
+    return shutil.which("tesseract")
+
+
+def _ocr_words(png: bytes, exe: str) -> list[str] | None:
+    """The words of 2+ alphanumerics tesseract reads from the icon flattened on white, or None when the tool cannot run
+    (OSError, timeout or a non-zero exit). Single characters and punctuation are noise and are ignored."""
+    from PIL import Image
+    try:
+        im = Image.open(io.BytesIO(png)).convert("RGBA")
+        flat = Image.new("RGBA", im.size, (255, 255, 255, 255))
+        flat = Image.alpha_composite(flat, im).convert("RGB")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "icon.png"
+            flat.save(path, "PNG")
+            done = subprocess.run([exe, str(path), "stdout", "--psm", "11"], capture_output=True, text=True,
+                                  encoding="utf-8", errors="replace", timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if done.returncode != 0:
+        return None
+    return re.findall(r"[A-Za-z0-9]{2,}", done.stdout)
+
+
 def icon_qa(data: bytes, *, card: str, ink: list[str] | None = None, org_mark: Path | None = None,
-            siblings: list[str] | None = None, strict: bool = False, min_contrast: float = 3.0) -> dict:
+            siblings: list[str] | None = None, strict: bool = False, min_contrast: float = 3.0,
+            ocr: bool = False) -> dict:
     """Automated icon checks (f.3, art QA): size, budget, alpha, live area, coverage, contrast on the card, family
-    inks, not the org glyph, one file. OCR and the 48 px set sheet stay manual. `strict` makes a failing family-ink
+    inks, not the org glyph, one file. The 48 px set sheet stays manual. `strict` makes a failing family-ink
     check fail the icon (default: warn); with no `ink` the family-ink check is not emitted at all. `min_contrast` is
-    the contrast floor of the dominant ink on the card (default 3.0; see icon_contrast_floor)."""
+    the contrast floor of the dominant ink on the card (default 3.0; see icon_contrast_floor). `ocr` (opt-in, off by
+    default) reads the icon with tesseract on PATH: words of 2+ alphanumerics are text, warn (fail with `strict`);
+    without tesseract, or when it fails, no-text stays manual and `logs` names needs-input:ocr-unavailable or
+    needs-input:ocr-failed. Only with `ocr` is a `logs` key returned."""
     from PIL import Image
     from .color import contrast, hexstr, rgb as hexrgb
     from .pnglint import validate_png
@@ -2219,10 +2250,31 @@ def icon_qa(data: bytes, *, card: str, ink: list[str] | None = None, org_mark: P
             add("not-org-glyph", True, f"org mark unreadable: {str(exc)[:60]}", level="warn")
     bad = [s for s in siblings or [] if re.search(r"icon[-_.](dark|light)\.", s, re.I)]
     add("one-file", not bad, ", ".join(bad) or "no -dark or -light sibling (decision 21)")
-    checks.append({"check": "no-text", "result": "manual", "detail": "OCR and the 48 px org sheet are reviewed (f.3, g)"})
+    logs: list[str] = []
+    if not ocr:
+        checks.append({"check": "no-text", "result": "manual", "detail": "OCR and the 48 px org sheet are reviewed (f.3, g)"})
+    else:
+        exe = _tesseract()
+        if exe is None:
+            checks.append({"check": "no-text", "result": "manual", "detail": "tesseract not installed: OCR skipped, "
+                           "no-text stays a manual review (needs-input:ocr-unavailable)"})
+            logs.append("needs-input:ocr-unavailable")
+        else:
+            words = _ocr_words(data, exe)
+            if words is None:
+                checks.append({"check": "no-text", "result": "manual",
+                               "detail": "tesseract failed: no-text stays a manual review"})
+                logs.append("needs-input:ocr-failed")
+            elif words:
+                add("no-text", False, "OCR found text: " + ", ".join(words[:5]), level="fail" if strict else "warn")
+            else:
+                add("no-text", True, "OCR found no text")
     res = "fail" if any(c["result"] == "fail" for c in checks) else (
         "warn" if any(c["result"] == "warn" for c in checks) else "pass")
-    return {"result": res, "checks": checks, "dominant_ink": dom}
+    out = {"result": res, "checks": checks, "dominant_ink": dom}
+    if ocr:
+        out["logs"] = logs
+    return out
 
 
 # =====================================================================================================
@@ -2277,6 +2329,8 @@ def add_parser(sub, cli=None):
     a.add_argument("--min-contrast", type=float, default=None,
                    help="contrast floor of the icon ink on the card plate (default: family key icon_min_contrast, "
                         "else 3.0; 4.5 is recommended)")
+    a.add_argument("--ocr", action="store_true", help="also OCR the icon for text with tesseract when installed "
+                                                      "(skipped with needs-input:ocr-unavailable otherwise)")
 
     a = cs.add_parser("links", parents=[common], help="CQ-04: relative links, anchors and remote targets")
     a.add_argument("files", nargs="*", help="Markdown files (default: displayed README, docs/**, .github/*.md, profile)")
@@ -2561,6 +2615,7 @@ def _cmd_icon(args, cli, resolver, head):
     org = org_row(resolver, ctx.brand, ctx.owner)
     mark = ctx.brand.asset(org.get("mark"))
     strict = bool(getattr(args, "strict", False) or ctx.style.get("icon_strict_family_ink"))
+    ocr = bool(getattr(args, "ocr", False))
     if args.icon_action == "prompt":
         art = load_art_direction(args.art_direction)
         glyph = None
@@ -2607,10 +2662,12 @@ def _cmd_icon(args, cli, resolver, head):
         src.load()
         img, info = normalize_icon(src, args.ground, card, pixel_art=bool(ctx.style.get("icon_pixel_art")))
         data, qlogs = icon_bytes(img)
-        qa = icon_qa(data, card=card, ink=ink, org_mark=mark, siblings=siblings, strict=strict, min_contrast=floor)
+        qa = icon_qa(data, card=card, ink=ink, org_mark=mark, siblings=siblings, strict=strict, min_contrast=floor,
+                     ocr=ocr)
         out = Path(args.out) if args.out else cli.default_out(args, "assets/icon.png")
         if qa["result"] == "fail":
-            return dict(head, result="fail", out=None, info=info, qa=qa, logs=ctx.logs + qlogs + ["art-fail:icon-qa"],
+            return dict(head, result="fail", out=None, info=info, qa=qa,
+                        logs=ctx.logs + qlogs + qa.get("logs", []) + ["art-fail:icon-qa"],
                         note="nothing written"), CHECK_FAILED
         cli.write_bytes(out, data)
         if args.preview:
@@ -2618,14 +2675,15 @@ def _cmd_icon(args, cli, resolver, head):
             prev.alpha_composite(img.convert("RGBA").resize((48, 48), Image.LANCZOS))
             cli.write_bytes(Path(args.preview), _png(prev.convert("RGB")))
         return dict(head, result=qa["result"], out=str(out), bytes=len(data),
-                    sha256=hashlib.sha256(data).hexdigest(), info=info, qa=qa, logs=ctx.logs + qlogs), OK
+                    sha256=hashlib.sha256(data).hexdigest(), info=info, qa=qa,
+                    logs=ctx.logs + qlogs + qa.get("logs", [])), OK
     path = Path(args.out) if args.out else (rd / "assets" / "icon.png" if rd else None)
     if path is None or not path.is_file():
         return dict(head, result="fail", file=str(path) if path else None, logs=ctx.logs + ["needs-input:repo-icon"]), \
             CHECK_FAILED
     qa = icon_qa(path.read_bytes(), card=card, ink=ink, org_mark=mark, siblings=siblings, strict=strict,
-                 min_contrast=floor)
-    return dict(head, result=qa["result"], file=str(path), qa=qa, logs=ctx.logs), _code(qa["result"])
+                 min_contrast=floor, ocr=ocr)
+    return dict(head, result=qa["result"], file=str(path), qa=qa, logs=ctx.logs + qa.get("logs", [])),         _code(qa["result"])
 
 
 def _hex_rgba(value: str) -> tuple[int, int, int, int]:

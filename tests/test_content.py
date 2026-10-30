@@ -891,3 +891,97 @@ def test_schema_icon_min_contrast(brand):
     assert schema_errors(raw) != []
     raw["families"]["completetech"]["icon_min_contrast"] = 22
     assert schema_errors(raw) != []
+
+
+# ---------------------------------------------------------------------------------------------------
+# optional OCR no-text check (E3.2.3): off by default, `--ocr` uses tesseract on PATH when installed
+# ---------------------------------------------------------------------------------------------------
+MANUAL_NO_TEXT = "OCR and the 48 px org sheet are reviewed (f.3, g)"
+
+
+def _no_text(qa):
+    return next(c for c in qa["checks"] if c["check"] == "no-text")
+
+
+def test_icon_ocr_off_by_default_keeps_manual(brand):
+    card = brand.style(NW)["tokens"]["card_fill"]
+    data = C.icon_bytes(C.normalize_icon(_candidate(card), "transparent", card)[0])[0]
+    qa = C.icon_qa(data, card=card)
+    assert "logs" not in qa
+    assert _no_text(qa) == {"check": "no-text", "result": "manual", "detail": MANUAL_NO_TEXT}
+
+
+def test_icon_ocr_unavailable_logs_and_skips(brand, monkeypatch):
+    card = brand.style(NW)["tokens"]["card_fill"]
+    data = C.icon_bytes(C.normalize_icon(_candidate(card), "transparent", card)[0])[0]
+    monkeypatch.setattr(C, "_tesseract", lambda: None)
+    off = C.icon_qa(data, card=card)
+    qa = C.icon_qa(data, card=card, ocr=True)
+    assert _no_text(qa)["result"] == "manual", qa
+    assert "tesseract not installed" in _no_text(qa)["detail"]
+    assert qa["logs"] == ["needs-input:ocr-unavailable"], qa
+    assert qa["result"] == off["result"]
+
+
+def test_icon_ocr_found_text_warns_or_fails_strict(brand, monkeypatch):
+    card = brand.style(NW)["tokens"]["card_fill"]
+    data = C.icon_bytes(C.normalize_icon(_candidate(card), "transparent", card)[0])[0]
+    monkeypatch.setattr(C, "_tesseract", lambda: "tesseract")
+    monkeypatch.setattr(C, "_ocr_words", lambda png, exe: ["HELLO", "A1"])
+    qa = C.icon_qa(data, card=card, ocr=True)
+    assert _no_text(qa)["result"] == "warn" and _no_text(qa)["detail"].startswith("OCR found text: HELLO"), qa
+    assert qa["logs"] == [] and qa["result"] == "warn"
+    qa = C.icon_qa(data, card=card, ocr=True, strict=True)
+    assert _no_text(qa)["result"] == "fail" and qa["result"] == "fail", qa
+
+
+def test_icon_ocr_clean_passes(brand, monkeypatch):
+    card = brand.style(NW)["tokens"]["card_fill"]
+    data = C.icon_bytes(C.normalize_icon(_candidate(card), "transparent", card)[0])[0]
+    monkeypatch.setattr(C, "_tesseract", lambda: "tesseract")
+    monkeypatch.setattr(C, "_ocr_words", lambda png, exe: [])
+    qa = C.icon_qa(data, card=card, ocr=True)
+    assert _no_text(qa) == {"check": "no-text", "result": "pass", "detail": "OCR found no text"}, qa
+    assert qa["logs"] == []
+
+
+def test_icon_ocr_tool_failure(brand, monkeypatch):
+    card = brand.style(NW)["tokens"]["card_fill"]
+    data = C.icon_bytes(C.normalize_icon(_candidate(card), "transparent", card)[0])[0]
+    monkeypatch.setattr(C, "_tesseract", lambda: "tesseract")
+    monkeypatch.setattr(C, "_ocr_words", lambda png, exe: None)
+    qa = C.icon_qa(data, card=card, ocr=True)
+    assert _no_text(qa)["result"] == "manual" and "stays a manual review" in _no_text(qa)["detail"], qa
+    assert "needs-input:ocr-failed" in qa["logs"]
+
+
+def test_ocr_words_filters_noise(monkeypatch):
+    import subprocess
+    from types import SimpleNamespace
+    from PIL import Image
+    png = _png(Image.new("RGBA", (64, 64), (0, 0, 0, 0)))
+    monkeypatch.setattr(C.subprocess, "run",
+                        lambda *a, **k: SimpleNamespace(returncode=0, stdout="\n x . HI 4 ab\n"))
+    assert C._ocr_words(png, "tesseract") == ["HI", "ab"]
+    monkeypatch.setattr(C.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=1, stdout="HI"))
+    assert C._ocr_words(png, "tesseract") is None
+
+    def timeout(*a, **k):
+        raise subprocess.TimeoutExpired(cmd="tesseract", timeout=60)
+    monkeypatch.setattr(C.subprocess, "run", timeout)
+    assert C._ocr_words(png, "tesseract") is None
+
+
+def test_icon_ocr_cli_logs(capsys, tmp_path, brand, monkeypatch):
+    card = brand.style(NW)["tokens"]["card_fill"]
+    img = C.normalize_icon(_candidate(card), "transparent", card)[0]
+    out = write(tmp_path, {"repo/assets/icon.png": C.icon_bytes(img)[0]}) / "repo" / "assets" / "icon.png"
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    check = ("--meta", meta, "--no-repo-dir", "content", "icon", "check", "--out", out,
+             "--art-direction", FIX / "ART_DIRECTION.min.md", *NO_ESTATE)
+    monkeypatch.setattr(C, "_tesseract", lambda: None)
+    code, plain = run_content(capsys, *check)
+    code_ocr, res = run_content(capsys, *check, "--ocr")
+    assert code_ocr == code and res["result"] == plain["result"], (plain, res)
+    assert "needs-input:ocr-unavailable" in res["logs"], res
