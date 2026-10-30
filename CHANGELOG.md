@@ -6,7 +6,7 @@ All notable changes to `github-showcase-skill` are recorded here. Versions follo
 
 ### Fixed
 
-- CLI stdout and stderr are configured as UTF-8 before argument parsing, so redirected Windows output preserves Unicode in label plans, raw footer markup, help and diagnostics without `UnicodeEncodeError`.
+- CLI stdout and stderr are configured as UTF-8 before argument parsing, preserving their existing error handlers, so redirected Windows output preserves Unicode in label plans, raw footer markup, help and diagnostics without `UnicodeEncodeError`, and undecodable filenames still use the stream's original escape policy.
 
 - `doctor` reports disabled-Issues label checks, inapplicable social previews and archived community health as `n/a`, while preserving label coverage during approved archived polishing and unknown captured values on applicable surfaces. Social upload plans share the R10 applicability rule and include the personal-profile capstone.
 - `doctor` reports R11 as `n/a` for archived repositories and outside T1/T2 organizations (personal-account, utility and co-owned repositories), matching the definition of done.

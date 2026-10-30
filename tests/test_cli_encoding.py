@@ -74,3 +74,24 @@ def test_quality_gate_decodes_cli_utf8_under_legacy_locale():
         cwd=ROOT, env=dict(os.environ, PYTHONIOENCODING="cp1252:strict", PYTHONUTF8="0"), capture_output=True)
     assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
     assert b"labels.yml ok" in result.stdout
+
+
+def test_stderr_escapes_surrogate_filename(monkeypatch):
+    """An undecodable filesystem byte must not crash the error-reporting path."""
+    raw = io.BytesIO()
+    error = io.TextIOWrapper(raw, encoding="utf-8", errors="backslashreplace", write_through=True)
+    monkeypatch.setattr(sys, "stderr", error)
+    assert showcase.main(["--format", "text", "--meta", "missing-\udcff.json",
+                          "--no-repo-dir", "describe"]) == 2
+    assert b"missing-\\udcff.json" in raw.getvalue()
+    assert b"UnicodeEncodeError" not in raw.getvalue()
+
+
+def test_stdout_keeps_surrogateescape_filename(monkeypatch):
+    """POSIX stdout's filesystem-byte handling survives UTF-8 configuration."""
+    raw = io.BytesIO()
+    output = io.TextIOWrapper(raw, encoding="utf-8", errors="surrogateescape", write_through=True)
+    monkeypatch.setattr(sys, "stdout", output)
+    assert showcase.main(["--meta", "missing-\udcff.json", "--no-repo-dir", "describe"]) == 2
+    payload = json.loads(raw.getvalue().decode("utf-8", errors="surrogateescape"))
+    assert "missing-\udcff.json" in payload["error"]

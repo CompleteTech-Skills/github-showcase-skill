@@ -115,7 +115,8 @@ Checks (`describe`, `topics`, `labels`, `readme`, `footer`, `meta`, `fingerprint
 
 CLI stdout and stderr use UTF-8, including redirected Windows output, raw footer markup,
 JSON, help and errors. Decode captured CLI output as UTF-8; JSON keeps Unicode characters
-without ASCII escaping. No `PYTHONIOENCODING` workaround is needed.
+without ASCII escaping. Existing stream error handlers are preserved, so diagnostics
+can still escape undecodable filenames. No `PYTHONIOENCODING` workaround is needed.
 
 The four command groups follow the same rules as the repository commands: read-only toward GitHub, one JSON object on stdout (`command`, `action`, `owner`, `result`, `logs[]`), the same exit codes, and refusals for excluded, HOLD and T3 owners. What they add:
 
