@@ -241,3 +241,20 @@ def test_denylist_owner_mask_needs_a_github_host_boundary():
     # real GitHub hosts (bare, www, raw, SCP) still mask the owner position
     assert _hits("https://www.github.com/ledger/x", names=["ledger"]) == []
     assert _hits("https://raw.githubusercontent.com/ledger/x/main/a", names=["ledger"]) == []
+
+
+def test_denylist_leaks_github_host_inside_another_hosts_path_is_not_an_owner_position():
+    # review B: `github.com/ledger` as a PATH of a mirror host is not a GitHub owner, so the name must still hit.
+    assert O.denylist_leaks("https://mirror.example/github.com/ledger", set(), {"ledger"}) == ["denied-name:L1"]
+    # while a real authority (with or without userinfo, or SCP) keeps masking the owner position.
+    for ok in ("https://github.com/ledger/x", "https://u@github.com/ledger/x", "git@github.com:ledger/x", "github.com/ledger/x"):
+        assert O.denylist_leaks(ok, set(), {"ledger"}) == [], ok
+
+
+def test_denylist_leaks_dot_underscore_hyphen_suffix_is_a_different_repository():
+    # review B: `app._public` / `app.-x` are distinct repo names; terminal punctuation and `.git` still match.
+    for other in ("app._public", "app.-x", "app-x", "app_x"):
+        assert O.denylist_leaks(f"https://github.com/northwind/{other}", {"northwind/app"}, set()) == [], other
+        assert O.denylist_leaks(other, set(), {"app"}) == [], other
+    for hit in ("https://github.com/northwind/app.", "https://github.com/northwind/app.git", "northwind/app,"):
+        assert O.denylist_leaks(hit, {"northwind/app"}, set()) == ["denied-slug:L1"], hit
