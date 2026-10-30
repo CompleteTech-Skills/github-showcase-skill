@@ -2066,6 +2066,15 @@ def normalize_icon(img, ground: str = "auto", card: str | None = None, pixel_art
         if gnd is None:
             raise ArtFail("icon-ground", "--ground keep needs four opaque corners of one colour"
                           + ("" if spread is None else f" (measured corner dE {spread:.2f} exceeds --ground-tolerance {tol:g})"))
+        if spread and spread > GROUND_DE:
+            # Tolerance was raised above the default: flatten the vignette to one ground so the kept tile's corners
+            # agree at the default tolerance that icon_qa, tile.py and iconbox.py use (issue #52 review).
+            lab = _lab_cache()
+            g = lab(hexrgb(gnd))
+            flat = hexrgb(gnd) + (255,)
+            px = _px(im)
+            im = im.copy()
+            im.putdata([flat if _de(lab(p[:3]), g) <= KEY_DE + spread else p for p in px])
         side = max(im.size)
         sq = Image.new("RGBA", (side, side), hexrgb(gnd) + (255,))
         sq.paste(im, ((side - im.width) // 2, (side - im.height) // 2))
@@ -2079,7 +2088,9 @@ def normalize_icon(img, ground: str = "auto", card: str | None = None, pixel_art
         lab = _lab_cache()
         g = lab(hexrgb(gnd))
         src = _px(im)
-        key_de = KEY_DE + (spread or 0.0)  # a vignetted ground drifts up to the corner spread from its mean
+        # Widen the key only when --ground-tolerance was raised above the default, so explicit modes and
+        # in-tolerance grounds key exactly as before (KEY_DE); a vignetted ground drifts up to the spread from its mean.
+        key_de = KEY_DE + (spread if spread and spread > GROUND_DE else 0.0)
         mask = Image.new("L", im.size)
         mask.putdata([0 if _de(lab(p[:3]), g) <= key_de else 255 for p in src])
         alpha = _min(mask, mask.filter(ImageFilter.GaussianBlur(2)))  # 2 px feather inside the edge, no ground halo

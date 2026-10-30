@@ -736,6 +736,30 @@ def test_icon_ground_tolerance_boundaries():
         C.normalize_icon(far, "auto", "#032530", tolerance=5)
 
 
+def test_icon_vignetted_night_tile_passes_qa_after_flattening():
+    """Review A/B: a kept (night-tile) ground vignetted past the default tolerance is flattened, so icon_qa and the
+    banner/card tile code (default tolerance) accept what `normalize --ground-tolerance 5` accepted."""
+    from ctshowcase.iconbox import corner_ground, corner_spread
+    img = _vignette("#171D28", "#1F2530")
+    assert 3.1 < corner_spread(img) < 4.9
+    out, info = C.normalize_icon(img, "auto", "#F8FAFC", tolerance=5)
+    assert info["mode"] == "keep" and info["auto_reason"] == "night-tile"
+    assert corner_ground(out) is not None
+    qa = C.icon_qa(C.icon_bytes(out)[0], card="#F8FAFC")
+    assert not [c for c in qa["checks"] if c["check"] == "opaque-ground" and c["result"] != "pass"]
+
+
+def test_icon_explicit_transparent_keeps_base_key_threshold():
+    """Review A/B: within the default tolerance the key stays KEY_DE (6) in explicit modes; it only widens when
+    --ground-tolerance is raised above the default."""
+    from PIL import ImageDraw
+    im = _vignette("#FFFFFF", "#F9F9F9")
+    d = ImageDraw.Draw(im)
+    d.rectangle((250, 250, 750, 750), fill=(234, 234, 234))
+    out, info = C.normalize_icon(im, "transparent", "#032530")
+    assert info["mode"] == "transparent" and out.getbbox() is not None
+
+
 def test_icon_not_the_org_glyph(brand, tmp_path):
     card = brand.style(NW)["tokens"]["card_fill"]
     img = C.normalize_icon(_candidate(card), "auto", card)[0]
