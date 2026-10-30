@@ -682,6 +682,60 @@ def test_icon_keep_ground_and_failures(brand):
         C.normalize_icon(noisy, "auto", card)
 
 
+@pytest.mark.parametrize("ground,card,mode,reason", [
+    ("#F8FAFC", "#0F172A", "transparent", "uniform-ground"),  # pale tile on a dark card: keyed out (#52)
+    ("#E6EDF5", "#0F172A", "transparent", "uniform-ground"),
+    ("#171D28", "#F8FAFC", "keep", "night-tile"),
+    ("#0F172A", "#0F172A", "transparent", "near-card"),
+    # Measured dE(#000000, #0F172A) is 16.5 > CONTENT_DE 12, so pure black on that card is a night tile.
+    ("#000000", "#0F172A", "keep", "night-tile"),
+    ("#171D28", None, "keep", "night-tile"),  # no card colour: the luminance rule decides
+])
+def test_icon_auto_ground_rule(ground, card, mode, reason):
+    img = _candidate(ground, ink=(70, 184, 255), size=1000, box=(250, 250, 750, 750))
+    info = C.normalize_icon(img, "auto", card)[1]
+    assert info["mode"] == mode
+    assert info["auto_reason"] == reason
+
+
+def test_icon_pale_ground_on_dark_card_keys_to_small_rgba(brand):
+    img, info = C.normalize_icon(_candidate("#F8FAFC", ink=(16, 185, 129), size=1024, box=(250, 250, 750, 750)),
+                                 "auto", "#032530")
+    assert info["mode"] == "transparent" and img.mode == "RGBA" and img.getpixel((0, 0))[3] == 0
+    assert len(C.icon_bytes(img)[0]) <= 300_000
+    # explicit modes are unchanged
+    kept = C.normalize_icon(_candidate("#F8FAFC", size=1024, box=(250, 250, 750, 750)), "keep", "#032530")[0]
+    assert kept.mode == "RGB"
+
+
+def _vignette(top, bottom, size=1024):
+    from PIL import Image, ImageDraw
+    from ctshowcase.color import rgb
+    t, b = rgb(top), rgb(bottom)
+    im = Image.new("RGB", (size, size))
+    d = ImageDraw.Draw(im)
+    for y in range(size):
+        k = y / (size - 1)
+        d.line([(0, y), (size, y)], fill=tuple(round(t[i] + (b[i] - t[i]) * k) for i in range(3)))
+    d.rounded_rectangle((250, 250, 750, 750), radius=40, outline=(16, 185, 129), width=40)
+    return im
+
+
+def test_icon_ground_tolerance_boundaries():
+    from ctshowcase.iconbox import corner_spread
+    img = _vignette("#F8FAFC", "#EEF0F2")  # measured corner dE 3.48, above the default 3.0
+    assert 3.1 < corner_spread(img) < 4.9
+    with pytest.raises(ArtFail) as e:
+        C.normalize_icon(img, "auto", "#032530")
+    msg = str(e.value)
+    assert "3.4" in msg and "--ground-tolerance 3" in msg
+    out, info = C.normalize_icon(img, "auto", "#032530", tolerance=5)
+    assert info["mode"] == "transparent" and out.getpixel((0, 0))[3] == 0 and out.getpixel((512, 100))[3] == 0
+    far = _vignette("#F8FAFC", "#B0B8C4")  # corner dE far above 5
+    with pytest.raises(ArtFail, match="--ground-tolerance 5"):
+        C.normalize_icon(far, "auto", "#032530", tolerance=5)
+
+
 def test_icon_not_the_org_glyph(brand, tmp_path):
     card = brand.style(NW)["tokens"]["card_fill"]
     img = C.normalize_icon(_candidate(card), "auto", card)[0]

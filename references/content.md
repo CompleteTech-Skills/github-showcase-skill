@@ -12,7 +12,7 @@ Run from inside the target checkout, or pass the global `--repo-dir DIR` and `--
 S=<skill-dir>/scripts/showcase.py
 python3 $S --meta meta.json content social [--out assets/social-preview.png] [--job]          # alias of social-preview
 python3 $S --meta meta.json content icon prompt [--glyph glyph.yaml] [--option A|B] [--out art/prompts/ORG/REPO/icon.md]
-python3 $S --meta meta.json content icon normalize --in candidate.png [--ground auto|transparent|keep] [--out assets/icon.png] [--preview icon-48.png]
+python3 $S --meta meta.json content icon normalize --in candidate.png [--ground auto|transparent|keep] [--ground-tolerance DE] [--out assets/icon.png] [--preview icon-48.png]
 python3 $S --meta meta.json content icon check [--out assets/icon.png]
 python3 $S content links [FILE ...] [--base-ref origin/main] [--online [--cache links.json]] [--strict] [--diff]
 python3 $S --meta meta.json content linguist [--min-share 0.02] [--language Python]
@@ -34,6 +34,12 @@ Every action also takes `--report FILE` (the JSON result), `--jobs FILE` (append
 | `actions` | RP-06, RP-01, CQ-13 | Red runs and README status badges for failing workflows, upstream-only automation in forks (CLA, stale, labeler), and what a README merge would start (deploys first). Workflow on/off changes are proposals that need a `workflow-toggle` approval (`--approval WORKFLOW=ID`, keyed by the workflow file name); the job's argv names the workflow file (`gh workflow disable stale.yml -R OWNER/REPO`), never its numeric id, because the guard matches the approval's `detail` against it. | nothing |
 | `images` | RP-03, RP-10 | README and docs image budget (bytes, pixels, alt text), lossless optimization proposals (pixel-identical candidates with `--out-dir`; an animated PNG gets none, because a re-save would keep only its first frame: its `check` reads `animated: N frames`), lossy ones only with a per-repository approval (`--approval-id`, review q69), and dark-theme flags for images that vanish on the dark page. | `--out-dir` |
 | `sidebar` | RP-05 | Target state of the About "Include in the home page" boxes (Releases, Packages, Deployments shown only when they exist, decision 7) and the `browser` job that sets them; GitHub's default shows all three, so only repositories whose target differs get a job. A count is a number, a list, or an object whose REST `total_count` or GraphQL `totalCount` wins over its (possibly paged) `nodes` list. A facts file keyed by `OWNER/REPO` plans the whole estate and returns `registry/sidebar.tsv` rows; a repository with a missing count gets no job, and a batch with no job but missing facts is `needs-input` (with `needs_input`, the number of such repositories), never `pass`. | nothing |
+
+### Icon ground rule (`icon normalize`, `--ground auto`)
+
+- Transparent corners: keyed as is. Four opaque corners within `--ground-tolerance` dE of each other (default 3.0) are one ground: a dark one (relative luminance < 0.2) that is not within dE 12 of the card colour is kept full-bleed as a night tile; any other uniform ground, pale or card-coloured, is keyed to transparent (the PNG stays under 300 KB).
+- A slightly vignetted ground with corner dE above 3.0 fails with `icon-ground` and a message naming the measured dE and `--ground-tolerance`; rerun with e.g. `--ground-tolerance 5` for corner dE 3.1-4.9. Larger spreads still fail, so ask for a flat ground (the option A prompt states the exact `card_fill` hex with no vignette, texture, gradient, shadow or glow).
+- `--ground keep|transparent` behave as before; `--ground-tolerance` also sets how alike the corners must be for them.
 
 ## Results and exit codes
 

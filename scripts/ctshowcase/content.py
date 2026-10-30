@@ -2027,32 +2027,45 @@ def _de(a, b) -> float:
     return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2) ** 0.5
 
 
-def normalize_icon(img, ground: str = "auto", card: str | None = None, pixel_art: bool = False):
+def normalize_icon(img, ground: str = "auto", card: str | None = None, pixel_art: bool = False,
+                   tolerance: float | None = None):
     """(1024 px RGBA or RGB image, info). Transparent icons are keyed (ΔE ≤ 6 from the ground, 2 px feather),
     trimmed to their alpha box and fitted to the 688 px live area; an icon with its own opaque ground (an avatar-style
-    night tile) is kept full-bleed (`ground="keep"`)."""
+    night tile) is kept full-bleed (`ground="keep"`). In auto mode only a dark ground (relative luminance < 0.2) that is
+    not within dE 12 of the card colour is kept as a night tile; every other uniform ground is keyed out. The four
+    corners count as one ground when they are within `tolerance` dE (default 3.0, `--ground-tolerance`)."""
     from PIL import Image, ImageFilter
     from .color import rgb as hexrgb
-    from .iconbox import corner_ground, native_pixels
+    from .iconbox import DARK_PLATE, GROUND_DE, corner_ground, corner_spread, native_pixels
+    from .color import luminance
+    tol = GROUND_DE if tolerance is None else float(tolerance)
     im = img.convert("RGBA")
     info: dict = {"source_px": list(im.size)}
     corners = [im.getpixel(p) for p in ((0, 0), (im.width - 1, 0), (0, im.height - 1), (im.width - 1, im.height - 1))]
     has_alpha = any(c[3] < 255 for c in corners)
-    gnd = None if has_alpha else corner_ground(im)
+    gnd = None if has_alpha else corner_ground(im, tol)
+    spread = None if has_alpha else corner_spread(im)
     mode = ground
     if mode == "auto":
         if has_alpha:
             mode = "transparent"
         elif gnd is None:
-            raise ArtFail("icon-ground", "corners are neither transparent nor one opaque ground")
+            raise ArtFail("icon-ground", f"corners are neither transparent nor one opaque ground: measured corner dE "
+                                         f"{spread:.2f} exceeds --ground-tolerance {tol:g}; raise --ground-tolerance "
+                                         "(e.g. 5) for a slightly vignetted ground, or ask for a flat one")
         else:
             lab = _lab_cache()
+            # Measured: pure black versus the dark card colour is dE 16.5 (> CONTENT_DE 12), so it is NOT
+            # near-card and stays a night tile (kept). Pale grounds are keyed out by luminance (> DARK_PLATE).
             near_card = card is not None and _de(lab(hexrgb(gnd)), lab(hexrgb(card))) <= CONTENT_DE
-            mode = "transparent" if near_card else "keep"
+            night_tile = (not near_card) and luminance(gnd) < DARK_PLATE
+            mode = "keep" if night_tile else "transparent"
+            info["auto_reason"] = "near-card" if near_card else ("night-tile" if night_tile else "uniform-ground")
     info["mode"] = mode
     if mode == "keep":
         if gnd is None:
-            raise ArtFail("icon-ground", "--ground keep needs four opaque corners of one colour")
+            raise ArtFail("icon-ground", "--ground keep needs four opaque corners of one colour"
+                          + ("" if spread is None else f" (measured corner dE {spread:.2f} exceeds --ground-tolerance {tol:g})"))
         side = max(im.size)
         sq = Image.new("RGBA", (side, side), hexrgb(gnd) + (255,))
         sq.paste(im, ((side - im.width) // 2, (side - im.height) // 2))
@@ -2061,12 +2074,14 @@ def normalize_icon(img, ground: str = "auto", card: str | None = None, pixel_art
         return out, info
     if not has_alpha:
         if gnd is None:
-            raise ArtFail("icon-ground", "no transparent or uniform ground to key out")
+            raise ArtFail("icon-ground", "no transparent or uniform ground to key out"
+                          + ("" if spread is None else f" (measured corner dE {spread:.2f} exceeds --ground-tolerance {tol:g})"))
         lab = _lab_cache()
         g = lab(hexrgb(gnd))
         src = _px(im)
+        key_de = KEY_DE + (spread or 0.0)  # a vignetted ground drifts up to the corner spread from its mean
         mask = Image.new("L", im.size)
-        mask.putdata([0 if _de(lab(p[:3]), g) <= KEY_DE else 255 for p in src])
+        mask.putdata([0 if _de(lab(p[:3]), g) <= key_de else 255 for p in src])
         alpha = _min(mask, mask.filter(ImageFilter.GaussianBlur(2)))  # 2 px feather inside the edge, no ground halo
         gr, gg, gb = hexrgb(gnd)
         rgba = []
@@ -2260,6 +2275,8 @@ def add_parser(sub, cli=None):
     a.add_argument("--art-direction", help="art direction file (default: the skill's references/art-direction.md)")
     a.add_argument("--in", dest="src", help="normalize: the returned candidate PNG")
     a.add_argument("--ground", choices=("auto", "transparent", "keep"), default="auto")
+    a.add_argument("--ground-tolerance", type=float, default=3.0, metavar="DE",
+                   help="normalize: corners within this dE are one ground (default 3.0; try 5 for a vignetted ground)")
     a.add_argument("--out", help="prompt: the prompt file (art/prompts/<org>/<repo>/icon.md); normalize: the icon "
                                  "(default assets/icon.png in the checkout); check: the icon to check")
     a.add_argument("--preview", help="normalize: also write a 48 px preview on the card colour")
@@ -2590,7 +2607,8 @@ def _cmd_icon(args, cli, resolver, head):
             raise ShowcaseError("content icon normalize needs --in CANDIDATE.png", log="usage")
         src = Image.open(args.src)
         src.load()
-        img, info = normalize_icon(src, args.ground, card, pixel_art=bool(ctx.style.get("icon_pixel_art")))
+        img, info = normalize_icon(src, args.ground, card, pixel_art=bool(ctx.style.get("icon_pixel_art")),
+                                  tolerance=args.ground_tolerance)
         data, qlogs = icon_bytes(img)
         qa = icon_qa(data, card=card, ink=ink, org_mark=mark, siblings=siblings)
         out = Path(args.out) if args.out else cli.default_out(args, "assets/icon.png")
