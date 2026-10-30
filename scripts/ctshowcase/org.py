@@ -1758,7 +1758,9 @@ def labels_plan(estate: Estate, org: str, *, allow_t3: bool = False, checkouts: 
             repo_dir = checkout_root / login / n if checkout_root is not None else None
             if repo_dir is not None and repo_dir.exists():
                 origin = labelsmod._checkout_origin(repo_dir)
-                if not origin or origin[1].lower() != n.lower() or not estate.resolver.same(origin[0], login):
+                current_owner, current_name = full.split("/", 1)
+                if (not origin or origin[1].lower() != current_name.lower()
+                        or not estate.resolver.same(origin[0], current_owner)):
                     raise ShowcaseError(f"--checkouts entry for {full} must have its matching GitHub origin", log="usage")
             else:
                 repo_dir = None
@@ -1769,8 +1771,13 @@ def labels_plan(estate: Estate, org: str, *, allow_t3: bool = False, checkouts: 
         logs += lg
         unchecked = [{"label": o["name"], "new_name": o["new_name"], "check_files": o["check_files"]} for o in ops
                      if o.get("log") == labelsmod.NEEDS_CHECKOUT]
-        repos.append({"repo": full, "result": "plan" if writes else "needs-input" if unchecked else "pass", "ops": writes,
-                      "logs": lg, **({"needs_checkout": unchecked} if unchecked else {})})
+        held_ops = [o for o in ops if o.get("log") in
+                    (labelsmod.NEEDS_CHECKOUT, "label-rewrite-first", "label-referenced")]
+        rewrites = [{"label": o["name"], "new_name": o["new_name"], **hit}
+                    for o in ops for hit in o.get("rewrite_references") or []]
+        repos.append({"repo": full, "result": "needs-input" if held_ops else "plan" if writes else "pass", "ops": writes,
+                      "logs": lg, **({"needs_checkout": unchecked} if unchecked else {}),
+                      **({"held": held_ops} if held_ops else {}), **({"rewrite_first": rewrites} if rewrites else {})})
         for argv in label_ops_argv(full, writes):  # ids from the operation, never its position
             jobs.append(job(label_job_id(PHASE["labels"], full, argv), PHASE["labels"], "labels", argv,
                             repo=full, note="§6.3 pass A renames before pass B creates; never --force, never a delete."))
@@ -1793,8 +1800,8 @@ def labels_plan(estate: Estate, org: str, *, allow_t3: bool = False, checkouts: 
     if unknown:
         logs.append(f"needs-input:metadata:{len(unknown)}")
     # a rename rule 0 could not check, or labels that were not captured, is never a pass
-    held = any(x.get("needs_checkout") or x.get("log") == "needs-input:labels" for x in repos)
-    return {"command": "org", "action": "labels", "owner": login, "result": "plan" if jobs else "needs-input" if held else "pass",
+    held = any(x.get("held") or x.get("log") == "needs-input:labels" for x in repos)
+    return {"command": "org", "action": "labels", "owner": login, "result": "incomplete" if held else "plan" if jobs else "pass",
             "repos": repos, "jobs": jobs, "logs": sorted(set(logs))}, OK
 
 
@@ -2075,6 +2082,9 @@ def estate_from_args(args) -> Estate:
     brand = load_brand(getattr(args, "config", None))
     if getattr(args, "repos_from_gh", False):
         resolver = Resolver(brand)
+        # Brand's lazy resolver otherwise discovers default decision files during owner-status checks.
+        # This run is explicitly brand-only; share its resolver without consulting the estate bundle.
+        brand._resolver = resolver
         return Estate(brand, resolver)
     resolver = Resolver.from_paths(brand, args.registry, args.approved, args.approved_yaml, args.actions, require_registry=True)
     estate = Estate(brand, resolver, flags=load_flags(args.decisions or _default_decisions()))

@@ -155,8 +155,9 @@ def test_member_checkout_origin_uses_github_case_rules(brand, tmp_path, origin_n
     subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
     subprocess.run(["git", "-C", str(repo), "remote", "add", "origin",
                     f"https://github.com/{N}/{origin_name}.git"], check=True, capture_output=True)
-    estate = O.Estate(brand, Resolver(brand, {"orgs": {N: {}}}), {
+    estate = O.Estate(brand, Resolver(brand, {"orgs": {N: {"final_repos": ["Widget"]}}}), {
         "Widget": dict(listing("Widget"), labels=[{"name": "bug", "color": "ff0000"}], files=[], files_complete=True),
+        ".github": dict(listing(".github"), files=[], files_complete=True),
     })
     if valid:
         result, _ = O.labels_plan(estate, N, checkouts=str(tmp_path))
@@ -165,3 +166,57 @@ def test_member_checkout_origin_uses_github_case_rules(brand, tmp_path, origin_n
     else:
         with pytest.raises(ShowcaseError, match="matching GitHub origin"):
             O.labels_plan(estate, N, checkouts=str(tmp_path))
+
+
+def test_cli_live_mode_ignores_malformed_default_decisions(monkeypatch, tmp_path, capsys):
+    import showcase
+    decisions = tmp_path / "decisions"
+    decisions.mkdir()
+    (decisions / "APPROVED_ACTIONS.yaml").write_text("broken: [\n", encoding="utf-8")
+    monkeypatch.setenv("SHOWCASE_ESTATE_ROOT", str(tmp_path))
+    fake_api(monkeypatch, [[listing(".github"), listing("one")]])
+    assert showcase.main(["org", "labels", N, "--repos-from-gh"]) == 0
+    assert json.loads(capsys.readouterr().out)["result"] == "plan"
+
+
+def init_checkout(path, full):
+    path.mkdir(parents=True)
+    subprocess.run(["git", "init", str(path)], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(path), "remote", "add", "origin",
+                    f"https://github.com/{full}.git"], check=True, capture_output=True)
+
+
+def test_held_rewrite_reports_locations_without_other_label_work(brand, tmp_path):
+    gh = tmp_path / N / ".github"
+    repo = tmp_path / N / "one"
+    init_checkout(gh, f"{N}/.github")
+    init_checkout(repo, f"{N}/one")
+    form = gh / ".github/ISSUE_TEMPLATE/bug.yml"
+    form.parent.mkdir(parents=True)
+    form.write_text("name: Bug\nlabels: [bug]\n", encoding="utf-8")
+    existing = [dict(lb) for lb in L.standard_labels() if lb["name"] != "type:bug"]
+    existing.append({"name": "bug", "color": "ff0000", "description": "old"})
+    estate = O.Estate(brand, Resolver(brand), {
+        name: dict(listing(name), labels=existing, files=[], files_complete=True) for name in (".github", "one")
+    })
+    result, _ = O.labels_plan(estate, N, registry_free=True, checkouts=str(tmp_path), dot_github=str(gh))
+    assert result["result"] == "incomplete"
+    row = next(r for r in result["repos"] if r["repo"] == f"{N}/one")
+    assert row["result"] == "needs-input"
+    assert row["rewrite_first"] == [{"label": "bug", "new_name": "type:bug", "repo": f"{N}/.github",
+                                     "path": ".github/ISSUE_TEMPLATE/bug.yml", "line": 2, "text": "labels: [bug]"}]
+    assert row["held"][0]["log"] == "label-rewrite-first"
+    assert not any("--name" in j.get("argv", []) for j in result["jobs"])
+
+
+def test_member_checkout_origin_follows_pending_repository_rename(brand, tmp_path):
+    init_checkout(tmp_path / N / "new-name", f"{N}/old-name")
+    approvals = {"rows": set(), "ids": set(), "answers": {}, "extra": [], "actions": [
+        {"id": "rename-test", "action": "rename", "owner": N, "repo": "old-name", "new_name": "new-name"},
+    ]}
+    estate = O.Estate(brand, Resolver(brand, {"orgs": {N: {"final_repos": ["new-name"]}}}, approvals), {
+        "old-name": dict(listing("old-name"), labels=[{"name": "bug", "color": "ff0000"}], files=[], files_complete=True),
+    })
+    result, _ = O.labels_plan(estate, N, checkouts=str(tmp_path))
+    assert result["repos"][0]["repo"] == f"{N}/old-name"
+    assert all(j.get("repo", f"{N}/old-name") == f"{N}/old-name" for j in result["jobs"])
