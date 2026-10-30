@@ -119,6 +119,9 @@ def summary(meta: str) -> None:
         with open(target, "a", encoding="utf-8") as fh:
             fh.write(text)
     else:
+        reconfigure = getattr(sys.stdout, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors=sys.stdout.errors)
         sys.stdout.write(text)
 
 
