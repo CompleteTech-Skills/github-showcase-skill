@@ -74,11 +74,15 @@ def description_heads(first: str) -> list[str]:
 def subtitle_candidates(ctx: RepoContext, cli: str | None) -> list[tuple[str, str]]:
     """One-line candidates in order: cli, override, security short title, description, first sentence, heads."""
     out: list[tuple[str, str]] = []
-    if cli:
-        out.append((cli, "cli"))
-    if ctx.override.get("subtitle"):
-        out.append((ctx.override["subtitle"], "override"))
     desc = (ctx.meta.get("description") or "").strip()
+    # #99 review: with no description a whitespace-only value is absent (require_banner_text and layout's fallback treat
+    # it so); emitting it would win the one-line pass and render a blank subtitle. With a description the base
+    # behaviour is kept byte for byte (any truthy value is emitted), so existing renders do not change.
+    if cli and (cli.strip() or desc):
+        out.append((cli, "cli"))
+    ov = ctx.override.get("subtitle")
+    if ov and (str(ov).strip() or desc):
+        out.append((ov, "override"))
     if ctx.det["type"] == "security-check":
         for m in re.finditer(r"\(([^()]+)\)", desc):
             inner = m.group(1).strip()
@@ -125,17 +129,21 @@ def layout(ctx: RepoContext, fonts: Fonts, *, subtitle: str | None = None, keys=
     # -- subtitle: every one-line candidate first (26 -> 22); two lines only as the last resort (needs-input:subtitle)
     sub_lines = sub_size = sub_src = None
     desc = (ctx.meta.get("description") or "").strip().rstrip(".")
+    # #99: with no GitHub description, the wrap falls back to the subtitle text (`--subtitle`, then `subtitle:`)
+    fallback = desc or (subtitle or "").strip() or str(ctx.override.get("subtitle") or "").strip()
+    fallback = fallback.rstrip(".")
     for text, src in subtitle_candidates(ctx, subtitle):
         s_ = fonts.fit(fk["subtitle"], text, SUB_SIZES, TW)
         if s_:
             sub_lines, sub_size, sub_src = [text], s_, src
             break
-    if sub_lines is None and desc:
+    if sub_lines is None and fallback:
         for maxl, sizes in ((2, SUB2_SIZES), (3, SUB2_SIZES[-1:])):
             for s_ in sizes:
-                lines = fonts.wrap(fk["subtitle"], desc, s_, TW, maxl, hyphens=False)
+                lines = fonts.wrap(fk["subtitle"], fallback, s_, TW, maxl, hyphens=False)
                 if lines:
-                    sub_lines, sub_size, sub_src = lines, s_, f"description-{maxl}-lines"
+                    kind = "description" if desc else "subtitle"
+                    sub_lines, sub_size, sub_src = lines, s_, f"{kind}-{maxl}-lines"
                     ctx.log("needs-input:subtitle")
                     break
             if sub_lines:

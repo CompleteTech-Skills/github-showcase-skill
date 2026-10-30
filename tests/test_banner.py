@@ -147,3 +147,146 @@ def test_subtitle_prefers_one_line(make_ctx, fonts):
     assert len(info["subtitle_lines"]) == 1 and info["subtitle"].startswith("NYC 311 complaint heatmaps built with Jev")
     assert info["subtitle"].split()[-1] not in banner.HEAD_STOP
     assert banner.description_heads("NYC 311 complaint heatmaps built with Jev") == []
+
+
+SUBTITLE_TEXT = "Offline triage for agents"
+
+
+def _empty_description_meta(tmp_path, description=""):
+    meta = tmp_path / "m.json"
+    meta.write_text(json.dumps({"owner": "Northwind-Trading-Co", "repo": "x", "description": description}), encoding="utf-8")
+    return meta
+
+
+def test_subtitle_alone_renders_via_override(tmp_path):
+    """#99: no GitHub description, but `subtitle:` in .github/showcase.yml satisfies the banner (logged, never an error)."""
+    meta = _empty_description_meta(tmp_path)
+    repo = tmp_path / "repo"
+    (repo / ".github").mkdir(parents=True)
+    (repo / ".github" / "showcase.yml").write_text(
+        f"subtitle: {SUBTITLE_TEXT}\nchips:\n  key: [Email]\n  attrs: [Python, MIT]\n", encoding="utf-8")
+    p, out = _render(tmp_path, meta, repo_dir=repo)
+    info = json.loads(p.stdout)
+    assert p.returncode == 0 and out.exists(), p.stdout + p.stderr
+    assert info["result"] == "ok" and info["subtitle_source"] == "override"
+    assert info["subtitle"] == SUBTITLE_TEXT
+    assert "description-missing" in info["logs"]
+
+
+def test_subtitle_alone_renders_via_cli_flag(tmp_path):
+    meta = _empty_description_meta(tmp_path)
+    p, out = _render(tmp_path, meta, "--subtitle", SUBTITLE_TEXT, "--key-chip", "Email", "--chip", "Python", "--chip", "MIT")
+    info = json.loads(p.stdout)
+    assert p.returncode == 0 and out.exists(), p.stdout + p.stderr
+    assert info["result"] == "ok" and info["subtitle_source"] == "cli"
+    assert "description-missing" in info["logs"]
+
+
+def test_long_subtitle_wraps_without_description(tmp_path):
+    long_text = ("Offline triage for agents that reads every support mailbox, groups duplicate tickets, "
+                 "drafts replies and escalates risky ones.")
+    assert 110 <= len(long_text) <= 130
+    meta = _empty_description_meta(tmp_path)
+    p, out = _render(tmp_path, meta, "--subtitle", long_text, "--key-chip", "Email", "--chip", "Python", "--chip", "MIT")
+    info = json.loads(p.stdout)
+    assert p.returncode == 0 and out.exists(), p.stdout + p.stderr
+    assert info["subtitle_source"].startswith("subtitle-") and info["subtitle_source"].endswith("-lines")
+    assert "needs-input:subtitle" in info["logs"] and "description-missing" in info["logs"]
+
+
+def test_whitespace_only_subtitle_is_absent(tmp_path):
+    """Regression guard, passes on the pre-#99 base by design: a whitespace-only subtitle is absent, so the
+    empty-description case still refuses with exit 4 and writes no file. It must not fail on base."""
+    meta = _empty_description_meta(tmp_path, description="   ")
+    p, out = _render(tmp_path, meta, "--subtitle", "   ", "--chip", "Python", "--chip", "MIT")
+    assert p.returncode == 4 and not out.exists()
+
+
+def test_whitespace_only_description_counts_as_empty(tmp_path):
+    meta = _empty_description_meta(tmp_path, description="   ")
+    p, out = _render(tmp_path, meta, "--subtitle", SUBTITLE_TEXT, "--key-chip", "Email", "--chip", "Python", "--chip", "MIT")
+    info = json.loads(p.stdout)
+    assert p.returncode == 0 and info["subtitle_source"] == "cli" and "description-missing" in info["logs"]
+
+
+def test_description_present_no_warning(tmp_path):
+    """A present description keeps the old path: no description-missing log, and a CLI subtitle still wins.
+    Regression guard, passes on the pre-#99 base by design (the base never logged description-missing); it
+    protects the unchanged output for repositories that have a description. It must not fail on base."""
+    p, out = _render(tmp_path, FIX / "CompleTetech-Security__php2shell-check.json", "--icon", LOGO,
+                     repo_dir=EX / "repos" / "php2shell-check")
+    info = json.loads(p.stdout)
+    assert p.returncode == 0 and "description-missing" not in info["logs"]
+    p, out = _render(tmp_path, _empty_description_meta(tmp_path, description="Offline triage for agents."),
+                     "--subtitle", "Triage", "--chip", "Python", "--chip", "MIT", name="b.png")
+    info = json.loads(p.stdout)
+    assert p.returncode == 0 and info["subtitle_source"] == "cli" and "description-missing" not in info["logs"]
+
+
+def test_scoped_override_does_not_satisfy_banner(tmp_path):
+    """An override written for another repository is emptied by RepoContext, so it does not supply the subtitle.
+    Regression guard, passes on the pre-#99 base by design (the base refused every empty description); it pins
+    that the scoped-override rule still holds after the change. It must not fail on base."""
+    meta = _empty_description_meta(tmp_path)
+    repo = tmp_path / "repo"
+    (repo / ".github").mkdir(parents=True)
+    (repo / ".github" / "showcase.yml").write_text(
+        f"for: Northwind-Trading-Co/other\nsubtitle: {SUBTITLE_TEXT}\nchips:\n  key: [Email]\n  attrs: [Python, MIT]\n",
+        encoding="utf-8")
+    p, out = _render(tmp_path, meta, repo_dir=repo)
+    assert p.returncode == 4 and not out.exists()
+
+
+def _override_repo(tmp_path, subtitle):
+    """A checkout whose `.github/showcase.yml` carries only a subtitle and chips (synthetic Northwind data)."""
+    repo = tmp_path / "repo"
+    (repo / ".github").mkdir(parents=True)
+    (repo / ".github" / "showcase.yml").write_text(
+        f"subtitle: {subtitle}\nchips:\n  key: [Email]\n  attrs: [Python, MIT]\n", encoding="utf-8")
+    return repo
+
+
+def test_whitespace_cli_subtitle_defers_to_override(tmp_path):
+    """#99 review (P3): a whitespace-only --subtitle is absent, so the override text renders, not a blank line.
+    Reproduced on HEAD before the fix: subtitle '   ' with subtitle_source 'cli'."""
+    meta = _empty_description_meta(tmp_path)
+    p, out = _render(tmp_path, meta, "--subtitle", "   ", repo_dir=_override_repo(tmp_path, SUBTITLE_TEXT))
+    info = json.loads(p.stdout)
+    assert p.returncode == 0 and out.exists(), p.stdout + p.stderr
+    assert info["subtitle_source"] == "override" and info["subtitle"] == SUBTITLE_TEXT
+    assert "description-missing" in info["logs"]
+
+
+def test_whitespace_override_defers_to_long_cli_subtitle(tmp_path):
+    """#99 review (P2): a whitespace-only override is absent, so a long --subtitle wraps instead of a blank one-liner.
+    Reproduced on HEAD before the fix: subtitle '   ' with subtitle_source 'override'."""
+    long_text = ("Offline triage for agents that reads every support mailbox, groups duplicate tickets, "
+                 "drafts replies and escalates risky ones.")
+    meta = _empty_description_meta(tmp_path)
+    p, out = _render(tmp_path, meta, "--subtitle", long_text, repo_dir=_override_repo(tmp_path, '"   "'))
+    info = json.loads(p.stdout)
+    assert p.returncode == 0 and out.exists(), p.stdout + p.stderr
+    assert info["subtitle_source"].startswith("subtitle-") and info["subtitle_source"].endswith("-lines")
+    assert info["subtitle"].startswith("Offline triage for agents that reads every support mailbox")
+
+
+def test_whitespace_cli_with_whitespace_override_still_exit_4(tmp_path):
+    """Both sources blank: the subtitle is absent, so the empty-description refusal (exit 4) still applies."""
+    meta = _empty_description_meta(tmp_path)
+    p, out = _render(tmp_path, meta, "--subtitle", "   ", "--chip", "Python", "--chip", "MIT",
+                     repo_dir=_override_repo(tmp_path, '"   "'))
+    assert p.returncode == 4 and not out.exists()
+
+
+def test_whitespace_subtitles_with_description_keep_base_behaviour(tmp_path):
+    """#99 review (P2): the whitespace filter applies only when the description is empty. With a description the
+    base emitted any truthy cli/override subtitle, so output must not change (a 200-char W description once flipped
+    from exit 0 on base to art-fail:subtitle). Passes on the pre-#99 base by design."""
+    meta = _empty_description_meta(tmp_path, description="Offline triage for agents.")
+    p, out = _render(tmp_path, meta, "--subtitle", "   ", "--chip", "Python", "--chip", "MIT", name="c.png")
+    info = json.loads(p.stdout)
+    assert p.returncode == 0 and info["subtitle_source"] == "cli" and "description-missing" not in info["logs"]
+    p, out = _render(tmp_path, meta, "--chip", "Python", "--chip", "MIT", name="o.png",
+                     repo_dir=_override_repo(tmp_path, '"   "'))
+    info = json.loads(p.stdout)
+    assert p.returncode == 0 and info["subtitle_source"] == "override" and "description-missing" not in info["logs"]
