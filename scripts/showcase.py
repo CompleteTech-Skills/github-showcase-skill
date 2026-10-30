@@ -363,7 +363,14 @@ def cmd_footer(args):
         owner = m.get("owner")
         if owner and owner != "unknown":
             b.check_owner(owner)  # raises Refused (exit 2) for excluded, hold and unsigned T3 owners
-            why = RepoContext(b, m, None).footer_status()
+            if b.owner_status(owner) == "watching":
+                # only the watching org's verdict depends on the repository (fork, `.github`): ask the context
+                why = RepoContext(b, m, None).footer_status()
+            else:
+                # no RepoContext: building one parses the captured rendering config, which this check must not
+                # depend on (a malformed `.github/showcase.yml` in the metadata is not a footer verdict)
+                fv = b.org(owner).get("footer", True)
+                why = None if fv is True else ("hold" if fv == "hold" else "exempt:footer")
             if why:  # the footer does not apply
                 res = "hold" if why.startswith("hold") else "exempt"
                 return {"command": "footer", "owner": owner, "result": res, "logs": [why]}, OK
