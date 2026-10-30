@@ -481,13 +481,7 @@ def _stamp_signoff_ids(rec: dict, association_ids, ctx) -> None:
     own grant first (a T3 target) and then each T3 `also_in` association's (topics.merge `signoff_ids`).
     `signoff_id` is the first; `signoff_ids` lists all of them only when there is more than one."""
     from ctshowcase import signoff
-    if not association_ids or not signoff.required():
-        return
-    own = signoff.record_for(ctx.owner, ctx.repo)
-    ids = list(dict.fromkeys(([str(own["id"])] if own and own.get("id") else []) + list(association_ids)))
-    rec["signoff_id"] = ids[0]
-    if len(ids) > 1:
-        rec["signoff_ids"] = ids
+    signoff.stamp_associations(rec, association_ids, ctx.owner, ctx.repo)  # shared with intake.adopt
 
 
 def cmd_topics(args):

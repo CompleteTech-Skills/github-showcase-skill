@@ -364,6 +364,36 @@ def _put(j: dict, rec: dict | None) -> None:
             j.setdefault("approval_id", str(rec["id"]))
 
 
+def stamp_associations(item: dict, association_ids, owner: str | None = None, repo: str | None = None) -> dict:
+    """Under the flag, name on ITEM (a writer job or a change record) every record that authorized it: OWNER's own
+    grant first (when OWNER/REPO is a signed-off T3 target), then each id in ASSOCIATION_IDS (a T3 org that ITEM
+    brings in without targeting it: topics.merge `signoff_ids` for an `also_in` membership topic, project.estate_plan
+    for a T3 org in the personal Estate's Org field). `signoff_id` is the first id and `signoff_ids` lists all of them
+    only when there is more than one. A writer job also gets `approval_id` = the first id unless it already has one
+    (an existing approval_id is never replaced). No-op when the flag is off or there are no association ids.
+    Shared by showcase.cmd_topics, intake.adopt and project.estate_plan
+    (tests/test_t3_signoff_require.py::test_adopt_topics_job_carries_the_also_in_signoff,
+    ::test_estate_plan_jobs_carry_the_t3_orgs_signoff)."""
+    if not association_ids or not required() or not isinstance(item, dict):
+        return item
+    own = record_for(owner, repo) if owner else None
+    ids = list(dict.fromkeys(([str(own["id"])] if own and own.get("id") else []) + [str(x) for x in association_ids]))
+    item["signoff_id"] = ids[0]
+    if len(ids) > 1:
+        item["signoff_ids"] = ids
+    if "phase" in item:
+        item.setdefault("approval_id", ids[0])
+    return item
+
+
+def record(owner: str, repo: str | None = None, aliases: list[str] | None = None) -> dict | None:
+    """Under the flag, the valid record covering OWNER (and REPO), else None; registers no grant. None when off."""
+    if not required():
+        return None
+    rec, _ = evaluate([owner, *(aliases or [])], repo)
+    return rec
+
+
 def stamp_source(job: dict, full: str, aliases: list[str] | None = None) -> dict:
     """Under the flag, stamp a writer job that names another owner's T3 repository FULL (OWNER/NAME) with the record
     covering that repository. A star-List item job (org.star_list_plan) targets the personal account for some org's

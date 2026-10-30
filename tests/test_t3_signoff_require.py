@@ -37,9 +37,10 @@ def _bundle(tmp_path, records):
     return tmp_path / "bundle"
 
 
-def _run(tmp_path, bundle, *argv, owner=OWNER, env=None):
+def _run(tmp_path, bundle, *argv, owner=OWNER, env=None, meta_extra=None):
     meta = tmp_path / "meta.json"
-    meta.write_text(json.dumps(dict(META, owner=owner, repo="northwind-synthetic")), encoding="utf-8")
+    meta.write_text(json.dumps(dict(META, owner=owner, repo="northwind-synthetic", **(meta_extra or {}))),
+                    encoding="utf-8")
     e = dict(os.environ, SHOWCASE_ESTATE_ROOT=str(bundle))
     e.pop("SHOWCASE_REQUIRE_T3_SIGNOFF", None)
     e.pop("SHOWCASE_T3_SIGNOFF_FILE", None)
@@ -201,7 +202,6 @@ def test_alias_record_matches_every_later_check(tmp_path, monkeypatch):
     from ctshowcase import signoff
     from ctshowcase.config import set_t3_signed_off, t3_signed_off
     from ctshowcase.org import _t3_granted as org_granted
-    from ctshowcase.project import _t3_granted as project_granted
     b = _bundle(tmp_path, [{"id": "t3s-10", "owner": "Old-Login"}])
     monkeypatch.setenv("SHOWCASE_T3_SIGNOFF_FILE", str(_file(b)))
     signoff.set_required(True)
@@ -209,7 +209,8 @@ def test_alias_record_matches_every_later_check(tmp_path, monkeypatch):
     try:
         assert not t3_signed_off("New-Login")  # nothing links the logins yet
         signoff.register_aliases(["New-Login", "Old-Login"])  # what Resolver.aliases does under the flag
-        assert t3_signed_off("New-Login") and org_granted("New-Login") and project_granted("New-Login")
+        assert t3_signed_off("New-Login") and org_granted("New-Login")
+        assert signoff.record("New-Login")["id"] == "t3s-10"  # what project.estate_orgs asks
     finally:
         set_t3_signed_off(False)
         signoff.set_required(False)
@@ -805,3 +806,108 @@ def test_file_envelope_follows_the_schema(tmp_path, doc, ok):
     jsonschema = pytest.importorskip("jsonschema")
     schema = json.loads((ROOT / "references" / "t3-signoff.schema.json").read_text(encoding="utf-8"))
     assert jsonschema.Draft202012Validator(schema).is_valid(doc) is ok
+
+
+# --- review round 4: evidence for each fixed finding (synthetic records only) ---
+
+def test_transfer_to_a_t3_org_is_unchanged_without_the_flag(monkeypatch, brand):
+    """Flag off (the default), no --allow-t3: a T1 member whose approved pending transfer resolves to the T3 org keeps
+    the base (2be04ac) behaviour. `org labels` plans its label jobs and the favorite and home entry stay public,
+    exactly as before this epic. The transfer-target T3 checks (org._t3_moved_held, the labels_plan gate) belong to
+    the opt-in --require-t3-signoff only: no issue of epic #22 (#31, #28, #23-#27) asks for a default-on tightening."""
+    from ctshowcase import org as O, signoff
+    from ctshowcase.config import reset_t3_signed_off, set_t3_signed_off
+    monkeypatch.delenv("SHOWCASE_REQUIRE_T3_SIGNOFF", raising=False)
+    monkeypatch.delenv("SHOWCASE_T3_SIGNOFF_FILE", raising=False)
+    fav = f"{T1}/northwind-member"
+    est, reg = _transfer_estate(brand, favorites=[fav])
+    t3, req = set_t3_signed_off(False), signoff.set_required(False)
+    try:
+        res, _ = O.labels_plan(est, T1, allow_t3=False)
+        assert res["result"] == "plan" and not [x for x in res["repos"] if x.get("result") == "held"], res
+        assert [j for j in res["jobs"] if f"{OWNER}/northwind-member" in j.get("argv", [])], res["jobs"]
+        favs, logs = O.public_favorites(est, reg["orgs"][T1], allow_t3=False)
+        assert favs == [f"{OWNER}/northwind-member"] and not logs, (favs, logs)
+        data, logs = O.public_slice(est, T1, allow_t3=False)
+        assert f"{OWNER}/northwind-member" in json.dumps(data), data
+        assert not any(x.startswith("t3-signoff") for x in logs), logs
+    finally:
+        signoff.reset_required(req)
+        reset_t3_signed_off(t3)
+
+
+def test_home_repository_held_by_a_t3_org_is_omitted_without_its_record(tmp_path, monkeypatch, brand):
+    """`org profile CompleteTech-Skills` under --require-t3-signoff: northwind-member is homed in the T1 org but the
+    T3 org holds it today. public_slice built its home list through estate.is_public only, so with no record the
+    profile README and data still named Pick-Your-AI/northwind-member (featured and sections)."""
+    from ctshowcase import org as O
+    est, reg = _transfer_estate(brand)
+    reg["orgs"][T1].update(pins_public=["northwind-member"], sections=[{"title": "Tools", "repos": ["northwind-member"]}])
+    full = f"{OWNER}/northwind-member"
+    with _Strict(monkeypatch, _file(_bundle(tmp_path / "none", []))):
+        data, logs = O.public_slice(est, T1, allow_t3=True)
+        assert full not in json.dumps(data) and f"t3-signoff:{full}" in logs, (data, logs)
+    with _Strict(monkeypatch, _file(_bundle(tmp_path / "ok", [{"id": "t3s-home", "repos": ["northwind-member"]}]))):
+        data, logs = O.public_slice(est, T1, allow_t3=True)
+        assert [e["full_name"] for e in data["featured"]] == [full], data
+        assert f"t3-signoff:{full}" not in logs, logs
+    with _Strict(monkeypatch, _file(_bundle(tmp_path / "noflag", [{"id": "t3s-x"}])), allow_t3=False):
+        data, logs = O.public_slice(est, T1, allow_t3=False)  # a record alone is not --allow-t3
+        assert full not in json.dumps(data), data
+
+
+def test_adopt_topics_job_carries_the_also_in_signoff(tmp_path):
+    """`adopt` of a T1 repository whose metadata has also_in: [Pick-Your-AI]: the topics PUT job and change record
+    that add the T3 membership topic carry the T3 org's record. intake.adopt ignored topics.merge `signoff_ids`, and
+    target-owner stamping only sees the T1 owner."""
+    from ctshowcase.config import load_brand
+    from ctshowcase.topics import org_topic
+    topic = org_topic(load_brand(), OWNER)[1]
+    b = _bundle(tmp_path, [{"id": "t3s-adopt"}])
+    extra = {"also_in": [OWNER]}
+    r = _run(tmp_path, b, "--require-t3-signoff", "--allow-t3", "adopt", f"{T1}/northwind-synthetic", owner=T1,
+             meta_extra=extra)
+    obj = json.loads(r.stdout)
+    jobs = [j for j in obj["jobs"] if j["kind"] == "topics"]
+    recs = [x for x in obj["records"] if x.get("kind") == "topics"]
+    assert len(jobs) == 1 and any(topic in a for a in jobs[0]["argv"]), obj["jobs"]
+    assert jobs[0]["signoff_id"] == "t3s-adopt" and jobs[0]["approval_id"] == "t3s-adopt", jobs
+    assert recs and all(x["signoff_id"] == "t3s-adopt" and "approval_id" not in x for x in recs), obj["records"]
+    # an existing approval_id on the job is kept
+    r = _run(tmp_path, b, "--require-t3-signoff", "--allow-t3", "adopt", f"{T1}/northwind-synthetic",
+             "--approval-id", "q-synthetic", owner=T1, meta_extra=extra)
+    jobs = [j for j in json.loads(r.stdout)["jobs"] if j["kind"] == "topics"]
+    assert jobs[0]["signoff_id"] == "t3s-adopt" and jobs[0]["approval_id"] == "q-synthetic", jobs
+    # without the flag: nothing is stamped
+    r = _run(tmp_path, b, "--allow-t3", "adopt", f"{T1}/northwind-synthetic", owner=T1, meta_extra=extra)
+    assert r.stdout and "signoff_id" not in r.stdout, _out(r)
+
+
+def test_estate_plan_jobs_carry_the_t3_orgs_signoff(tmp_path, monkeypatch, brand):
+    """`project estate-plan --copied ...` with a signed-off T3 org in the registry: the Org-field job that brings
+    Pick Your AI into the personal board carries its record. _t3_granted only checked the record and stamping by
+    target owner looks at @me, so the job had neither signoff_id nor approval_id. Several T3 orgs on one job give
+    signoff_ids (signoff.stamp_associations)."""
+    from ctshowcase import project as PJ
+    from ctshowcase.config import load_yaml_text
+    from ctshowcase.resolver import Resolver
+    reg = load_yaml_text((ROOT / "tests" / "fixtures" / "org" / "registry.yaml").read_text(encoding="utf-8"))
+    reg["profile"]["org_directory"].append({"group": "T3", "orgs": [OWNER]})
+    reg["orgs"][OWNER] = {}
+    res = Resolver(brand, reg, {"rows": {("create-project", "@me", "*", "")}, "ids": set(), "answers": {},
+                                "actions": [], "extra": []})
+    cap = json.loads((ROOT / "tests" / "fixtures" / "project" / "estate-copy-capture.json").read_text(encoding="utf-8"))
+    name = brand.raw["orgs"][OWNER]["display_name"]
+    with _Strict(monkeypatch, _file(_bundle(tmp_path / "ok", [{"id": "t3s-board"}]))):
+        plan = PJ.estate_plan(res, copied=cap, user_id=100, allow_t3=True)
+        t3 = [o for o in plan["orgs"] if o["login"] == OWNER]
+        assert t3 and t3[0]["signoff_id"] == "t3s-board", plan["orgs"]
+        named = [j for j in plan["jobs"] if OWNER in json.dumps(j) or name in json.dumps(j, ensure_ascii=False)]
+        assert any(j["id"].endswith("-field-org") for j in named), plan["jobs"]
+        assert all(j["signoff_id"] == "t3s-board" for j in named), named
+        assert all("signoff_id" not in j for j in plan["jobs"] if j not in named), plan["jobs"]
+    with _Strict(monkeypatch, _file(_bundle(tmp_path / "none", []))):
+        plan = PJ.estate_plan(res, copied=cap, user_id=100, allow_t3=True)
+        assert OWNER not in [o["login"] for o in plan["orgs"]] and OWNER not in json.dumps(plan["jobs"])
+    plan = PJ.estate_plan(res, copied=cap, user_id=100, allow_t3=True)  # flag off: included, nothing stamped
+    assert OWNER in [o["login"] for o in plan["orgs"]] and "signoff_id" not in json.dumps(plan)

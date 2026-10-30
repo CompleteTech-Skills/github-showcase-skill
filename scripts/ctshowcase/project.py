@@ -174,12 +174,6 @@ def _slug(owner: str) -> str:
     return "me" if is_user(owner) else owner
 
 
-def _t3_granted(owner: str) -> bool:
-    """True unless `--require-t3-signoff` is on and no valid sign-off record covers the owner (signoff.py)."""
-    from . import signoff
-    return signoff.granted(owner)
-
-
 def _gate_target(resolver: Resolver | None, owner: str, *, allow_t3: bool = False) -> str:
     """Targets of a write: never T3 without sign-off, never excluded or HOLD. Returns the resolved login."""
     if is_user(owner):
@@ -1088,7 +1082,10 @@ def lint(capture: dict, *, role: str = "org", owner: str | None = None, display_
 # estate-plan (§13.10): the cross-org personal Estate project on CompleteDotTech
 # =====================================================================================================
 def estate_orgs(resolver: Resolver, *, allow_t3: bool = False) -> list[dict]:
-    """In-scope orgs for the Estate's Org field: T1, T2, T2-R (T3 only after sign-off; never HOLD or excluded)."""
+    """In-scope orgs for the Estate's Org field: T1, T2, T2-R (T3 only after sign-off; never HOLD or excluded).
+    Under --require-t3-signoff a T3 org also needs a valid record, and its entry keeps that record's id as
+    `signoff_id` so estate_plan can carry it onto the jobs that bring the org into the personal board."""
+    from . import signoff
     out = []
     groups = (resolver.registry.get("profile") or {}).get("org_directory") or []
     keys = [o for g in groups for o in (g or {}).get("orgs") or []] or list(resolver.registry.get("orgs") or {})
@@ -1101,11 +1098,35 @@ def estate_orgs(resolver: Resolver, *, allow_t3: bool = False) -> list[dict]:
         except NeedsInput:
             continue
         tier = str(row.get("tier") or "").split()[0]
-        if tier == "T3" and not (allow_t3 and _t3_granted(key)):
-            continue
+        rec = None
+        if tier == "T3":
+            if not allow_t3:
+                continue
+            if signoff.required():
+                rec = signoff.record(key, None, resolver.aliases(key))
+                if rec is None:
+                    continue
         if tier in TIER_COLOR:
-            out.append({"login": resolver.canonical(key), "name": row.get("display_name") or key, "tier": tier})
+            entry = {"login": resolver.canonical(key), "name": row.get("display_name") or key, "tier": tier}
+            if rec is not None and rec.get("id"):
+                entry["signoff_id"] = str(rec["id"])
+            out.append(entry)
     return out
+
+
+def _stamp_estate_orgs(jobs: list[dict], orgs: list[dict]) -> None:
+    """Under --require-t3-signoff: each job that names a signed-off T3 org (its Org-field option, its login) carries
+    that org's record. The jobs target @me, so stamping by target owner never finds the T3 grant; several T3 orgs on
+    one job give `signoff_ids` (signoff.stamp_associations). No-op when no org carries a signoff_id.
+    (tests/test_t3_signoff_require.py::test_estate_plan_jobs_carry_the_t3_orgs_signoff)"""
+    from . import signoff
+    t3 = [o for o in orgs if o.get("signoff_id")]
+    if not t3:
+        return
+    for j in jobs:
+        blob = json.dumps(j, ensure_ascii=False)
+        ids = [o["signoff_id"] for o in t3 if o["name"] in blob or o["login"] in blob]
+        signoff.stamp_associations(j, ids)
 
 
 def estate_plan(resolver: Resolver, *, source: str | None = None, copied: dict | None = None, user_id: int | None = None,
@@ -1131,6 +1152,7 @@ def estate_plan(resolver: Resolver, *, source: str | None = None, copied: dict |
                                      [f"Open {url}/settings.", "Check that 'Visibility' reads Private; change nothing.",
                                       "Screenshot it into state/screens/projects/me/."], "project-check",
                                      "§13.2: the Estate stays private."))
+    _stamp_estate_orgs(plan["jobs"], orgs)
     return plan
 
 

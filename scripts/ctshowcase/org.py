@@ -367,18 +367,34 @@ def public_favorites(estate: Estate, reg: dict, *, allow_t3: bool = False) -> tu
 
 def _t3_held(estate: Estate, full: str, allow_t3: bool) -> bool:
     """A repository of a T3 org (any of its logins) before co-owner sign-off: never named on a public profile.
-    Both the slug as named and the slug it has today (estate.current: an approved pending transfer) are checked, so a
-    favorite named under a T1 org but held by a T3 org today is still held, and under --require-t3-signoff it needs
-    a record for the T3 org that holds it (tests/test_t3_signoff_require.py
-    ::test_favorite_transferred_to_a_t3_org_is_held_without_its_record)."""
+    The slug as named is checked as before. Under --require-t3-signoff only, the slug it has today (estate.current:
+    an approved pending transfer) is checked too (_t3_moved_held)."""
     if "/" not in (full or ""):
         return False
+    owner, _, name = full.partition("/")
+    if estate.resolver.owner_status(owner) == "t3" and not (allow_t3 and _t3_granted(owner, name)):
+        return True
+    return _t3_moved_held(estate, full, allow_t3)
+
+
+def _t3_moved_held(estate: Estate, full: str, allow_t3: bool) -> bool:
+    """Under --require-t3-signoff: FULL is named under one org but a T3 org holds it today (an approved pending
+    transfer, estate.current), and that T3 org has no --allow-t3 plus valid record covering the repository.
+
+    Opt-in only: without the flag this is always False, so the default (base 2be04ac) behaviour of profiles, star
+    Lists and `org labels` is unchanged; no issue of epic #22 asks for a default-on tightening
+    (tests/test_t3_signoff_require.py::test_transfer_to_a_t3_org_is_unchanged_without_the_flag). With the flag:
+    ::test_favorite_transferred_to_a_t3_org_is_held_without_its_record and
+    ::test_home_repository_held_by_a_t3_org_is_omitted_without_its_record."""
+    from . import signoff
+    if not signoff.required() or "/" not in (full or ""):
+        return False
     r = estate.resolver
-    for slug in dict.fromkeys([full, estate.current(r.slug(full))]):
-        owner, _, name = slug.partition("/")
-        if r.owner_status(owner) == "t3" and not (allow_t3 and _t3_granted(owner, name)):
-            return True
-    return False
+    cur = estate.current(r.slug(full))
+    owner, _, name = cur.partition("/")
+    if r.same(owner, full.split("/")[0]):
+        return False  # not moving to another org: the named check in _t3_held (or the org gate) covers it
+    return r.owner_status(owner) == "t3" and not (allow_t3 and _t3_granted(owner, name))
 
 
 def public_slice(estate: Estate, org: str, lists_capture: dict | None = None, *,
@@ -398,6 +414,14 @@ def public_slice(estate: Estate, org: str, lists_capture: dict | None = None, *,
         logs.append("needs-input:org-description")
     names = estate.repos_of(org)
     public = [n for n in names if n != ".github" and estate.is_public(f"{login}/{n}")]
+    # Under --require-t3-signoff: a home repository that a T3 org holds today (approved pending transfer) needs that
+    # org's record before the profile names it; held ones are omitted from featured, sections, forks and archives.
+    # Only the moved slug is checked here: the home org itself already passed _gate, and the callers that pass no
+    # allow_t3 (leak scope, doctor) must keep seeing the org's own repositories. No-op without the flag.
+    moved_held = [n for n in public if _t3_moved_held(estate, f"{login}/{n}", allow_t3)]
+    for n in moved_held:
+        logs.append(f"t3-signoff:{estate.current(r.slug(f'{login}/{n}'))}")
+    public = [n for n in public if n not in moved_held]
     for n in names:
         if n != ".github" and estate.visibility(f"{login}/{n}") == "unknown":
             moving = estate.pending_move(f"{login}/{n}")
@@ -1809,11 +1833,15 @@ def labels_plan(estate: Estate, org: str, *, allow_t3: bool = False, checkouts: 
         m = estate.meta(f"{login}/{n}")
         full = estate.current(f"{login}/{n}")  # labels are written where the repository is today
         current_owner, current_name = full.split("/", 1)
-        if not estate.resolver.same(current_owner, login) and estate.resolver.owner_status(current_owner) == "t3":
-            # An approved pending transfer: the label jobs target the T3 org that holds the repository today, so it
-            # passes that org's gate (--allow-t3 and, under --require-t3-signoff, its record; check_owner also
+        from . import signoff
+        if (signoff.required() and not estate.resolver.same(current_owner, login)
+                and estate.resolver.owner_status(current_owner) == "t3"):
+            # Under --require-t3-signoff only: an approved pending transfer whose label jobs target the T3 org that
+            # holds the repository today passes that org's gate (--allow-t3 and its record; check_owner also
             # registers the grant that stamps signoff_id on these jobs). The org gate above only saw LOGIN.
-            # (tests/test_t3_signoff_require.py::test_org_labels_gate_the_t3_owner_a_transfer_resolves_to)
+            # Without the flag the base behaviour is kept (no issue of epic #22 asks for a default-on change):
+            # tests/test_t3_signoff_require.py::test_org_labels_gate_the_t3_owner_a_transfer_resolves_to (flag on)
+            # and ::test_transfer_to_a_t3_org_is_unchanged_without_the_flag (flag off).
             from .errors import Refused
             try:
                 estate.resolver.check_owner(current_owner, allow_t3=allow_t3, repo=current_name)
