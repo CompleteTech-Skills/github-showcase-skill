@@ -280,7 +280,7 @@ These user decisions outrank `STANDARD.md` (`ct-std-v1`). Full text: [references
 
 ## Brand and Family Data
 
-- `references/brand.yaml` is the single place for colours, fonts, logo paths, eyebrows, company labels, footer strings and per-org rows. A hex colour literal in `scripts/` fails the quality gate.
+- `references/brand.yaml` is the single place for colours, fonts, logo paths, eyebrows, company labels, footer strings and per-org rows. A hex colour literal in `scripts/` fails the quality gate. `license_wording` on an org row is the approved legal holder name for README rights sentences; absent means none is written.
 - Precedence: schema defaults, then `families.<family>`, then `orgs.<Org>`, then the repository's `.github/showcase.yml`, then CLI flags. Repository files and flags change **content** only (icon, subtitle, chips, category, variant); colours and fonts are never overridable.
 - Icon on the banner card and the card tile, first match wins: `--icon`, `.github/showcase.yml` `icon`, then `assets/icon.png`, then the org mark (`assets/orgs/<Org>/mark.png`), then a family fallback: the light CompleteTech logo for CompleteTech orgs (its cloud-and-bulb crop, `mark_light`, in icon boxes under 200 px), and for every other family (AI-Ascension, Jev-Engineering, jevplay-games, LibreEvolve, TouchedByAnAgent, romgenie, T3) its display name typeset in the family font on the family plate. A T2 surface never carries the CompleteTech logo.
 - An icon that brings its own opaque ground (four corners alike) fills the card with that ground and is drawn full-bleed, so there is never a plate inside a plate; dark plates get a 2 px accent edge. jevplay-games icons are scaled nearest-neighbour at an integer factor.
