@@ -31,10 +31,13 @@ def test_windows_bash_comes_from_git_not_the_wsl_launcher(tmp_path, monkeypatch)
     assert conftest.find_bash(windows=True) is None
 
 
-def test_windows_bash_follows_git_exec_path_through_scoop_shim(tmp_path, monkeypatch):
-    scoop = tmp_path / "scoop with spaces"
-    shim = scoop / "shims" / "git.exe"
-    installation = scoop / "apps" / "git" / "current"
+@pytest.mark.parametrize(("git_relative", "installation_relative"), [
+    ("scoop with spaces/shims/git.exe", "scoop with spaces/apps/git/current"),
+    ("Git With Spaces/mingw64/bin/git.exe", "Git With Spaces"),
+], ids=["scoop-shim", "mingw64-bin"])
+def test_windows_bash_follows_git_exec_path(tmp_path, monkeypatch, git_relative, installation_relative):
+    shim = tmp_path / git_relative
+    installation = tmp_path / installation_relative
     bash = installation / "bin" / "bash.exe"
     shim.parent.mkdir(parents=True)
     shim.touch()
