@@ -788,7 +788,7 @@ def test_icon_prompt_cli_note_names_size_classes(monkeypatch, tmp_path, capsys):
                                  "spark_placement": "inside the tray", "size_class": "medium"}), encoding="utf-8")
     out = tmp_path / "prompt.md"
     args = ["--meta", str(meta), "--no-repo-dir", "content", "icon", "prompt", "--option", "A",
-            "--glyph", str(glyph)]
+            "--glyph", str(glyph), "--out", str(out)]
     assert C.main(args) == 1
     result = json.loads(capsys.readouterr().out)
     assert result["result"] == "needs-writer"

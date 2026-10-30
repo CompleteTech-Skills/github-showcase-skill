@@ -1767,7 +1767,7 @@ def size_class_help() -> str:
         " (case-insensitive)"
 
 
-HEX =r"`(#[0-9A-Fa-f]{6})`"
+HEX = r"`(#[0-9A-Fa-f]{6})`"
 
 
 def load_art_direction(path=None) -> str:
