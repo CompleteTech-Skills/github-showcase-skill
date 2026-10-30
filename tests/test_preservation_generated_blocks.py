@@ -2,14 +2,18 @@
 output: a refreshed tagline is a regenerated value, not a lost line. Lines outside generated blocks, a generated block
 that disappears, and unknown or template blocks stay guarded.
 
-Test kinds (verified by reverting scripts/ctshowcase/readme.py to the pre-change base, commit 2be04ac, and running this
-file there: 3 failed, 3 passed):
-- Fail on base, pass on HEAD (the behaviour change itself): test_refreshed_tagline_is_not_a_lost_line,
-  test_line_outside_generated_block_is_still_guarded, test_crlf_input_is_handled.
-- Pass on base and on HEAD by design (guards that the change must NOT relax the check): the boundary-case tests, and
-  test_duplicate_header_line_listed_in_removed_is_not_lost, which failed on an earlier over-engineered revision
-  (a removed entry was consumed by the generated copy). test_duplicate_outside_block_is_guarded_by_total_line_count
-  documents spec edge (e): a_lines counts the whole output, so a kept-block copy can satisfy an outside copy.
+Test kinds (verified by running this file against the pre-change base, commit 2be04ac, in an archive copy:
+5 failed, 5 passed):
+- Fail on base, pass on HEAD (they detect the change): test_refreshed_tagline_is_not_a_lost_line,
+  test_line_outside_generated_block_is_still_guarded, test_crlf_input_is_handled,
+  test_outside_duplicate_survives_when_generated_copy_is_removed,
+  test_duplicate_outside_block_is_guarded_by_total_line_count.
+- Pass on base and on HEAD by design (regression guards: the change must NOT relax these):
+  test_generated_block_removed_from_output_still_guards_its_lines, test_unknown_and_template_blocks_stay_guarded,
+  test_marker_example_in_code_is_not_stripped, test_authored_line_moved_into_generated_block_still_counts, and
+  test_duplicate_header_line_listed_in_removed_is_not_lost (failed on an earlier over-engineered revision, where a
+  removed entry was consumed by the generated copy). They cannot fail on the base because the base counts every line.
+  Spec edge (e): a_lines counts the whole output, so a kept-block copy can satisfy an outside copy.
 """
 from ctshowcase import readme as R
 
