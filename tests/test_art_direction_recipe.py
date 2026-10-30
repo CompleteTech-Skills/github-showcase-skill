@@ -222,6 +222,16 @@ def test_recipe_says_only_public_facts_in_prompts():
     assert "only public facts" in lowered
 
 
+def test_recipe_does_not_claim_generator_filters_privacy():
+    # Reproduced on the base: `content icon prompt` copies repo metadata and the
+    # local README heading into the prompt with no public/private check.
+    lowered = _recipe(_text()).lower()
+    assert "already limited" not in lowered
+    assert "does not establish whether a fact is public" in lowered
+    assert "complete generated markdown" in lowered
+    assert "readme-derived" in lowered
+
+
 def test_recipe_forbids_private_repository_content():
     lowered = _recipe(_text()).lower()
     assert "private-repository content" in lowered

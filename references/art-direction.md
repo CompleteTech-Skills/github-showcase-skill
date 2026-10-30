@@ -109,7 +109,7 @@ Use the same model and version for a whole family run (pipeline rule 4) and reco
 
 - (a) Prompts may contain only public facts: the public repository name, its public description and topics, the family palette and style lock, and the glyph fields supplied by the writer.
 - (b) Never paste private-repository content into a prompt: no private repo names, README or source text, issue text, customer or personal data, emails, tokens, or estate-registry rows.
-- (c) The prompt that `content icon prompt` writes is already limited to those public facts. Do not extend it by hand. Review it before running Codex, because the prompt leaves the machine.
+- (c) `content icon prompt` does not establish whether a fact is public. It writes repository metadata (name, description, topics) and fields derived from the local README, such as its heading, into the Markdown file that Codex receives, with no privacy filtering. Before running Codex, read the complete generated Markdown, including every README-derived field, and remove or replace anything that is not public. Use public-only inputs, or hold the task. The prompt leaves the machine.
 - (d) For a private repository, do not generate the icon with Codex from its contents. Use only the family glyph fields and a neutral name, or hold the task.
 - (e) Keep the prompt text in the provenance record verbatim, which makes this rule auditable.
 
