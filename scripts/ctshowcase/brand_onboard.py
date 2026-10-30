@@ -166,8 +166,9 @@ def cmd_add_org(args):
     if args.tier == "T3" and brand.owner_status(args.name) != "t3":
         raise ShowcaseError(f"{args.name} is T3 (co-owned): add it to owners.t3 by hand after co-owner sign-off, then rerun; "
                             "add-org never edits owners:", log="t3-signoff")
-    if args.tier == "T3":  # the global --allow-t3 gate (or an approved t3-signoff row) applies to writes like any T3 command
-        brand.check_owner(args.name, allow_t3=getattr(args, "allow_t3", False))
+    # the owner gate applies whatever --tier says: a login already recorded in owners.t3 is co-owned, so omitting --tier
+    # (default T2) or passing T2 must not bypass --allow-t3 (review fix; a non-owner returns None here)
+    brand.check_owner(args.name, allow_t3=getattr(args, "allow_t3", False))
     block = _block_org(args.name, args.family, args.tier, args.display_name.strip())
 
     def check(brand: Brand):

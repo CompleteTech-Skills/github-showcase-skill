@@ -188,3 +188,21 @@ def test_relative_path_to_default_config_still_regenerates_the_lock(tmp_path, mo
 
     obj, code = B.cmd_add_family(A)
     assert code == 0 and lock.exists() and obj["lock"] == str(lock)
+
+
+@pytest.mark.parametrize("tier_args", [(), ("--tier", "T2")])
+def test_recorded_t3_owner_needs_allow_t3_even_when_tier_is_omitted_or_t2(cfg, tier_args):
+    """Review fix: a login already in owners.t3 is co-owned, so the global --allow-t3 gate applies whatever --tier says.
+    Before the fix, omitting --tier (default T2) or passing T2 wrote the row without --allow-t3."""
+    assert _cli(cfg, *ADD_FAMILY, "--write").returncode == 0
+    text = cfg.read_text(encoding="utf-8")
+    signed = text.replace("t3: [Pick-Your-AI, Jevelopers-neatHack-2026]",
+                          "t3: [Pick-Your-AI, Jevelopers-neatHack-2026, Acme-Widgets]", 1)
+    assert signed != text
+    cfg.write_text(signed, encoding="utf-8")
+    argv = ["brand", "add-org", "Acme-Widgets", "--family", "acme-widgets", "--display-name", "Acme Widgets",
+            *tier_args, "--write"]
+    r = _cli(cfg, *argv)
+    assert r.returncode == 2 and "t3-signoff" in json.loads(r.stdout)["logs"], r.stdout
+    assert "Acme-Widgets" not in _raw(cfg)["orgs"]
+    assert _cli(cfg, *argv, pre=("--allow-t3",)).returncode == 0
