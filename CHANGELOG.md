@@ -6,6 +6,9 @@ All notable changes to `github-showcase-skill` are recorded here. Versions follo
 
 ### Fixed
 
+- CLI stdout and stderr are configured as UTF-8 before argument parsing, preserving their existing error handlers, so redirected Windows output preserves Unicode in label plans, raw footer markup, help and diagnostics without `UnicodeEncodeError`, and undecodable filenames still use the stream's original escape policy.
+- The Action summary and quality validator decode CLI results explicitly as UTF-8, preserving non-ASCII descriptions on Windows rather than corrupting them or failing with `UnicodeDecodeError`.
+
 - `doctor` reports disabled-Issues label checks, inapplicable social previews and archived community health as `n/a`, while preserving label coverage during approved archived polishing and unknown captured values on applicable surfaces. Social upload plans share the R10 applicability rule and include the personal-profile capstone.
 - `doctor` reports R11 as `n/a` for archived repositories and outside T1/T2 organizations (personal-account, utility and co-owned repositories), matching the definition of done.
 - R5 preserves upstream defaults on forks (forks in the watching and archive orgs still need Issues off, as `adopt` plans) and accepts a captured user keep decision for other default branches without relaxing the merge or Issues checks. `adopt` and the `doctor --estate` proposals honour the same keep decision: `adopt` logs `default-branch kept (user)` instead of asking for a `rename-default-branch` proposal, and neither asks for one on a fork.

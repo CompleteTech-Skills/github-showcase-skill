@@ -113,6 +113,12 @@ Checks (`describe`, `topics`, `labels`, `readme`, `footer`, `meta`, `fingerprint
 
 ## Orgs, Projects, the Enterprise and Content
 
+CLI stdout and stderr use UTF-8, including redirected Windows output, raw footer markup,
+JSON, help and errors. Decode captured CLI output as UTF-8; JSON keeps Unicode characters
+without ASCII escaping. Existing stream error handlers are preserved, so diagnostics
+can still escape undecodable filenames. No `PYTHONIOENCODING` workaround is needed.
+The Action summary and quality validator also decode CLI results as UTF-8.
+
 The four command groups follow the same rules as the repository commands: read-only toward GitHub, one JSON object on stdout (`command`, `action`, `owner`, `result`, `logs[]`), the same exit codes, and refusals for excluded, HOLD and T3 owners. What they add:
 
 **Command-name contract.** The orchestrator, the standard and other workstreams call these names, so they are fixed: the repository commands in the Command Reference; the top-level generators `banner`, `card`, `org-banner`, `org-tile`, `intro` and `contact-sheet`; and the groups `org {profile,about,pins,labels,health,doctor}`, `project {capture-query,normalize,copy-plan,readme,lint,estate-plan}`, `enterprise {snapshot-query,discover,snapshot,doctor,seat-check,diff,plan}` and `content {social,icon,links,linguist,actions,images,sidebar}`. The social preview is `content social`; the old top-level `social-preview` still parses as a hidden, deprecated alias (same options, same file, logged `deprecated:social-preview`) and is not documented as a command.
