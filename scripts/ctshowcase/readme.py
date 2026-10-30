@@ -18,6 +18,7 @@ from .mdcode import code_spans, find_blocks, masked  # noqa: F401  (code_spans: 
 MARK = re.compile(r"<!-- showcase:([a-z-]+):start -->\n?(.*?)\n?<!-- showcase:\1:end -->", re.S)
 EMOJI = re.compile("[\U0001F000-\U0001FAFF☀-➿⬀-⯿️‍]")
 SHIELDS = "https://img.shields.io/badge/"
+GENERATED_BADGES = re.compile(r"<!-- showcase:badges:generated sha256=([0-9a-f]{64}) -->\n(.*)", re.S)
 BOM = "\ufeff"
 
 
@@ -229,10 +230,19 @@ def badges_html(ctx) -> str:
 
 
 def badge_body(ctx: RepoContext, existing: str | None = None) -> str:
-    """Variant J keeps authored badge rows; lint still checks their count and palette."""
-    if ctx.det["variant"] == "J" and existing and existing.strip():
+    """Refresh owned rows; a missing or changed digest makes a J block authored."""
+    if ctx.det["variant"] != "J":
+        return badges_html(ctx) if ctx.det["variant"] == "F" else badges_md(ctx)
+    if existing and existing.strip() and not generated_badges(existing):
         return existing
-    return badges_html(ctx) if ctx.det["variant"] == "F" else badges_md(ctx)
+    body = badges_md(ctx)
+    return f"<!-- showcase:badges:generated sha256={body_sha(body)} -->\n{body}"
+
+
+def generated_badges(body: str) -> bool:
+    """The digest proves that the generated badge rows have not been edited."""
+    match = GENERATED_BADGES.fullmatch(body)
+    return bool(match and match.group(1) == body_sha(match.group(2)))
 
 
 def nav_first(ctx: RepoContext) -> bool:
@@ -626,7 +636,7 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
             removed += [ln for ln in old_tag.splitlines() if ln.strip()]
         keep = {"tagline": tag}
         if variant == "J" and blocks.get("badges", "").strip():
-            keep["badges"] = blocks["badges"]
+            keep["badges"] = badge_body(ctx, blocks["badges"])
         body, _ = _strip_markers(text, keep=keep)
         if want_footer:
             body, _ = drop_old_footer(body, ctx.brand)  # its lines are already in `removed`
@@ -966,6 +976,13 @@ def nonws(s: str) -> int:
 
 def preservation(before: str, after: str, removed: list[str]) -> list[str]:
     """Every original non-header line survives (heading lines may be renamed); size drop <= 10%."""
+    # Digest-verified generated badge rows are owned output, like their markers. Exclude them on both
+    # sides, so a metadata-driven refresh/removal does not hide loss of unrelated authored content.
+    def omit_owned_badges(m):
+        return wrap("badges", "") if m.group(1) == "badges" and generated_badges(m.group(2)) else m.group(0)
+
+    before = _sub_blocks(before, omit_owned_badges)
+    after = _sub_blocks(after, omit_owned_badges)
     problems = []
     b_lines = Counter(ln.strip() for ln in before.splitlines() if ln.strip() and not ln.strip().startswith("<!-- showcase:"))
     for r in removed:

@@ -6,7 +6,7 @@ All notable changes to `github-showcase-skill` are recorded here. Versions follo
 
 ### Fixed
 
-- Variant J READMEs generate the GitHub-profile type badge from standard data and the known license in the brand palette. Upgrade and header refresh preserve nonempty authored badge blocks, preventing `readme-shrink`; missing licenses remain explicit instead of being invented.
+- Variant J READMEs generate the GitHub-profile type badge from standard data and the known license in the brand palette. Digest-verified generated badge rows refresh with metadata and badge output mode changes; edited or unmarked authored blocks remain protected by the shrink guard. Missing licenses remain explicit instead of being invented.
 - `doctor` reports disabled-Issues label checks, inapplicable social previews and archived community health as `n/a`, while preserving label coverage during approved archived polishing and unknown captured values on applicable surfaces. Social upload plans share the R10 applicability rule and include the personal-profile capstone.
 - `doctor` reports R11 as `n/a` for archived repositories and outside T1/T2 organizations (personal-account, utility and co-owned repositories), matching the definition of done.
 - R5 preserves upstream defaults on forks (forks in the watching and archive orgs still need Issues off, as `adopt` plans) and accepts a captured user keep decision for other default branches without relaxing the merge or Issues checks. `adopt` and the `doctor --estate` proposals honour the same keep decision: `adopt` logs `default-branch kept (user)` instead of asking for a `rename-default-branch` proposal, and neither asks for one on a fork.

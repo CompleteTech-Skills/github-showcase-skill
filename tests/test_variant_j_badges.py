@@ -76,3 +76,67 @@ def test_variant_j_preserved_badges_still_obey_lint(make_ctx, tmp_path):
     result = readmelint.lint(ctx, path)
     assert "R7 off-palette badge colour ABCDEF" in result["fails"]
     assert "R7 2-4 header badges required (found 1)" in result["fails"]
+
+
+@pytest.mark.parametrize("mode", ["upgrade", "header"])
+@pytest.mark.parametrize("transition", ["add-license", "change-license", "public", "owner", "local"])
+def test_generated_variant_j_badges_refresh(make_ctx, tmp_path, mode, transition):
+    values = {"license": None} if transition == "add-license" else {}
+    if transition == "public":
+        values.update(visibility="private", created_at="2025-01-01T00:00:00Z")
+    if transition == "owner":
+        (tmp_path / ".github/workflows").mkdir(parents=True)
+        (tmp_path / ".github/workflows/ci.yml").write_text("name: CI\n", encoding="utf-8")
+    before_ctx = profile_context(make_ctx, tmp_path, **values)
+    before = readme.scaffold(before_ctx)
+    if transition in ("public", "owner"):
+        # Isolate badge ownership from the separate nav/license refresh rules.
+        before = readme.wrap("badges", badge_block(before)) + "\n\nAuthored paragraph to retain.\n"
+    changes = {
+        "add-license": {"license": "MIT"},
+        "change-license": {"license": "Apache-2.0"},
+        "public": {"visibility": "public"},
+        "owner": {"owner": "CompleteTech-Skills"},
+        "local": {},
+    }[transition]
+    after_ctx = make_ctx(repo_dir=tmp_path, **(before_ctx.meta | changes))
+    if transition == "local":
+        after_ctx.local_badges = True
+    if mode == "upgrade":
+        after, removed = readme.upgrade(after_ctx, before)
+    else:
+        after, removed = readme.header_only(after_ctx, before), []
+    assert readme.preservation(before, after, removed) == []
+    if transition in ("public", "owner"):
+        assert "Authored paragraph to retain." in after
+    body = badge_block(after)
+    if transition in ("add-license", "public"):
+        assert "license-MIT-" in body
+        assert "proprietary" not in body
+    elif transition == "change-license":
+        assert "license-Apache--2.0-" in body
+        assert "license-MIT-" not in body
+    elif transition == "owner":
+        assert "https://github.com/CompleteTech-Skills/.github/actions/workflows/ci.yml" in body
+        assert "https://github.com/Northwind-Trading-Co/.github/actions/workflows/ci.yml" not in body
+    else:
+        assert "docs/images/badges/" in body
+        assert "img.shields.io" not in body
+        assert after_ctx.badge_files
+
+
+def test_editing_a_generated_badge_makes_the_block_authored(make_ctx, tmp_path):
+    ctx = profile_context(make_ctx, tmp_path)
+    before = readme.scaffold(ctx)
+    edited = before.replace("type-GitHub%20profile-", "type-community-")
+    after_ctx = make_ctx(repo_dir=tmp_path, **(ctx.meta | {"license": "Apache-2.0"}))
+    after, removed = readme.upgrade(after_ctx, edited)
+    assert badge_block(after) == badge_block(edited)
+    assert readme.preservation(edited, after, removed) == []
+
+
+def test_generated_badges_do_not_exempt_authored_content_from_shrink_guard(make_ctx, tmp_path):
+    ctx = profile_context(make_ctx, tmp_path)
+    before = readme.scaffold(ctx) + "\nNever discard this authored sentence.\n"
+    after = before.replace("Never discard this authored sentence.", "")
+    assert any("Never discard" in p for p in readme.preservation(before, after, []))
