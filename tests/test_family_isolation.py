@@ -22,17 +22,11 @@ FORBIDDEN = re.compile(r'completetech|CompleteDotTech|005ADD', re.I)
 LEGIT_COMPLETETECH_ROWS = {'CompleteDotTech': 'the CompleteTech owner user account (display name is a person)'}  # the synthetic demo owner is added at runtime from brand.raw['brand_strings']['demo_owner'] (currently Northwind-Trading-Co)
 KNOWN_MISMATCHES = {'Jevelopers-neatHack-2026'}  # TicketStub; removed when task 43 lands
 
-# Org rows whose own text (the whole org row, not the banner or card) names CompleteTech. Each entry lists the
-# exact row keys that match FORBIDDEN and why. The leak test xfails only when exactly those keys match, so any
-# new leak in another key, or in the card, README header, lint output or banner style, still fails.
-KNOWN_ORG_ROW_TEXT = {
-    'AI-Ascension': (('description',), 'description ends "Steward: CompleteTech LLC." (brand.yaml); the org profile text only'),
-    'Jev-Engineering': (('description',), 'description ends "Steward: CompleteTech LLC." (brand.yaml); the org profile text only'),
-    'LibreEvolve': (('description',), 'description ends "Steward: CompleteTech LLC." (brand.yaml); the org profile text only'),
-    'jevplay-games': (('description',), 'description ends "Steward: CompleteTech LLC." (brand.yaml); the org profile text only'),
-    'romgenie-archive-repostiory': (('brand_topic', 'description'), 'brand_topic: completetech (a family topic, see topics.py) and a description naming CompleteTech LLC'),
-    'romgenie-following-repos': (('brand_topic', 'description'), 'brand_topic: completetech (a family topic, see topics.py) and a description naming CompleteTech LLC'),
-}
+# Org rows are NOT exempted here. The org blob (ctx.org) is part of the banner inputs, so a CompleteTech string in the
+# row itself fails the banner-style check: AI-Ascension, Jev-Engineering, LibreEvolve and jevplay-games carry
+# "Steward: CompleteTech LLC." in description; romgenie-archive-repostiory and romgenie-following-repos also carry
+# brand_topic: completetech. Those are findings for an owner decision (see the PR body), not documented gaps; there is
+# deliberately no per-row text allowlist, so any new leak still fails.
 
 # Rows whose card, README, lint or banner style inherit 005ADD from `defaults` would go here. The probe found none:
 # every family that is not CompleteTech overrides each token that defaults sets to 005ADD.
@@ -138,19 +132,46 @@ def synthetic_ctx(brand, owner):
     return RepoContext(brand, normalize({'owner': owner, 'repo': 'synthetic-repo', 'description': 'Synthetic repository for the leak test.', 'topics': [], 'visibility': 'public', 'language': 'Python', 'license': 'MIT', 'labels': []}), None)
 
 
-def strip_footer(md):
-    """Remove only the decision 18 footer (its <picture> block and any 'Built by' line).
-
-    Type badges are deliberately kept: a 005ADD type badge is a real leak in a non-owned header, and stripping it
-    hid one (review of task 42). Known badge rows are handled explicitly in the leak test, see KNOWN_TYPE_BADGE_GAP.
-    """
+def strip_footer_only(md):
+    """Remove only the decision 18 footer (its <picture> block and any 'Built by' line). Type badges stay."""
     out = FOOTER_PICTURE.sub('', md)
     return FOOTER_BUILT_BY.sub('', out)
 
 
+def strip_footer(md):
+    """The decision 18 footer and every 005ADD type badge image (the KNOWN_TYPE_BADGE_GAP shape)."""
+    return TYPE_BADGE_005ADD.sub('', strip_footer_only(md))
+
+
+def scene_text(scene):
+    """Every text string the scene draws, including text nested in clip children, plus the SVG title and desc.
+
+    Outlined text in the SVG is paths, so the SVG check alone cannot see a leaked eyebrow; this walks the scene.
+    """
+    from ctshowcase.scene import Text
+    out = [scene.title, scene.desc]
+
+    def walk(nodes):
+        for node in nodes:
+            if isinstance(node, Text):
+                out.append(node.text)
+            walk(getattr(node, 'children', None) or [])
+
+    walk(scene.nodes)
+    return out
+
+
+def card_leaks(ctx, fonts):
+    from ctshowcase import card
+    svg, scene, _info = card.render(ctx, fonts)
+    hits = [m.group(0) for m in FORBIDDEN.finditer(svg)]
+    hits += [m.group(0) for text in scene_text(scene) for m in FORBIDDEN.finditer(text)]
+    return hits
+
+
 @pytest.mark.parametrize('owner', ORG_OWNERS, ids=ORG_OWNERS)
 def test_org_row_renders_without_completetech_leak(owner, brand, fonts, tmp_path):
-    from ctshowcase import card, readme, readmelint
+    from ctshowcase import readme, readmelint
 
     row = brand.raw['orgs'][owner]
     if completetech_owned(owner, row, brand):
@@ -161,19 +182,21 @@ def test_org_row_renders_without_completetech_leak(owner, brand, fonts, tmp_path
     ctx = synthetic_ctx(brand, owner)
     gaps: list[str] = []  # documented gaps: every other check still runs, then one xfail reports them
 
-    # CARD
-    svg, _scene, _info = card.render(ctx, fonts)
-    assert not FORBIDDEN.search(svg), 'card leaks CompleteTech branding'
+    # CARD: the SVG and every text string in the scene (outlined text is invisible to the SVG check alone).
+    leaked = card_leaks(ctx, fonts)
+    assert not leaked, f'card leaks CompleteTech branding: {leaked}'
 
-    # README HEADER. The footer is stripped (the one CompleteTech surface allowed in a non-owned README); the type
-    # badge is not. Only the documented 005ADD badge is excused, and only for its own rows.
+    # README HEADER. The footer is the one CompleteTech surface allowed in a non-owned README, so it is removed first.
+    # A 005ADD type badge is not allowed: it is only excused for KNOWN_TYPE_BADGE_GAP rows, and only when it is there.
     md = readme.scaffold(ctx)
-    header = strip_footer(md)
+    badges = TYPE_BADGE_005ADD.findall(strip_footer_only(md))
     if owner in KNOWN_TYPE_BADGE_GAP:
-        assert TYPE_BADGE_005ADD.search(header), (
+        assert badges, (
             f'stale KNOWN_TYPE_BADGE_GAP entry for {owner}: no 005ADD type badge in the header; delete the entry')
         gaps.append(KNOWN_TYPE_BADGE_GAP[owner])
-        header = TYPE_BADGE_005ADD.sub('', header)
+    else:
+        assert not badges, f'README header carries a 005ADD type badge: {badges}'
+    header = strip_footer(md)
     leaked = [m.group(0) for m in FORBIDDEN.finditer(header)]
     assert not leaked, f'README header leaks CompleteTech branding: {leaked}'
 
@@ -186,20 +209,13 @@ def test_org_row_renders_without_completetech_leak(owner, brand, fonts, tmp_path
     lint_text = json.dumps({k: v for k, v in res.items() if k != 'file'}, default=str)
     assert not FORBIDDEN.search(lint_text), f'lint output leaks CompleteTech branding: {lint_text}'
 
-    # BANNER STYLE: the banner is a PNG, so its inputs are scanned instead of pixels.
-    if owner in KNOWN_DEFAULTS_INHERITANCE:
+    # BANNER STYLE: the banner is a PNG, so its inputs (style tokens and the whole org row) are scanned instead.
+    blob = json.dumps({'style': ctx.style, 'org': {k: v for k, v in ctx.org.items()}}, default=str)
+    if FORBIDDEN.search(blob) and owner in KNOWN_DEFAULTS_INHERITANCE:
         gaps.append(KNOWN_DEFAULTS_INHERITANCE[owner])
     else:
-        style_blob = json.dumps({'style': ctx.style}, default=str)
-        assert not FORBIDDEN.search(style_blob), 'banner style inputs leak CompleteTech branding'
-
-    # ORG ROW TEXT (banner inputs include ctx.org): a documented gap applies only when exactly the documented keys leak.
-    leaking = sorted(k for k, v in ctx.org.items() if FORBIDDEN.search(json.dumps(v, default=str)))
-    known = KNOWN_ORG_ROW_TEXT.get(owner)
-    if known is not None and leaking == sorted(known[0]):
-        gaps.append(f'org row text names CompleteTech in {leaking}: {known[1]}')
-    else:
-        assert not leaking, f'org row keys leak CompleteTech branding: {leaking}'
+        assert not FORBIDDEN.search(blob), (
+            f'banner style inputs leak CompleteTech branding: {sorted({m.group(0) for m in FORBIDDEN.finditer(blob)})}')
 
     if gaps:
         pytest.xfail('; '.join(gaps))
@@ -228,29 +244,55 @@ def test_strip_footer_removes_only_the_footer(brand):
     assert '<picture>' not in stripped and 'Built by' not in stripped
     assert not FORBIDDEN.search(stripped)
     assert '# synthetic-repo' in stripped and 'Synthetic body text.' in stripped
-    # On the full scaffold the footer goes and every other line stays, including the type badge and language badge.
+    # On the full scaffold the footer goes, and so does the 005ADD type badge (strip_footer's rule); other badges stay.
     full = strip_footer(md)
     assert '<picture>' not in full and 'Built by' not in full
     assert 'img.shields.io/badge/language-Python' in full
-    assert TYPE_BADGE_005ADD.search(full)
+    assert not TYPE_BADGE_005ADD.search(full)
+    assert TYPE_BADGE_005ADD.search(strip_footer_only(md))
 
 
-def test_strip_footer_keeps_a_type_badge(brand):
-    # Regression for the review finding: a 005ADD type badge in a header must survive the footer strip and be seen.
+def test_strip_footer_removes_a_005add_type_badge_image():
+    # strip_footer's documented rule: a 005ADD type badge image goes (KNOWN_TYPE_BADGE_GAP), and a teal one stays.
+    badge = '![Type Workspace](https://img.shields.io/badge/type-Workspace-005ADD)'
+    teal = '![Type Workspace](https://img.shields.io/badge/type-Workspace-0F766E)'
+    planted = f'# synthetic-repo\n\n{badge} {teal}\n\n<img src="https://img.shields.io/badge/type-Tool-005ADD" alt="t">\n'
+    stripped = strip_footer(planted)
+    assert 'type-Workspace-005ADD' not in stripped and 'type-Tool-005ADD' not in stripped
+    assert teal in stripped and '# synthetic-repo' in stripped
+
+
+def test_footer_only_strip_keeps_a_type_badge():
+    # Regression for the review finding: the header check must see a 005ADD type badge, so it uses the footer-only strip.
     badge = '![Type Workspace](https://img.shields.io/badge/type-Workspace-005ADD)'
     planted = f'# synthetic-repo\n\n{badge}\n'
-    assert strip_footer(planted) == planted
-    assert FORBIDDEN.search(strip_footer(planted))
+    assert strip_footer_only(planted) == planted
+    assert TYPE_BADGE_005ADD.search(strip_footer_only(planted))
+    assert FORBIDDEN.search(strip_footer_only(planted))
 
 
 def test_planted_005add_type_badge_fails_the_header_check(brand):
     # Pick-Your-AI has its own teal type badge (badge_brand). Recolouring that badge to 005ADD must be caught by the
-    # same README header check the leak test runs, not hidden by it.
+    # same README header check the leak test runs (the footer-only strip, not the badge-stripping one).
     from ctshowcase import readme
 
     ctx = synthetic_ctx(brand, 'Pick-Your-AI')
     assert not FORBIDDEN.search(strip_footer(readme.scaffold(ctx)))  # baseline: the teal badge is clean
     ctx.style = {**ctx.style, 'badge_brand': '005ADD'}
-    header = strip_footer(readme.scaffold(ctx))
+    header = strip_footer_only(readme.scaffold(ctx))
     assert TYPE_BADGE_005ADD.search(header), 'the planted recolour did not reach the README header'
     assert FORBIDDEN.search(header)
+
+
+def test_card_text_scan_catches_a_planted_eyebrow(brand, fonts, monkeypatch):
+    # Regression for the review finding: outlined eyebrow text is invisible to the SVG check. A planted CompleteTech
+    # eyebrow must be caught through the scene text, and the SVG on its own must miss it (the reason the scan exists).
+    from ctshowcase import card
+
+    ctx = synthetic_ctx(brand, 'Pick-Your-AI')
+    assert not card_leaks(ctx, fonts)  # baseline: clean card
+    monkeypatch.setattr(card, 'eyebrow', lambda _ctx: 'CompleteTech LLC')
+    svg, scene, _info = card.render(ctx, fonts)
+    assert not FORBIDDEN.search(svg), 'the SVG check was expected to miss outlined text'
+    assert any(FORBIDDEN.search(text) for text in scene_text(scene)), 'the scene text scan missed the planted eyebrow'
+    assert card_leaks(ctx, fonts)
