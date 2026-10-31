@@ -156,3 +156,18 @@ def test_reference_destination_unescapes_markdown_punctuation(make_ctx, tmp_path
     result = lint_reference(make_ctx, tmp_path, "![Shot][shot]", r"[shot]: docs/images/shot\(1\).png",
                             files=["docs/images/shot(1).png"])
     assert not any("does not resolve" in f for f in result["fails"]), result
+
+
+@pytest.mark.parametrize("document, alts", [
+    ("Use `<br>` for breaks.\n\n![ ](docs/images/screenshot.png)\n", [" "]),
+    ("Use `<br>`, `<hr>` or `<wbr>` tags.\n\n![Architecture](docs/x.png)\n" + "\n" * 60, ["Architecture"]),
+    ("`<br>`\n![Logo](docs/images/logo.png)\n", ["Logo"]),
+    ("Use `<img src=\"examples/a-very-long-example-file.png\" alt=\"example\">` here\n\n![ ](docs/images/shot.png)\n", [" "]),
+    ("```html\n<p class=\"x\">\n<img src=\"a.png\">\n```\n\n![Valid alt](docs/images/v.png)\n", ["Valid alt"]),
+    ("```html\n<img src=\"example.png\"\n```\n![Screenshot](docs/images/missing.png)\n"
+     "<img src=\"docs/images/shot.png\" alt=\"Shot\">\n", ["Screenshot", "Shot"]),
+])
+def test_html_inside_code_keeps_source_offsets(document, alts):
+    outside = readmelint._outside_code(document)
+    assert len(outside) == len(document)
+    assert [alt for alt, _ in readmelint._images(outside, document)] == alts

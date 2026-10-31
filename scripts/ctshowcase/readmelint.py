@@ -8,6 +8,7 @@ from pathlib import Path
 from urllib.parse import unquote
 
 from . import footer as footermod
+from .mdcode import code_spans
 from .context import RepoContext
 from .detect import standard
 from .readme import BANNER_BLOCK, EMOJI, MARK, is_footer_like, masked, normalize_text, nav_first, preserved, split_sections
@@ -48,24 +49,32 @@ class _HTMLTokens(HTMLParser):
             self.images.append((first.get("alt") or "", first.get("src") or "", start, end))
 
 
+def _blank(text: str, a: int, b: int, fill: str = " ") -> str:
+    return text[:a] + re.sub(r"[^\n]", fill, text[a:b]) + text[b:]
+
+
 def _outside_code(text: str) -> str:
-    """Mask Markdown code without interpreting literal backticks in HTML attributes as code."""
-    out, replacements, pos = [], [], 0
-    for index, (start, end) in enumerate(_HTMLTokens(text).tags):
+    """Mask Markdown code without interpreting literal backticks in HTML attributes as code.
+    The result always has the same length (and newline positions) as `text`."""
+    # fenced code is blanked before HTML tokenizing so an unfinished example tag cannot swallow the closing fence
+    tokenized = text
+    for a, b in code_spans(text):
+        if re.match(r" {0,3}(`{3,}|~{3,})", text[a:a + 8]):
+            tokenized = _blank(tokenized, a, b)
+    protected, replacements = text, []
+    for start, end in _HTMLTokens(tokenized).tags:
         raw = text[start:end]
-        key = f"\x01showcase-html-{index}\x02"
-        while key in text:
-            key += "x"
-        key += "\n" * raw.count("\n")
-        out.extend((text[pos:start], key))
-        replacements.append((key, raw))
-        pos = end
-    out.append(text[pos:])
+        key = re.sub(r"[^\n]", "\x02", raw)
+        if key[:1] != "\n":
+            key = "\x01" + key[1:]
+        protected = protected[:start] + key + protected[end:]
+        replacements.append((start, end, key, raw))
     # blank comments in place (keep newlines) so offsets stay valid for the original document
-    protected = re.sub(r"<!--.*?-->", lambda m: re.sub(r"[^\n]", " ", m.group(0)), "".join(out), flags=re.S)
+    protected = re.sub(r"<!--.*?-->", lambda m: re.sub(r"[^\n]", " ", m.group(0)), protected, flags=re.S)
     protected = masked(protected)
-    for key, raw in replacements:
-        protected = protected.replace(key, raw)
+    for start, end, key, raw in replacements:
+        if protected[start:end] == key:
+            protected = protected[:start] + raw + protected[end:]
     return protected.replace("\x00", " ")
 
 
