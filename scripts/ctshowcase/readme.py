@@ -542,6 +542,12 @@ FOOTER_TAG = re.compile(r"</?(p|div|a|picture|source|img|br|sub|sup|b|strong|em)
 
 FOOTER_ATTR = re.compile(r"""\b(src|srcset|alt)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""", re.I)
 
+FOOTER_HREF = re.compile(r"""\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""", re.I)
+
+# one whole attribute (name plus optional quoted or bare value), so a name or value inside another attribute's quotes
+# (title="href=...") is never read as an attribute of its own
+FOOTER_ATTR_TOKEN = re.compile(r"""\s*([^\s"'=>/]+)(\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))?""")
+
 OLD_LOCAL_LOGOS = {'assets/logo.png', 'logo.png', 'assets/logo-dark.png', 'logo-dark.png'}
 
 
@@ -576,6 +582,31 @@ def _own_site_logo(url: str, brand) -> bool:
         return False
 
 
+def _footer_href_ok(href: str, brand) -> bool:
+    """`href` is an http(s) link to the configured footer link host (`footer.href`, never hardcoded): the same hostname,
+    case-insensitively, with a leading `www.` equivalent on either side; no userinfo, port or other host. Path, query
+    and fragment are ignored. A suffix, look-alike or partner host, or a complete.tech mention outside the host, is not."""
+    import html
+    from urllib.parse import urlsplit
+    try:
+        got = urlsplit(html.unescape(href).strip())
+        want = urlsplit(brand.raw["footer"]["href"])
+        if got.scheme not in ("http", "https") or got.hostname is None:
+            return False
+        if got.username is not None or got.password is not None or got.port is not None:
+            return False
+        if want.hostname is None:
+            return False
+
+        def _norm(host: str) -> str:
+            host = host.lower()
+            return host[4:] if host.startswith("www.") else host
+
+        return _norm(got.hostname) == _norm(want.hostname)
+    except ValueError:
+        return False
+
+
 def _footer_logo_url(url: str, brand) -> bool:
     """`url` is one of the decision 18 footer's own logo files (brand footer `logo_light_url` or `logo_dark_url`),
     including explicitly configured legacy URLs, or drifted only in scheme, branch, query or the github.com
@@ -599,7 +630,7 @@ def _footer_logo_url(url: str, brand) -> bool:
 
 def is_footer_copy(block: str, brand, loose_src: bool = False, own_site: bool = False) -> bool:
     """Every line of `block` is a line of the decision 18 footer or a drifted copy of one: only centring, link, logo,
-    `<br>`/`<sub>` markup, with complete.tech links, the footer's own logo image (its src or srcset is the brand footer
+    `<br>`/`<sub>` markup, with anchors that target the configured footer link host (`footer.href`), the footer's own logo image (its src or srcset is the brand footer
     logo URL or a drifted form of it; an image without src/srcset passes on an alt that is exactly the company) and as text only the credit line ("Built by
     <company>", optionally with the suffix). The former local logo files (assets/logo.png and the other `OLD_LOCAL_LOGOS`) are also recognized when the image's alt is exactly the company or the footer alt. A sponsor or partner image (whatever its file name), a thanks line or
     any other authored text makes it not a footer copy, so it is never removed. `loose_src=True` keeps the original
@@ -625,7 +656,13 @@ def is_footer_copy(block: str, brand, loose_src: bool = False, own_site: bool = 
         if m.group(0).startswith("</") or name not in ("a", "img", "source"):
             return True
         if name == "a":
-            return "complete.tech" in attrs.lower()
+            href = None
+            for tok in FOOTER_ATTR_TOKEN.finditer(attrs):  # first href attribute, as a browser reads it
+                if tok.group(1).lower() == "href":
+                    hm = FOOTER_HREF.search(tok.group(0))
+                    href = next((g for g in hm.groups() if g is not None), None) if hm else None
+                    break
+            return href is not None and _footer_href_ok(href, brand)
         alt_ok, urls = False, []
         for a in FOOTER_ATTR.finditer(attrs):  # never a file name that merely contains "logo"
             key = a.group(1).lower()
