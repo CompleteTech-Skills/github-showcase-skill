@@ -531,10 +531,20 @@ def preserved(ctx: RepoContext, text: str) -> bool:
 CENTRED_OPEN = re.compile(r'(?m)^[ \t]*<(p|div) align="center">')
 
 
-def is_footer_like(block: str) -> bool:
-    """A centred block that credits the company with a complete.tech link: the decision 18 footer, exact or drifted."""
-    return bool(re.match(r'\s*<(p|div) align="center">', block)) and "built by" in block.lower() \
-        and "complete.tech" in block.lower()
+def is_footer_like(block: str, brand=None) -> bool:
+    """A centred block that credits the company with a complete.tech link (or, given `brand`, a link to the configured
+    footer host): the decision 18 footer, exact or drifted. A cheap pre-filter; `is_footer_copy` decides what is removed."""
+    low = block.lower()
+    hosts = ["complete.tech"]
+    if brand is not None:
+        from urllib.parse import urlsplit
+        try:
+            h = (urlsplit(brand.raw["footer"]["href"]).hostname or "").lower()
+        except (KeyError, TypeError, ValueError):
+            h = ""
+        if h:
+            hosts.append(h[4:] if h.startswith("www.") else h)
+    return bool(re.match(r'\s*<(p|div) align="center">', block)) and "built by" in low and any(h in low for h in hosts)
 
 
 FOOTER_TAG = re.compile(r"</?(p|div|a|picture|source|img|br|sub|sup|b|strong|em)\b([^>]*)>", re.I)
@@ -703,7 +713,7 @@ def drop_old_footer(text: str, brand, loose_src: bool = False, own_site: bool = 
         return text, []
     m = opens[-1]
     tail = body[m.start():]
-    if not tail.rstrip().endswith(f"</{m.group(1)}>") or not is_footer_like(tail) or not is_footer_copy(tail, brand, loose_src, own_site):
+    if not tail.rstrip().endswith(f"</{m.group(1)}>") or not is_footer_like(tail, brand) or not is_footer_copy(tail, brand, loose_src, own_site):
         return text, []
     return body[:m.start()].rstrip() + "\n", [ln for ln in tail.splitlines() if ln.strip()]
 

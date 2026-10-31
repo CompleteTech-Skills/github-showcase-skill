@@ -43,9 +43,9 @@ POSITIVE_SRCS = [
 ]
 
 
-def unmarked(src, alt="CompleteTech LLC"):
-    return ('<p align="center"><a href="https://www.complete.tech"><img src="%s" alt="%s" width="160"></a><br>%s</p>'
-            % (src, alt, CREDIT))
+def unmarked(src, alt="CompleteTech LLC", href=OWN_SITE_HOST):
+    return ('<p align="center"><a href="%s"><img src="%s" alt="%s" width="160"></a><br>%s</p>'
+            % (href, src, alt, CREDIT.replace(OWN_SITE_HOST, href)))
 
 
 def image_lines(text, src):
@@ -94,7 +94,7 @@ def test_own_site_host_is_derived_from_brand_data(brand, tmp_path):
     derived = Brand(raw, brand.path)
     ctx = RepoContext(derived, normalize(meta_dict()), tmp_path)
     own = DERIVED_HOST + "/wp-content/uploads/logo.png"
-    before = readme.scaffold(ctx).replace(footer.block(derived), unmarked(own))
+    before = readme.scaffold(ctx).replace(footer.block(derived), unmarked(own, href=DERIVED_HOST))
     assert own in before
     after, removed = readme.upgrade(ctx, before)
     assert after.count("Built by") == 1 and own not in after
