@@ -29,15 +29,25 @@ DARK_PLATE = 0.2     # relative luminance under which a plate gets the accent ed
 PIXEL_GRIDS = (16, 24, 32, 48, 64, 96, 128)
 
 
-def corner_ground(im: Image.Image) -> str | None:
-    """Hex of the icon's own ground when its four corners are opaque and alike, else None."""
+def corner_spread(im: Image.Image) -> float | None:
+    """Largest pairwise ΔE between the four corners, or None when a corner is not opaque."""
     rgba = im.convert("RGBA")
     w, h = rgba.size
     px = [rgba.getpixel(p) for p in ((0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1))]
     if any(p[3] < 255 for p in px):
         return None
-    if max(delta_e(a[:3], b[:3]) for a, b in combinations(px, 2)) >= GROUND_DE:
+    return max(delta_e(a[:3], b[:3]) for a, b in combinations(px, 2))
+
+
+def corner_ground(im: Image.Image, tolerance: float = GROUND_DE) -> str | None:
+    """Hex of the icon's own ground when its four corners are opaque and within `tolerance` ΔE of each other
+    (`--ground-tolerance`, default GROUND_DE), else None."""
+    spread = corner_spread(im)
+    if spread is None or spread > tolerance:
         return None
+    rgba = im.convert("RGBA")
+    w, h = rgba.size
+    px = [rgba.getpixel(p) for p in ((0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1))]
     return hexstr(tuple(round(sum(p[i] for p in px) / 4) for i in range(3)))
 
 

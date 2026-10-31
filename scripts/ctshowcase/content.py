@@ -21,7 +21,9 @@ import html
 import io
 import json
 import re
+import shutil
 import subprocess
+import tempfile
 import time
 import unicodedata
 import urllib.error
@@ -1874,6 +1876,11 @@ def _template(text: str, section: str) -> str | None:
     return m.group(1) if m else None
 
 
+def ground_clause(card: str) -> str:
+    return (f"Fill the entire background with one perfectly flat {card.upper()} colour: no vignette, texture, "
+            "gradient, shadow or glow in the background.")
+
+
 def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = None, option: str = "A",
                 language: str | None = None, skill_art: str | None = None, seed: int | None = None) -> dict:
     """The Codex prompt for a repository icon (f.3 option A: the (d) template with "repo icon" for "avatar"; option
@@ -1956,9 +1963,9 @@ def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = Non
                                      "48 px (f.3).")
         if slots.get("SPARK_NAME"):
             slots["SPARK_EXCLUSIVITY"] = f" and the only element in {slots['SPARK_NAME']}"
-        if slots.get("GLOW_HEX"):
-            slots["POOL"] = (f"one very soft round pool of {slots['GLOW_HEX']} light at about 10% strength, about 880 px "
-                             "across, centred behind the glyph and fading to nothing well before the edges")
+        # a repo icon sits on the flat card ground (#52): the estate template's avatar light pool is never requested;
+        # a stray {POOL} outside the BACKGROUND section (rewritten below) still reads as no glow
+        slots["POOL"] = "no light pool, glow or vignette"
         size = str(glyph.get("SIZE_CLASS") or "").upper()
         if size in SIZE_CLASSES:
             slots["SIZE_CLASS"] = f"{size}: {SIZE_CLASSES[size]}"
@@ -1989,6 +1996,14 @@ def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = Non
                                 "It joins the 28 Neon Night avatars and its sibling repo icons as one matched family")
         prompt = prompt.replace("(identical in all 28 repo icons)", "(identical to the Neon Night avatars)")
         prompt = prompt.replace("same model and version for all 28", "same model and version as the avatar set")
+        card = ctx.style["tokens"]["card_fill"]
+        prompt = prompt.replace("Keep the background empty and the glyph inside",
+                                ground_clause(card) + " Keep the glyph inside")
+        # the estate-format (d) template's numbered BACKGROUND section (one paragraph) asks for the avatars' night
+        # tile and light pool; a repo icon's ground is the flat card colour instead (#52/#53). Only that paragraph is
+        # replaced; every other section of the template is kept.
+        prompt = re.sub(r"^(\d+ BACKGROUND)\b(?:[^\n]|\n(?!\s*\n))*", lambda m: f"{m.group(1)}. {ground_clause(card)}",
+                        prompt, flags=re.M)
         for k, v in slots.items():
             if v is not None:
                 prompt = prompt.replace("{" + k + "}", str(v))
@@ -2049,32 +2064,54 @@ def _de(a, b) -> float:
     return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2) ** 0.5
 
 
-def normalize_icon(img, ground: str = "auto", card: str | None = None, pixel_art: bool = False):
+def normalize_icon(img, ground: str = "auto", card: str | None = None, pixel_art: bool = False,
+                   tolerance: float | None = None):
     """(1024 px RGBA or RGB image, info). Transparent icons are keyed (ΔE ≤ 6 from the ground, 2 px feather),
     trimmed to their alpha box and fitted to the 688 px live area; an icon with its own opaque ground (an avatar-style
-    night tile) is kept full-bleed (`ground="keep"`)."""
+    night tile) is kept full-bleed (`ground="keep"`). In auto mode only a dark ground (relative luminance < 0.2) that is
+    not within dE 12 of the card colour is kept as a night tile; every other uniform ground is keyed out. The four
+    corners count as one ground when they are within `tolerance` dE (default 3.0, `--ground-tolerance`)."""
     from PIL import Image, ImageFilter
     from .color import rgb as hexrgb
-    from .iconbox import corner_ground, native_pixels
+    from .iconbox import DARK_PLATE, GROUND_DE, corner_ground, corner_spread, native_pixels
+    from .color import luminance
+    tol = GROUND_DE if tolerance is None else float(tolerance)
     im = img.convert("RGBA")
     info: dict = {"source_px": list(im.size)}
     corners = [im.getpixel(p) for p in ((0, 0), (im.width - 1, 0), (0, im.height - 1), (im.width - 1, im.height - 1))]
     has_alpha = any(c[3] < 255 for c in corners)
-    gnd = None if has_alpha else corner_ground(im)
+    gnd = None if has_alpha else corner_ground(im, tol)
+    spread = None if has_alpha else corner_spread(im)
     mode = ground
     if mode == "auto":
         if has_alpha:
             mode = "transparent"
         elif gnd is None:
-            raise ArtFail("icon-ground", "corners are neither transparent nor one opaque ground")
+            raise ArtFail("icon-ground", f"corners are neither transparent nor one opaque ground: measured corner dE "
+                                         f"{spread:.2f} exceeds --ground-tolerance {tol:g}; raise --ground-tolerance "
+                                         "(e.g. 5) for a slightly vignetted ground, or ask for a flat one")
         else:
             lab = _lab_cache()
+            # Measured: pure black versus the dark card colour is dE 16.5 (> CONTENT_DE 12), so it is NOT
+            # near-card and stays a night tile (kept). Pale grounds are keyed out by luminance (> DARK_PLATE).
             near_card = card is not None and _de(lab(hexrgb(gnd)), lab(hexrgb(card))) <= CONTENT_DE
-            mode = "transparent" if near_card else "keep"
+            night_tile = (not near_card) and luminance(gnd) < DARK_PLATE
+            mode = "keep" if night_tile else "transparent"
+            info["auto_reason"] = "near-card" if near_card else ("night-tile" if night_tile else "uniform-ground")
     info["mode"] = mode
     if mode == "keep":
         if gnd is None:
-            raise ArtFail("icon-ground", "--ground keep needs four opaque corners of one colour")
+            raise ArtFail("icon-ground", "--ground keep needs four opaque corners of one colour"
+                          + ("" if spread is None else f" (measured corner dE {spread:.2f} exceeds --ground-tolerance {tol:g})"))
+        if spread and spread > GROUND_DE:
+            # Tolerance was raised above the default: flatten the vignette to one ground so the kept tile's corners
+            # agree at the default tolerance that icon_qa, tile.py and iconbox.py use (issue #52 review).
+            lab = _lab_cache()
+            g = lab(hexrgb(gnd))
+            flat = hexrgb(gnd) + (255,)
+            px = _px(im)
+            im = im.copy()
+            im.putdata([flat if _de(lab(p[:3]), g) <= KEY_DE + spread else p for p in px])
         side = max(im.size)
         sq = Image.new("RGBA", (side, side), hexrgb(gnd) + (255,))
         sq.paste(im, ((side - im.width) // 2, (side - im.height) // 2))
@@ -2083,12 +2120,18 @@ def normalize_icon(img, ground: str = "auto", card: str | None = None, pixel_art
         return out, info
     if not has_alpha:
         if gnd is None:
-            raise ArtFail("icon-ground", "no transparent or uniform ground to key out")
+            raise ArtFail("icon-ground", "no transparent or uniform ground to key out"
+                          + ("" if spread is None else f" (measured corner dE {spread:.2f} exceeds --ground-tolerance {tol:g})"))
         lab = _lab_cache()
         g = lab(hexrgb(gnd))
         src = _px(im)
+        # Widen the key only when --ground-tolerance was raised above the default, so explicit modes and
+        # in-tolerance grounds key exactly as before (KEY_DE); a vignetted ground drifts up to the spread from its mean.
+        # The widening follows the requested tolerance (not the corner spread): a radial vignette has matching
+        # corners (spread 0) but a darker interior, so --ground-tolerance must still widen the key (review B, #52).
+        key_de = KEY_DE + (max(spread or 0.0, tol) if tol > GROUND_DE else 0.0)
         mask = Image.new("L", im.size)
-        mask.putdata([0 if _de(lab(p[:3]), g) <= KEY_DE else 255 for p in src])
+        mask.putdata([0 if _de(lab(p[:3]), g) <= key_de else 255 for p in src])
         alpha = _min(mask, mask.filter(ImageFilter.GaussianBlur(2)))  # 2 px feather inside the edge, no ground halo
         gr, gg, gb = hexrgb(gnd)
         rgba = []
@@ -2157,10 +2200,83 @@ def _dhash(img, size: int = 16) -> int:
     return bits
 
 
+ICON_MIN_CONTRAST = 3.0  # default contrast floor of the icon ink on the card (E3.2.2)
+
+
+def icon_contrast_floor(cli_value, family_value) -> float:
+    """The contrast floor of the icon ink on the card: `--min-contrast`, else the family key `icon_min_contrast`, else
+    3.0. Only 1 to 21 is valid (WCAG contrast range); a bool or non-number is refused."""
+    value = cli_value if cli_value is not None else family_value if family_value is not None else ICON_MIN_CONTRAST
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not 1 <= value <= 21:
+        raise ShowcaseError(f"--min-contrast / icon_min_contrast must be between 1 and 21, got {value}", log="usage")
+    return float(value)
+
+
+def icon_ground_tolerance(value) -> float:
+    """`--ground-tolerance`: a finite corner dE from 0 to CONTENT_DE (12). NaN would make every `spread > tol` test
+    false (any four opaque corners become one averaged ground) and a huge value widens the key (KEY_DE + tol) until it
+    keys the whole image, so both are refused as usage errors, as `--min-contrast` is (review A, epic #51). Above 12
+    the corners may differ by more than what icon_qa counts as content, so they are no longer one ground."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= CONTENT_DE:
+        raise ShowcaseError(f"--ground-tolerance must be a dE between 0 and {CONTENT_DE:g}, got {value}", log="usage")
+    return float(value)
+
+
+def _tesseract() -> str | None:
+    """The `tesseract` executable on PATH, or None. OCR is optional: this tool never installs it."""
+    return shutil.which("tesseract")
+
+
+def _flatten_on_card(png: bytes, card: str) -> bytes:
+    """The icon composited on the real card colour, as it is seen on the card. Flattening on white would erase white
+    lettering on a dark card before OCR; an unreadable PNG is returned unchanged."""
+    from PIL import Image
+    try:
+        im = Image.open(io.BytesIO(png)).convert("RGBA")
+        flat = Image.alpha_composite(Image.new("RGBA", im.size, _hex_rgba(card)), im).convert("RGB")
+        buf = io.BytesIO()
+        flat.save(buf, "PNG")
+        return buf.getvalue()
+    except (OSError, ValueError):
+        return png
+
+
+def _ocr_words(png: bytes, exe: str) -> list[str] | None:
+    """The words of 2+ letters or digits (Unicode-aware) tesseract reads from the icon (opaque callers pass it already flattened), or None when the tool cannot run
+    (OSError, timeout or a non-zero exit). Single characters and punctuation are noise and are ignored."""
+    from PIL import Image
+    try:
+        im = Image.open(io.BytesIO(png)).convert("RGBA")
+        flat = Image.new("RGBA", im.size, (255, 255, 255, 255))
+        flat = Image.alpha_composite(flat, im).convert("RGB")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "icon.png"
+            flat.save(path, "PNG")
+            done = subprocess.run([exe, str(path), "stdout", "--psm", "11"], capture_output=True, text=True,
+                                  encoding="utf-8", errors="replace", timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if done.returncode != 0:
+        return None
+    return re.findall(r"[^\W_]{2,}", done.stdout)
+
+
 def icon_qa(data: bytes, *, card: str, ink: list[str] | None = None, org_mark: Path | None = None,
-            siblings: list[str] | None = None) -> dict:
+            siblings: list[str] | None = None, strict: bool = False, min_contrast: float = 3.0,
+            ocr: bool = False, exact_contrast: bool = False) -> dict:
     """Automated icon checks (f.3, art QA): size, budget, alpha, live area, coverage, contrast on the card, family
-    inks, not the org glyph, one file. OCR and the 48 px set sheet stay manual."""
+    inks, not the org glyph, one file. The 48 px set sheet stays manual. `strict` makes a failing family-ink
+    check fail the icon (default: warn); with no `ink` the family-ink check is not emitted at all. `min_contrast` is
+    the contrast floor of the dominant ink on the card (default 3.0; see icon_contrast_floor). The dominant ink is the
+    most common 16-level colour bucket; by default its contrast is measured at the bucket midpoint (legacy). With
+    `exact_contrast` (set when a floor was explicitly configured) it is measured at the most common actual RGB in that
+    bucket, because the midpoint can be up to 8 levels per channel off: grey 128 on a dark teal card is really 4.06:1
+    but its midpoint (grey 136) measures 4.52:1, a false pass at 4.5; grey 112 on a pale card is 4.73:1 but its
+    midpoint (grey 120) measures 4.22:1, a false fail (test_icon_explicit_floor_measures_actual_ink_not_bucket_midpoint).
+    `ocr` (opt-in, off by
+    default) reads the icon with tesseract on PATH: words of 2+ alphanumerics are text, warn (fail with `strict`);
+    without tesseract, or when it fails, no-text stays manual and `logs` names needs-input:ocr-unavailable or
+    needs-input:ocr-failed. Only with `ocr` is a `logs` key returned."""
     from PIL import Image
     from .color import contrast, hexstr, rgb as hexrgb
     from .pnglint import validate_png
@@ -2172,7 +2288,7 @@ def icon_qa(data: bytes, *, card: str, ink: list[str] | None = None, org_mark: P
         w, h, colour = validate_png(data)
     except ValueError as exc:
         add("png", False, str(exc))
-        return {"result": "fail", "checks": checks}
+        return {"result": "fail", "checks": checks, **({"logs": []} if ocr else {})}
     add("png", True)
     add("size", (w, h) == (ICON_PX, ICON_PX), f"{w}x{h}")
     add("bytes", len(data) <= ICON_BUDGET, f"{len(data)} <= {ICON_BUDGET}")
@@ -2215,12 +2331,22 @@ def icon_qa(data: bytes, *, card: str, ink: list[str] | None = None, org_mark: P
         for p in ink_px:
             key = (p[0] // 16 * 16 + 8, p[1] // 16 * 16 + 8, p[2] // 16 * 16 + 8)
             counts[key] = counts.get(key, 0) + 1
-        dom = hexstr(max(counts, key=counts.get))
-        cr = contrast(dom, card)
-        add("contrast-on-card", cr >= 3.0, f"dominant ink {dom} on {card}: {cr:.2f}:1 (>= 3:1)")
+        bucket = max(counts, key=counts.get)
+        dom = hexstr(bucket)
+        measured = dom
+        if exact_contrast:
+            exact: dict = {}
+            for p in ink_px:
+                if (p[0] // 16 * 16 + 8, p[1] // 16 * 16 + 8, p[2] // 16 * 16 + 8) == bucket:
+                    exact[p[:3]] = exact.get(p[:3], 0) + 1
+            measured = hexstr(max(exact, key=exact.get))
+        cr = contrast(measured, card)
+        floor = float(min_contrast)
+        add("contrast-on-card", cr >= floor, f"dominant ink {measured} on {card}: {cr:.2f}:1 (>= {floor:g}:1)")
         if ink:
             near = min(_de(lab(hexrgb(dom)), lab(hexrgb(x))) for x in ink)
-            add("family-ink", near <= 12, f"dominant ink {dom}, nearest family ink ΔE {near:.1f}", level="warn")
+            add("family-ink", near <= 12, f"dominant ink {dom}, nearest family ink ΔE {near:.1f}",
+                level="fail" if strict else "warn")
     else:
         add("contrast-on-card", False, "no opaque ink")
     if org_mark and Path(org_mark).is_file() and Path(org_mark).stat().st_size > 0:
@@ -2233,10 +2359,31 @@ def icon_qa(data: bytes, *, card: str, ink: list[str] | None = None, org_mark: P
             add("not-org-glyph", True, f"org mark unreadable: {str(exc)[:60]}", level="warn")
     bad = [s for s in siblings or [] if re.search(r"icon[-_.](dark|light)\.", s, re.I)]
     add("one-file", not bad, ", ".join(bad) or "no -dark or -light sibling (decision 21)")
-    checks.append({"check": "no-text", "result": "manual", "detail": "OCR and the 48 px org sheet are reviewed (f.3, g)"})
+    logs: list[str] = []
+    if not ocr:
+        checks.append({"check": "no-text", "result": "manual", "detail": "OCR and the 48 px org sheet are reviewed (f.3, g)"})
+    else:
+        exe = _tesseract()
+        if exe is None:
+            checks.append({"check": "no-text", "result": "manual", "detail": "tesseract not installed: OCR skipped, "
+                           "no-text stays a manual review (needs-input:ocr-unavailable)"})
+            logs.append("needs-input:ocr-unavailable")
+        else:
+            words = _ocr_words(_flatten_on_card(data, card), exe)
+            if words is None:
+                checks.append({"check": "no-text", "result": "manual",
+                               "detail": "tesseract failed: no-text stays a manual review"})
+                logs.append("needs-input:ocr-failed")
+            elif words:
+                add("no-text", False, "OCR found text: " + ", ".join(words[:5]), level="fail" if strict else "warn")
+            else:
+                add("no-text", True, "OCR found no text")
     res = "fail" if any(c["result"] == "fail" for c in checks) else (
         "warn" if any(c["result"] == "warn" for c in checks) else "pass")
-    return {"result": res, "checks": checks, "dominant_ink": dom}
+    out = {"result": res, "checks": checks, "dominant_ink": dom}
+    if ocr:
+        out["logs"] = logs
+    return out
 
 
 # =====================================================================================================
@@ -2284,10 +2431,20 @@ def add_parser(sub, cli=None):
                                             "provenance; default: not supported, no seed is requested)")
     a.add_argument("--in", dest="src", help="normalize: the returned candidate PNG")
     a.add_argument("--ground", choices=("auto", "transparent", "keep"), default="auto")
+    a.add_argument("--ground-tolerance", type=float, default=3.0, metavar="DE",
+                   help="normalize: corners within this dE are one ground (default 3.0; try 5 for a vignetted ground; "
+                        "0 to 12)")
     a.add_argument("--out", help="prompt: the prompt file (art/prompts/<org>/<repo>/icon.md); normalize: the icon "
                                  "(default assets/icon.png in the checkout); check: the icon to check")
     a.add_argument("--preview", help="normalize: also write a 48 px preview on the card colour")
     a.add_argument("--allow-hold", action="store_true", help="work on a family that is on hold (as banner and card)")
+    a.add_argument("--strict", action="store_true", help="fail (not warn) when the dominant ink is not a family ink; "
+                                                         "also set by the family key icon_strict_family_ink")
+    a.add_argument("--min-contrast", type=float, default=None,
+                   help="contrast floor of the icon ink on the card plate (default: family key icon_min_contrast, "
+                        "else 3.0; 4.5 is recommended)")
+    a.add_argument("--ocr", action="store_true", help="also OCR the icon for text with tesseract when installed "
+                                                      "(skipped with needs-input:ocr-unavailable otherwise)")
 
     a = cs.add_parser("links", parents=[common], help="CQ-04: relative links, anchors and remote targets")
     a.add_argument("files", nargs="*", help="Markdown files (default: displayed README, docs/**, .github/*.md, profile)")
@@ -2571,6 +2728,8 @@ def _cmd_icon(args, cli, resolver, head):
     card = ctx.style["tokens"]["card_fill"]
     org = org_row(resolver, ctx.brand, ctx.owner)
     mark = ctx.brand.asset(org.get("mark"))
+    strict = bool(getattr(args, "strict", False) or ctx.style.get("icon_strict_family_ink"))
+    ocr = bool(getattr(args, "ocr", False))
     if args.icon_action == "prompt":
         art = load_art_direction(args.art_direction)
         glyph = None
@@ -2609,6 +2768,10 @@ def _cmd_icon(args, cli, resolver, head):
                    facts=res["facts"], render=res["render"], prompt=res["prompt"], markdown=None if out else md,
                    logs=logs, note=note)
         return obj, _code(result)
+    floor = icon_contrast_floor(getattr(args, "min_contrast", None), ctx.style.get("icon_min_contrast"))
+    # an explicitly configured floor is measured on the actual ink, not the bucket midpoint (review B, epic #51); the
+    # unconfigured default keeps the legacy midpoint measurement so existing pass/fail results do not move
+    exact = getattr(args, "min_contrast", None) is not None or ctx.style.get("icon_min_contrast") is not None
     ink = []
     try:
         art = load_art_direction(args.art_direction)
@@ -2620,14 +2783,18 @@ def _cmd_icon(args, cli, resolver, head):
     if args.icon_action == "normalize":
         if not args.src:
             raise ShowcaseError("content icon normalize needs --in CANDIDATE.png", log="usage")
+        tolerance = icon_ground_tolerance(args.ground_tolerance)
         src = Image.open(args.src)
         src.load()
-        img, info = normalize_icon(src, args.ground, card, pixel_art=bool(ctx.style.get("icon_pixel_art")))
+        img, info = normalize_icon(src, args.ground, card, pixel_art=bool(ctx.style.get("icon_pixel_art")),
+                                  tolerance=tolerance)
         data, qlogs = icon_bytes(img)
-        qa = icon_qa(data, card=card, ink=ink, org_mark=mark, siblings=siblings)
+        qa = icon_qa(data, card=card, ink=ink, org_mark=mark, siblings=siblings, strict=strict, min_contrast=floor,
+                     ocr=ocr, exact_contrast=exact)
         out = Path(args.out) if args.out else cli.default_out(args, "assets/icon.png")
         if qa["result"] == "fail":
-            return dict(head, result="fail", out=None, info=info, qa=qa, logs=ctx.logs + qlogs + ["art-fail:icon-qa"],
+            return dict(head, result="fail", out=None, info=info, qa=qa,
+                        logs=ctx.logs + qlogs + qa.get("logs", []) + ["art-fail:icon-qa"],
                         note="nothing written"), CHECK_FAILED
         cli.write_bytes(out, data)
         if args.preview:
@@ -2635,13 +2802,15 @@ def _cmd_icon(args, cli, resolver, head):
             prev.alpha_composite(img.convert("RGBA").resize((48, 48), Image.LANCZOS))
             cli.write_bytes(Path(args.preview), _png(prev.convert("RGB")))
         return dict(head, result=qa["result"], out=str(out), bytes=len(data),
-                    sha256=hashlib.sha256(data).hexdigest(), info=info, qa=qa, logs=ctx.logs + qlogs), OK
+                    sha256=hashlib.sha256(data).hexdigest(), info=info, qa=qa,
+                    logs=ctx.logs + qlogs + qa.get("logs", [])), OK
     path = Path(args.out) if args.out else (rd / "assets" / "icon.png" if rd else None)
     if path is None or not path.is_file():
         return dict(head, result="fail", file=str(path) if path else None, logs=ctx.logs + ["needs-input:repo-icon"]), \
             CHECK_FAILED
-    qa = icon_qa(path.read_bytes(), card=card, ink=ink, org_mark=mark, siblings=siblings)
-    return dict(head, result=qa["result"], file=str(path), qa=qa, logs=ctx.logs), _code(qa["result"])
+    qa = icon_qa(path.read_bytes(), card=card, ink=ink, org_mark=mark, siblings=siblings, strict=strict,
+                 min_contrast=floor, ocr=ocr, exact_contrast=exact)
+    return dict(head, result=qa["result"], file=str(path), qa=qa, logs=ctx.logs + qa.get("logs", [])), _code(qa["result"])
 
 
 def _hex_rgba(value: str) -> tuple[int, int, int, int]:

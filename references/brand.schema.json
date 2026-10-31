@@ -223,6 +223,14 @@
     },
     "icon_pixel_art": {
      "type": "boolean"
+    },
+    "icon_strict_family_ink": {
+     "type": "boolean"
+    },
+    "icon_min_contrast": {
+     "type": "number",
+     "minimum": 1,
+     "maximum": 21
     }
    }
   },
