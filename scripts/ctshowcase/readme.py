@@ -470,7 +470,8 @@ def callout_only(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
     follows its §5.4 variant instead: pass that variant with `readme --variant`.
     Returns (text, removed lines): a recognized old footer (marked or unmarked, `is_footer_copy`: for example one with
     the former logo URLs) is replaced by the current one, and its lines are reported so the preservation check accepts
-    them. A marked footer that is not a footer copy (a partner image) is left as it is."""
+    them. A marked footer that is not a footer copy (a partner image) is left as it is. A removed recognized footer is
+    always replaced, even when fenced example text makes check() report drift."""
     if ctx.det["variant"] == "G" and ctx.brand.readme_opts.get("fork_readme") == "full":
         ctx.log("needs-input:fork-variant (q27 full treatment: pass readme --variant for the §5.4 variant)")
     body = text
@@ -495,17 +496,21 @@ def callout_only(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
     out = lead_banner + out.lstrip("\n")
     removed: list[str] = []
     if footer_wanted(ctx):
+        had_footer = False
         if footermod.check(ctx.brand, out)[0] != "pass":
             pos, kept = 0, []
             for fm in find_blocks(MARK, out):
                 if fm.group(1) == "footer" and is_footer_copy(fm.group(2), ctx.brand):
                     kept.append(out[pos:fm.start()])
                     removed += [ln for ln in fm.group(2).splitlines() if ln.strip()]
+                    had_footer = True
                     pos = fm.end()
             out = "".join(kept) + out[pos:]
             out, old_footer = drop_old_footer(out, ctx.brand)
             removed += old_footer
-        if footermod.check(ctx.brand, out)[0] == "fail:missing":
+            if old_footer:
+                had_footer = True
+        if had_footer or footermod.check(ctx.brand, out)[0] == "fail:missing":
             out = out.rstrip("\n") + "\n\n" + footermod.block(ctx.brand) + "\n"
     return out, removed
 
