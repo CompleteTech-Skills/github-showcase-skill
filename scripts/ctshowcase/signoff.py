@@ -268,16 +268,44 @@ def _repo_list(repos) -> list[str] | None:
     return None
 
 
+def _repos_malformed(rec: dict) -> bool:
+    """True when problems() reports the `repos:` break: `repos` is neither a non-empty string nor a non-empty list of
+    non-empty strings."""
+    repos = rec.get("repos")
+    if isinstance(repos, str) and repos.strip():
+        return False
+    if isinstance(repos, list) and repos and all(isinstance(x, str) and x.strip() for x in repos):
+        return False
+    return True
+
+
+def _scope_key(entry: str, logins: list[str] | None) -> str:
+    """A canonical key for one `repos` entry, so equivalent scopes compare equal. `*` stays `*`. A bare NAME is its
+    lowercased name. OWNER/NAME for one of LOGINS (the owner's own logins, aliases included) is the bare name, the same
+    repository. OWNER/NAME for another account keeps its full lowercased form. With logins None, the lowercased entry."""
+    e = entry.strip().lower()
+    if e == "*":
+        return "*"
+    head, sep, tail = e.rpartition("/")
+    if not sep:
+        return e
+    if logins is not None and head in {x.lower() for x in logins}:
+        return tail
+    return e
+
+
 def _withdrawn(grant: dict, withdrawals: list[dict], logins: list[str] | None = None) -> bool:
     """True when an approved:false record (a withdrawal) vetoes GRANT: its approved_on is on or after the grant's
     approved_on (same day counts), its owner is one of LOGINS (when given), and its repos cover everything the grant
-    covers (`*`, or every entry of the grant's repos, case-insensitively, appears in its own repos). A malformed
-    `repos` never withdraws."""
+    covers (`*`, or every scope of the grant appears among its own). Scopes are compared owner- and alias-aware: a bare
+    name equals OWNER/NAME when OWNER is one of the owner's own LOGINS, so the two forms revoke each other, and another
+    account's OWNER/NAME stays distinct. A malformed `repos` never withdraws."""
     g_on = _parse_when(grant.get("approved_on"))
     g_repos = _repo_list(grant.get("repos"))
     if g_on is None or g_repos is None or isinstance(g_on, _dt.datetime):
         return False
     owners = {x.lower() for x in logins} if logins is not None else None
+    g_keys = {_scope_key(x, logins) for x in g_repos}
     for f in withdrawals:
         if owners is not None and str(f.get("owner") or "").lower() not in owners:
             continue
@@ -285,10 +313,10 @@ def _withdrawn(grant: dict, withdrawals: list[dict], logins: list[str] | None = 
         f_repos = _repo_list(f.get("repos"))
         if f_on is None or f_repos is None or isinstance(f_on, _dt.datetime) or f_on < g_on:
             continue
-        if "*" in f_repos:
+        f_keys = {_scope_key(x, logins) for x in f_repos}
+        if "*" in f_keys:
             return True
-        have = {x.lower() for x in f_repos}
-        if all(x.lower() in have for x in g_repos):
+        if g_keys <= f_keys:
             return True
     return False
 
@@ -334,9 +362,14 @@ def evaluate(owners: list[str], repo: str | None = None, today: _dt.date | None 
     scoped = [r for r in mine if _covers(r, repo, sorted(logins))]
     if not scoped:
         # a malformed record that would have covered the repository is the cause, not a missing scope
-        bad = [r for r in ours if problems(r, today) and _covers(r, repo, sorted(logins))]
+        # a malformed `repos` is reported whether or not it would have covered the repository
+        bad = [r for r in ours if problems(r, today) and (_repos_malformed(r) or _covers(r, repo, sorted(logins)))]
         if bad:
-            return None, f"invalid:{str(bad[0].get('id') or '?')}: {problems(bad[0], today)[0]}"
+            malformed = [r for r in bad if _repos_malformed(r)]
+            pick = (malformed or bad)[0]
+            probs = problems(pick, today)
+            line = next((p for p in probs if p.startswith("repos:")), probs[0]) if malformed else probs[0]
+            return None, f"invalid:{str(pick.get('id') or '?')}: {line}"
         if any(_covers(g, repo, sorted(logins)) for g in revoked):  # the grant that covered it was withdrawn
             return None, "revoked"
         return None, "scope"
