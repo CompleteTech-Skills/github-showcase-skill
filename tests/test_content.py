@@ -642,6 +642,49 @@ def test_icon_prompt_states_the_flat_ground_for_estate_template(brand, icon_ctx)
     assert "perfectly flat" in p and brand.style(NW)["tokens"]["card_fill"].upper() in p
     assert "no vignette, texture, gradient, shadow or glow" in p
     assert "880 px" not in p and "soft round pool" not in p
+    # the heading no longer claims the avatars' night ground, which contradicts the flat card ground
+    assert "identical to the Neon Night avatars" not in p
+    assert "28 avatars" not in p and "28 repo icons" not in p
+    bg = next(line for line in p.splitlines() if "BACKGROUND" in line)
+    assert "one flat ground, not the avatar night tile" in bg
+
+
+def test_icon_prompt_custom_template_states_the_exact_ground_clause(brand, icon_ctx):
+    """An option-A template without {POOL} or the 'Keep the background empty' anchor, whose glyph text happens to
+    contain 'perfectly flat', still gets the ground clause (review: the fallback must not key on loose text)."""
+    glyph = {"glyph_name": "Inbox Tray", "glyph_description": "An open tray seen front-on.",
+             "spark_placement": "held inside the tray", "size_class": "wide"}
+    art = C.load_art_direction()
+    anchor = "Keep the background empty and the glyph inside"
+    assert anchor in art
+    art = art.replace(anchor, "Draw a perfectly flat glyph. Keep the background empty.")
+    assert anchor not in art
+    card = brand.style(NW)["tokens"]["card_fill"]
+    p = C.icon_prompt(icon_ctx, resolver(brand), art, glyph)["prompt"]
+    assert C.ground_clause(card) in p
+    assert card.upper() in p
+
+
+def test_corner_ground_zero_tolerance_accepts_identical_corners():
+    from ctshowcase.iconbox import corner_ground
+    flat = _candidate("#F8FAFC", size=64, box=(16, 16, 48, 48))
+    assert corner_ground(flat, 0) is not None
+    off = flat.copy()
+    off.putpixel((63, 63), (240, 240, 240))
+    assert corner_ground(off, 0) is None
+
+
+@pytest.mark.parametrize("mode", ["auto", "keep", "transparent"])
+def test_icon_zero_tolerance_normalizes_a_flat_ground(mode):
+    img = _candidate("#F8FAFC", size=64, box=(16, 16, 48, 48))
+    out, info = C.normalize_icon(img, mode, "#0F172A", tolerance=0)
+    assert out.size == (1024, 1024)
+
+
+def test_icon_zero_tolerance_still_rejects_unequal_corners():
+    img = _vignette("#F8FAFC", "#EEF0F2")
+    with pytest.raises(ArtFail, match="icon-ground"):
+        C.normalize_icon(img, "auto", "#0F172A", tolerance=0)
 
 
 def test_icon_prompt_parses_the_bundled_art_direction(brand, fixture_meta):

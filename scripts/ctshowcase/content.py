@@ -1975,14 +1975,16 @@ def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = Non
         prompt = re.sub(r"\bavatar\b", "repo icon", prompt)
         prompt = prompt.replace("It is one of 28 repo icons in a single matched family",
                                 "It joins the 28 Neon Night avatars and its sibling repo icons as one matched family")
-        prompt = prompt.replace("(identical in all 28 repo icons)", "(identical to the Neon Night avatars)")
+        prompt = prompt.replace("(identical in all 28 repo icons)",
+                                "(one flat ground, not the avatar night tile)")
         prompt = prompt.replace("same model and version for all 28", "same model and version as the avatar set")
-        prompt = prompt.replace("Keep the background empty and the glyph inside",
-                                ground_clause(card) + " Keep the glyph inside")
+        clause = ground_clause(card)
+        anchored = "Keep the background empty and the glyph inside" in prompt
+        prompt = prompt.replace("Keep the background empty and the glyph inside", clause + " Keep the glyph inside")
         for k, v in slots.items():
             if v is not None:
                 prompt = prompt.replace("{" + k + "}", str(v))
-        if "perfectly flat" not in prompt:  # a template with neither anchor still states the ground
+        if not anchored and "{POOL}" not in tpl and clause not in prompt:  # a template with neither anchor still states the exact ground
             prompt = prompt.rstrip() + "\n\n" + ground_clause(card)
     missing = sorted(set(re.findall(r"\{([A-Z_]+)\}", prompt)))
     ink = colours.get("INK") or []
