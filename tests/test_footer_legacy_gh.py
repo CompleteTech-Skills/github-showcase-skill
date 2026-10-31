@@ -109,3 +109,38 @@ def test_footer_copy_guard_accepts_alt_only_current_and_legacy_images(brand):
     assert readme.is_footer_copy(alt_only, brand)  # alt-only img, no src
     other = markup.replace(light, "https://example.test/x.png").replace('alt="CompleteTech LLC"', 'alt="Partner"')
     assert not readme.is_footer_copy(other, brand)
+
+
+# ------------------------------------------------------------------ former local-logo footer and remote legacy URL footer
+def old_local_footer(src, alt="CompleteTech LLC"):
+    return ('<p align="center">\n  <a href="https://complete.tech"><img src="%s" alt="%s" width="160"></a><br>\n'
+            '  <sub>Built by <a href="https://complete.tech">CompleteTech LLC</a> · Innovation at Every Integration</sub>\n'
+            "</p>\n" % (src, alt))
+
+
+@pytest.mark.parametrize("src", ["assets/logo.png", "./logo.png"])
+def test_footer_copy_accepts_old_local_logo_and_remote_legacy_url_at_once(brand, src):
+    assert readme.is_footer_copy(old_local_footer(src), brand)
+    legacy = footer.markup(legacy_brand(brand))
+    assert LEGACY in legacy and readme.is_footer_copy(legacy, brand)
+
+
+@pytest.mark.parametrize("src", ["assets/logo.png", "./logo.png"])
+def test_upgrade_on_old_local_logo_footer_yields_one_built_by(brand, tmp_path, src):
+    ctx = RepoContext(brand, normalize(meta_dict()), tmp_path)
+    before = readme.scaffold(ctx).replace(footer.block(brand), old_local_footer(src))
+    assert "Built by" in before and src in before and footer.block(brand) not in before
+    after, removed = readme.upgrade(ctx, before)
+    assert after.count("Built by") == 1
+    assert removed and readme.preservation(before, after, removed) == []
+
+
+@pytest.mark.parametrize("block", [
+    old_local_footer("assets/partner.png"),
+    old_local_footer("assets/logo.png", alt="Partner"),
+    old_local_footer("https://example.test/assets/logo.png"),
+], ids=["partner-file", "wrong-alt", "foreign-host"])
+def test_non_footer_images_are_not_footer_copies_and_are_left(brand, block):
+    assert not readme.is_footer_copy(block, brand)
+    text = "# A\n\n" + block
+    assert readme.drop_old_footer(text, brand) == (text, [])
