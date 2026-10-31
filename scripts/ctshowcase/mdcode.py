@@ -8,9 +8,7 @@ import re
 
 # CommonMark: a backtick fence's info string has no backtick, so "```npm test``` runs" is inline code, not a fence
 FENCE_OPEN = re.compile(r"^ {0,3}(`{3,}(?=[^`\n]*$)|~{3,})")
-# Compatibility name only: readmelint still searches with it until it calls find_inline_code. Its one-backslash
-# lookbehind does not implement the parity rule, so new callers must use find_inline_code instead.
-INLINE_CODE = re.compile(r"(?<!(?<!\\)\\)(?<!`)(`+)(?!`).+?(?<!`)\1(?!`)")
+_ATX_HEADING = re.compile(r"^ {0,3}#{1,6}(?:[ \t\r\n]|$)")
 
 
 def _run_end(text: str, i: int) -> int:
@@ -21,11 +19,32 @@ def _run_end(text: str, i: int) -> int:
     return j
 
 
+def _paragraph_end(text: str, pos: int) -> int:
+    """Index where the paragraph containing `pos` ends: the start of the first later line that is blank, a fence
+    opener or an ATX heading. A heading line containing `pos` ends at its own line end. Otherwise len(text)."""
+    line_start = text.rfind("\n", 0, pos) + 1
+    if _ATX_HEADING.match(text[line_start:pos]):
+        eol = text.find("\n", pos)
+        return len(text) if eol < 0 else eol
+    nl = text.find("\n", pos)
+    while nl >= 0:
+        start = nl + 1
+        eol = text.find("\n", start)
+        line = text[start:] if eol < 0 else text[start:eol]
+        if not line.strip(" \t\r") or FENCE_OPEN.match(line) or _ATX_HEADING.match(line):
+            return start
+        if eol < 0:
+            break
+        nl = eol
+    return len(text)
+
+
 def _closing_run(text: str, pos: int, k: int) -> tuple[int, int] | None:
-    """First maximal backtick run of exactly `k` backticks at or after `pos`, found before the line ends."""
+    """First maximal backtick run of exactly `k` backticks at or after `pos` and before the paragraph ends."""
+    limit = _paragraph_end(text, pos)
     while True:
-        p = text.find("`", pos)
-        if p < 0 or text.find("\n", pos, p) >= 0:
+        p = text.find("`", pos, limit)
+        if p < 0:
             return None
         q = _run_end(text, p)
         if q - p == k:
@@ -37,7 +56,8 @@ def find_inline_code(text: str, start: int = 0) -> tuple[int, int] | None:
     """(start, end) of the first CommonMark inline code span whose opening run begins at or after `start`. The span
     runs from the opening backtick run to the end of its closing run; escaping backslashes are not part of it. A
     backtick preceded by an odd number of backslashes is escaped, so its run starts one character later. The
-    content must be non-empty and contain no newline."""
+    content must be non-empty. It may span single newlines within one paragraph, but not a blank line, a fence
+    opener line or an ATX heading line, so the closing run must come before any of those."""
     i = start
     while True:
         i = text.find("`", i)
@@ -67,19 +87,25 @@ def find_inline_code(text: str, start: int = 0) -> tuple[int, int] | None:
 def code_spans(text: str) -> list[tuple[int, int]]:
     """(start, end) offsets of fenced code (``` and ~~~, an unclosed fence runs to the end) and inline code spans."""
     spans, pos, fence, fstart = [], 0, None, 0
+    chunk, cstart = "", 0  # pending paragraph text outside fences, and its absolute start offset
     for line in text.splitlines(keepends=True):
         if fence is None:
             m = FENCE_OPEN.match(line)
             if m:
+                _scan_chunk(chunk, cstart, spans)
+                chunk = ""
                 fence, fstart = m.group(1), pos
+            elif not line.strip():
+                _scan_chunk(chunk, cstart, spans)
+                chunk = ""
+            elif _ATX_HEADING.match(line):
+                _scan_chunk(chunk, cstart, spans)
+                _scan_chunk(line, pos, spans)
+                chunk = ""
             else:
-                at = 0
-                while True:
-                    span = find_inline_code(line, at)
-                    if span is None:
-                        break
-                    spans.append((pos + span[0], pos + span[1]))
-                    at = span[1]
+                if not chunk:
+                    cstart = pos
+                chunk += line
         else:
             close = re.match(r"^ {0,3}(`{3,}|~{3,})[ \t]*$", line.rstrip("\n"))
             if close and close.group(1)[0] == fence[0] and len(close.group(1)) >= len(fence):
@@ -88,7 +114,21 @@ def code_spans(text: str) -> list[tuple[int, int]]:
         pos += len(line)
     if fence is not None:
         spans.append((fstart, len(text)))
+    else:
+        _scan_chunk(chunk, cstart, spans)
     return spans
+
+
+def _scan_chunk(chunk: str, base: int, spans: list[tuple[int, int]]) -> None:
+    """Append the inline code spans of `chunk`, a run of non-fence lines, as absolute offsets (`chunk` starts at
+    `base`)."""
+    at = 0
+    while True:
+        span = find_inline_code(chunk, at)
+        if span is None:
+            return
+        spans.append((base + span[0], base + span[1]))
+        at = span[1]
 
 
 def masked(text: str) -> str:
