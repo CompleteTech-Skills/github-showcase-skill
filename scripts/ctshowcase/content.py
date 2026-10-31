@@ -1874,8 +1874,9 @@ def ground_clause(card: str) -> str:
             "gradient, shadow or glow in the background.")
 
 
-# a numbered estate BACKGROUND paragraph: its heading line plus every following non-blank line
-_BACKGROUND_PARAGRAPH = re.compile(r"(?m)^(\d+)\s+BACKGROUND\b.*(?:\n(?=[ \t]*\S)[^\n]*)*")
+# a numbered estate BACKGROUND paragraph = its heading line plus following non-blank lines, stopping at a blank
+# line or at the next numbered section heading (digits, space, capital letter)
+_BACKGROUND_PARAGRAPH = re.compile(r"(?m)^(\d+)\s+BACKGROUND\b.*(?:\n(?=[ \t]*\S)(?![ \t]*\d+\s+[A-Z])[^\n]*)*")
 
 
 def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = None, option: str = "A",
