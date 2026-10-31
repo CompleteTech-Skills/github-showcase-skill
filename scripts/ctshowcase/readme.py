@@ -579,15 +579,25 @@ def _footer_logo_url(url: str, brand) -> bool:
     return False
 
 
-def is_footer_copy(block: str, brand) -> bool:
+def is_footer_copy(block: str, brand, loose_src: bool = False) -> bool:
     """Every line of `block` is a line of the decision 18 footer or a drifted copy of one: only centring, link, logo,
     `<br>`/`<sub>` markup, with complete.tech links, the footer's own logo image (its src or srcset is the brand footer
     logo URL or a drifted form of it; an image without src/srcset passes on an alt that is exactly the company) and as text only the credit line ("Built by
     <company>", optionally with the suffix). The former local logo files (assets/logo.png and the other `OLD_LOCAL_LOGOS`) are also recognized when the image's alt is exactly the company or the footer alt. A sponsor or partner image (whatever its file name), a thanks line or
-    any other authored text makes it not a footer copy, so it is never removed."""
+    any other authored text makes it not a footer copy, so it is never removed. `loose_src=True` (only `upgrade()`, for
+    an unmarked trailing block that also passes `is_footer_like`) keeps the original rule that an alt exactly the
+    company vouches for an image whatever its src; the default is strict."""
     import html
     f, company = brand.raw["footer"], brand.strings["company"]
     credit = {f"{f['line_prefix']} {company}", f"{f['line_prefix']} {company} {f['line_suffix']}"}
+
+    def _alts(attrs: str) -> list[str]:
+        return [html.unescape(next(g for g in a.groups()[1:] if g is not None)).strip()
+                for a in FOOTER_ATTR.finditer(attrs) if a.group(1).lower() == "alt"]
+
+    # a <source> carries no alt: the block's own <img> alt vouches for its former local logo files
+    block_alt_ok = any(v in (company, f["alt"]) for m in FOOTER_TAG.finditer(block)
+                       if m.group(1).lower() == "img" and not m.group(0).startswith("</") for v in _alts(m.group(2)))
 
     def tag_ok(m: re.Match) -> bool:
         name, attrs = m.group(1).lower(), m.group(2)
@@ -603,7 +613,11 @@ def is_footer_copy(block: str, brand) -> bool:
                 alt_ok = alt_ok or val in (company, f["alt"])
             else:
                 urls.append([p.split()[0] for p in val.split(",") if p.split()])
-        if urls:  # a matching alt never vouches for another image: every src/srcset must be a footer logo URL
+        if name == "source":
+            alt_ok = block_alt_ok
+        if urls:  # a matching alt never vouches for another image (unless loose_src): every src/srcset must be a footer logo URL
+            if loose_src and alt_ok and name == "img":
+                return True
             return all(parts and all(_footer_logo_url(u, brand) or (alt_ok and _old_local_logo(u)) for u in parts)
                        for parts in urls)
         return alt_ok
@@ -619,18 +633,18 @@ def is_footer_copy(block: str, brand) -> bool:
     return True
 
 
-def drop_old_footer(text: str, brand) -> tuple[str, list[str]]:
+def drop_old_footer(text: str, brand, loose_src: bool = False) -> tuple[str, list[str]]:
     """(text, removed lines) with a trailing old footer (an unmarked or drifted decision 18 footer: every line a
     footer line, `is_footer_copy`) taken off the end, so the marked footer replaces it instead of following it. Any
     other block, a centred credits block with authored lines included, is left as it is (lint reports a second
-    footer-like block as `fail:duplicate`)."""
+    footer-like block as `fail:duplicate`). `loose_src` is passed through to `is_footer_copy` (strict by default)."""
     body = text.rstrip()
     opens = [m for m in CENTRED_OPEN.finditer(masked(body))]
     if not opens:
         return text, []
     m = opens[-1]
     tail = body[m.start():]
-    if not tail.rstrip().endswith(f"</{m.group(1)}>") or not is_footer_like(tail) or not is_footer_copy(tail, brand):
+    if not tail.rstrip().endswith(f"</{m.group(1)}>") or not is_footer_like(tail) or not is_footer_copy(tail, brand, loose_src):
         return text, []
     return body[:m.start()].rstrip() + "\n", [ln for ln in tail.splitlines() if ln.strip()]
 
@@ -646,11 +660,18 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
     want_footer = footer_wanted(ctx)
     removed: list[str] = []
     if want_footer and blocks.get("footer") and is_footer_copy(blocks["footer"], ctx.brand):
-        # A configured publication-path change replaces only our recognized footer,
-        # not authored credits or partner images inside a similarly named block.
-        removed += [ln for ln in blocks["footer"].splitlines() if ln.strip()]
+        # A configured publication-path change replaces only our recognized footer, not authored credits or partner
+        # images inside a similarly named block. Only the lines the emitted footer does not carry again are reported:
+        # a compliant footer is re-emitted unchanged and must not weaken the never-drop-a-line guard.
+        kept = Counter(ln.strip() for ln in footermod.block(ctx.brand).splitlines() if ln.strip())
+        for ln in blocks["footer"].splitlines():
+            if ln.strip():
+                if kept[ln.strip()] > 0:
+                    kept[ln.strip()] -= 1
+                else:
+                    removed.append(ln)
     if want_footer:  # an unmarked or drifted footer at the end is replaced by the marked one, never kept beside it
-        body, old_footer = drop_old_footer(body, ctx.brand)
+        body, old_footer = drop_old_footer(body, ctx.brand, loose_src=True)
         removed += old_footer
     # preserve list / existing third-party banner
     preserve = ctx.repo in (ctx.org.get("readme_preserve") or []) or len(text.encode()) > 15000
@@ -670,7 +691,7 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
             removed += [ln for ln in old_tag.splitlines() if ln.strip()]
         body, _ = _strip_markers(text, keep={"tagline": tag})
         if want_footer:
-            body, _ = drop_old_footer(body, ctx.brand)  # its lines are already in `removed`
+            body, _ = drop_old_footer(body, ctx.brand, loose_src=True)  # its lines are already in `removed`
         pre, sections = split_sections(body)
         lines = pre.splitlines()
     # an unmarked bold line opening the preamble is an old tagline. With a description it is replaced; without one it
