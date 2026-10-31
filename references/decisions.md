@@ -1,8 +1,8 @@
 # User decisions this skill implements
 
-Verbatim excerpt from `decisions/USER_DECISIONS.md` (Timothy Wayne Gregg, 2026-10-25) in the estate hand-off bundle, except decision 18, whose footer logo URLs were updated and which carries a clearly labelled skill note, both for #47 (see the note on line 5). These decisions outrank the estate standard `ct-std-v1` (`STANDARD.md`), the art direction and every audit proposal. Where this skill's references paraphrase the standard, the decisions below have already been applied.
+Verbatim excerpt from `decisions/USER_DECISIONS.md` (Timothy Wayne Gregg, 2026-10-25) in the estate hand-off bundle, except that the skill note under decision 18 is skill maintenance and not part of the user decision. These decisions outrank the estate standard `ct-std-v1` (`STANDARD.md`), the art direction and every audit proposal. Where this skill's references paraphrase the standard, the decisions below have already been applied.
 
-Footer logo URLs repaired for #47 (former URLs returned 404); layout, credit and artwork unchanged. This repair is an amendment made by the skill; it is not the user's own wording.
+Skill maintenance (#47): the footer logo URLs configured in `references/brand.yaml` were repaired because the former URLs returned 404. Layout, credit and artwork are unchanged. The user decisions below are unmodified.
 
 | Decision | Where the skill applies it |
 |---|---|
@@ -70,8 +70,8 @@ Footer logo URLs repaired for #47 (former URLs returned 404); layout, credit and
     <p align="center">
       <a href="https://www.complete.tech">
         <picture>
-          <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/CompleteTech-Skills/github-showcase-skill/main/assets/brand/logo-dark.png">
-          <img src="https://raw.githubusercontent.com/CompleteTech-Skills/github-showcase-skill/main/assets/brand/logo.png" alt="CompleteTech LLC" width="200">
+          <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/CompleteTech-LLC/.github/main/brand/logo-dark.png">
+          <img src="https://raw.githubusercontent.com/CompleteTech-LLC/.github/main/brand/logo.png" alt="CompleteTech LLC" width="200">
         </picture>
       </a>
       <br>
@@ -79,7 +79,7 @@ Footer logo URLs repaired for #47 (former URLs returned 404); layout, credit and
     </p>
     ```
 
-    **Skill note (#47, not part of the user decision):** The emitted logo URLs now come from `references/brand.yaml` and point to the published, unchanged masters bundled with this skill (`assets/brand/`); the former `CompleteTech-LLC/.github/main/brand/` URLs returned 404. The exact-markup URLs above are therefore amended for #47. Layout, credit text, theme selection and artwork are unchanged.
+    **Skill note (#47, not part of the user decision):** The footer URLs this skill currently emits are configured in `references/brand.yaml` (`footer.logo_light_url` and `footer.logo_dark_url`) and point to this repository's published masters: https://raw.githubusercontent.com/CompleteTech-Skills/github-showcase-skill/main/assets/brand/logo.png and .../logo-dark.png (same sha256 as listed in `assets/brand/README.md`). The former `CompleteTech-LLC/.github/main/brand/` URLs shown in the decision above returned 404. Layout, credit text, theme selection and artwork are unchanged.
 
     - Scope: all in-scope repos, T2 families included ("all of them").
     - Exceptions: watching-org forks (not the user's work), and T3 orgs until their co-owners sign off.
