@@ -45,9 +45,28 @@ def _search_unescaped(pattern, text: str, pos: int):
     return match
 
 
+def _in_inline_code(text: str, index: int) -> bool:
+    """True when `index` lies strictly inside a non-fenced inline code span (a < index < b for a span (a, b))."""
+    fences = _fence_spans(text)
+    start = 0
+    while True:
+        found = find_inline_code(text, start)
+        if not found or found[0] > index:
+            return False
+        a, b = found
+        inside = next((f for f in fences if f[0] <= a < f[1]), None)
+        if inside is None:
+            if a < index < b:
+                return True
+            start = b
+        else:
+            start = inside[1]
+
+
 def _definition_spans(document: str) -> list[tuple[int, int]]:
     """Spans of complete reference definitions (label, destination and title): their text is not Markdown."""
-    return [(m.start(), m.end()) for m in REF_DEFINITION.finditer(_outside_code(document, mask_inline=False))]
+    return [(m.start(), m.end()) for m in REF_DEFINITION.finditer(_outside_code(document, mask_inline=False))
+            if not _in_inline_code(document, m.start())]
 
 
 class _HTMLTokens:
@@ -205,6 +224,8 @@ def _markdown_images(text: str, document: str) -> list[tuple[str, str, int, int]
 
     definitions = {}
     for match in REF_DEFINITION.finditer(_outside_code(document, mask_inline=False)):
+        if _in_inline_code(document, match.start()):
+            continue  # a definition written inside a code span is literal text, not a live definition
         target = html.unescape(re.sub(r"\\([^\w\s])", r"\1", match.group(2) or match.group(3)))
         definitions.setdefault(label(match.group(1)), target)
     spans = _definition_spans(document)  # definition titles are never rendered as images
@@ -340,6 +361,7 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
         fails.append(f"R7 exactly one H1 required (found {len(h1s)})")
     # badges 2-4, palette tokens only
     shields = re.findall(r"img\.shields\.io/badge/([^)\"'<>\s]+)", plain)
+    shields = list(dict.fromkeys(shields))
     header_part = plain.split("\n---\n", 1)[0]
     badge_header = _outside_code(header_part)
     image_sources = [source for _, source in _images(badge_header, plain)]
@@ -356,6 +378,7 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
     # colours are read from parsed image destinations too, so an apostrophe or other HTML delimiter inside a Markdown URL hides nothing
     shields += [m.group(1).split("?")[0].split("#")[0] for _, src in _images(_outside_code(plain), plain)
                 if (m := SHIELDS_BADGE.match(src))]
+    shields = list(dict.fromkeys(shields))
     for s in shields:
         col = re.split(r"[?)]", s.rsplit("-", 1)[-1])[0].upper()
         family_cols = {str(ctx.style.get(k) or "").upper() for k in ("badge_brand", "badge_accent")}
