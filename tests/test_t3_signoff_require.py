@@ -1,8 +1,7 @@
 """`--allow-t3` sign-off enforcement (issue 23): `--allow-t3` needs a valid, unexpired sign-off record in the file named by
 `--t3-signoff-file` (env SHOWCASE_T3_SIGNOFF_FILE) or, by default, in the private estate bundle
 (`<estate root>/decisions/t3-signoffs.yaml`; tests/test_t3_signoff_default.py). The enforcement is default-on and
-there is no opt-out (tests/test_t3_signoff_default.py::test_there_is_no_opt_out); `--require-t3-signoff` is an accepted
-no-op flag.
+there is no opt-out (tests/test_t3_signoff_default.py::test_there_is_no_opt_out).
 
 Synthetic records only (owner Pick-Your-AI is the brand.yaml T3 owner; the ids and dates are made up). The existing
 tests/test_allow_t3_global.py pins the refusals without `--allow-t3`; it only gained the record-file environment that
@@ -63,32 +62,32 @@ def _out(r):
 
 
 def test_missing_record_refuses(tmp_path):
-    r = _run(tmp_path, _bundle(tmp_path, []), "--require-t3-signoff", "--allow-t3", "describe")
+    r = _run(tmp_path, _bundle(tmp_path, []), "--allow-t3", "describe")
     assert r.returncode == 2 and "t3-signoff:missing" in _out(r), _out(r)
 
 
 def test_unapproved_record_counts_as_missing(tmp_path):
     b = _bundle(tmp_path, [{"id": "t3s-9", "approved": False}])
-    r = _run(tmp_path, b, "--require-t3-signoff", "--allow-t3", "describe")
+    r = _run(tmp_path, b, "--allow-t3", "describe")
     assert r.returncode == 2 and "t3-signoff:missing" in _out(r), _out(r)
 
 
 def test_expired_record_refuses(tmp_path):
     b = _bundle(tmp_path, [{"id": "t3s-1", "expires": "2020-01-01"}])
-    r = _run(tmp_path, b, "--require-t3-signoff", "--allow-t3", "describe")
+    r = _run(tmp_path, b, "--allow-t3", "describe")
     assert r.returncode == 2 and "t3-signoff:expired" in _out(r), _out(r)
 
 
 def test_record_scoped_to_other_repo_refuses(tmp_path):
     b = _bundle(tmp_path, [{"id": "t3s-2", "repos": ["some-other-repo"]}])
-    r = _run(tmp_path, b, "--require-t3-signoff", "--allow-t3", "describe")
+    r = _run(tmp_path, b, "--allow-t3", "describe")
     assert r.returncode == 2 and "t3-signoff:scope" in _out(r), _out(r)
 
 
 def test_valid_wildcard_and_repo_scoped_records_are_honoured(tmp_path):
     for repos in (["*"], ["northwind-synthetic"], [f"{OWNER}/northwind-synthetic"]):
         b = _bundle(tmp_path / "_".join(repos).replace("/", "_").replace("*", "star"), [{"id": "t3s-3", "repos": repos}])
-        r = _run(tmp_path, b, "--require-t3-signoff", "--allow-t3", "describe")
+        r = _run(tmp_path, b, "--allow-t3", "describe")
         assert r.returncode != 2 and "t3-signoff" not in _out(r), (repos, _out(r))
 
 
@@ -101,20 +100,20 @@ def test_unrelated_env_cannot_disable_enforcement(tmp_path, value):
 
 # Guard test: pins the unchanged refusal when --allow-t3 is absent, even with the (no-op) flag.
 def test_flag_without_allow_t3_still_refuses_as_before(tmp_path):
-    r = _run(tmp_path, _bundle(tmp_path, [{"id": "t3s-4"}]), "--require-t3-signoff", "describe")
+    r = _run(tmp_path, _bundle(tmp_path, [{"id": "t3s-4"}]), "describe")
     assert r.returncode == 2 and "t3-signoff" in _out(r)
 
 
 def test_excluded_owner_is_refused_even_with_a_record(tmp_path):
     b = _bundle(tmp_path, [{"id": "t3s-5", "owner": "BunsDev"}])
-    r = _run(tmp_path, b, "--require-t3-signoff", "--allow-t3", "describe", owner="BunsDev")
+    r = _run(tmp_path, b, "--allow-t3", "describe", owner="BunsDev")
     assert r.returncode == 2, _out(r)
     assert "t3-signoff" not in _out(r) or "exempt" in _out(r)
 
 
 def test_doctor_shows_the_signoff_id(tmp_path):
     b = _bundle(tmp_path, [{"id": "t3s-7", "expires": "2099-01-02"}])
-    r = _run(tmp_path, b, "--require-t3-signoff", "--allow-t3", "doctor", "--format", "json")
+    r = _run(tmp_path, b, "--allow-t3", "doctor", "--format", "json")
     row = json.loads(r.stdout)
     assert row["signoff_id"] == "t3s-7" and row["signoff_expires"] == "2099-01-02", r.stdout
     plain = _run(tmp_path, b, "doctor", "--format", "json")
@@ -133,8 +132,8 @@ def test_writer_jobs_carry_the_signoff_id(tmp_path):
                       "approval_id": "ent-009"},
                      {"id": "c", "phase": "p", "kind": "repo-settings", "repo": "Other-Org/z", "argv": []}])
         a, b, c = (json.loads(x) for x in out.read_text(encoding="utf-8").splitlines())
-        assert a["signoff_id"] == "t3s-8" and a["approval_id"] == "t3s-8"
-        assert b["signoff_id"] == "t3s-8" and b["approval_id"] == "ent-009"  # an existing approval is kept
+        assert a["signoff_id"] == "t3s-8" and "approval_id" not in a  # approval_id names an APPROVED_ACTIONS row: never stamped
+        assert b["signoff_id"] == "t3s-8" and b["approval_id"] == "ent-009"  # a pre-existing approval_id is preserved
         assert "signoff_id" not in c
     finally:
         signoff.reset()
@@ -164,10 +163,10 @@ def test_evaluate_scope_rules(repo, expect):
 def test_repo_scoped_record_is_honoured_by_repository_commands(tmp_path, argv):
     """Regression: only gate_owner/doctor passed the repo, so a repo-scoped record hit t3-signoff:scope elsewhere."""
     b = _bundle(tmp_path, [{"id": "t3s-9", "repos": ["northwind-synthetic"]}])
-    r = _run(tmp_path, b, "--require-t3-signoff", "--allow-t3", *argv)
+    r = _run(tmp_path, b, "--allow-t3", *argv)
     assert "t3-signoff" not in _out(r), _out(r)
     other = _bundle(tmp_path / "o", [{"id": "t3s-9", "repos": ["some-other-repo"]}])
-    r = _run(tmp_path, other, "--require-t3-signoff", "--allow-t3", *argv)
+    r = _run(tmp_path, other, "--allow-t3", *argv)
     assert r.returncode == 2 and "t3-signoff:scope" in _out(r), _out(r)
 
 
@@ -224,7 +223,7 @@ def test_project_gate_registers_the_grant_and_reports_the_reason(tmp_path, monke
 def test_default_doctor_renderers_show_the_signoff_id(tmp_path):
     b = _bundle(tmp_path, [{"id": "t3s-13"}])
     for fmt in ("tsv", "md"):
-        r = _run(tmp_path, b, "--require-t3-signoff", "--allow-t3", "doctor", "--format", fmt)
+        r = _run(tmp_path, b, "--allow-t3", "doctor", "--format", fmt)
         assert "t3s-13" in r.stdout, _out(r)
         plain = _run(tmp_path, b, "doctor", "--format", fmt)
         assert "t3s-13" not in plain.stdout and "signoff_id" not in plain.stdout  # no --allow-t3: output unchanged
@@ -240,27 +239,27 @@ def _raw_bundle(tmp_path, body):
 
 
 def test_doctor_without_allow_t3_still_reports_hold_under_the_flag(tmp_path):
-    r = _run(tmp_path, _bundle(tmp_path, []), "--require-t3-signoff", "doctor", "--format", "json")
+    r = _run(tmp_path, _bundle(tmp_path, []), "doctor", "--format", "json")
     assert r.returncode in (0, 1) and "t3-signoff:missing" not in _out(r), _out(r)
     assert "hold" in _out(r)
 
 
 def test_qualified_scope_for_another_owner_refuses(tmp_path):
     b = _bundle(tmp_path, [{"id": "t3s-4", "repos": ["Other-Org/northwind-synthetic"]}])
-    r = _run(tmp_path, b, "--require-t3-signoff", "--allow-t3", "describe")
+    r = _run(tmp_path, b, "--allow-t3", "describe")
     assert r.returncode == 2 and "t3-signoff:scope" in _out(r), _out(r)
 
 
 def test_garbage_expiry_never_validates(tmp_path):
     b = _bundle(tmp_path, [{"id": "t3s-5", "expires": "2099-12-31garbage"}])
-    r = _run(tmp_path, b, "--require-t3-signoff", "--allow-t3", "describe")
+    r = _run(tmp_path, b, "--allow-t3", "describe")
     assert r.returncode == 2 and "t3-signoff:invalid" in _out(r) and "expires" in _out(r), _out(r)
 
 
 def test_malformed_repos_refuses_instead_of_raising(tmp_path):
     b = _raw_bundle(tmp_path, f"  - id: t3s-6\n    owner: {OWNER}\n    repos: 7\n    approved: true\n"
                               "    approver: x\n    approved_on: 2026-01-01\n    expires: 2099-12-31\n")
-    r = _run(tmp_path, b, "--require-t3-signoff", "--allow-t3", "describe")
+    r = _run(tmp_path, b, "--allow-t3", "describe")
     assert r.returncode == 2 and "t3-signoff:invalid" in _out(r) and "repos" in _out(r), _out(r)
     assert "t3-signoff:scope" not in _out(r) and "Traceback" not in _out(r), _out(r)
 
@@ -276,7 +275,7 @@ def test_malformed_or_empty_repos_is_invalid_with_a_needs_star_message(tmp_path,
 
 def test_adopt_and_content_links_honour_repo_scoped_record(tmp_path):
     b = _bundle(tmp_path, [{"id": "t3s-7", "repos": ["northwind-synthetic"]}])
-    r = _run(tmp_path, b, "--require-t3-signoff", "--allow-t3", "adopt", f"{OWNER}/northwind-synthetic")
+    r = _run(tmp_path, b, "--allow-t3", "adopt", f"{OWNER}/northwind-synthetic")
     assert "t3-signoff" not in _out(r), _out(r)
 
 
@@ -292,7 +291,7 @@ def test_report_jobs_carry_signoff_id(tmp_path):
         _finish(argparse.Namespace(jobs=None, report=str(rp)),
                 {"job": {"phase": 3, "org": OWNER, "repo": f"{OWNER}/northwind-synthetic"}}, 0)
         saved = json.loads(rp.read_text(encoding="utf-8"))["job"]
-        assert saved["signoff_id"] == "t3s-8" and saved["approval_id"] == "t3s-8"
+        assert saved["signoff_id"] == "t3s-8" and "approval_id" not in saved
     finally:
         signoff.reset()
 
@@ -323,7 +322,7 @@ def test_malformed_signoff_file_refuses_instead_of_raising(tmp_path, body):
     d = tmp_path / "bundle" / "decisions"
     d.mkdir(parents=True)
     (d / "t3-signoffs.yaml").write_text(body, encoding="utf-8")
-    r = _run(tmp_path, tmp_path / "bundle", "--require-t3-signoff", "--allow-t3", "describe")
+    r = _run(tmp_path, tmp_path / "bundle", "--allow-t3", "describe")
     assert r.returncode == 2 and "t3-signoff:missing" in _out(r) and "Traceback" not in _out(r), _out(r)
 
 
@@ -331,7 +330,7 @@ def test_malformed_signoff_file_refuses_instead_of_raising(tmp_path, body):
 def test_keyed_sidebar_batch_does_not_swallow_signoff_refusals(tmp_path, records, why):
     facts = tmp_path / "facts.json"
     facts.write_text(json.dumps({f"{OWNER}/northwind-synthetic": {}}), encoding="utf-8")
-    r = _run(tmp_path, _bundle(tmp_path, records), "--require-t3-signoff", "--allow-t3",
+    r = _run(tmp_path, _bundle(tmp_path, records), "--allow-t3",
              "content", "sidebar", "--facts", str(facts))
     assert r.returncode == 2 and f"t3-signoff:{why}" in _out(r), _out(r)
 
@@ -414,7 +413,7 @@ def test_record_file_may_have_any_name_and_come_from_env(tmp_path):
     chosen = tmp_path / "elsewhere" / "my-approved-actions.yaml"
     chosen.parent.mkdir()
     chosen.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
-    r = _run(tmp_path, None, "--require-t3-signoff", "--allow-t3", "describe",
+    r = _run(tmp_path, None, "--allow-t3", "describe",
              env={"SHOWCASE_ESTATE_ROOT": str(tmp_path / "nowhere"), "SHOWCASE_T3_SIGNOFF_FILE": str(chosen)})
     assert r.returncode != 2 and "t3-signoff" not in _out(r), _out(r)
 
@@ -451,14 +450,14 @@ def test_audit_fields_are_required(tmp_path, drop):
     body = (f"  - id: t3s-a\n    owner: {OWNER}\n    repos: ['*']\n    approved: true\n"
             "    approver: x\n    approved_on: 2026-01-01\n    expires: 2099-12-31\n")
     body = "\n".join(line for line in body.split("\n") if not line.strip().startswith(drop + ":"))
-    r = _run(tmp_path, _raw_bundle(tmp_path, body), "--require-t3-signoff", "--allow-t3", "describe")
+    r = _run(tmp_path, _raw_bundle(tmp_path, body), "--allow-t3", "describe")
     assert r.returncode == 2 and "t3-signoff:invalid" in _out(r) and drop in _out(r), _out(r)
 
 
 def test_approved_as_a_string_is_reported_invalid_not_missing(tmp_path):
     body = (f"  - id: t3s-s\n    owner: {OWNER}\n    repos: ['*']\n    approved: 'true'\n"
             "    approver: x\n    approved_on: 2026-01-01\n    expires: 2099-12-31\n")
-    r = _run(tmp_path, _raw_bundle(tmp_path, body), "--require-t3-signoff", "--allow-t3", "describe")
+    r = _run(tmp_path, _raw_bundle(tmp_path, body), "--allow-t3", "describe")
     assert r.returncode == 2 and "t3-signoff:invalid" in _out(r) and "t3s-s" in _out(r), _out(r)
 
 
@@ -496,7 +495,7 @@ def test_topics_change_records_carry_the_signoff_id(tmp_path):
     """#26: change records (records.record(), no `phase`) carry signoff_id, and no approval_id (not a writer job)."""
     b = _bundle(tmp_path, [{"id": "t3s-cr"}])
     out = tmp_path / "rec.jsonl"
-    r = _run(tmp_path, b, "--require-t3-signoff", "--allow-t3", "topics", "--records", str(out))
+    r = _run(tmp_path, b, "--allow-t3", "topics", "--records", str(out))
     assert "t3-signoff" not in _out(r) and out.is_file(), _out(r)
     recs = [json.loads(x) for x in out.read_text(encoding="utf-8").splitlines()]
     assert recs and all(x["signoff_id"] == "t3s-cr" and "approval_id" not in x for x in recs), recs
@@ -504,7 +503,7 @@ def test_topics_change_records_carry_the_signoff_id(tmp_path):
 
 def test_adopt_json_output_stamps_change_records_and_jobs(tmp_path):
     b = _bundle(tmp_path, [{"id": "t3s-ad"}])
-    r = _run(tmp_path, b, "--require-t3-signoff", "--allow-t3", "adopt", f"{OWNER}/northwind-synthetic")
+    r = _run(tmp_path, b, "--allow-t3", "adopt", f"{OWNER}/northwind-synthetic")
     obj = json.loads(r.stdout)
     assert obj.get("records") and all(x.get("signoff_id") == "t3s-ad" for x in obj["records"]), obj.get("records")
     assert all(x.get("signoff_id") == "t3s-ad" for x in obj.get("jobs") or []), obj.get("jobs")
@@ -551,7 +550,7 @@ def test_star_list_jobs_for_a_t3_org_carry_its_signoff(tmp_path, monkeypatch, br
         signoff.require(OWNER)
         res = O.star_list_plan(est, OWNER, lists_capture=lists, allow_t3=True)
         assert res["jobs"] and all(j["org"] == O.USER_LOGIN for j in res["jobs"]), res
-        assert all(j["signoff_id"] == "t3s-sl" and j["approval_id"] == "t3s-sl" for j in res["jobs"]), res["jobs"]
+        assert all(j["signoff_id"] == "t3s-sl" and "approval_id" not in j for j in res["jobs"]), res["jobs"]
     finally:
         signoff.restore(run)
         reset_t3_signed_off(t3)
@@ -579,7 +578,7 @@ _WHEN = ["2099-12-31", "20991231", "2099-W52-1", "2099-W52", "2099-365", " 2099-
 @pytest.mark.parametrize("value", _WHEN)
 def test_problems_follow_the_schema_string_patterns(value):
     """Python 3.11+ fromisoformat accepts compact, week-date and `+00` forms the schema rejects; problems() used to
-    accept them, so --require-t3-signoff granted a record the published schema refuses. Both now agree."""
+    accept them, so --allow-t3 granted a record the published schema refuses. Both now agree."""
     from ctshowcase import signoff
     base = {"id": "t3s-p", "owner": OWNER, "repos": "*", "approved": True, "approver": "x",
             "approved_on": "2026-01-15", "expires": "2099-12-31"}
@@ -605,7 +604,7 @@ def test_compact_and_week_dates_refuse_invalid(tmp_path, field, value):
     vals = {"approved_on": "2026-01-15", "expires": "2099-12-31", field: value}
     body = (f"  - id: t3s-cmp\n    owner: {OWNER}\n    repos: ['*']\n    approved: true\n    approver: x\n"
             f"    approved_on: '{vals['approved_on']}'\n    expires: '{vals['expires']}'\n")
-    r = _run(tmp_path, _raw_bundle(tmp_path, body), "--require-t3-signoff", "--allow-t3", "describe")
+    r = _run(tmp_path, _raw_bundle(tmp_path, body), "--allow-t3", "describe")
     assert r.returncode == 2 and "t3-signoff:invalid" in _out(r) and field in _out(r), _out(r)
 
 
@@ -613,7 +612,7 @@ def test_mixed_type_unknown_keys_refuse_invalid(tmp_path):
     """`unexpected: true` beside `7: unexpected`: sorting str and int keys raised TypeError out of showcase.main()."""
     body = (f"  - id: t3s-mix\n    owner: {OWNER}\n    repos: ['*']\n    approved: true\n    approver: x\n"
             "    approved_on: 2026-01-15\n    expires: 2099-12-31\n    unexpected: true\n    7: unexpected\n")
-    r = _run(tmp_path, _raw_bundle(tmp_path, body), "--require-t3-signoff", "--allow-t3", "describe")
+    r = _run(tmp_path, _raw_bundle(tmp_path, body), "--allow-t3", "describe")
     assert r.returncode == 2 and "t3-signoff:invalid" in _out(r) and "unknown field" in _out(r), _out(r)
     assert "Traceback" not in _out(r), _out(r)
 
@@ -638,7 +637,7 @@ def test_t1_star_list_item_for_a_t3_favorite_carries_the_favorites_signoff(tmp_p
         res = O.star_list_plan(est, t1, lists_capture=lists, allow_t3=True, repo_ids={fav: "R_synthetic"})
         items = [j for j in res["jobs"] if "list-item" in j["id"]]
         assert len(items) == 1 and items[0]["org"] == O.USER_LOGIN, res
-        assert items[0]["signoff_id"] == "t3s-fav" and items[0]["approval_id"] == "t3s-fav", items
+        assert items[0]["signoff_id"] == "t3s-fav" and "approval_id" not in items[0], items
     finally:
         signoff.restore(run)
         reset_t3_signed_off(t3)
@@ -667,7 +666,7 @@ def _transfer_estate(brand, favorites=()):
 
 
 class _Strict:
-    """`--allow-t3` (unless allow_t3=False) plus `--require-t3-signoff` in this context, reading the given file."""
+    """`--allow-t3` (unless allow_t3=False) in this context, reading the given file."""
 
     def __init__(self, monkeypatch, path, allow_t3=True):
         self.monkeypatch, self.path, self.allow_t3 = monkeypatch, path, allow_t3
@@ -703,7 +702,7 @@ def test_org_labels_gate_the_t3_owner_a_transfer_resolves_to(tmp_path, monkeypat
         jobs = [j for j in res["jobs"] if f"{OWNER}/northwind-member" in j.get("argv", [])]
         assert jobs, res
         signoff.stamp(jobs)  # showcase.main stamps every emitted job list the same way
-        assert all(j["signoff_id"] == "t3s-lbl" for j in jobs), jobs
+        assert all(j["signoff_id"] == "t3s-lbl" and "approval_id" not in j for j in jobs), jobs  # label jobs: no approval_id
     # no --allow-t3: the base behaviour is kept (the transfer-target hold is opt-in via the T3 flag, not via the
     # default-on enforcement), so T1/T2 org output does not change
     with _Strict(monkeypatch, _file(_bundle(tmp_path / "noflag", [{"id": "t3s-x"}])), allow_t3=False):
@@ -743,7 +742,7 @@ def test_t3_also_in_association_carries_its_signoff_id(tmp_path):
     assert topic
     b = _bundle(tmp_path, [{"id": "t3s-assoc"}])
     out = tmp_path / "rec.jsonl"
-    r = _run(tmp_path, b, "--require-t3-signoff", "--allow-t3", "topics", "--also-in", OWNER, "--records", str(out),
+    r = _run(tmp_path, b, "--allow-t3", "topics", "--also-in", OWNER, "--records", str(out),
              owner=T1)
     obj = json.loads(r.stdout)
     assert topic in obj["proposed"] and obj.get("signoff_ids") == ["t3s-assoc"], _out(r)
@@ -771,7 +770,7 @@ def test_file_envelope_follows_the_schema(tmp_path, doc, ok):
     d = tmp_path / "bundle" / "decisions"
     d.mkdir(parents=True)
     (d / "t3-signoffs.yaml").write_text(json.dumps(doc), encoding="utf-8")  # JSON is YAML
-    r = _run(tmp_path, tmp_path / "bundle", "--require-t3-signoff", "--allow-t3", "describe")
+    r = _run(tmp_path, tmp_path / "bundle", "--allow-t3", "describe")
     if ok:
         assert r.returncode != 2 and "t3-signoff" not in _out(r), _out(r)
     else:
@@ -808,7 +807,7 @@ def test_transfer_to_a_t3_org_is_unchanged_without_the_flag(monkeypatch, brand):
 
 
 def test_home_repository_held_by_a_t3_org_is_omitted_without_its_record(tmp_path, monkeypatch, brand):
-    """`org profile CompleteTech-Skills` under --require-t3-signoff: northwind-member is homed in the T1 org but the
+    """`org profile CompleteTech-Skills` under --allow-t3: northwind-member is homed in the T1 org but the
     T3 org holds it today. public_slice built its home list through estate.is_public only, so with no record the
     profile README and data still named Pick-Your-AI/northwind-member (featured and sections)."""
     from ctshowcase import org as O
@@ -836,16 +835,16 @@ def test_adopt_topics_job_carries_the_also_in_signoff(tmp_path):
     topic = org_topic(load_brand(), OWNER)[1]
     b = _bundle(tmp_path, [{"id": "t3s-adopt"}])
     extra = {"also_in": [OWNER]}
-    r = _run(tmp_path, b, "--require-t3-signoff", "--allow-t3", "adopt", f"{T1}/northwind-synthetic", owner=T1,
+    r = _run(tmp_path, b, "--allow-t3", "adopt", f"{T1}/northwind-synthetic", owner=T1,
              meta_extra=extra)
     obj = json.loads(r.stdout)
     jobs = [j for j in obj["jobs"] if j["kind"] == "topics"]
     recs = [x for x in obj["records"] if x.get("kind") == "topics"]
     assert len(jobs) == 1 and any(topic in a for a in jobs[0]["argv"]), obj["jobs"]
-    assert jobs[0]["signoff_id"] == "t3s-adopt" and jobs[0]["approval_id"] == "t3s-adopt", jobs
+    assert jobs[0]["signoff_id"] == "t3s-adopt" and "approval_id" not in jobs[0], jobs
     assert recs and all(x["signoff_id"] == "t3s-adopt" and "approval_id" not in x for x in recs), obj["records"]
     # an existing approval_id on the job is kept
-    r = _run(tmp_path, b, "--require-t3-signoff", "--allow-t3", "adopt", f"{T1}/northwind-synthetic",
+    r = _run(tmp_path, b, "--allow-t3", "adopt", f"{T1}/northwind-synthetic",
              "--approval-id", "q-synthetic", owner=T1, meta_extra=extra)
     jobs = [j for j in json.loads(r.stdout)["jobs"] if j["kind"] == "topics"]
     assert jobs[0]["signoff_id"] == "t3s-adopt" and jobs[0]["approval_id"] == "q-synthetic", jobs
@@ -986,7 +985,7 @@ def test_t3_favorite_and_t3_list_org_keep_both_grants(tmp_path, monkeypatch, bra
         items = [j for j in plan["jobs"] if "list-item" in j["id"]]
         assert len(items) == 1, plan["jobs"]
         assert items[0]["signoff_id"] == "t3s-fav" and items[0]["signoff_ids"] == ["t3s-fav", "t3s-dest"], items
-        assert items[0]["approval_id"] == "t3s-fav", items  # the first id; an existing approval_id is never replaced
+        assert "approval_id" not in items[0], items  # sign-off ids never populate approval_id
 
 
 # --- review round 6: dates that make a record unusable, malformed-vs-scope, no opt-out ---
@@ -1119,12 +1118,13 @@ def test_false_record_dated_before_the_grant_does_not_revoke():
     assert why is None and got["id"] == "a"
 
 
-def test_false_record_scoped_to_one_repo_does_not_revoke_a_star_grant():
+def test_false_record_scoped_to_one_repo_revokes_only_that_repo_of_a_star_grant():
+    """Per-repository veto (review finding): the withdrawal of X refuses X and leaves the rest of the `*` grant."""
     from ctshowcase import signoff
     narrow = _rec(id="b", approved=False, approved_on="2026-10-01", repos=["X"])
-    for repo in ("foo", "X"):
-        got, why = signoff.evaluate([OWNER], repo, records=[A_TRUE, narrow])
-        assert why is None and got["id"] == "a", repo
+    got, why = signoff.evaluate([OWNER], "foo", records=[A_TRUE, narrow])
+    assert why is None and got["id"] == "a"
+    assert signoff.evaluate([OWNER], "X", records=[A_TRUE, narrow]) == (None, "revoked")
 
 
 def test_false_record_for_another_owner_does_not_revoke():

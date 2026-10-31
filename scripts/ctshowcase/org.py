@@ -1673,7 +1673,7 @@ def _star_list_plan(estate: Estate, org: str, *, lists_capture: dict | None = No
         added = sorted(i for i in targets.get(f.lower(), set()) - have - {list_id} if i in list_signoffs)
         # Every grant the job needs is kept: the T3 favorite's own record (stamped above), the List org's record when
         # that org is T3 (the destination of this item job), and the record of each newly added T3 destination List.
-        # One grant never suppresses another; an existing approval_id is kept (signoff.stamp_associations).
+        # One grant never suppresses another; the ids are kept in signoff_id/signoff_ids (signoff.stamp_associations), and approval_id is left as the job had it.
         sids = [item["signoff_id"]] if "signoff_id" in item else []
         if r.owner_status(login) == "t3":
             own = signoff.record(login, None, r.aliases(login))

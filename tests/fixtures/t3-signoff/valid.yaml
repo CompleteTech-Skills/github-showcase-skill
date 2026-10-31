@@ -10,7 +10,7 @@ signoffs:
     note: "synthetic fixture"
   - id: t3s-fixture-one
     owner: Pick-Your-AI
-    repos: northwind-synthetic
+    repos: northwind-withdrawn
     approved: false
     approver: synthetic-co-owner
     approved_on: 2026-01-15

@@ -65,9 +65,9 @@ def test_help_text_matches_docs():
     )
     assert result.returncode == 0, result.stderr
     assert "--allow-t3" in result.stdout
-    # issue 23 adds --require-t3-signoff (default) and right after --allow-t3 (there is no opt-out flag); the synopsis must keep up with --help
-    fragment = "[--quiet] [--allow-t3] [--require-t3-signoff] [--t3-signoff-file PATH] [--version]"
-    usage_fragment = "[--allow-t3] [--require-t3-signoff] [--t3-signoff-file PATH] [--version]"
+    # issue 23 adds --t3-signoff-file right after --allow-t3 (enforcement is unconditional: no toggle flag); the synopsis must keep up with --help
+    fragment = "[--quiet] [--allow-t3] [--t3-signoff-file PATH] [--version]"
+    usage_fragment = "[--allow-t3] [--t3-signoff-file PATH] [--version]"
     help_usage = " ".join(result.stdout.split())
     skill = _read("SKILL.md")
     ref = skill[skill.index("## Command Reference"):]
@@ -76,12 +76,11 @@ def test_help_text_matches_docs():
     assert fragment in " ".join(synopsis.split()), synopsis
 
 
-def test_skill_documents_require_t3_signoff_beside_allow_t3():
-    """Epic 22 integration: the sign-off paragraph (issue 31) names the opt-in record check (issue 23) and its codes."""
+def test_skill_names_the_signoff_refusal_codes_beside_allow_t3():
+    """Epic 22 integration: the sign-off paragraph (issue 31) names the record check (issue 23) and its codes."""
     skill = _read("SKILL.md")
     para = skill[skill.index(MARKER):].split("\n\n", 1)[0]
-    assert "--require-t3-signoff" in para, para
-    for code in ("t3-signoff:missing", "t3-signoff:expired", "t3-signoff:scope"):
+    for code in ("t3-signoff:missing", "t3-signoff:expired", "t3-signoff:scope", "t3-signoff:revoked", "t3-signoff:invalid"):
         assert code in para, code
 
 
@@ -109,11 +108,14 @@ def test_skill_documents_default_on_enforcement_path_and_no_opt_out():
     assert "DEFAULT OFF" not in ref and "decisions/t3-signoffs.yaml" in ref
 
 
-def test_require_t3_signoff_is_documented_as_accepted_and_ignored():
-    """The flag is a no-op, never a released compatibility surface: no doc says it is kept for compatibility."""
-    for name in ("SKILL.md", "CHANGELOG.md", "references/t3-signoff.md"):
-        text = _read(name)
-        for line in text.splitlines():
-            if "--require-t3-signoff" in line:
-                assert "kept for compatibility" not in line, (name, line[:200])
-        assert "accepted and ignored" in text, name
+def test_require_t3_signoff_flag_does_not_exist():
+    """The flag never shipped and enforcement is unconditional: it is not a live option in --help, SKILL.md,
+    references/t3-signoff.md or CHANGELOG.md, and argparse rejects it (exit 2)."""
+    helptext = subprocess.run([sys.executable, str(ROOT / "scripts" / "showcase.py"), "--help"],
+                              capture_output=True, encoding="utf-8").stdout
+    assert "require-t3-signoff" not in helptext
+    for name in ("SKILL.md", "references/t3-signoff.md", "CHANGELOG.md"):
+        assert "--require-t3-signoff" not in _read(name), name
+    r = subprocess.run([sys.executable, str(ROOT / "scripts" / "showcase.py"), "--require-t3-signoff", "--allow-t3", "describe"],
+                       capture_output=True, encoding="utf-8")
+    assert r.returncode == 2 and "unrecognized arguments: --require-t3-signoff" in r.stderr, r.stderr

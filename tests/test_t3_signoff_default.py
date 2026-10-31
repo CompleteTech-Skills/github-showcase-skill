@@ -107,8 +107,8 @@ def test_there_is_no_opt_out(tmp_path):
     for value in ("0", "false", "no", "off"):
         r = _run(tmp_path, root, "--allow-t3", "describe", env={"SHOWCASE_REQUIRE_T3_SIGNOFF": value})
         assert r.returncode == 2 and "t3-signoff:no-file" in _out(r), (value, _out(r))
-    r = _run(tmp_path, root, "--require-t3-signoff", "--allow-t3", "describe")  # the compatible no-op flag
-    assert r.returncode == 2 and "t3-signoff:no-file" in _out(r), _out(r)
+    r = _run(tmp_path, root, "--require-t3-signoff", "--allow-t3", "describe")  # the flag no longer exists
+    assert r.returncode == 2 and "unrecognized arguments: --require-t3-signoff" in _out(r), _out(r)
 
 
 def test_writer_jobs_carry_the_default_records_id(tmp_path):
@@ -169,23 +169,21 @@ def test_estate_plan_stamping_ignores_a_display_name_shared_with_another_org(tmp
     assert {j["id"]: j.get("signoff_id") for j in jobs} == {"t1": None, "t3": "t3s-acme"}
 
 
-def test_flag_is_an_accepted_no_op_and_the_no_file_default_still_refuses(tmp_path):
-    """Default-on enforcement is not a regression: with no record file `--allow-t3` refuses exactly as it does with
-    the compatibility flag, and the flag changes neither the exit code nor the output."""
+def test_no_file_default_refuses_with_or_without_the_removed_flag(tmp_path):
+    """Default-on enforcement: with no record file `--allow-t3` refuses (exit 2, t3-signoff:no-file); the removed
+    `--require-t3-signoff` is rejected by argparse instead of being accepted as a no-op."""
     root = _bundle(tmp_path, write=False)
     bare = _run(tmp_path, root, "--allow-t3", "describe")
+    assert bare.returncode == 2 and "t3-signoff:no-file" in _out(bare), _out(bare)
     flagged = _run(tmp_path, root, "--require-t3-signoff", "--allow-t3", "describe")
-    assert bare.returncode == flagged.returncode == 2
-    assert "t3-signoff:no-file" in _out(bare) and "t3-signoff:no-file" in _out(flagged), _out(bare)
-    assert (bare.stdout, bare.stderr) == (flagged.stdout, flagged.stderr)
+    assert flagged.returncode == 2 and "unrecognized arguments" in _out(flagged), _out(flagged)
     root = _bundle(tmp_path / "ok", id="t3s-flag")
     ok = _run(tmp_path / "ok", root, "--allow-t3", "describe")
-    ok_flag = _run(tmp_path / "ok", root, "--require-t3-signoff", "--allow-t3", "describe")
-    assert ok.returncode == ok_flag.returncode == 0 and ok.stdout == ok_flag.stdout
+    assert ok.returncode == 0
 
 
 def test_no_opt_out_option_exists_in_help_or_source():
     helptext = subprocess.run([*SHOWCASE, "--help"], capture_output=True, encoding="utf-8").stdout
-    assert "--require-t3-signoff" in helptext and "--no-require-t3-signoff" not in helptext
+    assert "require-t3-signoff" not in helptext
     src = "".join(p.read_text(encoding="utf-8") for p in (ROOT / "scripts").rglob("*.py"))
     assert "SHOWCASE_REQUIRE_T3_SIGNOFF" not in src and "no-require-t3-signoff" not in src
