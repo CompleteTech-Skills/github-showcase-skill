@@ -78,7 +78,7 @@ def test_unknown_org_is_needs_input_not_defaults(brand):
         r.registry_org("Nobody-Knows-This-Org")
 
 
-def test_check_owner_refuses_under_every_alias(brand):
+def test_check_owner_refuses_under_every_alias(brand, t3_record):
     r = R.Resolver(brand, {}, approvals(rows=[("org-rename", "Pick-Your-AI", "*", "Pick-Your-Stack")], actions=[]))
     with pytest.raises(Refused) as e:
         r.check_owner("Pick-Your-Stack")

@@ -1,5 +1,7 @@
 """`--require-t3-signoff` (issue 23): `--allow-t3` needs a valid, unexpired sign-off record in the file named by
-`--t3-signoff-file` (env SHOWCASE_T3_SIGNOFF_FILE). There is no default location (the maintainer has not chosen one).
+`--t3-signoff-file` (env SHOWCASE_T3_SIGNOFF_FILE) or, by default, in the private estate bundle
+(`<estate root>/decisions/t3-signoffs.yaml`; tests/test_t3_signoff_default.py). The enforcement is default-on; the tests
+that pin the trust-only behaviour pass the explicit opt-out `--no-require-t3-signoff`.
 
 Synthetic records only (owner Pick-Your-AI is the brand.yaml T3 owner; the ids and dates are made up). The existing
 tests/test_allow_t3_global.py is the proof that behaviour without the new flag is unchanged and stays untouched.
@@ -100,11 +102,11 @@ def test_flag_without_allow_t3_still_refuses_as_before(tmp_path):
     assert r.returncode == 2 and "t3-signoff" in _out(r)
 
 
-# Guard test: passes on base 2be04ac by design (verified: 28 of 30 tests in this file fail on base, only the two guards pass). It pins the unchanged default.
-def test_default_is_unchanged_without_the_new_flag(tmp_path):
-    """No flag and no records at all: `--allow-t3` alone still lifts the refusal (byte-for-byte old behaviour)."""
-    r = _run(tmp_path, _bundle(tmp_path, []), "--allow-t3", "describe")
-    assert r.returncode != 2 and "t3-signoff" not in _out(r).replace("t3-signoff:file-ignored", ""), _out(r)
+def test_opt_out_keeps_the_trust_only_behaviour(tmp_path):
+    """The explicit opt-out and no records at all: `--allow-t3` alone lifts the refusal (the pre-issue-23 behaviour)."""
+    r = _run(tmp_path, _bundle(tmp_path, []), "--no-require-t3-signoff", "--allow-t3", "describe")
+    assert r.returncode != 2 and "t3-signoff:opt-out" in _out(r), _out(r)
+    assert "t3-signoff:no-file" not in _out(r) and "t3-signoff:missing" not in _out(r), _out(r)
 
 
 def test_excluded_owner_is_refused_even_with_a_record(tmp_path):
@@ -119,7 +121,7 @@ def test_doctor_shows_the_signoff_id(tmp_path):
     r = _run(tmp_path, b, "--require-t3-signoff", "--allow-t3", "doctor", "--format", "json")
     row = json.loads(r.stdout)
     assert row["signoff_id"] == "t3s-7" and row["signoff_expires"] == "2099-01-02", r.stdout
-    plain = _run(tmp_path, b, "--allow-t3", "doctor", "--format", "json")
+    plain = _run(tmp_path, b, "--no-require-t3-signoff", "--allow-t3", "doctor", "--format", "json")
     assert "signoff_id" not in json.loads(plain.stdout)  # off by default: the row is unchanged
 
 
@@ -144,10 +146,11 @@ def test_writer_jobs_carry_the_signoff_id(tmp_path):
         signoff.reset()
 
 
-def test_jobs_are_untouched_without_the_flag(tmp_path):
+def test_jobs_are_untouched_when_enforcement_is_opted_out(tmp_path):
     from ctshowcase import signoff
     from ctshowcase.records import append
     signoff._grant(OWNER.lower(), {"id": "t3s-8", "repos": ["*"]})
+    signoff.set_required(False)
     try:
         out = tmp_path / "jobs.jsonl"
         append(out, [{"id": "a", "phase": "p", "kind": "k", "repo": f"{OWNER}/x"}])
@@ -159,9 +162,10 @@ def test_jobs_are_untouched_without_the_flag(tmp_path):
 def test_state_does_not_outlive_the_invocation(tmp_path, capsys):
     from ctshowcase import signoff
     import showcase
-    showcase.main(["--require-t3-signoff", "config"])
+    assert signoff.required() is True  # the default
+    showcase.main(["--no-require-t3-signoff", "config"])
     capsys.readouterr()
-    assert signoff.required() is False and not signoff._granted()
+    assert signoff.required() is True and not signoff._granted()  # the opt-out held for that call only
 
 
 @pytest.mark.parametrize("repo,expect", [(None, "scope"), ("a", None), ("B", None), ("c", "scope")])
@@ -245,7 +249,7 @@ def test_default_doctor_renderers_show_the_signoff_id(tmp_path):
     for fmt in ("tsv", "md"):
         r = _run(tmp_path, b, "--require-t3-signoff", "--allow-t3", "doctor", "--format", fmt)
         assert "t3s-13" in r.stdout, _out(r)
-        plain = _run(tmp_path, b, "--allow-t3", "doctor", "--format", fmt)
+        plain = _run(tmp_path, b, "--no-require-t3-signoff", "--allow-t3", "doctor", "--format", fmt)
         assert "t3s-13" not in plain.stdout and "signoff_id" not in plain.stdout  # off: output unchanged
 
 
@@ -413,12 +417,16 @@ def test_main_restores_an_enclosing_runs_signoff_state(tmp_path, capsys):
 
 # --- review round 4: explicit record file, record schema, timestamp expiry, copy-on-write state, change records ---
 
-def test_no_record_file_refuses_without_a_default(tmp_path):
-    """The canonical path in the estate bundle is still the maintainer's choice (issue 24), so the tool must not pick
-    one: a valid record sitting at the formerly hard-coded bundle path is NOT read unless the file is named."""
-    b = _bundle(tmp_path, [{"id": "t3s-d"}])
-    r = _run(tmp_path, None, "--require-t3-signoff", "--allow-t3", "describe", env={"SHOWCASE_ESTATE_ROOT": str(b)})
-    assert r.returncode == 2 and "t3-signoff:no-file" in _out(r) and "--t3-signoff-file" in _out(r), _out(r)
+def test_no_record_file_refuses_and_names_the_resolved_path(tmp_path):
+    """Nothing at the default path and no explicit file: the gate refuses t3-signoff:no-file and names the path it
+    resolved (the estate default). It never creates the file and never falls back to trusting --allow-t3."""
+    root = tmp_path / "bundle"
+    (root / "decisions").mkdir(parents=True)
+    r = _run(tmp_path, None, "--allow-t3", "describe", env={"SHOWCASE_ESTATE_ROOT": str(root)})
+    want = root / "decisions" / "t3-signoffs.yaml"
+    assert r.returncode == 2 and "t3-signoff:no-file" in _out(r), _out(r)
+    assert str(want) in json.loads(r.stdout)["error"], r.stdout
+    assert not want.exists()
 
 
 def test_record_file_may_have_any_name_and_come_from_env(tmp_path):
@@ -513,7 +521,7 @@ def test_topics_change_records_carry_the_signoff_id(tmp_path):
     recs = [json.loads(x) for x in out.read_text(encoding="utf-8").splitlines()]
     assert recs and all(x["signoff_id"] == "t3s-cr" and "approval_id" not in x for x in recs), recs
     plain = tmp_path / "plain.jsonl"
-    _run(tmp_path, b, "--allow-t3", "topics", "--records", str(plain))
+    _run(tmp_path, b, "--no-require-t3-signoff", "--allow-t3", "topics", "--records", str(plain))
     assert all("signoff_id" not in json.loads(x) for x in plain.read_text(encoding="utf-8").splitlines())
 
 
@@ -774,7 +782,7 @@ def test_t3_also_in_association_carries_its_signoff_id(tmp_path):
     assert len(recs) == 1 and recs[0]["owner"] == T1 and topic in recs[0]["after"], recs
     assert recs[0]["signoff_id"] == "t3s-assoc" and "approval_id" not in recs[0], recs
     plain = tmp_path / "plain.jsonl"  # without the flag: no key, behaviour unchanged
-    r = _run(tmp_path, b, "--allow-t3", "topics", "--also-in", OWNER, "--records", str(plain), owner=T1)
+    r = _run(tmp_path, b, "--no-require-t3-signoff", "--allow-t3", "topics", "--also-in", OWNER, "--records", str(plain), owner=T1)
     assert "signoff_ids" not in json.loads(r.stdout), r.stdout
     assert all("signoff_id" not in json.loads(x) for x in plain.read_text(encoding="utf-8").splitlines())
 
@@ -879,7 +887,7 @@ def test_adopt_topics_job_carries_the_also_in_signoff(tmp_path):
     jobs = [j for j in json.loads(r.stdout)["jobs"] if j["kind"] == "topics"]
     assert jobs[0]["signoff_id"] == "t3s-adopt" and jobs[0]["approval_id"] == "q-synthetic", jobs
     # without the flag: nothing is stamped
-    r = _run(tmp_path, b, "--allow-t3", "adopt", f"{T1}/northwind-synthetic", owner=T1, meta_extra=extra)
+    r = _run(tmp_path, b, "--no-require-t3-signoff", "--allow-t3", "adopt", f"{T1}/northwind-synthetic", owner=T1, meta_extra=extra)
     assert r.stdout and "signoff_id" not in r.stdout, _out(r)
 
 
@@ -909,20 +917,25 @@ def test_estate_plan_jobs_carry_the_t3_orgs_signoff(tmp_path, monkeypatch, brand
     with _Strict(monkeypatch, _file(_bundle(tmp_path / "none", []))):
         plan = PJ.estate_plan(res, copied=cap, user_id=100, allow_t3=True)
         assert OWNER not in [o["login"] for o in plan["orgs"]] and OWNER not in json.dumps(plan["jobs"])
-    plan = PJ.estate_plan(res, copied=cap, user_id=100, allow_t3=True)  # flag off: included, nothing stamped
+    from ctshowcase import signoff
+    off = signoff.set_required(False)  # opted out: included, nothing stamped
+    try:
+        plan = PJ.estate_plan(res, copied=cap, user_id=100, allow_t3=True)
+    finally:
+        signoff.reset_required(off)
     assert OWNER in [o["login"] for o in plan["orgs"]] and "signoff_id" not in json.dumps(plan)
 
 
 # --- review round 5: evidence for each fixed finding (synthetic records and slugs only) ---
 
 def test_signoff_file_without_the_flag_is_logged_not_silently_ignored(tmp_path):
-    """A record file given without --require-t3-signoff is never read; the run says so instead of looking enforced."""
+    """A record file given while enforcement is opted out is never read; the run says so instead of looking enforced."""
     b = _bundle(tmp_path, [{"id": "t3s-ign", "expires": "2020-01-01"}])
-    r = _run(tmp_path, b, "--allow-t3", "describe")
+    r = _run(tmp_path, b, "--no-require-t3-signoff", "--allow-t3", "describe")
     assert r.returncode != 2 and "t3-signoff:file-ignored" in _out(r), _out(r)
     r = _run(tmp_path, b, "--allow-t3", "--require-t3-signoff", "describe")  # enforced: expired record refuses
     assert r.returncode == 2 and "file-ignored" not in _out(r), _out(r)
-    r = _run(tmp_path, None, "--allow-t3", "describe")  # no file at all: nothing to report
+    r = _run(tmp_path, None, "--no-require-t3-signoff", "--allow-t3", "describe")  # no explicit file: nothing to report
     assert "file-ignored" not in _out(r), _out(r)
 
 

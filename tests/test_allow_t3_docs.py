@@ -65,13 +65,14 @@ def test_help_text_matches_docs():
     )
     assert result.returncode == 0, result.stderr
     assert "--allow-t3" in result.stdout
-    # issue 23 adds the opt-in --require-t3-signoff right after --allow-t3; the synopsis must keep up with --help
-    fragment = "[--quiet] [--allow-t3] [--require-t3-signoff] [--t3-signoff-file PATH] [--version]"
+    # issue 23 adds --require-t3-signoff (default) and its opt-out right after --allow-t3; the synopsis must keep up with --help
+    fragment = "[--quiet] [--allow-t3] [--require-t3-signoff | --no-require-t3-signoff] [--t3-signoff-file PATH] [--version]"
+    usage_fragment = "[--allow-t3] [--require-t3-signoff] [--no-require-t3-signoff] [--t3-signoff-file PATH] [--version]"
     help_usage = " ".join(result.stdout.split())
     skill = _read("SKILL.md")
     ref = skill[skill.index("## Command Reference"):]
     synopsis = next(line for line in ref.splitlines() if line.startswith("python3 <skill-dir>/scripts/showcase.py"))
-    assert fragment in help_usage, help_usage
+    assert usage_fragment in help_usage, help_usage  # argparse prints the pair as separate options
     assert fragment in " ".join(synopsis.split()), synopsis
 
 
@@ -82,3 +83,18 @@ def test_skill_documents_require_t3_signoff_beside_allow_t3():
     assert "--require-t3-signoff" in para, para
     for code in ("t3-signoff:missing", "t3-signoff:expired", "t3-signoff:scope"):
         assert code in para, code
+
+
+def test_skill_documents_default_on_enforcement_path_and_opt_out():
+    """Issue 23: SKILL.md, ONBOARDING.md, CHANGELOG.md and references/t3-signoff.md describe the default-on record check."""
+    skill = _read("SKILL.md")
+    para = skill[skill.index(MARKER):].split("\n\n", 1)[0]
+    assert "on by default" in para and "decisions/t3-signoffs.yaml" in skill, para
+    assert "--no-require-t3-signoff" in para and "SHOWCASE_REQUIRE_T3_SIGNOFF=0" in para, para
+    assert "default off" not in para and "is always named explicitly" not in para, para
+    assert "it is never read from a config file or environment." not in para, para
+    assert "decisions/t3-signoffs.yaml" in _read("ONBOARDING.md")
+    changelog = _read("CHANGELOG.md")
+    assert "Default-on T3 sign-off enforcement" in changelog and "decisions/t3-signoffs.yaml" in changelog
+    ref = _read("references/t3-signoff.md")
+    assert "DEFAULT OFF" not in ref and "decisions/t3-signoffs.yaml" in ref

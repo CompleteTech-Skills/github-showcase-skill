@@ -1,20 +1,27 @@
-"""A global `--allow-t3` lifts the T3 refusal for every repository command; the default still refuses (exit 2)."""
+"""A global `--allow-t3` lifts the T3 refusal for every repository command; the default still refuses (exit 2).
+
+Issue 23: `--allow-t3` also needs a sign-off record by default, so the runs that expect it to lift the refusal read the
+synthetic record fixture (tests/fixtures/t3-signoff/valid.yaml, owner Pick-Your-AI) through SHOWCASE_T3_SIGNOFF_FILE."""
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SHOWCASE = [sys.executable, str(ROOT / "scripts" / "showcase.py")]
+RECORDS = ROOT / "tests" / "fixtures" / "t3-signoff" / "valid.yaml"
 META = json.loads((ROOT / "examples" / "meta" / "northwind-support-triage-agent.json").read_text(encoding="utf-8"))
 
 
 def _run(tmp_path, *argv, owner="Pick-Your-AI"):
     meta = tmp_path / "meta.json"
     meta.write_text(json.dumps(dict(META, owner=owner, repo="northwind-synthetic")), encoding="utf-8")
-    return subprocess.run([*SHOWCASE, "--meta", str(meta), "--no-repo-dir", *argv], cwd=ROOT,
+    env = dict(os.environ, SHOWCASE_T3_SIGNOFF_FILE=str(RECORDS))
+    env.pop("SHOWCASE_REQUIRE_T3_SIGNOFF", None)
+    return subprocess.run([*SHOWCASE, "--meta", str(meta), "--no-repo-dir", *argv], cwd=ROOT, env=env,
                           capture_output=True, text=True, encoding="utf-8")
 
 
@@ -67,7 +74,7 @@ def test_signoff_does_not_outlive_the_invocation(tmp_path, capsys):
         load_brand().check_owner("Pick-Your-AI")
 
 
-def test_signed_off_t3_org_joins_also_in_and_star_lists(brand):
+def test_signed_off_t3_org_joins_also_in_and_star_lists(brand, t3_record):
     from ctshowcase.config import set_t3_signed_off
     from ctshowcase.org import _star_held
     from ctshowcase.resolver import Resolver
@@ -155,7 +162,7 @@ def test_main_restores_the_caller_sign_off_value(capsys):
         reset_t3_signed_off(token)
 
 
-def test_two_concurrent_threads_have_independent_sign_off_at_the_owner_gate(brand):
+def test_two_concurrent_threads_have_independent_sign_off_at_the_owner_gate(brand, monkeypatch):
     """Acceptance: one thread signed off and one not behave independently; the unsigned one is refused for a T3 owner.
 
     Each thread sets its own state explicitly, so this also runs where threads inherit the caller's context. The barrier
@@ -163,6 +170,7 @@ def test_two_concurrent_threads_have_independent_sign_off_at_the_owner_gate(bran
     import threading
     from ctshowcase.config import reset_t3_signed_off, set_t3_signed_off, t3_signed_off
     from ctshowcase.errors import Refused
+    monkeypatch.setenv("SHOWCASE_T3_SIGNOFF_FILE", str(RECORDS))  # the signed thread's record (synthetic)
     barrier = threading.Barrier(2, timeout=10)
     out: dict[str, tuple] = {}
 

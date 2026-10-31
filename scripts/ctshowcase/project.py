@@ -1156,8 +1156,12 @@ def _stamp_estate_orgs(jobs: list[dict], orgs: list[dict]) -> None:
         return
     for j in jobs:
         tokens = _job_tokens(j)
-        ids = [o["signoff_id"] for o in t3 if o["name"].lower() in tokens or o["login"].lower() in tokens
-               or f"{TIER_PREFIX_T3}{o['login']}".lower() in tokens]
+        # a name that is also another org's login or display name is ambiguous: only that org's login or its
+        # `T3: login` description credits the job (exact identity, never a shared label)
+        others = {x.lower() for o in orgs if not o.get("signoff_id") for x in (o["login"], o["name"])}
+        ids = [o["signoff_id"] for o in t3
+               if o["login"].lower() in tokens or f"{TIER_PREFIX_T3}{o['login']}".lower() in tokens
+               or (o["name"].lower() in tokens and o["name"].lower() not in others)]
         signoff.stamp_associations(j, ids)
 
 

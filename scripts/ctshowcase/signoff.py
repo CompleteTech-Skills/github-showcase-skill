@@ -1,12 +1,13 @@
-"""Opt-in T3 sign-off verification (`--require-t3-signoff`, env SHOWCASE_REQUIRE_T3_SIGNOFF=1; issue 23).
+"""Default-on T3 sign-off verification (`--allow-t3` needs a record; issue 23, tasks 24-27).
 
-Off by default: nothing here runs and `--allow-t3` keeps its original meaning (tests/test_allow_t3_global.py).
-When on, `--allow-t3` is honoured only while the sign-off record file holds a valid, unexpired record for the owner
-(and the repository when the record is scoped). The file is passed explicitly with the global `--t3-signoff-file PATH`
-(env SHOWCASE_T3_SIGNOFF_FILE). There is deliberately no default location: issue 24 leaves the canonical path inside
-the estate bundle to the maintainer, so the tool never picks one (tests/test_t3_signoff_require.py
-::test_no_record_file_refuses_without_a_default). The file is read, never copied. Format (the contract is
-references/t3-signoff.schema.json, described in references/t3-signoff.md)::
+On by default: `--allow-t3` is honoured only while the sign-off record file holds a valid, unexpired record for the
+owner (and the repository when the record is scoped). The record file is the private estate file
+`<estate_root>/decisions/t3-signoffs.yaml` (default_record_path(); estate_root is resolver.estate_root()). An explicit
+`--t3-signoff-file PATH` (env SHOWCASE_T3_SIGNOFF_FILE) overrides it. The order is: the explicit flag, then the env,
+then the default. The tool never creates the file and never falls back to trusting the flag when it is absent.
+The one opt-out is explicit: `--no-require-t3-signoff` or env SHOWCASE_REQUIRE_T3_SIGNOFF=0, which restores the
+trust-only meaning of `--allow-t3` for that run (tests/test_t3_signoff_default.py). The file is read, never copied.
+Format (the contract is references/t3-signoff.schema.json, described in references/t3-signoff.md)::
 
     signoffs:
       - id: t3s-001                 # carried onto writer jobs and change records as `signoff_id`
@@ -18,7 +19,7 @@ references/t3-signoff.schema.json, described in references/t3-signoff.md)::
         expires: 2099-12-31         # a date (valid through that day) or a timestamp with a UTC offset
         note: "optional free text"
 
-Refusals are exit 2 with log `t3-signoff:no-file` (no record file was given), `t3-signoff:missing` (no approved record
+Refusals are exit 2 with log `t3-signoff:no-file` (no record file at the resolved path, or no estate root to resolve one; the log names the path), `t3-signoff:missing` (no approved record
 for the owner), `t3-signoff:invalid` (the owner's records all break the schema; the error names the first problem),
 `t3-signoff:expired` (every matching record is past `expires`) or `t3-signoff:scope` (the owner has records but none
 covers the repository; an owner-wide command with no repository needs a `*` record). Excluded and HOLD owners are
@@ -35,15 +36,18 @@ from pathlib import Path
 from .errors import Refused
 
 FILE_ENV = "SHOWCASE_T3_SIGNOFF_FILE"
+REQUIRE_ENV = "SHOWCASE_REQUIRE_T3_SIGNOFF"
+DEFAULT_RELATIVE = Path("decisions") / "t3-signoffs.yaml"
+_OFF = ("0", "false", "no", "off")
 
 # All sign-off state is context-local, like `--allow-t3` itself (config._T3_SIGNED_OFF, issue 28): one thread's or
 # asyncio task's --require-t3-signoff, record file, grants and aliases never leak into another's owner gate
 # (tests/test_t3_signoff_require.py::test_signoff_state_is_context_local). showcase.main() opens a fresh run state
 # and restores the enclosing one on every exit.
-_REQUIRE: ContextVar[bool] = ContextVar("ctshowcase_t3_signoff_required", default=False)
+_REQUIRE: ContextVar[bool] = ContextVar("ctshowcase_t3_signoff_required", default=True)
 _FILE: ContextVar[str | None] = ContextVar("ctshowcase_t3_signoff_file", default=None)
 # (granted, aliases): lowercase login -> the records that granted it, for stamping this run's writer jobs; and
-# lowercase login -> every login of its org, filled by Resolver.aliases under the flag. None until first use.
+# lowercase login -> every login of its org, filled by Resolver.aliases by default. None until first use.
 # Copy-on-write: every update builds new dicts and sets them, so a context that inherited this value (an asyncio task,
 # contextvars.copy_context().run) never mutates its parent's grants
 # (tests/test_t3_signoff_require.py::test_child_context_grant_does_not_leak_into_parent).
@@ -52,7 +56,8 @@ _RUN: ContextVar[tuple[dict[str, tuple[dict, ...]], dict[str, frozenset[str]]] |
 
 
 def env_required() -> bool:
-    return os.environ.get("SHOWCASE_REQUIRE_T3_SIGNOFF", "").strip().lower() in ("1", "true", "yes", "on")
+    """On unless the environment opts out explicitly (SHOWCASE_REQUIRE_T3_SIGNOFF=0|false|no|off)."""
+    return os.environ.get(REQUIRE_ENV, "").strip().lower() not in _OFF
 
 
 def set_required(value: bool) -> Token:
@@ -77,9 +82,23 @@ def reset_file(token: Token) -> None:
     _FILE.reset(token)
 
 
-def record_file() -> Path | None:
+def explicit_file() -> Path | None:
+    """The file named by `--t3-signoff-file` or env SHOWCASE_T3_SIGNOFF_FILE, else None (in that order)."""
     v = _FILE.get() or os.environ.get(FILE_ENV, "").strip()
     return Path(v) if v else None
+
+
+def default_record_path() -> Path | None:
+    """`<estate_root>/decisions/t3-signoffs.yaml` in the private estate bundle, or None when no estate root resolves.
+    Only a path: the file is never created."""
+    from . import resolver
+    root = resolver.estate_root()
+    return root / DEFAULT_RELATIVE if root else None
+
+
+def record_file() -> Path | None:
+    """The record file this context reads: the explicit flag, then the env, then default_record_path()."""
+    return explicit_file() or default_record_path()
 
 
 def _run_state() -> tuple[dict[str, tuple[dict, ...]], dict[str, frozenset[str]]]:
@@ -135,7 +154,7 @@ def _expand(owners: list[str]) -> list[str]:
 
 
 def load_records(path: str | Path | None = None) -> list[dict]:
-    """Records from PATH, else from this run's `--t3-signoff-file` / SHOWCASE_T3_SIGNOFF_FILE. No file: []."""
+    """Records from PATH, else from this run's record_file() (flag, env, then the estate default). No file: []."""
     from .config import load_yaml_text
     path = Path(path) if path else record_file()
     if not path or not path.is_file():
@@ -256,8 +275,11 @@ def evaluate(owners: list[str], repo: str | None = None, today: _dt.date | None 
         if today is not None:  # start of that local day, so date expiries compare exactly as before
             now = _dt.datetime.combine(today, _dt.time.min).astimezone()
     if records is None:
-        if record_file() is None:
-            return None, "no-file"
+        path = record_file()
+        if path is None:
+            return None, "no-file:no estate root resolves, so there is no default record path"
+        if not path.is_file():
+            return None, f"no-file:{path}"
         records = load_records()
     logins = set(_expand([o for o in owners if o]))
     ours = [r for r in records if str(r.get("owner") or "").lower() in logins]
@@ -279,7 +301,8 @@ def evaluate(owners: list[str], repo: str | None = None, today: _dt.date | None 
 
 def _covers(rec: dict, repo: str | None, logins: list[str] | None = None) -> bool:
     """`*` covers everything; a bare name covers that repository; OWNER/NAME needs the owner to be one of `logins`
-    (the requested owner and its org aliases) as well as the name. A malformed `repos` (not a string or a list of
+    (the requested owner and its org aliases) as well as the name. A repository given as OWNER/NAME is covered only
+    when that owner is one of `logins` too (only `*` covers another account's repository). A malformed `repos` (not a string or a list of
     strings) covers nothing, so it surfaces as t3-signoff:scope instead of an uncaught exception."""
     repos = rec.get("repos")
     if isinstance(repos, str):
@@ -292,6 +315,9 @@ def _covers(rec: dict, repo: str | None, logins: list[str] | None = None) -> boo
     if not name:
         return False
     mine = {x.lower() for x in logins or []}
+    holder = (repo or "").rpartition("/")[0].lower()
+    if holder and logins is not None and holder not in mine:
+        return False  # OWNER/NAME names another account's repository: a bare name or this owner's pair never covers it
     for r in repos:
         head, _, tail = r.rpartition("/")
         if tail.lower() != name:
@@ -317,8 +343,9 @@ def require(owner: str, repo: str | None = None, aliases: list[str] | None = Non
     rec, why = evaluate(logins, repo)
     if rec is None:
         code, _, detail = (why or "missing").partition(":")
-        hint = " (pass --t3-signoff-file PATH or set SHOWCASE_T3_SIGNOFF_FILE)" if code == "no-file" else ""
-        raise Refused(f"{owner}{'/' + repo if repo else ''} is T3 and --require-t3-signoff is set: "
+        hint = (" (create the record in the private estate bundle, or pass --t3-signoff-file PATH / set "
+                "SHOWCASE_T3_SIGNOFF_FILE; --no-require-t3-signoff opts out)") if code == "no-file" else ""
+        raise Refused(f"{owner}{'/' + repo if repo else ''} is T3 and a sign-off record is required: "
                       f"no valid sign-off record ({code}{': ' + detail.strip() if detail else ''}){hint}",
                       log=f"t3-signoff:{code}")
     for login in _expand(logins):
@@ -337,7 +364,7 @@ def record_for(owner: str, repo: str | None = None) -> dict | None:
 
 
 def stamp(items, owner: str | None = None):
-    """Under the flag, carry the granting sign-off onto this run's output:
+    """By default, carry the granting sign-off onto this run's output:
 
     - writer jobs (dicts with `phase`) for a signed-off T3 owner get `signoff_id`, and `approval_id` when none is set;
     - change records (records.record(): dicts with `std`, `owner` and `repo`, no `phase`) get `signoff_id` only, since
@@ -368,7 +395,7 @@ def _put(j: dict, rec: dict | None) -> None:
 
 
 def stamp_associations(item: dict, association_ids, owner: str | None = None, repo: str | None = None) -> dict:
-    """Under the flag, name on ITEM (a writer job or a change record) every record that authorized it: OWNER's own
+    """By default, name on ITEM (a writer job or a change record) every record that authorized it: OWNER's own
     grant first (when OWNER/REPO is a signed-off T3 target), then each id in ASSOCIATION_IDS (a T3 org that ITEM
     brings in without targeting it: topics.merge `signoff_ids` for an `also_in` membership topic, project.estate_plan
     for a T3 org in the personal Estate's Org field). `signoff_id` is the first id and `signoff_ids` lists all of them
@@ -390,7 +417,7 @@ def stamp_associations(item: dict, association_ids, owner: str | None = None, re
 
 
 def record(owner: str, repo: str | None = None, aliases: list[str] | None = None) -> dict | None:
-    """Under the flag, the valid record covering OWNER (and REPO), else None; registers no grant. None when off."""
+    """By default, the valid record covering OWNER (and REPO), else None; registers no grant. None when off."""
     if not required():
         return None
     rec, _ = evaluate([owner, *(aliases or [])], repo)
@@ -398,7 +425,7 @@ def record(owner: str, repo: str | None = None, aliases: list[str] | None = None
 
 
 def stamp_source(job: dict, full: str, aliases: list[str] | None = None) -> dict:
-    """Under the flag, stamp a writer job that names another owner's T3 repository FULL (OWNER/NAME) with the record
+    """By default, stamp a writer job that names another owner's T3 repository FULL (OWNER/NAME) with the record
     covering that repository. A star-List item job (org.star_list_plan) targets the personal account for some org's
     List, so neither the target nor the org's grant names the record that let the favorite through
     (org._t3_held checks it with granted(), which does not register a grant). It is evaluated here instead. The

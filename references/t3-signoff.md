@@ -1,10 +1,10 @@
 # T3 sign-off records (`--require-t3-signoff`)
 
-`--allow-t3` is enforced by default. The tool requires `--require-t3-signoff` to be on (it is on by default) and verifies the operator's claim that a co-owner signed off against a record file. A T3 run therefore needs a valid, unexpired record that covers the owner and, when the record is scoped, the repository.
+`--allow-t3` is enforced by default: the tool verifies the operator's claim that a co-owner signed off against a record file. `--require-t3-signoff` is accepted for explicitness and changes nothing. The one escape is the explicit opt-out `--no-require-t3-signoff` (or `SHOWCASE_REQUIRE_T3_SIGNOFF=0`), which restores the trust-only meaning of `--allow-t3` for that run and is logged `t3-signoff:opt-out`; the two flags together are a usage error. A T3 run therefore needs a valid, unexpired record that covers the owner and, when the record is scoped, the repository.
 
 ## Where the file lives
 
-The canonical private path is `<estate_root>/decisions/t3-signoffs.yaml`, where the estate root is `resolver.estate_root()`: `SHOWCASE_ESTATE_ROOT` when set, otherwise the skill's parent bundle. An explicit `--t3-signoff-file PATH` or `SHOWCASE_T3_SIGNOFF_FILE=PATH` overrides the canonical path. The records belong in the private estate bundle (issue 24: tracked there, never copied into target repositories). Never copy a record into a repository. Real records come only from the estate bundle; the files under `tests/fixtures/t3-signoff/` are synthetic.
+The canonical private path is `<estate_root>/decisions/t3-signoffs.yaml`, where the estate root is `resolver.estate_root()`: `SHOWCASE_ESTATE_ROOT` when set, otherwise the skill's parent bundle. The order is the explicit `--t3-signoff-file PATH`, then `SHOWCASE_T3_SIGNOFF_FILE=PATH`, then the canonical path. When no estate root resolves there is no default path and the refusal is `t3-signoff:no-file` saying so; the flag is never trusted instead. The tool reads the file and never creates it. The records belong in the private estate bundle (issue 24: tracked there, never copied into target repositories). Never copy a record into a repository. Real records come only from the estate bundle; the files under `tests/fixtures/t3-signoff/` are synthetic.
 
 ## Format
 
@@ -44,7 +44,7 @@ Each refusal exits 2 with result `refused`.
 | `t3-signoff:no-file` | no record file was found; the log names the resolved path |
 | `t3-signoff:missing` | no approved record for the owner (also an unreadable or non-YAML file, or a file whose envelope breaks the schema) |
 | `t3-signoff:invalid` | the owner has records but every one breaks the schema; the error names the record id and the first problem |
-| `t3-signoff:scope` | the owner has valid approved records but none covers the repository |
+| `t3-signoff:scope` | the owner has valid approved records but none covers the repository; an `OWNER/NAME` repository is covered only when that owner is the record's org (only `*` covers another account's repository) |
 | `t3-signoff:expired` | every covering record is past `expires` |
 
 Excluded owners (`exempt`) and HOLD owners (`hold`) are refused before the record is read. Repository `doctor` stays read-only: it reports R7 `hold` instead of refusing, and under the flag shows the granting record as `signoff_id`.

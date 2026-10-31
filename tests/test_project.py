@@ -335,7 +335,7 @@ def estate_resolver(brand):
     return resolver(b, rows=[("create-project", "@me", "*", "")], registry=reg)
 
 
-def test_estate_plan_stage_one(estate_resolver):
+def test_estate_plan_stage_one(estate_resolver, t3_record):
     plan = PJ.estate_plan(estate_resolver, source="CompleteTech-LLC/4")
     assert plan["action"] == "estate-plan" and plan["owner"] == "@me"
     assert plan["jobs"][0]["argv"] == ["gh", "project", "copy", "4", "--source-owner", "CompleteTech-LLC", "--target-owner",

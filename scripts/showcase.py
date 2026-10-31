@@ -960,13 +960,15 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--allow-t3", action="store_true",
                    help="treat a T3 (co-owned) owner as signed off for this run: every repository command and generator, not just `meta`; pass only when a t3-metadata or t3-signoff row is approved (default: T3 owners are refused, exit 2)")
     p.add_argument("--require-t3-signoff", action="store_true",
-                   help="opt-in (env SHOWCASE_REQUIRE_T3_SIGNOFF=1): honour --allow-t3 only when a valid, unexpired sign-off record "
-                        "in --t3-signoff-file covers the owner and repository; otherwise exit 2 "
-                        "(t3-signoff:no-file|missing|invalid|expired|scope). Default off: --allow-t3 behaves as before")
+                   help="the default, accepted for explicitness: --allow-t3 is honoured only when a valid, unexpired sign-off record "
+                        "covers the owner and repository; otherwise exit 2 (t3-signoff:no-file|missing|invalid|expired|scope)")
+    p.add_argument("--no-require-t3-signoff", action="store_true",
+                   help="explicit opt-out (env SHOWCASE_REQUIRE_T3_SIGNOFF=0): --allow-t3 is trusted without a record, as before issue 23; "
+                        "logged as t3-signoff:opt-out")
     p.add_argument("--t3-signoff-file", metavar="PATH",
-                   help="the sign-off record file --require-t3-signoff reads (env SHOWCASE_T3_SIGNOFF_FILE; format: "
-                        "references/t3-signoff.md). There is no default location: the canonical path in the estate bundle "
-                        "is still the maintainer's choice, so the file must be named explicitly")
+                   help="the sign-off record file to read instead of the default <estate root>/decisions/t3-signoffs.yaml "
+                        "(env SHOWCASE_T3_SIGNOFF_FILE; format: references/t3-signoff.md). Order: this flag, the env, the default. "
+                        "The file is read, never created")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__} ({STANDARD})")
     sub = p.add_subparsers(dest="command", required=True, metavar="<command>")
 
@@ -1248,7 +1250,10 @@ def _main(argv=None) -> int:
     from ctshowcase.config import set_t3_signed_off
     set_t3_signed_off(getattr(args, "allow_t3", False))
     from ctshowcase import signoff
-    signoff.set_required(getattr(args, "require_t3_signoff", False) or signoff.env_required())
+    if getattr(args, "no_require_t3_signoff", False) and getattr(args, "require_t3_signoff", False):
+        cli.error("--require-t3-signoff and --no-require-t3-signoff are mutually exclusive")
+    signoff.set_required(False if getattr(args, "no_require_t3_signoff", False)
+                         else bool(getattr(args, "require_t3_signoff", False)) or signoff.env_required())
     signoff.set_file(getattr(args, "t3_signoff_file", None))
     if args.format is None:
         args.format = "text" if args.command in GENERATORS else "json"
@@ -1269,11 +1274,13 @@ def _main(argv=None) -> int:
             print(f"{args.command}: {obj['error']}", file=sys.stderr)
             return code
     if obj is not None:
-        if not signoff.required() and signoff.record_file() is not None:  # a file nobody enforces is not silently ignored
+        if not signoff.required() and signoff.explicit_file() is not None:  # a file nobody enforces is not silently ignored
             obj["logs"] = [*(obj.get("logs") or []), "t3-signoff:file-ignored"]
             if args.format == "text" and not args.quiet:
-                print("t3-signoff:file-ignored: a sign-off record file was given without --require-t3-signoff, "
+                print("t3-signoff:file-ignored: a sign-off record file was given with sign-off enforcement opted out, "
                       "so no record is read or enforced", file=sys.stderr)
+        if not signoff.required() and getattr(args, "allow_t3", False):  # trust-only --allow-t3 is visible in the output
+            obj["logs"] = [*(obj.get("logs") or []), "t3-signoff:opt-out"]
         for key in ("jobs", "records"):  # writer jobs and change records (adopt, new, enterprise plan)
             if signoff.required() and isinstance(obj.get(key), list):
                 signoff.stamp(obj[key])

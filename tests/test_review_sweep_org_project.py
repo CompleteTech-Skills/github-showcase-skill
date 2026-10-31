@@ -300,7 +300,7 @@ def _t3_estate(labs_brand):
     return est
 
 
-def test_t3_repositories_wait_for_sign_off_on_public_profiles(labs_brand):
+def test_t3_repositories_wait_for_sign_off_on_public_profiles(labs_brand, t3_record):
     est = _t3_estate(labs_brand)
     data, logs = O.user_slice(est, "CompleteDotTech")
     assert "Pick-Your-AI/demo-board" not in json.dumps(data["pins"] + data["more_projects"])
