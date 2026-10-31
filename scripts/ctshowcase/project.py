@@ -1144,11 +1144,14 @@ def _job_tokens(job: dict) -> set[str]:
     return out
 
 
-def _readme_signoff_ids(orgs: list[dict], text: str) -> list[str]:
+def _readme_signoff_ids(orgs: list[dict], text: str, others: tuple[str, ...] = ()) -> list[str]:
     """The signoff_id of every org in ORGS that carries one and whose login or display name appears in TEXT
     (a README Markdown table, say). Case-insensitive, on word boundaries: a name inside a longer word or a
-    hyphenated name (`Acme` in `Acme-Tools`) does not match. An empty name matches nothing."""
+    hyphenated name (`Acme` in `Acme-Tools`) does not match. OTHERS are the names of non-T3 orgs: they are blanked out of
+    TEXT first, so `Acme` does not match inside the longer `Acme Tools`. An empty name matches nothing."""
     out: list[str] = []
+    for x in sorted((x for x in others if x), key=len, reverse=True):
+        text = re.sub(r"(?<![\w-])" + re.escape(str(x)) + r"(?![\w-])", " ", text, flags=re.IGNORECASE)
     for o in orgs:
         if not o.get("signoff_id"):
             continue
@@ -1184,7 +1187,7 @@ def _stamp_estate_orgs(jobs: list[dict], orgs: list[dict]) -> None:
         argv = j.get("argv") if isinstance(j.get("argv"), list) else []
         for i, arg in enumerate(argv[:-1]):
             if arg == "--readme" and isinstance(argv[i + 1], str):
-                ids += _readme_signoff_ids(readme_orgs, argv[i + 1])
+                ids += _readme_signoff_ids(readme_orgs, argv[i + 1], tuple(others))
         signoff.stamp_associations(j, list(dict.fromkeys(ids)))
 
 

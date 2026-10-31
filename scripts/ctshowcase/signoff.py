@@ -322,7 +322,8 @@ def evaluate(owners: list[str], repo: str | None = None, today: _dt.date | None 
     withdrawals = [r for r in valid if r.get("approved") is False]
     mine = [r for r in valid if r.get("approved") is True]
     had_grants = bool(mine)
-    mine = [g for g in mine if not _withdrawn(g, withdrawals, sorted(logins))]
+    revoked = [g for g in mine if _withdrawn(g, withdrawals, sorted(logins))]
+    mine = [g for g in mine if g not in revoked]
     if had_grants and not mine:
         return None, "revoked"
     if not mine:
@@ -336,6 +337,8 @@ def evaluate(owners: list[str], repo: str | None = None, today: _dt.date | None 
         bad = [r for r in ours if problems(r, today) and _covers(r, repo, sorted(logins))]
         if bad:
             return None, f"invalid:{str(bad[0].get('id') or '?')}: {problems(bad[0], today)[0]}"
+        if any(_covers(g, repo, sorted(logins)) for g in revoked):  # the grant that covered it was withdrawn
+            return None, "revoked"
         return None, "scope"
     live = [r for r in scoped if _live(r, now)]
     if not live:
