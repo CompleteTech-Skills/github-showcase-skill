@@ -1,8 +1,8 @@
 # User decisions this skill implements
 
-Verbatim excerpt from `decisions/USER_DECISIONS.md` (Timothy Wayne Gregg, 2026-10-25) in the estate hand-off bundle. These decisions outrank the estate standard `ct-std-v1` (`STANDARD.md`), the art direction and every audit proposal. Where this skill's references paraphrase the standard, the decisions below have already been applied.
+Verbatim excerpt from `decisions/USER_DECISIONS.md` (Timothy Wayne Gregg, 2026-10-25) in the estate hand-off bundle, except decision 18, whose footer logo URLs were updated and which carries a clearly labelled skill note, both for #47 (see the note on line 5). These decisions outrank the estate standard `ct-std-v1` (`STANDARD.md`), the art direction and every audit proposal. Where this skill's references paraphrase the standard, the decisions below have already been applied.
 
-Footer logo URLs repaired for #47 (former URLs returned 404); layout, credit and artwork unchanged.
+Footer logo URLs repaired for #47 (former URLs returned 404); layout, credit and artwork unchanged. This repair is an amendment made by the skill, pending the user's confirmation; it is not the user's own wording.
 
 | Decision | Where the skill applies it |
 |---|---|
@@ -65,8 +65,6 @@ Footer logo URLs repaired for #47 (former URLs returned 404); layout, credit and
     - a centred logo about 200 px wide, linking to https://www.complete.tech
     - under it, the line `Built by [CompleteTech LLC](https://www.complete.tech) · Innovation at Every Integration`
 
-    The logo URLs point to the published, unchanged masters bundled with this skill; the former `CompleteTech-LLC/.github/main/brand/` URLs returned 404. The layout, credit, theme selection and artwork are unchanged.
-
     Use `<picture>` so **dark mode shows the transparent dark logo (no white box)** and light mode shows the light logo. Exact markup:
     ```html
     <p align="center">
@@ -80,6 +78,9 @@ Footer logo URLs repaired for #47 (former URLs returned 404); layout, credit and
       Built by <a href="https://www.complete.tech">CompleteTech LLC</a> · Innovation at Every Integration
     </p>
     ```
+
+    **Skill note (#47, not part of the user decision):** The emitted logo URLs now come from `references/brand.yaml` and point to the published, unchanged masters bundled with this skill (`assets/brand/`); the former `CompleteTech-LLC/.github/main/brand/` URLs returned 404. The exact-markup URLs above are therefore amended for #47 and await the user's confirmation. Layout, credit text, theme selection and artwork are unchanged.
+
     - Scope: all in-scope repos, T2 families included ("all of them").
     - Exceptions: watching-org forks (not the user's work), and T3 orgs until their co-owners sign off.
     - TouchedByAnAgent is included on this instruction. `STANDARD.md` §12.5 #4 had left it open; confirm on the review page.
