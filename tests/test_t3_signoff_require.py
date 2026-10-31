@@ -1254,3 +1254,110 @@ def test_malformed_repos_beside_a_valid_unrelated_grant_is_invalid_not_scope(bad
     got, why = signoff.evaluate([OWNER], "northwind-synthetic", records=[good, bad])
     assert got is None and why.startswith("invalid:t3s-2: repos"), (got, why)
     assert signoff.evaluate([OWNER], "northwind-synthetic", records=[good]) == (None, "scope")
+
+
+# --- round 5: a wildcard grant followed by a per-repository withdrawal (synthetic records and slugs only) ---
+
+_WILD = [{"id": "t3s-all", "repos": ["*"], "approved_on": "2026-01-15"},
+         {"id": "t3s-drop-x", "repos": ["withdrawn-x"], "approved": False, "approved_on": "2026-10-01"}]
+
+
+def _pya_estate(brand):
+    from ctshowcase import org as O
+    from ctshowcase.resolver import Resolver
+    reg = {"orgs": {OWNER: {"final_repos": ["withdrawn-x", "kept-y"], "pins_public": ["withdrawn-x", "kept-y"],
+                            "sections": [{"title": "Tools", "repos": ["withdrawn-x", "kept-y"]}],
+                            "star_list": {"name": "Pick Your AI", "description": ""}}}}
+    metas = {n: {"owner": OWNER, "repo": n, "visibility": "public", "description": "synthetic"}
+             for n in ("withdrawn-x", "kept-y")}
+    return O.Estate(brand, Resolver(brand, reg, {"rows": set(), "ids": set(), "answers": {}, "extra": [], "actions": []}),
+                    metas), reg
+
+
+def test_wildcard_grant_with_a_repo_withdrawal_holds_that_repo_in_profile_and_pins(tmp_path, monkeypatch, brand):
+    """A `*` grant plus a later withdrawal of withdrawn-x: the owner-wide gate still passes (the grant covers the org),
+    but `org profile` data and `org pins` named and pinned withdrawn-x under the grant's id. The other repository stays."""
+    from ctshowcase import org as O, signoff
+    est, _ = _pya_estate(brand)
+    with _Strict(monkeypatch, _file(_bundle(tmp_path, _WILD))):
+        assert signoff.evaluate([OWNER], "withdrawn-x") == (None, "revoked")
+        data, logs = O.public_slice(est, OWNER, allow_t3=True)
+        text = json.dumps(data)
+        assert "withdrawn-x" not in text and "kept-y" in text, data
+        assert f"t3-signoff:revoked:{OWNER}/withdrawn-x" in logs, logs
+        res, _ = O.pins(est, OWNER, allow_t3=True)
+        signoff.stamp(res["jobs"])
+        assert "withdrawn-x" not in json.dumps(res["jobs"]) and res["order"]["public"] == ["withdrawn-x", "kept-y"], res
+        held = [c for c in res["checks"] if c["repo"] == "withdrawn-x"]
+        assert held and all(c["result"] == "hold" for c in held), res["checks"]
+        pins = [j for j in res["jobs"] if "kept-y" in json.dumps(j)]
+        assert pins and all(j["signoff_id"] == "t3s-all" for j in pins), res["jobs"]
+        assert f"t3-signoff:revoked:{OWNER}/withdrawn-x" in res["logs"], res["logs"]
+    with _Strict(monkeypatch, _file(_bundle(tmp_path / "ok", _WILD[:1]))):  # control: no withdrawal, both repositories
+        data, _ = O.public_slice(est, OWNER, allow_t3=True)
+        assert "withdrawn-x" in json.dumps(data) and "kept-y" in json.dumps(data), data
+        res, _ = O.pins(est, OWNER, allow_t3=True)
+        assert sum("pin-public" in j["id"] or "-pin-public-" in j["id"] for j in res["jobs"]) >= 2, res["jobs"]
+
+
+def test_without_the_flag_the_profile_is_unchanged_by_a_repo_withdrawal(tmp_path, brand):
+    """Control: without --allow-t3 the profile is the base behaviour (nothing newly held)."""
+    from ctshowcase import org as O
+    est, _ = _pya_estate(brand)
+    b = _bundle(tmp_path, _WILD)
+    from ctshowcase import signoff
+    from ctshowcase.config import set_t3_signed_off, reset_t3_signed_off
+    os.environ["SHOWCASE_T3_SIGNOFF_FILE"] = str(_file(b))
+    t3, run = set_t3_signed_off(False), signoff.reset()
+    try:
+        data, logs = O.public_slice(est, OWNER, allow_t3=False)  # no --allow-t3: base behaviour, nothing newly held
+        assert "withdrawn-x" in json.dumps(data) and not any(x.startswith("t3-signoff") for x in logs), logs
+    finally:
+        signoff.restore(run)
+        reset_t3_signed_off(t3)
+        os.environ.pop("SHOWCASE_T3_SIGNOFF_FILE", None)
+
+
+def test_estate_replan_holds_a_captured_t3_org_after_withdrawal(tmp_path, monkeypatch, brand):
+    """A previously populated Estate board whose Org field already holds the T3 option, re-planned with --allow-t3 after
+    the org's grant was withdrawn: no option-replacement job and no README may carry the withdrawn org (copy_plan kept
+    every captured option), the existing option ids are not deleted, and the refusal is logged. With a valid grant the
+    plan is unchanged."""
+    from ctshowcase import project as PJ
+    from ctshowcase.config import load_yaml_text
+    from ctshowcase.resolver import Resolver
+    reg = load_yaml_text((ROOT / "tests" / "fixtures" / "org" / "registry.yaml").read_text(encoding="utf-8"))
+    reg["profile"]["org_directory"].append({"group": "T3", "orgs": [OWNER]})
+    reg["orgs"][OWNER] = {}
+    res = Resolver(brand, reg, {"rows": {("create-project", "@me", "*", "")}, "ids": set(), "answers": {},
+                                "actions": [], "extra": []})
+    cap = json.loads((ROOT / "tests" / "fixtures" / "project" / "estate-copy-capture.json").read_text(encoding="utf-8"))
+    name = brand.raw["orgs"][OWNER]["display_name"]
+    def with_t3_option(c):
+        c = json.loads(json.dumps(c))
+        c["data"]["user"]["projectV2"]["fields"]["nodes"].append({
+            "__typename": "ProjectV2SingleSelectField", "id": "PVTF_org", "databaseId": 1099, "name": "Org",
+            "dataType": "SINGLE_SELECT", "isIssueField": False, "options": [
+                {"id": "opt-t3-synthetic", "name": name, "color": "GRAY", "description": f"T3: {OWNER}"},
+                {"id": "opt-t1-synthetic", "name": "CompleteTech Skills", "color": "BLUE",
+                 "description": "T1: CompleteTech-Skills"}]})
+        return c
+
+    captured = with_t3_option(cap)
+    withdrawn = [{"id": "t3s-g", "approved_on": "2026-01-15"},
+                 {"id": "t3s-w", "approved": False, "approved_on": "2026-10-01"}]
+    with _Strict(monkeypatch, _file(_bundle(tmp_path / "rev", withdrawn))):
+        plan = PJ.estate_plan(res, copied=captured, user_id=100, allow_t3=True)
+    blob = json.dumps(plan["jobs"], ensure_ascii=False)
+    assert OWNER not in blob and name not in blob, [j["id"] for j in plan["jobs"] if name in json.dumps(j, ensure_ascii=False)]
+    assert not any("-options-org" in j["id"] for j in plan["jobs"]), plan["jobs"]
+    assert not any("--readme" in j.get("argv", []) for j in plan["jobs"]), plan["jobs"]
+    assert any("README held" in p.get("why", "") for p in plan["pending"]), plan["pending"]
+    assert f"t3-signoff:revoked:{OWNER}" in plan["logs"], plan["logs"]
+    ok = [{"id": "t3s-g", "approved_on": "2026-01-15"}]
+    with _Strict(monkeypatch, _file(_bundle(tmp_path / "ok", ok))):
+        plan = PJ.estate_plan(res, copied=captured, user_id=100, allow_t3=True)
+    opt = [j for j in plan["jobs"] if "-options-org" in j["id"]]
+    assert opt and name in json.dumps(opt, ensure_ascii=False) and opt[0]["signoff_id"] == "t3s-g", plan["jobs"]
+    assert not any("README held" in p.get("why", "") for p in plan["pending"]), plan["pending"]
+    assert not [x for x in plan["logs"] if str(x).startswith("t3-signoff:")], plan["logs"]

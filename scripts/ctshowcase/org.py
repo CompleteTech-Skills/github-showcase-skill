@@ -401,6 +401,24 @@ def _t3_moved_held(estate: Estate, full: str, allow_t3: bool) -> bool:
     return r.owner_status(owner) == "t3" and not (allow_t3 and _t3_granted(owner, name))
 
 
+def _t3_repo_refusal(estate: Estate, login: str, name: str, allow_t3: bool) -> str | None:
+    """The refusal code (`revoked`, `scope`, ...) when LOGIN is a T3 org, --allow-t3 is passed and NAME has no valid
+    sign-off of its own, else None. The command gate checks the owner-wide record, which a wildcard grant satisfies even
+    after a later withdrawal of one repository; every repository the org's own profile or pins would name or act on is
+    therefore checked again here (signoff.evaluate with the repository), so a withdrawn repository is held while the
+    org's unrelated repositories stay authorized. No-op without --allow-t3 (the base behaviour is unchanged) and for
+    owners that are not T3. Callers log `t3-signoff:<code>:<login>/<name>`
+    (tests/test_t3_signoff_require.py::test_wildcard_grant_with_a_repo_withdrawal_holds_that_repo_in_profile_and_pins)."""
+    r = estate.resolver
+    if not allow_t3 or not name or r.owner_status(login) != "t3":
+        return None
+    from . import signoff
+    rec, why = signoff.evaluate([login, *r.aliases(login)], name)
+    if rec is not None:
+        return None
+    return (why or "missing").partition(":")[0]
+
+
 def public_slice(estate: Estate, org: str, lists_capture: dict | None = None, *,
                  allow_t3: bool = False) -> tuple[dict, list[str]]:
     """The sanitized data the profile is rendered from (and committed as profile/data.json): no private repo, no
@@ -426,6 +444,11 @@ def public_slice(estate: Estate, org: str, lists_capture: dict | None = None, *,
     for n in moved_held:
         logs.append(f"t3-signoff:{estate.current(r.slug(f'{login}/{n}'))}")
     public = [n for n in public if n not in moved_held]
+    # A repository whose own sign-off was withdrawn (a wildcard grant stays valid org-wide) is never named either.
+    repo_held = {n: c for n in public if (c := _t3_repo_refusal(estate, login, n, allow_t3))}
+    for n, c in repo_held.items():
+        logs.append(f"t3-signoff:{c}:{login}/{n}")
+    public = [n for n in public if n not in repo_held]
     for n in names:
         if n != ".github" and estate.visibility(f"{login}/{n}") == "unknown":
             moving = estate.pending_move(f"{login}/{n}")
@@ -1483,6 +1506,9 @@ def pins(estate: Estate, org: str, *, allow_t3: bool = False, lists_capture: dic
                 logs.append(f"pin-gated:{pin}:{dep or (hit or ('', ''))[1]}")
             if held:
                 res, detail = "hold", "org on HOLD (STANDARD §12.5 #4): pins only report"
+            elif (t3c := _t3_repo_refusal(estate, login, pin, allow_t3)):
+                res, detail = "hold", f"t3-signoff:{t3c}:{login}/{pin}"
+                logs.append(f"t3-signoff:{t3c}:{login}/{pin}")
             checks.append({"target": target, "position": i, "repo": pin, "result": res, "detail": detail,
                            "depends_on": dep or None, "gate": gate})
             order[target].append(pin)

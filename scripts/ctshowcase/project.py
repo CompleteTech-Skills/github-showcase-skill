@@ -681,6 +681,41 @@ def _readme_repos(spec: dict, owner: str, role: str, resolver, repos) -> tuple[l
     return repos, []
 
 
+def held_captured_t3(resolver: Resolver | None, spec: dict | None, allow_t3: bool) -> list[str]:
+    """The refusals (`t3-signoff:<code>:<login>`) for T3 orgs that the CAPTURED Estate Org field already names (an option
+    whose description is `T3: <login>`, or whose name is a T3 org's display name) while --allow-t3 is passed and no
+    valid sign-off record covers the org. copy_plan keeps every captured option (ids are never dropped) and the README
+    documents them, so a withdrawn association would otherwise survive into the option-update job and the README
+    (tests/test_t3_signoff_require.py::test_estate_replan_holds_a_captured_t3_org_after_withdrawal). Empty without
+    --allow-t3 (the base behaviour is unchanged) or without a resolver."""
+    if not allow_t3 or resolver is None:
+        return []
+    have = _field(spec or {}, "Org")
+    if not have:
+        return []
+    from . import signoff
+    t3 = {}
+    for key in (resolver.registry.get("orgs") or {}):
+        try:
+            row = resolver.brand_org(key)
+        except NeedsInput:
+            continue
+        if str(row.get("tier") or "").split()[0] == "T3":
+            t3[resolver.canonical(key).lower()] = key
+            t3[str(row.get("display_name") or key).lower()] = key
+    out = []
+    for o in have.get("options") or []:
+        desc = str(o.get("description") or "")
+        ident = desc[len(TIER_PREFIX_T3):] if desc.startswith(TIER_PREFIX_T3) else str(o.get("name") or "")
+        key = t3.get(ident.strip().lower())
+        if key is None:
+            continue
+        rec, why = signoff.evaluate([key, *resolver.aliases(key)])
+        if rec is None:
+            out.append(f"t3-signoff:{(why or 'missing').partition(':')[0]}:{resolver.canonical(key)}")
+    return list(dict.fromkeys(out))
+
+
 def copy_plan(target: str, *, role: str = "org", source: str | None = None, title: str | None = None,
               display_name: str | None = None, copied: dict | None = None, workstreams: list[dict] | None = None,
               repositories: list[str] | None = None, approval_id: str | None = None, resolver: Resolver | None = None,
@@ -744,8 +779,16 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
     # 1. fields: create what is missing, fix standard options keeping ids
     std_fields = list(FIELDS) + list(extra_fields or [])
     planned: dict[str, list] = {}  # the options each field will have once these jobs run (for the README)
+    held_t3 = held_captured_t3(resolver, spec, allow_t3) if role == "estate" else []
+    logs += held_t3
     for f in std_fields:
         have = _field(spec, f["name"])
+        if held_t3 and f["name"] == "Org" and have is not None:
+            # a captured T3 association lost its sign-off: leave the option list as captured (no ids dropped) and plan
+            # no option write or README that would carry it on
+            logs.append("hold:org-options (a captured T3 org option has no valid sign-off)")
+            planned[f["name"]] = have.get("options") or []
+            continue
         if have is None:
             if not f.get("required") and f["dataType"] == "MULTI_SELECT":
                 logs.append(f"optional-field-skipped:{f['name']}")
@@ -819,7 +862,11 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
     text = readme_text
     readme_repos, lg = _readme_repos(spec, owner, role, resolver, repositories)
     logs += lg
-    if text is None:
+    if held_t3:
+        text = None
+        pending.append({"why": "README held: the Org field names a T3 org with no valid sign-off record",
+                        "needs": "a valid record in the sign-off file, or remove the option on the board"})
+    elif text is None:
         try:
             text, lg = readme(owner, name, number, nums, repositories=readme_repos,
                               out_of_scope=out_of_scope, reviewed=reviewed, views=vlist, estate=role == "estate",
@@ -1209,7 +1256,7 @@ def estate_plan(resolver: Resolver, *, source: str | None = None, copied: dict |
                      display_name="CompleteTech Estate", status_update=False, allow_t3=allow_t3)
     plan["action"] = "estate-plan"
     plan["orgs"] = orgs
-    plan["logs"] = [*plan.get("logs", []), *dict.fromkeys(t3_refusals)]
+    plan["logs"] = list(dict.fromkeys([*plan.get("logs", []), *t3_refusals]))
     plan["reads"] +=[{"name": f"estate-items:{o['login']}",
                        "argv": ["gh", "search", "issues", "--owner", o["login"], "--label", "estate", "--state", "open",
                                 "--json", "url", "--limit", "200"]} for o in orgs]
