@@ -1,102 +1,280 @@
 """Opt-in T3 sign-off verification (`--require-t3-signoff`, env SHOWCASE_REQUIRE_T3_SIGNOFF=1; issue 23).
 
 Off by default: nothing here runs and `--allow-t3` keeps its original meaning (tests/test_allow_t3_global.py).
-When on, `--allow-t3` is honoured only while the estate bundle holds a valid, unexpired sign-off record for the
-owner (and the repository when the record is scoped). The bundle is read, never copied: `decisions/t3-signoffs.yaml`
-under `estate_root()` (env SHOWCASE_ESTATE_ROOT)::
+When on, `--allow-t3` is honoured only while the sign-off record file holds a valid, unexpired record for the owner
+(and the repository when the record is scoped). The file is passed explicitly with the global `--t3-signoff-file PATH`
+(env SHOWCASE_T3_SIGNOFF_FILE). There is deliberately no default location: issue 24 leaves the canonical path inside
+the estate bundle to the maintainer, so the tool never picks one (tests/test_t3_signoff_require.py
+::test_no_record_file_refuses_without_a_default). The file is read, never copied. Format (the contract is
+references/t3-signoff.schema.json, described in references/t3-signoff.md)::
 
     signoffs:
-      - id: t3s-001            # carried onto writer jobs as `signoff_id` (and `approval_id` when none else is set)
-        owner: Example-Co-Owned   # any login of the org (renames resolve through the aliases the gate passes in)
-        repos: ["*"]           # "*" or repository names / OWNER/NAME; absent or empty matches nothing (fail closed)
+      - id: t3s-001                 # carried onto writer jobs and change records as `signoff_id`
+        owner: Example-Co-Owned     # any login of the org (renames resolve through the aliases the gate passes in)
+        repos: ["*"]                # "*" or repository names / OWNER/NAME; absent or empty matches nothing
         approved: true
-        expires: 2099-12-31    # required: a record with no parsable date never validates
+        approver: example-co-owner  # who signed off (audit)
+        approved_on: 2026-01-15     # when they signed off (audit)
+        expires: 2099-12-31         # a date (valid through that day) or a timestamp with a UTC offset
+        note: "optional free text"
 
-Refusals are exit 2 with log `t3-signoff:missing` (no approved record for the owner), `t3-signoff:expired` (every
-matching record is past `expires`) or `t3-signoff:scope` (the owner has records but none covers the repository; an
-owner-wide command with no repository needs a `*` record). Excluded and HOLD owners are refused before this runs.
+Refusals are exit 2 with log `t3-signoff:no-file` (no record file was given), `t3-signoff:missing` (no approved record
+for the owner), `t3-signoff:invalid` (the owner's records all break the schema; the error names the first problem),
+`t3-signoff:expired` (every matching record is past `expires`) or `t3-signoff:scope` (the owner has records but none
+covers the repository; an owner-wide command with no repository needs a `*` record). Excluded and HOLD owners are
+refused before this runs.
 """
 from __future__ import annotations
 
 import datetime as _dt
 import os
+import re
+from contextvars import ContextVar, Token
 from pathlib import Path
 
 from .errors import Refused
 
-SIGNOFF_FILE = "t3-signoffs.yaml"
-_REQUIRE = False
-_GRANTED: dict[str, list[dict]] = {}  # lowercase login -> the records that granted it, for stamping this run's writer jobs
-_ALIASES: dict[str, set[str]] = {}  # lowercase login -> every login of its org, filled by Resolver.aliases under the flag
+FILE_ENV = "SHOWCASE_T3_SIGNOFF_FILE"
+
+# All sign-off state is context-local, like `--allow-t3` itself (config._T3_SIGNED_OFF, issue 28): one thread's or
+# asyncio task's --require-t3-signoff, record file, grants and aliases never leak into another's owner gate
+# (tests/test_t3_signoff_require.py::test_signoff_state_is_context_local). showcase.main() opens a fresh run state
+# and restores the enclosing one on every exit.
+_REQUIRE: ContextVar[bool] = ContextVar("ctshowcase_t3_signoff_required", default=False)
+_FILE: ContextVar[str | None] = ContextVar("ctshowcase_t3_signoff_file", default=None)
+# (granted, aliases): lowercase login -> the records that granted it, for stamping this run's writer jobs; and
+# lowercase login -> every login of its org, filled by Resolver.aliases under the flag. None until first use.
+# Copy-on-write: every update builds new dicts and sets them, so a context that inherited this value (an asyncio task,
+# contextvars.copy_context().run) never mutates its parent's grants
+# (tests/test_t3_signoff_require.py::test_child_context_grant_does_not_leak_into_parent).
+_RUN: ContextVar[tuple[dict[str, tuple[dict, ...]], dict[str, frozenset[str]]] | None] = ContextVar(
+    "ctshowcase_t3_signoff_run", default=None)
 
 
 def env_required() -> bool:
     return os.environ.get("SHOWCASE_REQUIRE_T3_SIGNOFF", "").strip().lower() in ("1", "true", "yes", "on")
 
 
-def set_required(value: bool) -> None:
-    global _REQUIRE
-    _REQUIRE = bool(value)
+def set_required(value: bool) -> Token:
+    """Set this context's `--require-t3-signoff`; the token restores the prior value (reset_required)."""
+    return _REQUIRE.set(bool(value))
+
+
+def reset_required(token: Token) -> None:
+    _REQUIRE.reset(token)
 
 
 def required() -> bool:
-    return _REQUIRE
+    return _REQUIRE.get()
 
 
-def reset() -> None:
-    _GRANTED.clear()
-    _ALIASES.clear()
+def set_file(path: str | Path | None) -> Token:
+    """Set this context's `--t3-signoff-file` (None: fall back to env SHOWCASE_T3_SIGNOFF_FILE, else no file)."""
+    return _FILE.set(str(path) if path else None)
+
+
+def reset_file(token: Token) -> None:
+    _FILE.reset(token)
+
+
+def record_file() -> Path | None:
+    v = _FILE.get() or os.environ.get(FILE_ENV, "").strip()
+    return Path(v) if v else None
+
+
+def _run_state() -> tuple[dict[str, tuple[dict, ...]], dict[str, frozenset[str]]]:
+    state = _RUN.get()
+    return state if state is not None else ({}, {})
+
+
+def _granted() -> dict[str, tuple[dict, ...]]:
+    """Read-only view of this context's grants (a fresh dict; writes go through _grant)."""
+    return dict(_run_state()[0])
+
+
+def _aliases() -> dict[str, frozenset[str]]:
+    return _run_state()[1]
+
+
+def _grant(login: str, rec: dict) -> None:
+    granted, aliases = _run_state()
+    new = dict(granted)
+    new[login] = (*new.get(login, ()), rec)
+    _RUN.set((new, aliases))
+
+
+def reset() -> Token:
+    """Start empty grants and aliases in this context. New dicts, so an enclosing run's state is untouched;
+    the token restores it (restore)."""
+    return _RUN.set(({}, {}))
+
+
+def restore(token: Token) -> None:
+    _RUN.reset(token)
 
 
 def register_aliases(logins: list[str]) -> None:
     """Remember that these logins name one org, so a record under a former login still matches wherever the owner is
     re-checked (doctor rows, org and project helpers) without each caller passing the aliases again."""
+    granted, aliases = _run_state()
     group = {x.lower() for x in logins if x}
     for x in list(group):
-        group |= _ALIASES.get(x, set())
+        group |= aliases.get(x, frozenset())
+    new = dict(aliases)
     for x in group:
-        _ALIASES[x] = group
+        new[x] = frozenset(group)
+    _RUN.set((granted, new))
 
 
 def _expand(owners: list[str]) -> list[str]:
+    aliases = _aliases()
     out = {o.lower() for o in owners if o}
     for o in list(out):
-        out |= _ALIASES.get(o, set())
+        out |= aliases.get(o, frozenset())
     return sorted(out)
 
 
-def load_records(root: Path | None = None) -> list[dict]:
+def load_records(path: str | Path | None = None) -> list[dict]:
+    """Records from PATH, else from this run's `--t3-signoff-file` / SHOWCASE_T3_SIGNOFF_FILE. No file: []."""
     from .config import load_yaml_text
-    from .resolver import estate_root
-    root = root or estate_root()
-    path = root / "decisions" / SIGNOFF_FILE if root else None
+    path = Path(path) if path else record_file()
     if not path or not path.is_file():
         return []
     try:
         data = load_yaml_text(path.read_text(encoding="utf-8"))
     except Exception:  # invalid YAML or unreadable file: no usable records, so the gate refuses (t3-signoff:missing)
         return []
-    items = data.get("signoffs") if isinstance(data, dict) else data
-    if not isinstance(items, list):  # `signoffs: 7` and similar: fail closed instead of raising TypeError
-        return []
-    return [r for r in items if isinstance(r, dict)]
+    # the envelope is checked before any record is read (a top-level list or an extra key never authorizes)
+    return list(_envelope(data))
 
 
-def _expiry(rec: dict) -> _dt.date | None:
-    v = rec.get("expires")
+def _envelope(data) -> tuple[dict, ...]:
+    """The records of a file whose envelope conforms to references/t3-signoff.schema.json, else none at all.
+
+    The schema's root is an object with exactly one property, `signoffs`, an array of record objects
+    (additionalProperties false). Anything else (a top-level list, an extra top-level key, `signoffs: 7`, a scalar
+    or a list entry in `signoffs`) is a file an external validator of the estate bundle refuses, so the whole file
+    authorizes nothing and the gate refuses t3-signoff:missing, as for unparsable YAML. Records that break the schema
+    one by one are still judged per record (problems(), t3-signoff:invalid).
+    (tests/test_t3_signoff_require.py::test_file_envelope_follows_the_schema)"""
+    if not isinstance(data, dict) or set(data) != {"signoffs"}:
+        return ()
+    items = data["signoffs"]
+    if not isinstance(items, list) or not all(isinstance(r, dict) for r in items):
+        return ()
+    return tuple(items)
+
+
+# The string forms references/t3-signoff.schema.json permits ($defs.date and $defs.awareTimestamp), checked before
+# parsing. Python 3.11+ fromisoformat also accepts compact (`20991231`), week (`2099-W52-1`) and hour-only offset
+# (`+00`) forms that the schema rejects, so without these the tool would grant a record an external validator of the
+# estate bundle refuses (tests/test_t3_signoff_require.py::test_problems_follow_the_schema_string_patterns, which runs
+# without jsonschema). ASCII digits only, like the schema's ECMA-262 `\d`. The one deliberate difference: a
+# calendar-impossible date that matches the pattern (`2099-02-30`) still fails to parse here, so the tool is stricter
+# than the schema there and fails closed.
+_DATE_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", re.ASCII)
+_AWARE_TS_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}:?[0-9]{2})",
+                          re.ASCII)
+
+
+def _parse_when(v) -> _dt.date | _dt.datetime | None:
+    """A date, or a timezone-aware timestamp. A naive timestamp is ambiguous, so it never parses (fail closed).
+    A string must match the schema's date or awareTimestamp pattern in full (no surrounding whitespace) first."""
     if isinstance(v, _dt.datetime):
-        return v.date()
+        return v if v.tzinfo is not None else None
     if isinstance(v, _dt.date):
         return v
-    # the whole value must parse: `2099-12-31garbage` is not a date, so it never validates (fail closed)
+    if not isinstance(v, str):
+        return None
+    # the whole value must match and parse: `2099-12-31garbage` is not a date, so it never validates (fail closed)
+    if _DATE_RE.fullmatch(v):
+        try:
+            return _dt.date.fromisoformat(v)
+        except ValueError:
+            return None
+    if not _AWARE_TS_RE.fullmatch(v):
+        return None
     try:
-        return _dt.date.fromisoformat(str(v).strip())
-    except ValueError:
-        pass
-    try:
-        return _dt.datetime.fromisoformat(str(v).strip()).date()
+        ts = _dt.datetime.fromisoformat(v.replace("Z", "+00:00"))  # `Z` for Python < 3.11
     except ValueError:
         return None
+    return ts if ts.tzinfo is not None else None
+
+
+def _expiry(rec: dict) -> _dt.date | _dt.datetime | None:
+    return _parse_when(rec.get("expires"))
+
+
+def problems(rec: dict) -> list[str]:
+    """What breaks references/t3-signoff.schema.json in one record ([] when it conforms). Kept in step with the schema
+    by tests/test_t3_signoff_require.py::test_schema_and_problems_agree_on_the_fixtures."""
+    out = []
+    for key in ("id", "owner", "approver"):
+        if not isinstance(rec.get(key), str) or not rec[key].strip():
+            out.append(f"{key}: needs a non-empty string")
+    repos = rec.get("repos")
+    if not (isinstance(repos, str) and repos.strip()) and not (
+            isinstance(repos, list) and repos and all(isinstance(x, str) and x.strip() for x in repos)):
+        out.append("repos: needs '*', a repository name or a non-empty list of them")
+    if not isinstance(rec.get("approved"), bool):
+        out.append("approved: needs true or false (a boolean, not a string)")
+    approved_on = _parse_when(rec.get("approved_on"))
+    if approved_on is None or isinstance(approved_on, _dt.datetime):
+        out.append("approved_on: needs a date (YYYY-MM-DD)")
+    if _expiry(rec) is None:
+        out.append("expires: needs a date (YYYY-MM-DD) or a timestamp with a UTC offset")
+    if "note" in rec and rec["note"] is not None and not isinstance(rec["note"], str):
+        out.append("note: needs a string")
+    # key=str: YAML keys need not be strings (`7: x` beside `unexpected: true`), and sorting mixed types raised
+    # TypeError out of showcase.main() instead of refusing t3-signoff:invalid
+    # (tests/test_t3_signoff_require.py::test_mixed_type_unknown_keys_refuse_invalid)
+    extra = sorted(set(rec) - {"id", "owner", "repos", "approved", "approver", "approved_on", "expires", "note"},
+                   key=lambda k: (type(k).__name__, str(k)))
+    if extra:
+        out.append("unknown field(s): " + ", ".join(map(str, extra)))
+    return out
+
+
+def _live(rec: dict, now: _dt.datetime) -> bool:
+    """A date expiry is valid through the end of that day (inclusive, local calendar day, as before); a timestamp
+    expiry is valid only strictly before that instant, compared timezone-aware (a record expiring at
+    2026-10-30T00:00:00+00:00 is dead at 2026-10-30T12:44Z)."""
+    exp = _expiry(rec)
+    if isinstance(exp, _dt.datetime):
+        return exp > now
+    if isinstance(exp, _dt.date):
+        return exp >= now.astimezone().date()
+    return False
+
+
+def evaluate(owners: list[str], repo: str | None = None, today: _dt.date | None = None,
+             records: list[dict] | None = None, now: _dt.datetime | None = None) -> tuple[dict | None, str | None]:
+    """(record, None) when signed off, else (None, 'no-file' | 'missing' | 'invalid:<problem>' | 'expired' | 'scope').
+    `today` (a date) is kept for callers that only care about date expiries; `now` is an aware instant."""
+    if now is None:
+        now = _dt.datetime.now(_dt.timezone.utc)
+        if today is not None:  # start of that local day, so date expiries compare exactly as before
+            now = _dt.datetime.combine(today, _dt.time.min).astimezone()
+    if records is None:
+        if record_file() is None:
+            return None, "no-file"
+        records = load_records()
+    logins = set(_expand([o for o in owners if o]))
+    ours = [r for r in records if str(r.get("owner") or "").lower() in logins]
+    valid = [r for r in ours if not problems(r)]
+    mine = [r for r in valid if r.get("approved") is True]
+    if not mine:
+        bad = [r for r in ours if problems(r)]
+        if bad:  # a malformed record never authorizes, and the refusal says why instead of a silent 'missing'
+            return None, f"invalid:{str(bad[0].get('id') or '?')}: {problems(bad[0])[0]}"
+        return None, "missing"
+    scoped = [r for r in mine if _covers(r, repo, sorted(logins))]
+    if not scoped:
+        return None, "scope"
+    live = [r for r in scoped if _live(r, now)]
+    if not live:
+        return None, "expired"
+    return live[0], None
 
 
 def _covers(rec: dict, repo: str | None, logins: list[str] | None = None) -> bool:
@@ -123,30 +301,9 @@ def _covers(rec: dict, repo: str | None, logins: list[str] | None = None) -> boo
     return False
 
 
-def evaluate(owners: list[str], repo: str | None = None, today: _dt.date | None = None,
-             records: list[dict] | None = None) -> tuple[dict | None, str | None]:
-    """(record, None) when signed off, else (None, 'missing' | 'expired' | 'scope')."""
-    today = today or _dt.date.today()
-    logins = {o.lower() for o in owners if o}
-    recs = load_records() if records is None else records
-    logins = set(_expand(list(logins)))
-    # a record with no id cannot be carried onto writer jobs, so it never authorizes anything
-    mine = [r for r in recs if r.get("approved") is True and str(r.get("id") or "").strip()
-            and str(r.get("owner") or "").lower() in logins]
-    if not mine:
-        return None, "missing"
-    scoped = [r for r in mine if _covers(r, repo, sorted(logins))]
-    if not scoped:
-        return None, "scope"
-    live = [r for r in scoped if (_expiry(r) or _dt.date.min) >= today]
-    if not live:
-        return None, "expired"
-    return live[0], None
-
-
 def granted(owner: str, repo: str | None = None, aliases: list[str] | None = None) -> bool:
     """True when sign-off is not required, or a valid record covers the owner (and repository). Never raises."""
-    if not _REQUIRE:
+    if not required():
         return True
     rec, _ = evaluate([owner, *(aliases or [])], repo)  # evaluate also expands the aliases Resolver.aliases registered
     return rec is not None
@@ -154,36 +311,100 @@ def granted(owner: str, repo: str | None = None, aliases: list[str] | None = Non
 
 def require(owner: str, repo: str | None = None, aliases: list[str] | None = None) -> dict | None:
     """Gate for a requested `--allow-t3`: the record, or Refused (exit 2) logged t3-signoff:<why>. No-op when off."""
-    if not _REQUIRE:
+    if not required():
         return None
     logins = [owner, *(aliases or [])]
     rec, why = evaluate(logins, repo)
     if rec is None:
+        code, _, detail = (why or "missing").partition(":")
+        hint = " (pass --t3-signoff-file PATH or set SHOWCASE_T3_SIGNOFF_FILE)" if code == "no-file" else ""
         raise Refused(f"{owner}{'/' + repo if repo else ''} is T3 and --require-t3-signoff is set: "
-                      f"no valid sign-off record ({why})", log=f"t3-signoff:{why}")
+                      f"no valid sign-off record ({code}{': ' + detail.strip() if detail else ''}){hint}",
+                      log=f"t3-signoff:{code}")
     for login in _expand(logins):
-        _GRANTED.setdefault(login, []).append(rec)
+        _grant(login, rec)
     return rec
 
 
 def record_for(owner: str, repo: str | None = None) -> dict | None:
-    for rec in _GRANTED.get((owner or "").lower(), []):
+    for rec in _granted().get((owner or "").lower(), ()):
         if _covers(rec, repo, _expand([owner or ""])):
             return rec
     return None
 
 
-def stamp(jobs):
-    """Under the flag, writer jobs for a signed-off T3 owner carry `signoff_id` (and `approval_id` when none is set)."""
-    if not _REQUIRE or not _GRANTED:
-        return jobs
-    for j in jobs or []:
-        if not isinstance(j, dict) or "phase" not in j:
+def stamp(items, owner: str | None = None):
+    """Under the flag, carry the granting sign-off onto this run's output:
+
+    - writer jobs (dicts with `phase`) for a signed-off T3 owner get `signoff_id`, and `approval_id` when none is set;
+    - change records (records.record(): dicts with `std`, `owner` and `repo`, no `phase`) get `signoff_id` only, since
+      they are not writer jobs and carry no approval_id.
+
+    `owner` names the gated owner explicitly when a job's target is another account (the star-List jobs of a T3 org's
+    `org pins` run as the personal account, org.star_list_plan); without it the owner is read from the item. An item
+    that already carries a `signoff_id` is left as it is."""
+    if not required() or not _granted():
+        return items
+    for j in items or []:
+        if not isinstance(j, dict) or "signoff_id" in j:
+            continue
+        is_job = "phase" in j
+        if not is_job and not ("std" in j and "owner" in j and "repo" in j):
             continue
         full = str(j.get("repo") or "")
-        owner = j.get("org") or j.get("owner") or (full.split("/")[0] if "/" in full else "")
-        rec = record_for(str(owner), full or None)
-        if rec is not None and rec.get("id"):
-            j["signoff_id"] = str(rec["id"])
+        who = owner or j.get("org") or j.get("owner") or (full.split("/")[0] if "/" in full else "")
+        _put(j, record_for(str(who), full or None))
+    return items
+
+
+def _put(j: dict, rec: dict | None) -> None:
+    if rec is not None and rec.get("id"):
+        j["signoff_id"] = str(rec["id"])
+        if "phase" in j:
             j.setdefault("approval_id", str(rec["id"]))
-    return jobs
+
+
+def stamp_associations(item: dict, association_ids, owner: str | None = None, repo: str | None = None) -> dict:
+    """Under the flag, name on ITEM (a writer job or a change record) every record that authorized it: OWNER's own
+    grant first (when OWNER/REPO is a signed-off T3 target), then each id in ASSOCIATION_IDS (a T3 org that ITEM
+    brings in without targeting it: topics.merge `signoff_ids` for an `also_in` membership topic, project.estate_plan
+    for a T3 org in the personal Estate's Org field). `signoff_id` is the first id and `signoff_ids` lists all of them
+    only when there is more than one. A writer job also gets `approval_id` = the first id unless it already has one
+    (an existing approval_id is never replaced). No-op when the flag is off or there are no association ids.
+    Shared by showcase.cmd_topics, intake.adopt and project.estate_plan
+    (tests/test_t3_signoff_require.py::test_adopt_topics_job_carries_the_also_in_signoff,
+    ::test_estate_plan_jobs_carry_the_t3_orgs_signoff)."""
+    if not association_ids or not required() or not isinstance(item, dict):
+        return item
+    own = record_for(owner, repo) if owner else None
+    ids = list(dict.fromkeys(([str(own["id"])] if own and own.get("id") else []) + [str(x) for x in association_ids]))
+    item["signoff_id"] = ids[0]
+    if len(ids) > 1:
+        item["signoff_ids"] = ids
+    if "phase" in item:
+        item.setdefault("approval_id", ids[0])
+    return item
+
+
+def record(owner: str, repo: str | None = None, aliases: list[str] | None = None) -> dict | None:
+    """Under the flag, the valid record covering OWNER (and REPO), else None; registers no grant. None when off."""
+    if not required():
+        return None
+    rec, _ = evaluate([owner, *(aliases or [])], repo)
+    return rec
+
+
+def stamp_source(job: dict, full: str, aliases: list[str] | None = None) -> dict:
+    """Under the flag, stamp a writer job that names another owner's T3 repository FULL (OWNER/NAME) with the record
+    covering that repository. A star-List item job (org.star_list_plan) targets the personal account for some org's
+    List, so neither the target nor the org's grant names the record that let the favorite through
+    (org._t3_held checks it with granted(), which does not register a grant). It is evaluated here instead. The
+    repository's record wins over the List org's: the item job is what puts the T3 repository in public; the org's own
+    grant was enforced at the command gate and stays on its List create/describe jobs. No-op when off, when the job
+    already carries a signoff_id or when no valid record covers FULL (the favorite is then held and has no job)."""
+    if not required() or not isinstance(job, dict) or "signoff_id" in job or "/" not in (full or ""):
+        return job
+    owner, name = full.split("/", 1)
+    rec, _ = evaluate([owner, *(aliases or [])], name)
+    _put(job, rec)
+    return job

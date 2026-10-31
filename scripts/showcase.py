@@ -476,6 +476,14 @@ def cmd_describe(args):
         CHECK_FAILED if failed else OK
 
 
+def _stamp_signoff_ids(rec: dict, association_ids, ctx) -> None:
+    """Under --require-t3-signoff: the topics change record names every record that authorized it, the target owner's
+    own grant first (a T3 target) and then each T3 `also_in` association's (topics.merge `signoff_ids`).
+    `signoff_id` is the first; `signoff_ids` lists all of them only when there is more than one."""
+    from ctshowcase import signoff
+    signoff.stamp_associations(rec, association_ids, ctx.owner, ctx.repo)  # shared with intake.adopt
+
+
 def cmd_topics(args):
     from ctshowcase import records, topics
     ctx = context(args)
@@ -489,8 +497,9 @@ def cmd_topics(args):
         also_in = topics.registry_also_in(res, ctx.owner, ctx.repo)
     r = topics.merge(ctx, also_in)
     if args.records and not r["equal_as_set"]:
-        records.append(args.records, [records.record(ctx.owner, ctx.repo, "topics", "topics", r["current"], r["proposed"],
-                                                     "§5.6 merge")])
+        rec = records.record(ctx.owner, ctx.repo, "topics", "topics", r["current"], r["proposed"], "§5.6 merge")
+        _stamp_signoff_ids(rec, r.get("signoff_ids"), ctx)
+        records.append(args.records, [rec])
     out = base("topics", ctx, result="pass" if r["equal_as_set"] else "fail", **{k: v for k, v in r.items() if k != "logs"},
                logs=ctx.logs + r["logs"])
     if args.gh and not r["equal_as_set"]:
@@ -952,8 +961,12 @@ def parser() -> argparse.ArgumentParser:
                    help="treat a T3 (co-owned) owner as signed off for this run: every repository command and generator, not just `meta`; pass only when a t3-metadata or t3-signoff row is approved (default: T3 owners are refused, exit 2)")
     p.add_argument("--require-t3-signoff", action="store_true",
                    help="opt-in (env SHOWCASE_REQUIRE_T3_SIGNOFF=1): honour --allow-t3 only when a valid, unexpired sign-off record "
-                        "in the estate bundle (decisions/t3-signoffs.yaml) covers the owner and repository; otherwise exit 2 "
-                        "(t3-signoff:missing|expired|scope). Default off: --allow-t3 behaves as before")
+                        "in --t3-signoff-file covers the owner and repository; otherwise exit 2 "
+                        "(t3-signoff:no-file|missing|invalid|expired|scope). Default off: --allow-t3 behaves as before")
+    p.add_argument("--t3-signoff-file", metavar="PATH",
+                   help="the sign-off record file --require-t3-signoff reads (env SHOWCASE_T3_SIGNOFF_FILE; format: "
+                        "references/t3-signoff.md). There is no default location: the canonical path in the estate bundle "
+                        "is still the maintainer's choice, so the file must be named explicitly")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__} ({STANDARD})")
     sub = p.add_subparsers(dest="command", required=True, metavar="<command>")
 
@@ -1195,16 +1208,21 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main(argv=None) -> int:
-    """Run one invocation. `--allow-t3` holds only for this call: the previous value is restored on every exit."""
-    from ctshowcase.config import set_t3_signed_off, t3_signed_off
+    """Run one invocation. `--allow-t3` and `--require-t3-signoff` hold only for this call (and this context): the prior
+    values, and the sign-off grants of any enclosing run, are restored on every exit."""
+    from ctshowcase.config import reset_t3_signed_off, set_t3_signed_off, t3_signed_off
     from ctshowcase import signoff
-    previous, previous_required = t3_signed_off(), signoff.required()
+    token = set_t3_signed_off(t3_signed_off())
+    required_token = signoff.set_required(signoff.required())
+    file_token = signoff.set_file(signoff._FILE.get())
+    run_token = signoff.reset()
     try:
         return _main(argv)
     finally:
-        set_t3_signed_off(previous)
-        signoff.set_required(previous_required)
-        signoff.reset()
+        signoff.restore(run_token)
+        signoff.reset_file(file_token)
+        signoff.reset_required(required_token)
+        reset_t3_signed_off(token)
 
 
 def _main(argv=None) -> int:
@@ -1231,6 +1249,7 @@ def _main(argv=None) -> int:
     set_t3_signed_off(getattr(args, "allow_t3", False))
     from ctshowcase import signoff
     signoff.set_required(getattr(args, "require_t3_signoff", False) or signoff.env_required())
+    signoff.set_file(getattr(args, "t3_signoff_file", None))
     if args.format is None:
         args.format = "text" if args.command in GENERATORS else "json"
     try:
@@ -1250,8 +1269,9 @@ def _main(argv=None) -> int:
             print(f"{args.command}: {obj['error']}", file=sys.stderr)
             return code
     if obj is not None:
-        if signoff.required() and isinstance(obj.get("jobs"), list):
-            signoff.stamp(obj["jobs"])
+        for key in ("jobs", "records"):  # writer jobs and change records (adopt, new, enterprise plan)
+            if signoff.required() and isinstance(obj.get(key), list):
+                signoff.stamp(obj[key])
         emit(args, obj)
     return code
 
