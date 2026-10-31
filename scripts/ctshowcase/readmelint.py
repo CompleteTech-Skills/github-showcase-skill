@@ -63,6 +63,18 @@ def _in_inline_code(text: str, index: int) -> bool:
             start = inside[1]
 
 
+_SHIELDS_SEGMENT_DASH = re.compile(r"(?<!-)-(?!-)")  # Shields: a single dash separates segments, "--" is a literal dash
+
+
+def _badge_colour(path: str) -> str:
+    """Upper-cased colour of a Shields badge path (the text after `/badge/`): its last single-dash segment, with the
+    query and fragment removed. Labels and messages may hold apostrophes, escaped dashes or hex-looking text; only the
+    final segment is the colour."""
+    path = unquote(path)
+    path = path.split("#", 1)[0].split("?", 1)[0]
+    return _SHIELDS_SEGMENT_DASH.split(path)[-1].upper()
+
+
 def _definition_spans(document: str) -> list[tuple[int, int]]:
     """Spans of complete reference definitions (label, destination and title): their text is not Markdown."""
     return [(m.start(), m.end()) for m in REF_DEFINITION.finditer(_outside_code(document, mask_inline=False))
@@ -374,8 +386,7 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
     elif len(h1s) != 1:
         fails.append(f"R7 exactly one H1 required (found {len(h1s)})")
     # badges 2-4, palette tokens only
-    shields = re.findall(r"img\.shields\.io/badge/([^)\"'<>\s]+)", plain)
-    shields = list(dict.fromkeys(shields))
+    shields: list[str] = []
     header_part = plain.split("\n---\n", 1)[0]
     badge_header = _outside_code(header_part)
     image_sources = [source for _, source in _images(badge_header, plain)]
@@ -389,12 +400,12 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
             fails.append(f"R7 2-4 header badges required (found {nbadges})")
         elif nbadges < 2:
             warns.append(f"badges-short: {nbadges} badge (no licence or language to show yet)")
-    # colours are read from parsed image destinations too, so an apostrophe or other HTML delimiter inside a Markdown URL hides nothing
-    shields += [m.group(1).split("?")[0].split("#")[0] for _, src in _images(_outside_code(plain), plain)
+    # colours come only from complete parsed image destinations, so an apostrophe or other HTML delimiter inside a Markdown URL hides nothing
+    shields += [m.group(1) for _, src in _images(_outside_code(plain), plain)
                 if (m := SHIELDS_BADGE.match(src))]
     shields = list(dict.fromkeys(shields))
     for s in shields:
-        col = re.split(r"[?)]", s.rsplit("-", 1)[-1])[0].upper()
+        col = _badge_colour(s)
         family_cols = {str(ctx.style.get(k) or "").upper() for k in ("badge_brand", "badge_accent")}
         if re.fullmatch(r"[0-9A-F]{6}", col) and col not in PALETTE and col not in family_cols:
             fails.append(f"R7 off-palette badge colour {col}")
