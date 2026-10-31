@@ -35,7 +35,8 @@ def _bundle(tmp_path, records):
         lines.append(f"    approved: {str(r.get('approved', True)).lower()}")
         lines.append(f"    approver: {r.get('approver', 'synthetic-co-owner')}")
         lines.append(f"    approved_on: {r.get('approved_on', '1990-01-01')}")
-        lines.append(f"    expires: {r.get('expires', '2099-12-31')}")
+        if r.get("expires", "2099-12-31") is not None:  # expires=None omits the key: the record has no expiry
+            lines.append(f"    expires: {r.get('expires', '2099-12-31')}")
     (d / "t3-signoffs.yaml").write_text("\n".join(lines) + "\n", encoding="utf-8")
     return tmp_path / "bundle"
 
@@ -259,7 +260,16 @@ def test_malformed_repos_refuses_instead_of_raising(tmp_path):
                               "    approver: x\n    approved_on: 2026-01-01\n    expires: 2099-12-31\n")
     r = _run(tmp_path, b, "--require-t3-signoff", "--allow-t3", "describe")
     assert r.returncode == 2 and "t3-signoff:invalid" in _out(r) and "repos" in _out(r), _out(r)
-    assert "Traceback" not in _out(r), _out(r)
+    assert "t3-signoff:scope" not in _out(r) and "Traceback" not in _out(r), _out(r)
+
+
+@pytest.mark.parametrize("repos", ["7", "[]"])
+def test_malformed_or_empty_repos_is_invalid_with_a_needs_star_message(tmp_path, repos):
+    b = _raw_bundle(tmp_path, f"  - id: t3s-6\n    owner: {OWNER}\n    repos: {repos}\n    approved: true\n"
+                              "    approver: x\n    approved_on: 2026-01-01\n    expires: 2099-12-31\n")
+    r = _run(tmp_path, b, "--allow-t3", "describe")
+    assert r.returncode == 2 and "t3-signoff:invalid" in _out(r) and "repos: needs '*'" in _out(r), _out(r)
+    assert "t3-signoff:scope" not in _out(r) and "Traceback" not in _out(r), _out(r)
 
 
 def test_adopt_and_content_links_honour_repo_scoped_record(tmp_path):
@@ -1033,3 +1043,146 @@ def test_doctor_row_shape_is_unchanged_without_allow_t3(tmp_path):
     r = _run(tmp_path, bundle, "doctor", "--header", owner="CompleteTech-Skills")
     head = r.stdout.splitlines()[0].split("\t")
     assert head[-1] == "done" and "signoff_id" not in head, r.stdout
+
+
+# --- review fix round 1: optional expiry, withdrawal, estate README stamping ---
+
+def _rec(**kw):
+    base = {"id": "a", "owner": OWNER, "repos": ["*"], "approved": True, "approver": "synthetic-co-owner",
+            "approved_on": "2026-01-15"}
+    base.update(kw)
+    return base
+
+
+def test_record_without_expires_grants_and_has_no_expiry(tmp_path):
+    from ctshowcase import signoff
+    rec = _rec()
+    assert "expires" not in rec and signoff.problems(rec) == []
+    got, why = signoff.evaluate([OWNER], "r", records=[rec])
+    assert why is None and got is rec
+    r = _run(tmp_path, _bundle(tmp_path, [{"id": "t3s-open", "expires": None}]), "--allow-t3", "describe")
+    assert r.returncode == 0 and "t3-signoff" not in _out(r), _out(r)
+    (tmp_path / "j").mkdir()
+    j = _run(tmp_path / "j", _bundle(tmp_path / "j", [{"id": "t3s-open", "expires": None}]), "--allow-t3", "adopt",
+             f"{OWNER}/northwind-synthetic")
+    topics = [x for x in json.loads(j.stdout)["jobs"] if x["kind"] == "topics"]
+    assert topics and all(x.get("signoff_id") == "t3s-open" for x in topics), j.stdout[:400]
+
+
+@pytest.mark.parametrize("body", ["    expires: null\n", "    expires: not-a-date\n", "    expires: 2099-12-31garbage\n"])
+def test_null_or_unparseable_expires_is_still_invalid(tmp_path, body):
+    from ctshowcase import signoff
+    b = _raw_bundle(tmp_path, f"  - id: t3s-x\n    owner: {OWNER}\n    repos: ['*']\n    approved: true\n"
+                              f"    approver: x\n    approved_on: 2026-01-01\n{body}")
+    r = _run(tmp_path, b, "--allow-t3", "describe")
+    assert r.returncode == 2 and "t3-signoff:invalid" in _out(r) and "expires" in _out(r), _out(r)
+    assert signoff.evaluate([OWNER], "r", records=[_rec(expires=None)])[1].startswith("invalid")
+
+
+A_TRUE = _rec(id="a", approved_on="2026-01-15")
+B_FALSE = _rec(id="b", approved=False, approved_on="2026-10-01")
+
+
+def test_later_false_record_withdraws_the_grant(tmp_path):
+    from ctshowcase import signoff
+    assert signoff.evaluate([OWNER], "foo", records=[A_TRUE, B_FALSE]) == (None, "revoked")
+    assert signoff.evaluate([OWNER], None, records=[B_FALSE, A_TRUE]) == (None, "revoked")
+    b = _bundle(tmp_path, [{"id": "a", "approved_on": "2026-01-15"},
+                           {"id": "b", "approved": False, "approved_on": "2026-10-01"}])
+    r = _run(tmp_path, b, "--allow-t3", "describe")
+    assert r.returncode == 2 and "t3-signoff:revoked" in _out(r), _out(r)
+
+
+def test_same_day_false_record_withdraws_too():
+    from ctshowcase import signoff
+    same = _rec(id="b", approved=False, approved_on="2026-01-15")
+    assert signoff.evaluate([OWNER], "foo", records=[A_TRUE, same]) == (None, "revoked")
+
+
+def test_false_record_dated_before_the_grant_does_not_revoke():
+    from ctshowcase import signoff
+    early = _rec(id="b", approved=False, approved_on="2026-01-01")
+    got, why = signoff.evaluate([OWNER], "foo", records=[A_TRUE, early])
+    assert why is None and got["id"] == "a"
+
+
+def test_false_record_scoped_to_one_repo_does_not_revoke_a_star_grant():
+    from ctshowcase import signoff
+    narrow = _rec(id="b", approved=False, approved_on="2026-10-01", repos=["X"])
+    for repo in ("foo", "X"):
+        got, why = signoff.evaluate([OWNER], repo, records=[A_TRUE, narrow])
+        assert why is None and got["id"] == "a", repo
+
+
+def test_false_record_for_another_owner_does_not_revoke():
+    from ctshowcase import signoff
+    other = _rec(id="b", owner="Other-Org", approved=False, approved_on="2026-10-01")
+    got, why = signoff.evaluate([OWNER], "foo", records=[A_TRUE, other])
+    assert why is None and got["id"] == "a"
+
+
+def test_regrant_after_the_withdrawal_grants_again():
+    from ctshowcase import signoff
+    regrant = _rec(id="c", approved_on="2026-10-02")
+    got, why = signoff.evaluate([OWNER], "foo", records=[A_TRUE, B_FALSE, regrant])
+    assert why is None and got["id"] == "c"
+
+
+def test_withdrawal_of_one_scope_leaves_the_other_scope_granted():
+    from ctshowcase import signoff
+    x = _rec(id="x", repos=["X"], approved_on="2026-01-15")
+    y = _rec(id="y", repos=["Y"], approved_on="2026-01-15")
+    drop_x = _rec(id="dx", repos=["X"], approved=False, approved_on="2026-10-01")
+    assert signoff.evaluate([OWNER], "X", records=[x, y, drop_x]) == (None, "revoked")
+    got, why = signoff.evaluate([OWNER], "Y", records=[x, y, drop_x])
+    assert why is None and got["id"] == "y"
+
+
+def _complete_estate_capture():
+    """estate-copy-capture.json plus every Estate view and an Org field whose existing option is the T3 org."""
+    from ctshowcase import project as PJ
+    cap = json.loads((ROOT / "tests" / "fixtures" / "project" / "estate-copy-capture.json").read_text(encoding="utf-8"))
+    board = cap["data"]["user"]["projectV2"]
+    for i, v in enumerate(PJ.ESTATE_VIEWS):
+        board["views"]["nodes"].append(dict(board["views"]["nodes"][-1], id=f"PVTV_e{i}", number=20 + i, name=v["name"],
+                                            filter=v["filter"]))
+    board["fields"]["nodes"].append({"__typename": "ProjectV2SingleSelectField", "id": "PVTF_org", "databaseId": 1099,
+                                     "name": "Org", "dataType": "SINGLE_SELECT", "isIssueField": False,
+                                     "options": [{"id": "optorg1", "name": "Pick Your AI", "color": "YELLOW",
+                                                  "description": f"T3: {OWNER}"}]})
+    return cap
+
+
+def _readme_jobs(plan):
+    return [j for j in plan["jobs"] if "--readme" in j.get("argv", [])]
+
+
+def test_estate_readme_job_carries_the_t3_orgs_signoff(tmp_path, monkeypatch, brand):
+    from ctshowcase import project as PJ
+    from ctshowcase.config import load_yaml_text
+    from ctshowcase.resolver import Resolver
+    reg = load_yaml_text((ROOT / "tests" / "fixtures" / "org" / "registry.yaml").read_text(encoding="utf-8"))
+    reg["profile"]["org_directory"].append({"group": "T3", "orgs": [OWNER]})
+    reg["orgs"][OWNER] = {}
+    res = Resolver(brand, reg, {"rows": {("create-project", "@me", "*", "")}, "ids": set(), "answers": {},
+                                "actions": [], "extra": []})
+    with _Strict(monkeypatch, _file(_bundle(tmp_path, [{"id": "t3s-board"}]))):
+        plan = PJ.estate_plan(res, copied=_complete_estate_capture(), user_id=100, allow_t3=True)
+    readme = _readme_jobs(plan)
+    assert readme, [j["id"] for j in plan["jobs"]]
+    text = readme[0]["argv"][readme[0]["argv"].index("--readme") + 1]
+    assert "Pick Your AI" in text, text
+    assert all(j.get("signoff_id") == "t3s-board" for j in readme), readme
+
+
+def test_readme_naming_only_a_non_t3_org_gets_no_signoff_id():
+    from ctshowcase import project as PJ
+    orgs = [{"login": "Acme", "name": "Acme", "tier": "T3", "signoff_id": "t3s-acme"},
+            {"login": "Acme-Tools", "name": "Acme Tools", "tier": "T1"}]
+    for table in ("| Acme-Tools | tools |", "| Acme Tools | tools |", "AcmeCorp and Acme-Tools"):
+        jobs = [{"id": "r", "phase": 1, "argv": ["gh", "project", "edit", "7", "--readme", table]}]
+        PJ._stamp_estate_orgs(jobs, orgs)
+        assert "signoff_id" not in jobs[0] and "signoff_ids" not in jobs[0], (table, jobs[0])
+    jobs = [{"id": "r", "phase": 1, "argv": ["gh", "project", "edit", "7", "--readme", "| Acme | own |"]}]
+    PJ._stamp_estate_orgs(jobs, orgs)
+    assert jobs[0].get("signoff_id") == "t3s-acme"

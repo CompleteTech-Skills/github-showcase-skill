@@ -167,3 +167,25 @@ def test_estate_plan_stamping_ignores_a_display_name_shared_with_another_org(tmp
     finally:
         signoff.restore(token)
     assert {j["id"]: j.get("signoff_id") for j in jobs} == {"t1": None, "t3": "t3s-acme"}
+
+
+def test_flag_is_an_accepted_no_op_and_the_no_file_default_still_refuses(tmp_path):
+    """Default-on enforcement is not a regression: with no record file `--allow-t3` refuses exactly as it does with
+    the compatibility flag, and the flag changes neither the exit code nor the output."""
+    root = _bundle(tmp_path, write=False)
+    bare = _run(tmp_path, root, "--allow-t3", "describe")
+    flagged = _run(tmp_path, root, "--require-t3-signoff", "--allow-t3", "describe")
+    assert bare.returncode == flagged.returncode == 2
+    assert "t3-signoff:no-file" in _out(bare) and "t3-signoff:no-file" in _out(flagged), _out(bare)
+    assert (bare.stdout, bare.stderr) == (flagged.stdout, flagged.stderr)
+    root = _bundle(tmp_path / "ok", id="t3s-flag")
+    ok = _run(tmp_path / "ok", root, "--allow-t3", "describe")
+    ok_flag = _run(tmp_path / "ok", root, "--require-t3-signoff", "--allow-t3", "describe")
+    assert ok.returncode == ok_flag.returncode == 0 and ok.stdout == ok_flag.stdout
+
+
+def test_no_opt_out_option_exists_in_help_or_source():
+    helptext = subprocess.run([*SHOWCASE, "--help"], capture_output=True, encoding="utf-8").stdout
+    assert "--require-t3-signoff" in helptext and "--no-require-t3-signoff" not in helptext
+    src = "".join(p.read_text(encoding="utf-8") for p in (ROOT / "scripts").rglob("*.py"))
+    assert "SHOWCASE_REQUIRE_T3_SIGNOFF" not in src and "no-require-t3-signoff" not in src

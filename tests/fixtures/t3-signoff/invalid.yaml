@@ -41,3 +41,10 @@ signoffs:
     approved_on: 2026-01-15
     expires: 2099-12-31
     approvd_by: typo
+  - id: t3s-bad-null-expiry
+    owner: Pick-Your-AI
+    repos: ["*"]
+    approved: true
+    approver: synthetic-co-owner
+    approved_on: 2026-01-15
+    expires: null
