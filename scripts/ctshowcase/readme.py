@@ -537,6 +537,21 @@ FOOTER_TAG = re.compile(r"</?(p|div|a|picture|source|img|br|sub|sup|b|strong|em)
 
 FOOTER_ATTR = re.compile(r"""\b(src|srcset|alt)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""", re.I)
 
+OLD_LOCAL_LOGOS = {'assets/logo.png', 'logo.png', 'assets/logo-dark.png', 'logo-dark.png'}
+
+
+def _old_local_logo(url: str) -> bool:
+    """`url` is a former local footer logo file (`OLD_LOCAL_LOGOS`), relative and without a scheme, host or data URI."""
+    url = url.strip()
+    if "://" in url or url.startswith("//") or url.startswith("data:"):
+        return False
+    path = url.split("#", 1)[0].split("?", 1)[0]
+    if path.startswith("./"):
+        path = path[2:]
+    elif path.startswith("/"):
+        path = path[1:]
+    return path in OLD_LOCAL_LOGOS
+
 
 def _footer_logo_url(url: str, brand) -> bool:
     """`url` is one of the decision 18 footer's own logo files (brand footer `logo_light_url` or `logo_dark_url`),
@@ -563,7 +578,7 @@ def is_footer_copy(block: str, brand) -> bool:
     """Every line of `block` is a line of the decision 18 footer or a drifted copy of one: only centring, link, logo,
     `<br>`/`<sub>` markup, with complete.tech links, the footer's own logo image (its src or srcset is the brand footer
     logo URL or a drifted form of it; an image without src/srcset passes on an alt that is exactly the company) and as text only the credit line ("Built by
-    <company>", optionally with the suffix). A sponsor or partner image (whatever its file name), a thanks line or
+    <company>", optionally with the suffix). The former local logo files (assets/logo.png and the other `OLD_LOCAL_LOGOS`) are also recognized when the image's alt is exactly the company or the footer alt. A sponsor or partner image (whatever its file name), a thanks line or
     any other authored text makes it not a footer copy, so it is never removed."""
     import html
     f, company = brand.raw["footer"], brand.strings["company"]
@@ -584,7 +599,8 @@ def is_footer_copy(block: str, brand) -> bool:
             else:
                 urls.append([p.split()[0] for p in val.split(",") if p.split()])
         if urls:  # a matching alt never vouches for another image: every src/srcset must be a footer logo URL
-            return all(parts and all(_footer_logo_url(u, brand) for u in parts) for parts in urls)
+            return all(parts and all(_footer_logo_url(u, brand) or (alt_ok and _old_local_logo(u)) for u in parts)
+                       for parts in urls)
         return alt_ok
 
     for line in block.splitlines():
