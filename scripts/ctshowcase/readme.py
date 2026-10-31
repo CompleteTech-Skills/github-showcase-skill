@@ -469,8 +469,9 @@ def callout_only(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
     exempts them). Review q27 "Full CompleteTech treatment" (brand.yaml readme.fork_readme: full) means the fork
     follows its §5.4 variant instead: pass that variant with `readme --variant`.
     Returns (text, removed lines): a recognized old footer (marked or unmarked, `is_footer_copy`: for example one with
-    the former logo URLs) is replaced by the current one, and its lines are reported so the preservation check accepts
-    them. A marked footer that is not a footer copy (a partner image) is left as it is. A removed recognized footer is
+    the former logo URLs) is replaced by the current one, and only the removed footer lines that the replacement footer
+    does not carry again are reported (multiset difference), so the preservation check accepts them. A re-emitted
+    line is not reported, so it cannot weaken the never-drop-a-line guard. A marked footer that is not a footer copy (a partner image) is left as it is. A removed recognized footer is
     always replaced, even when fenced example text makes check() report drift."""
     if ctx.det["variant"] == "G" and ctx.brand.readme_opts.get("fork_readme") == "full":
         ctx.log("needs-input:fork-variant (q27 full treatment: pass readme --variant for the §5.4 variant)")
@@ -512,6 +513,16 @@ def callout_only(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
                 had_footer = True
         if had_footer or footermod.check(ctx.brand, out)[0] == "fail:missing":
             out = out.rstrip("\n") + "\n\n" + footermod.block(ctx.brand) + "\n"
+            # Report only the removed footer lines that the replacement footer does not carry again (multiset
+            # difference), so a re-emitted line never counts as lost content in the preservation check.
+            kept = Counter(ln.strip() for ln in footermod.block(ctx.brand).splitlines() if ln.strip())
+            rest = []
+            for ln in removed:
+                if kept[ln.strip()] > 0:
+                    kept[ln.strip()] -= 1
+                else:
+                    rest.append(ln)
+            removed = rest
     return out, removed
 
 
