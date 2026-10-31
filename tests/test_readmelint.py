@@ -314,7 +314,9 @@ def test_backtick_in_a_resolved_reference_label_does_not_pair_with_later_code(ma
     licence_off = REF_LABEL_LAYOUT.format(type="005ADD", license="FF0000") + "\n\n" + REF_LABEL_DEFINITION
     assert "R7 off-palette badge colour FF0000" in _badge_fails(make_ctx, tmp_path, brand, licence_off)
     type_off = REF_LABEL_LAYOUT.format(type="FF0000", license="64748B") + "\n\n" + REF_LABEL_DEFINITION
-    assert "R7 off-palette badge colour FF0000" in _badge_fails(make_ctx, tmp_path, brand, type_off)
+    second = tmp_path / "second"  # good_readme builds a fresh tree, so the second body gets its own directory
+    second.mkdir()
+    assert "R7 off-palette badge colour FF0000" in _badge_fails(make_ctx, second, brand, type_off)
 
 
 def test_backtick_in_an_unresolved_reference_label_still_opens_code(make_ctx, tmp_path, brand):
