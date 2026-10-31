@@ -74,3 +74,67 @@ def test_multiline_inline_code_placeholder_is_not_flagged(make_ctx, tmp_path, br
     res = readmelint.lint(ctx, p)
     assert not any("placeholder" in f.lower() for f in res["fails"]), res["fails"]
     assert not any("TODO" in f for f in res["fails"]), res["fails"]
+
+
+def test_list_item_backtick_does_not_hide_a_missing_image_in_the_next_item(make_ctx, tmp_path, brand):
+    ctx = good_readme(make_ctx, tmp_path, brand)
+    p = _insert_usage(tmp_path, "- Install `foo\n- See ![Logo](docs/images/missing.png) and `bar`")
+    assert "R7 local image does not resolve: docs/images/missing.png" in readmelint.lint(ctx, p)["fails"]
+
+
+def test_ordered_list_backtick_does_not_hide_a_missing_image_in_the_next_item(make_ctx, tmp_path, brand):
+    ctx = good_readme(make_ctx, tmp_path, brand)
+    p = _insert_usage(tmp_path, "1. Install `foo\n2. See ![Logo](docs/images/missing.png) and `bar`")
+    assert "R7 local image does not resolve: docs/images/missing.png" in readmelint.lint(ctx, p)["fails"]
+
+
+def test_ordered_list_starting_at_one_second_item(make_ctx, tmp_path, brand):
+    ctx = good_readme(make_ctx, tmp_path, brand)
+    p = _insert_usage(tmp_path, "1. Install `foo\n1. See ![Logo](docs/images/missing.png) and `bar`")
+    assert "R7 local image does not resolve: docs/images/missing.png" in readmelint.lint(ctx, p)["fails"]
+
+
+def test_angle_destination_backtick_pairs_with_nothing():
+    text = "![A](<https://example.test/a`b.png>) ![B](<docs/images/missing.png>) `code`"
+    found = readmelint._images(readmelint._outside_code(text), text)
+    assert [source for _, source in found] == ["https://example.test/a`b.png", "docs/images/missing.png"]
+
+
+def test_angle_destination_backtick_does_not_hide_the_missing_file(make_ctx, tmp_path, brand):
+    ctx = good_readme(make_ctx, tmp_path, brand)
+    p = _insert_usage(tmp_path, "![A](<https://example.test/a`b.png>) ![B](<docs/images/missing.png>) `code`")
+    assert "R7 local image does not resolve: docs/images/missing.png" in readmelint.lint(ctx, p)["fails"]
+
+
+def test_plain_destination_backtick_does_not_hide_the_missing_file(make_ctx, tmp_path, brand):
+    ctx = good_readme(make_ctx, tmp_path, brand)
+    p = _insert_usage(tmp_path, "![A](a`b.png) ![B](missing.png) `c`")
+    assert "R7 local image does not resolve: missing.png" in readmelint.lint(ctx, p)["fails"]
+
+
+def test_backtick_opener_before_the_closing_bracket_still_wins():
+    text = "![A `x](docs/images/missing.png) y` tail"
+    assert readmelint._images(readmelint._outside_code(text), text) == []
+
+
+def test_reference_definition_inside_multiline_code_is_not_a_definition(make_ctx, tmp_path, brand):
+    ctx = good_readme(make_ctx, tmp_path, brand)
+    p = _insert_usage(tmp_path, "![Shot][example]\n\nExample `syntax\n[example]: docs/images/missing.png\nend`")
+    res = readmelint.lint(ctx, p)
+    assert not any("local image" in f for f in res["fails"]), res["fails"]
+    text = p.read_text(encoding="utf-8")
+    assert readmelint._images(readmelint._outside_code(text), text) == [] or all(
+        "missing.png" not in source for _, source in readmelint._images(readmelint._outside_code(text), text))
+
+
+def test_reference_definition_with_backtick_label_still_defines_the_image(make_ctx, tmp_path, brand):
+    ctx = good_readme(make_ctx, tmp_path, brand)
+    p = _insert_usage(tmp_path, "![Shot][`a`]\n\n[`a`]: docs/images/missing.png")
+    assert "R7 local image does not resolve: docs/images/missing.png" in readmelint.lint(ctx, p)["fails"]
+
+
+def test_off_palette_badge_colour_is_reported_once(make_ctx, tmp_path, brand):
+    ctx = good_readme(make_ctx, tmp_path, brand)
+    p = tmp_path / "README.md"
+    p.write_text("# X\n\n![Type](https://img.shields.io/badge/type-x-FF0000)\n", encoding="utf-8")
+    assert readmelint.lint(ctx, p)["fails"].count("R7 off-palette badge colour FF0000") == 1

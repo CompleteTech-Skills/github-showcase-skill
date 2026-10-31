@@ -107,7 +107,7 @@ def _outside_code(text: str, mask_inline: bool = True) -> str:
     The result has the same length (and newline positions) as `text`."""
     fences = _fence_spans(text)
     out, pos = list(text), 0
-    tag = comment = inline = None
+    tag = comment = inline = dest = None
 
     def blank(a, b):
         for i in range(a, b):
@@ -124,9 +124,21 @@ def _outside_code(text: str, mask_inline: bool = True) -> str:
                 return found
             start = inside[1]
 
+    def next_destination(start):
+        """(start, end) of the first inline link or image destination `](...)` from `start`: its text is literal, so a
+        backtick inside it opens no code span (CommonMark parses the destination before looking for later code)."""
+        while match := _search_unescaped(re.compile(r"\]\("), text, start):
+            target = _inline_image_target(text, match.end() - 1)
+            if target:
+                return match.start(), target[1]
+            start = match.start() + 1
+        return False
+
     while pos < len(text):
         if inline is not False and (inline is None or inline[0] < pos):
             inline = next_inline(pos)
+        if dest is not False and (dest is None or dest[0] < pos):
+            dest = next_destination(pos)
         if tag is not False and (tag is None or tag.start() < pos):
             tag = _search_unescaped(HTML_OPEN_TAG, text, pos) or False
         if comment is not False and (comment is None or comment.start() < pos):
@@ -135,7 +147,9 @@ def _outside_code(text: str, mask_inline: bool = True) -> str:
         code = min([c for c in ((inline if inline else None), fence) if c], default=None)
         found = [m for m in (tag, comment) if m]
         nxt = min(found, key=lambda m: m.start()) if found else None
-        if code and (nxt is None or code[0] <= nxt.start()):
+        if dest and all(dest[0] < other for other in [c[0] for c in (code,) if c] + [m.start() for m in found]):
+            pos = dest[1]
+        elif code and (nxt is None or code[0] <= nxt.start()):
             if mask_inline or code is fence:
                 blank(*code)
             pos = code[1]
