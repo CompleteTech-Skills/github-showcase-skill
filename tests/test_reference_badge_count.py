@@ -189,3 +189,30 @@ def test_fallback_reference_with_existing_local_definition_passes(make_ctx, tmp_
     result = lint_reference(make_ctx, tmp_path, "![CI](current build)", "[CI]: docs/images/badges/ci.svg",
                             files=["docs/images/badges/ci.svg"])
     assert not any("local image" in failure or "header badges" in failure for failure in result["fails"]), result
+
+
+LIC = "[lic]: https://img.shields.io/badge/license-MIT-64748B"
+
+
+def _comment_definition_doc(body):
+    return f"{body}\n\n{LIC}\n\n<!-- note -->"
+
+
+def _count(make_ctx, tmp_path, body):
+    result = lint_reference(make_ctx, tmp_path, "![License][lic]", _comment_definition_doc(body))
+    return result
+
+
+def test_code_span_comment_opener_does_not_hide_a_later_definition(make_ctx, tmp_path):
+    result = _count(make_ctx, tmp_path, "Use `<!--` to document comments.")
+    assert not any("header badges" in failure for failure in result["fails"]), result
+
+
+def test_real_comment_containing_a_definition_still_hides_it(make_ctx, tmp_path):
+    result = lint_reference(make_ctx, tmp_path, "![License][lic]", f"<!--\n{LIC}\n-->")
+    assert "R7 2-4 header badges required (found 1)" in result["fails"]
+
+
+def test_escaped_comment_opener_does_not_start_a_comment(make_ctx, tmp_path):
+    result = _count(make_ctx, tmp_path, r"Write \<!-- to open a comment.")
+    assert not any("header badges" in failure for failure in result["fails"]), result

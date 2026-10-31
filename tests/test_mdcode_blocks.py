@@ -231,3 +231,28 @@ def test_continuation_starts_hold_paragraph_continuation_lines_only():
     assert {t.index("second line"), t.index("[a]: x")} <= starts
     for block_start in ("# Head", "first line", "- item", "fenced", "## Next"):
         assert t.index(block_start) not in starts
+
+
+QUOTED_EXTRA = "> ```text\n> > ```\n> code\n> ```\n> ![Shot](<docs/images/missing.png>)"
+
+
+def test_extra_quote_markers_inside_a_quoted_fence_are_code_content():
+    spans = mdcode.fence_spans(QUOTED_EXTRA)
+    closer = QUOTED_EXTRA.index("> code\n> ```\n") + len("> code\n> ```\n")
+    assert spans == ((0, closer),)
+    assert not covers(QUOTED_EXTRA, "![Shot]")
+
+
+def test_extra_quote_markers_do_not_hide_the_image_after_the_real_closer():
+    assert [src for _, src in images(QUOTED_EXTRA)] == ["docs/images/missing.png"]
+
+
+def test_a_real_quoted_closer_still_closes():
+    t = "> ```text\n> code\n> ```\n> ![Shot](docs/images/missing.png)"
+    assert mdcode.fence_spans(t) == ((0, t.index("> ![Shot]")),)
+
+
+def test_a_depth_two_fence_still_opens_and_closes_on_its_own_depth():
+    t = "> > ```text\n> > code\n> > ```\n> > ![Shot](docs/images/missing.png)"
+    assert mdcode.fence_spans(t) == ((0, t.index("> > ![Shot]")),)
+    assert [src for _, src in images(t)] == ["docs/images/missing.png"]

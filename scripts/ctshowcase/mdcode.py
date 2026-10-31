@@ -53,6 +53,16 @@ def _quotes(body: str) -> tuple[int, str]:
     return depth, body
 
 
+def _strip_quotes(body: str, depth: int) -> str:
+    """`body` with at most `depth` leading block-quote markers removed: deeper `>` characters stay content."""
+    for _ in range(depth):
+        m = _QUOTE.match(body)
+        if not m:
+            break
+        body = body[m.end():]
+    return body
+
+
 def _containers(body: str) -> tuple[int, int, str]:
     """(block-quote depth, list-item content column, remainder): quote and item markers are peeled in any order, so
     `- ```x`, `1. ```x`, `- > ```x` and `> - ```x` all reach the same remainder. The column is the summed width of the
@@ -150,7 +160,9 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
             run, fdepth, col, outer = fence
             # an item whose marker precedes its quote marker (`- > ```x`) is indented before the quote marker, so its
             # indentation is the raw one; otherwise it is the indentation left after the quote markers (`> - ```x`)
-            lead = len(body) - len(body.lstrip(" ")) if outer else len(rest) - len(rest.lstrip(" "))
+            # only the fence's own quote depth is container syntax: extra `>` characters inside it are code content
+            inner = _strip_quotes(body, fdepth)
+            lead = len(body) - len(body.lstrip(" ")) if outer else len(inner) - len(inner.lstrip(" "))
             if depth < fdepth or (col and depth == fdepth and rest.strip(" \t") and lead < col):
                 # the quote container of an open fence ended, or a non-blank line left the item's content column: the
                 # fence ends unclosed at this line, and this line is then processed as an ordinary line
@@ -159,7 +171,7 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
             else:
                 # a depth-0 fence is closed by its raw line, as before; a quoted fence by the line inside its quote; an
                 # item fence by the line after its content column is removed
-                closer = rest if fdepth else body
+                closer = inner if fdepth else body
                 if col:
                     closer = closer[min(len(closer) - len(closer.lstrip(" ")), col):]
                 close = _FENCE_CLOSE.match(closer)

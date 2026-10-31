@@ -277,3 +277,28 @@ def test_placeholder_inside_an_item_fence_is_code(make_ctx, tmp_path, brand, sni
 def test_genuine_placeholder_outside_code_still_fails(make_ctx, tmp_path, brand):
     snippet = "- ```text\n  fine\n  ```\n\nTODO"
     assert any("placeholder" in f for f in _usage_fails(make_ctx, tmp_path, brand, snippet))
+
+
+@pytest.mark.parametrize("path,colour", [
+    ("type-example---FF0000", "FF0000"),
+    ("x-a---005ADD", "005ADD"),
+    ("type-example-005ADD", "005ADD"),
+    ("my--label-a--b-64748B", "64748B"),
+], ids=["trailing-dash-off-palette", "trailing-dash-on-palette", "plain", "escaped-dashes"])
+def test_badge_colour_keeps_the_structural_separator_after_a_trailing_dash(path, colour):
+    assert readmelint._badge_colour(path) == colour
+
+
+def test_trailing_dash_message_with_off_palette_colour_is_reported(make_ctx, tmp_path, brand):
+    body = "![Type](<https://img.shields.io/badge/type-example---FF0000>)"
+    assert "R7 off-palette badge colour FF0000" in _badge_fails(make_ctx, tmp_path, brand, body)
+
+
+def test_trailing_dash_message_with_palette_colour_passes(make_ctx, tmp_path, brand):
+    body = "![Type](<https://img.shields.io/badge/type-example---005ADD>)"
+    assert not any("off-palette" in f for f in _badge_fails(make_ctx, tmp_path, brand, body))
+
+
+def test_extra_quote_markers_in_a_quoted_fence_do_not_hide_a_missing_image(make_ctx, tmp_path, brand):
+    snippet = "> ```text\n> > ```\n> code\n> ```\n> ![Shot](<docs/images/missing.png>)"
+    assert MISSING in _usage_fails(make_ctx, tmp_path, brand, snippet)
