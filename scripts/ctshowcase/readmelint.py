@@ -7,7 +7,7 @@ from pathlib import Path
 from urllib.parse import unquote
 
 from . import footer as footermod
-from .mdcode import FENCE_OPEN, INLINE_CODE, code_spans
+from .mdcode import FENCE_OPEN, code_spans, find_inline_code
 from .context import RepoContext
 from .detect import standard
 from .readme import BANNER_BLOCK, EMOJI, MARK, is_footer_like, masked, normalize_text, nav_first, preserved, split_sections
@@ -24,6 +24,30 @@ _ATTR = r"""\s+[A-Za-z_:][A-Za-z0-9_.:-]*(?:\s*=\s*(?:[^\s"'=<>`]+|'[^']*'|"[^"]
 HTML_OPEN_TAG = re.compile(rf"<([A-Za-z][A-Za-z0-9-]*)((?:{_ATTR})*)\s*/?>")
 HTML_ATTR = re.compile(r"""([A-Za-z_:][A-Za-z0-9_.:-]*)(?:\s*=\s*([^\s"'=<>`]+|'[^']*'|"[^"]*"))?""")
 HTML_COMMENT = re.compile(r"<!--.*?-->", re.S)
+SHIELDS_SRC = re.compile(r"https?://img\.shields\.io/badge/", re.I)
+SHIELDS_BADGE = re.compile(r"https?://img\.shields\.io/badge/(.+)", re.I)
+
+
+def _escaped(text: str, i: int) -> bool:
+    """True when an odd number of consecutive backslashes immediately precedes index `i` (CommonMark escape)."""
+    count, before = 0, i - 1
+    while before >= 0 and text[before] == "\\":
+        count += 1
+        before -= 1
+    return count % 2 == 1
+
+
+def _search_unescaped(pattern, text: str, pos: int):
+    """First match at or after `pos` whose opening character is not backslash-escaped."""
+    match = pattern.search(text, pos)
+    while match and _escaped(text, match.start()):
+        match = pattern.search(text, match.start() + 1)
+    return match
+
+
+def _definition_spans(document: str) -> list[tuple[int, int]]:
+    """Spans of complete reference definitions (label, destination and title): their text is not Markdown."""
+    return [(m.start(), m.end()) for m in REF_DEFINITION.finditer(_outside_code(document, mask_inline=False))]
 
 
 class _HTMLTokens:
@@ -34,10 +58,7 @@ class _HTMLTokens:
         self.images = []
         for match in HTML_OPEN_TAG.finditer(text):
             start, end = match.span()
-            before = start - 1
-            while before >= 0 and text[before] == "\\":
-                before -= 1
-            if (start - before - 1) % 2:
+            if _escaped(text, start):
                 continue
             self.tags.append((start, end))
             if match.group(1).lower() == "img":
@@ -76,23 +97,23 @@ def _outside_code(text: str, mask_inline: bool = True) -> str:
 
     def next_inline(start):
         while True:
-            found = INLINE_CODE.search(text, start)
+            found = find_inline_code(text, start)  # (start, end) or None
             if not found:
                 return False
-            inside = next((f for f in fences if f[0] <= found.start() < f[1]), None)
+            inside = next((f for f in fences if f[0] <= found[0] < f[1]), None)
             if inside is None:
                 return found
             start = inside[1]
 
     while pos < len(text):
-        if inline is not False and (inline is None or inline.start() < pos):
+        if inline is not False and (inline is None or inline[0] < pos):
             inline = next_inline(pos)
         if tag is not False and (tag is None or tag.start() < pos):
-            tag = HTML_OPEN_TAG.search(text, pos) or False
+            tag = _search_unescaped(HTML_OPEN_TAG, text, pos) or False
         if comment is not False and (comment is None or comment.start() < pos):
-            comment = HTML_COMMENT.search(text, pos) or False
+            comment = _search_unescaped(HTML_COMMENT, text, pos) or False
         fence = next((f for f in fences if f[0] >= pos), None)
-        code = min([c for c in ((inline.span() if inline else None), fence) if c], default=None)
+        code = min([c for c in ((inline if inline else None), fence) if c], default=None)
         found = [m for m in (tag, comment) if m]
         nxt = min(found, key=lambda m: m.start()) if found else None
         if code and (nxt is None or code[0] <= nxt.start()):
@@ -186,10 +207,13 @@ def _markdown_images(text: str, document: str) -> list[tuple[str, str, int, int]
     for match in REF_DEFINITION.finditer(_outside_code(document, mask_inline=False)):
         target = html.unescape(re.sub(r"\\([^\w\s])", r"\1", match.group(2) or match.group(3)))
         definitions.setdefault(label(match.group(1)), target)
+    spans = _definition_spans(document)  # definition titles are never rendered as images
     sources = []
     consumed = 0
     for match in re.finditer(r"!\[", text):
         if match.start() < consumed:
+            continue
+        if any(a <= match.start() < b for a, b in spans):
             continue
         pos = match.start() - 1
         while pos >= 0 and text[pos] == "\\":
@@ -232,9 +256,13 @@ def _images(text: str, document: str) -> list[tuple[str, str]]:
         begin = start + 2
         return document[begin:begin + len(alt)] if len(document) >= begin + len(alt) else alt
 
+    spans = _definition_spans(document)
+    def in_definition(start):
+        return any(a <= start < b for a, b in spans)
     result = [(written_alt(alt, start), source) for alt, source, start, end in markdown
-              if not any(tstart <= start and end <= tend for tstart, tend in tags)]
-    result += [(alt, source) for alt, source, start, end in parser.images if (start, end) in tags]
+              if not in_definition(start) and not any(tstart <= start and end <= tend for tstart, tend in tags)]
+    result += [(alt, source) for alt, source, start, end in parser.images
+               if (start, end) in tags and not in_definition(start)]
     return result
 
 
@@ -312,7 +340,7 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
     header_part = plain.split("\n---\n", 1)[0]
     badge_header = _outside_code(header_part)
     image_sources = [source for _, source in _images(badge_header, plain)]
-    nbadges = sum(bool(src.startswith("https://img.shields.io/badge/")
+    nbadges = sum(bool(SHIELDS_SRC.match(src)
                        or re.fullmatch(r"(?:\./)?docs/images/badges/[^/?#]+\.svg(?:[?#].*)?", unquote(src))
                        or re.search(r"(?:^|/)badge\.svg(?:[?#].*)?$", src)) for src in image_sources)
     if not preserve:
@@ -324,7 +352,7 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
             warns.append(f"badges-short: {nbadges} badge (no licence or language to show yet)")
     # colours are read from parsed image destinations too, so an apostrophe or other HTML delimiter inside a Markdown URL hides nothing
     shields += [m.group(1).split("?")[0].split("#")[0] for _, src in _images(_outside_code(plain), plain)
-                if (m := re.match(r"https://img\.shields\.io/badge/(.+)", src))]
+                if (m := SHIELDS_BADGE.match(src))]
     for s in shields:
         col = re.split(r"[?)]", s.rsplit("-", 1)[-1])[0].upper()
         family_cols = {str(ctx.style.get(k) or "").upper() for k in ("badge_brand", "badge_accent")}
