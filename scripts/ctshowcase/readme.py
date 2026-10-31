@@ -636,6 +636,9 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
     old_tag = blocks.get("tagline")
     if preserve and old_tag is not None:
         # additive only, so the tagline block stays where it is, its body decided by the header rule (tagline_body)
+        # an inherited tagline emptied here stays as an empty block: its lines are excluded from the check by
+        # preservation() while the block exists in the output, so they are not credited in `removed` (a credit would
+        # also hide an identical authored line elsewhere in the README)
         tag = tagline_body(ctx, old_tag, text)
         removed += _replaced_lines(old_tag, tag)  # emptied or refreshed on purpose (not a lost line)
         body, _ = _strip_markers(text, keep={"tagline": tag})
@@ -750,9 +753,11 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
             out.append(footermod.block(ctx.brand))
         return "\n\n".join(x for x in out if x) + "\n", removed
     else:
-        if carry:  # an unmarked tagline with no description: it moves into the block (the move is not a lost line)
+        if carry:  # an unmarked tagline with no description: it moves into the block, or is emptied when inherited
             old_tag = carry[0].strip()
-            removed.remove(carry[0])
+            # the carried line stays credited in `removed`: its copy inside the generated tagline block is excluded
+            # from the output count, so the credit is what records the intentional move (see
+            # test_readme_refresh_tagline: test_unmarked_tagline_moved_into_block_is_not_lost)
         new_tag = tagline_body(ctx, old_tag, text)
         # an emptied (inherited) or refreshed (changed description) tagline: header mode does the same, so its old
         # lines are dropped on purpose and the never-delete check must not report them as lost
@@ -991,7 +996,8 @@ def _guard_text(before: str, after: str) -> str:
 
 
 def preservation(before: str, after: str, removed: list[str]) -> list[str]:
-    """Every original non-header line survives (heading lines may be renamed); size drop <= 10%."""
+    """Every original non-header line survives (heading lines may be renamed); size drop <= 10%. The contents of the
+    generated marker blocks (`GENERATED_BLOCKS`) are exempt while the same block still exists in `after`."""
     problems = []
     def counted(text: str) -> Counter:
         return Counter(ln.strip() for ln in text.splitlines()

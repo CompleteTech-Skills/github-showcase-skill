@@ -93,8 +93,10 @@ T2 uses these tokens, except jevplay-games (brand `E551BA`, accent `F386A1`, neu
 2. Existing H2s are renamed case-insensitively: Installation → Install; Getting Started, Quickstart, Quick start → Quick Start; Licence → License.
 3. An existing H2 that matches a variant H2 moves into that section, verbatim.
 4. Any other existing H2 is kept verbatim, demoted to `###`, emoji removed from its heading, in its original order, under `## Notes` (immediately before the License section).
-5. Content changes only by link rewrites, brand-string fixes and the heading changes above. Nothing is deleted: every original non-header line must appear in the output.
+5. Content changes only by link rewrites, brand-string fixes and the heading changes above. Nothing is deleted: every original non-header line must appear in the output. Lines inside the generated `banner`, `nav`, `tagline`, `badges` and `footer` marker blocks are regenerated and are not part of this check while the block remains in the output.
 6. If non-whitespace characters drop by more than 10%, nothing is written; log `readme-shrink` (exit 1).
+
+**Refreshing only the generated blocks (`readme --mode header`):** replaces just the existing marker blocks (tagline, banner, nav line, footer) from the current description and runs no restructuring or shrink check. It is what the Action runs on every push; use it with `--write` when only the About description changed and the body must stay byte-identical.
 
 **Preserve list (additive changes only):** `CompleteTech-Skills/creative-studio`; every README in AI-Ascension, Jev-Engineering, jevplay-games, TouchedByAnAgent and LibreEvolve that starts with a banner `<img>` or `<picture>`; any README over 15,000 bytes. Allowed: insert the hero banner block at the top (q57 `pres`; the README's own banner stays directly under the new header); prepend the nav line in the §7.1 order; add or fix the License section; link rewrites; alt text; brand-string fixes; disclaimers; G/H callouts; the footer. A full re-layout needs approval.
 
