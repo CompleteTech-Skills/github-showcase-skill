@@ -558,6 +558,24 @@ def _old_local_logo(url: str) -> bool:
     return path in OLD_LOCAL_LOGOS
 
 
+OWN_SITE_LOCAL_LOGOS = {"docs/images/logo.svg"}
+
+
+def _own_site_logo(url: str, brand) -> bool:
+    """`url` is a demonstrated historical logo source of this brand: a file on the configured company website host
+    (`brand_strings.website`, never hardcoded) over http(s), or the conventional local `docs/images/logo.svg`."""
+    from urllib.parse import urlsplit
+    url = url.strip()
+    if "://" not in url:
+        path = url.split("#", 1)[0].split("?", 1)[0]
+        return (path[2:] if path.startswith("./") else path) in OWN_SITE_LOCAL_LOGOS
+    try:
+        got, want = urlsplit(url), urlsplit(brand.strings["website"])
+        return bool(want.hostname) and got.scheme in ("http", "https") and got.hostname == want.hostname             and got.port in (None, want.port) and got.username is None
+    except ValueError:
+        return False
+
+
 def _footer_logo_url(url: str, brand) -> bool:
     """`url` is one of the decision 18 footer's own logo files (brand footer `logo_light_url` or `logo_dark_url`),
     including explicitly configured legacy URLs, or drifted only in scheme, branch, query or the github.com
@@ -579,14 +597,17 @@ def _footer_logo_url(url: str, brand) -> bool:
     return False
 
 
-def is_footer_copy(block: str, brand, loose_src: bool = False) -> bool:
+def is_footer_copy(block: str, brand, loose_src: bool = False, own_site: bool = False) -> bool:
     """Every line of `block` is a line of the decision 18 footer or a drifted copy of one: only centring, link, logo,
     `<br>`/`<sub>` markup, with complete.tech links, the footer's own logo image (its src or srcset is the brand footer
     logo URL or a drifted form of it; an image without src/srcset passes on an alt that is exactly the company) and as text only the credit line ("Built by
     <company>", optionally with the suffix). The former local logo files (assets/logo.png and the other `OLD_LOCAL_LOGOS`) are also recognized when the image's alt is exactly the company or the footer alt. A sponsor or partner image (whatever its file name), a thanks line or
-    any other authored text makes it not a footer copy, so it is never removed. `loose_src=True` (only `upgrade()`, for
-    an unmarked trailing block that also passes `is_footer_like`) keeps the original rule that an alt exactly the
-    company vouches for an image whatever its src; the default is strict."""
+    any other authored text makes it not a footer copy, so it is never removed. `loose_src=True` keeps the original
+    rule that an alt exactly the company vouches for an image whatever its src (no caller in `upgrade()`: a generic
+    alt is not provenance). `own_site=True` (`upgrade()`, for an unmarked trailing block that also passes
+    `is_footer_like`) additionally recognizes, under an alt exactly the company or the footer alt, only the brand's
+    own-site historical logo sources (`_own_site_logo`); partner, foreign and look-alike hosts stay authored. The
+    default is strict."""
     import html
     f, company = brand.raw["footer"], brand.strings["company"]
     credit = {f"{f['line_prefix']} {company}", f"{f['line_prefix']} {company} {f['line_suffix']}"}
@@ -618,7 +639,8 @@ def is_footer_copy(block: str, brand, loose_src: bool = False) -> bool:
         if urls:  # a matching alt never vouches for another image (unless loose_src): every src/srcset must be a footer logo URL
             if loose_src and alt_ok and name == "img":
                 return True
-            return all(parts and all(_footer_logo_url(u, brand) or (alt_ok and _old_local_logo(u)) for u in parts)
+            return all(parts and all(_footer_logo_url(u, brand) or (alt_ok and (_old_local_logo(u) or (
+                own_site and name == "img" and _own_site_logo(u, brand)))) for u in parts)
                        for parts in urls)
         return alt_ok
 
@@ -633,18 +655,18 @@ def is_footer_copy(block: str, brand, loose_src: bool = False) -> bool:
     return True
 
 
-def drop_old_footer(text: str, brand, loose_src: bool = False) -> tuple[str, list[str]]:
+def drop_old_footer(text: str, brand, loose_src: bool = False, own_site: bool = False) -> tuple[str, list[str]]:
     """(text, removed lines) with a trailing old footer (an unmarked or drifted decision 18 footer: every line a
     footer line, `is_footer_copy`) taken off the end, so the marked footer replaces it instead of following it. Any
     other block, a centred credits block with authored lines included, is left as it is (lint reports a second
-    footer-like block as `fail:duplicate`). `loose_src` is passed through to `is_footer_copy` (strict by default)."""
+    footer-like block as `fail:duplicate`). `loose_src` and `own_site` are passed through to `is_footer_copy` (strict by default)."""
     body = text.rstrip()
     opens = [m for m in CENTRED_OPEN.finditer(masked(body))]
     if not opens:
         return text, []
     m = opens[-1]
     tail = body[m.start():]
-    if not tail.rstrip().endswith(f"</{m.group(1)}>") or not is_footer_like(tail) or not is_footer_copy(tail, brand, loose_src):
+    if not tail.rstrip().endswith(f"</{m.group(1)}>") or not is_footer_like(tail) or not is_footer_copy(tail, brand, loose_src, own_site):
         return text, []
     return body[:m.start()].rstrip() + "\n", [ln for ln in tail.splitlines() if ln.strip()]
 
@@ -671,7 +693,7 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
                 else:
                     removed.append(ln)
     if want_footer:  # an unmarked or drifted footer at the end is replaced by the marked one, never kept beside it
-        body, old_footer = drop_old_footer(body, ctx.brand, loose_src=True)
+        body, old_footer = drop_old_footer(body, ctx.brand, own_site=True)
         removed += old_footer
     # preserve list / existing third-party banner
     preserve = ctx.repo in (ctx.org.get("readme_preserve") or []) or len(text.encode()) > 15000
@@ -691,7 +713,7 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
             removed += [ln for ln in old_tag.splitlines() if ln.strip()]
         body, _ = _strip_markers(text, keep={"tagline": tag})
         if want_footer:
-            body, _ = drop_old_footer(body, ctx.brand, loose_src=True)  # its lines are already in `removed`
+            body, _ = drop_old_footer(body, ctx.brand, own_site=True)  # its lines are already in `removed`
         pre, sections = split_sections(body)
         lines = pre.splitlines()
     # an unmarked bold line opening the preamble is an old tagline. With a description it is replaced; without one it
