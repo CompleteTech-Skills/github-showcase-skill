@@ -2,8 +2,9 @@
 `readme` (and through it `readmelint` and `footer`) and the stdlib-only `meta` find marker blocks the same way.
 CommonMark escaping: the parity of the backslashes directly before a backtick decides escaping (odd = escaped,
 even = real), for any number of backslashes. Block structure is decided before inline spans (CommonMark appendix A):
-an inline code span never pairs across a block boundary. A fence inside a block quote is container-aware: it opens and
-closes on the quote's own lines, its quote markers are container syntax, and a line of lower quote depth ends it."""
+an inline code span never pairs across a block boundary. A fence inside a block quote or a list item is container-aware:
+it opens and closes on the container's own lines, its quote and item markers are container syntax, and a line of lower
+quote depth (or, in an item, a line left of the item's content column) ends it."""
 from __future__ import annotations
 
 import bisect
@@ -50,6 +51,21 @@ def _quotes(body: str) -> tuple[int, str]:
         depth += 1
         body = body[m.end():]
     return depth, body
+
+
+def _containers(body: str) -> tuple[int, int, str]:
+    """(block-quote depth, list-item content column, remainder): quote and item markers are peeled in any order, so
+    `- ```x`, `1. ```x`, `- > ```x` and `> - ```x` all reach the same remainder. The column is the summed width of the
+    item prefixes, measured on the quote-stripped line; it is 0 when the line has no item marker."""
+    depth, col, rest = 0, 0, body
+    while True:
+        if m := _QUOTE.match(rest):
+            depth += 1
+        elif m := _ITEM_PREFIX.match(rest):
+            col += m.end()
+        else:
+            return depth, col, rest
+        rest = rest[m.end():]
 
 
 def _unescaped_pipe(row: str, i: int) -> bool:
@@ -106,13 +122,17 @@ def _interrupts(rest: str, depth: int, para_depth: int, base: int) -> bool:
 
 
 @functools.lru_cache(maxsize=16)
-def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, int], ...]]:
-    """(inline regions, fenced spans). An inline region is a stretch in which one inline code span can live: a
-    paragraph, a heading line, an HTML block start line or one table cell."""
+def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, int], ...], tuple[int, ...]]:
+    """(inline regions, fenced spans, continuation starts). An inline region is a stretch in which one inline code span
+    can live: a paragraph, a heading line, an HTML block start line or one table cell. A continuation start is the
+    source offset of a line that continues an open paragraph or table (not the first line of a block, not a heading,
+    not a line inside a fence)."""
     WORK['layout_builds'] += 1
     regions: list[tuple[int, int]] = []
     fences: list[tuple[int, int]] = []
+    conts: set[int] = set()
     seg: list[tuple[int, str]] = []
+    # an open fence: (fence run, block-quote depth, list-item content column (0 outside an item), item-before-quote flag)
     fence, fstart, table, para_depth, base, pos = None, 0, False, 0, 0, 0
 
     def flush(rows):
@@ -127,14 +147,22 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
         body = raw.rstrip("\r\n")
         depth, rest = _quotes(body)
         if fence is not None:
-            run, fdepth = fence
-            if depth < fdepth:
-                # the quote container of an open '> ```' fence ended: the fence ends unclosed, this line is normal
+            run, fdepth, col, outer = fence
+            # an item whose marker precedes its quote marker (`- > ```x`) is indented before the quote marker, so its
+            # indentation is the raw one; otherwise it is the indentation left after the quote markers (`> - ```x`)
+            lead = len(body) - len(body.lstrip(" ")) if outer else len(rest) - len(rest.lstrip(" "))
+            if depth < fdepth or (col and depth == fdepth and rest.strip(" \t") and lead < col):
+                # the quote container of an open fence ended, or a non-blank line left the item's content column: the
+                # fence ends unclosed at this line, and this line is then processed as an ordinary line
                 fences.append((fstart, at))
                 fence = None
             else:
-                # a depth-0 fence is closed by its raw line, as before; a quoted fence by the line inside its quote
-                close = _FENCE_CLOSE.match(rest if fdepth else body)
+                # a depth-0 fence is closed by its raw line, as before; a quoted fence by the line inside its quote; an
+                # item fence by the line after its content column is removed
+                closer = rest if fdepth else body
+                if col:
+                    closer = closer[min(len(closer) - len(closer.lstrip(" ")), col):]
+                close = _FENCE_CLOSE.match(closer)
                 if close and close.group(1)[0] == run[0] and len(close.group(1)) >= len(run):
                     fences.append((fstart, pos))
                     fence = None
@@ -146,13 +174,17 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
         if table:
             if not _interrupts(rest, depth, para_depth, 0):
                 row_cells(at, raw)
+                conts.add(at)
                 continue
             table = False
         elif seg:
             lead = len(rest) - len(rest.lstrip(" "))
             if _is_delimiter_row(rest) and _cell_count(_quotes(seg[-1][1].rstrip("\r\n"))[1]) == _cell_count(rest):
                 flush(seg[:-1])
+                # the header row (the last paragraph line) starts the table, so it is not a continuation
+                conts.discard(seg[-1][0])
                 row_cells(*seg[-1])
+                conts.add(at)
                 seg, table = [], True
                 continue
             if _SETEXT.match(rest[min(lead, base):]):
@@ -161,12 +193,15 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
                 continue
             if not _interrupts(rest, depth, para_depth, base):
                 seg.append((at, raw))
+                conts.add(at)
                 continue
             flush(seg)
             seg, base = [], 0
-        opener = FENCE_OPEN.match(rest)
+        # the opener may sit behind quote and list-item markers in any order, e.g. `- ```x` or `> - ```x`
+        cdepth, col, crest = _containers(body)
+        opener = FENCE_OPEN.match(crest)
         if opener:
-            fence, fstart = (opener.group(1), depth), at
+            fence, fstart = (opener.group(1), cdepth, col, bool(col) and not _QUOTE.match(body)), at
         elif _ATX_HEADING.match(rest) or _HTML_BLOCK.match(rest):
             regions.append((at, pos))
         elif not _THEMATIC.match(rest):
@@ -176,7 +211,14 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
         fences.append((fstart, len(text)))
     else:
         flush(seg)
-    return tuple(regions), tuple(fences)
+    return tuple(regions), tuple(fences), tuple(sorted(conts))
+
+
+@functools.lru_cache(maxsize=16)
+def continuation_starts(text: str) -> frozenset[int]:
+    """Source offsets of the lines that continue an open paragraph or table (every such line after the first line of
+    its block, and each table row after the header). Headings, block starts and lines inside fences are not included."""
+    return frozenset(_layout(text)[2])
 
 
 def _closing_run(text: str, pos: int, k: int, limit: int) -> tuple[int, int] | None:
