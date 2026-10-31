@@ -73,6 +73,61 @@ Read [SKILL.md](SKILL.md), select `github-showcase-skill` using your agent's ski
 
 For a new repository, start from `completetech-repo-template`: its workflow calls this skill's composite Action, which bootstraps the README for the detected type and keeps the banner and card current.
 
+## Onboard a non-CompleteTech organization
+
+Use this sequence to add an organization outside the CompleteTech family. The example uses the synthetic `Acme-Widgets` org and the `acme-widgets` family; substitute your own synthetic values and never commit private names, metadata or brand files. Run every command from the skill root. The steps edit only `references/brand.yaml` and, with `--write`, its generated copy `references/brand.lock.json`. None of them calls GitHub.
+
+Rules that apply to every step:
+
+- **Dry run is the default.** Without `--write` a command prints the diff and writes nothing.
+- **`--write` regenerates the lock.** It rewrites `references/brand.lock.json` for the default config. Commit `brand.yaml` and `brand.lock.json` together, or `config` reports `lock_in_sync: false`.
+- **A new family starts `measured: false`.** Art for it is refused until its colours are measured; `--allow-unmeasured` generates art before then.
+- **The footer defaults to `hold`.** It stays on hold until real logo URLs exist, then it is set to `true` or `false` by hand.
+- **`add-org` never edits `owners:`.** Owner status is a hand-reviewed decision.
+
+1. **Preview the family (dry run).** This prints the diff and writes nothing:
+
+   ```bash
+   python scripts/showcase.py brand add-family acme-widgets --company-label "Acme Widgets" --accent '#22D3EE' --background '#0B1020'
+   ```
+
+2. **Write the family.** Repeat the command with `--write`:
+
+   ```bash
+   python scripts/showcase.py brand add-family acme-widgets --company-label "Acme Widgets" --accent '#22D3EE' --background '#0B1020' --write
+   ```
+
+3. **Preview the organization (dry run).**
+
+   ```bash
+   python scripts/showcase.py brand add-org Acme-Widgets --family acme-widgets --display-name "Acme Widgets" --tier T2
+   ```
+
+4. **Write the organization.** Repeat the command with `--write`:
+
+   ```bash
+   python scripts/showcase.py brand add-org Acme-Widgets --family acme-widgets --display-name "Acme Widgets" --tier T2 --write
+   ```
+
+   Re-running `add-org` for a login that is already a row, or a former login listed in its `former_slugs`, is refused, so the org never gets a second row.
+
+5. **Check the configuration.** The result should be `pass`:
+
+   ```bash
+   python scripts/showcase.py config
+   ```
+
+6. **Check the owner gate.** `--strict-owner` applies the same owner gate as the banner, card and social preview, and refuses an owner that `brand.yaml` does not know. The owner comes from metadata, not from the directory you run in. Create the metadata file in a temporary folder outside the repository (below, `$ACME_META` is its absolute path, for example `/tmp/acme-meta.json`), as a copy of `examples/meta/northwind-support-triage-agent.json` with `"owner": "Acme-Widgets"` and a synthetic `"repo"`, then run:
+
+   ```bash
+   ACME_META=/tmp/acme-meta.json   # the absolute path of the file you created
+   python scripts/showcase.py --meta "$ACME_META" --no-repo-dir doctor --strict-owner
+   ```
+
+   Without `--meta`, the owner is read from the current checkout's git remote, which is this skill's own repository. Outside a git checkout the owner is `unknown` and the gate refuses it with exit 2 and `"logs": ["unknown-org"]`, so the check must always name the new org. Exit 2 with `"result": "refused"` is a gate refusal. Any other exit code is the ordinary doctor verdict for the synthetic metadata, which has no file tree.
+
+**T3 organizations are co-owned.** `add-org --tier T3` refuses unless the org's login is already listed under `owners.t3` in `brand.yaml`. Adding that entry is a hand edit made after co-owner sign-off (an approved `t3-signoff` row in the approvals file); `add-org` never adds it. Each run that touches a T3 owner also needs the global `--allow-t3` flag, and the flag goes **before** the subcommand, for example `python scripts/showcase.py --allow-t3 --meta "$ACME_META" --no-repo-dir doctor --strict-owner`, not after it.
+
 ## Branding and handoff
 
 Use the committed CompleteTech LLC brand files and the practical, evidence-led voice described in [README.md](README.md). The code license does not grant logo, seal or signature rights: follow [BRAND_ASSETS.md](BRAND_ASSETS.md). Do not replace or republish private artwork or fonts. Every surface uses the dark design (decision 21); do not add light variants.

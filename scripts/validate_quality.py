@@ -268,6 +268,18 @@ def gate_changelog(root: Path = ROOT) -> None:
     print(f"changelog ok ({versions[0]})")
 
 
+def gate_onboarding_docs() -> None:
+    """ONBOARDING.md documents the brand onboarding commands and the owner gate; SKILL.md names brand add-org."""
+    onboarding = (ROOT / "ONBOARDING.md").read_text(encoding="utf-8")
+    skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+    for needle in ("brand add-family", "brand add-org", "--strict-owner"):
+        if needle not in onboarding:
+            raise RuntimeError(f"ONBOARDING.md does not document {needle}")
+    if "brand add-org" not in skill:
+        raise RuntimeError("SKILL.md does not document brand add-org")
+    print("onboarding docs ok")
+
+
 def gate_labels() -> None:
     import hashlib
     out = showcase("labels", "--emit-yml").stdout
@@ -473,6 +485,7 @@ def main() -> int:
     gate_fonts()
     gate_package_extras()
     gate_changelog()
+    gate_onboarding_docs()
     gate_labels()
     gate_action()
     gate_privacy()
