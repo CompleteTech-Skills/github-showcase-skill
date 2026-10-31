@@ -124,3 +124,9 @@ def test_angle_destinations_and_html_inside_code_are_excluded(make_ctx, tmp_path
     result = lint_reference(make_ctx, tmp_path, usage, "")
     assert "R7 2-4 header badges required (found 1)" in result["fails"]
     assert not any("local image" in failure or "without alt" in failure for failure in result["fails"])
+
+
+@pytest.mark.parametrize("usage", [f"![CI](<{URL}>)", f"[![CI](<{URL}>)](https://example.test/ci)"])
+def test_angle_bracketed_inline_destinations_count(make_ctx, tmp_path, usage):
+    result = lint_reference(make_ctx, tmp_path, usage, "")
+    assert not any("badge" in failure for failure in result["fails"]), result

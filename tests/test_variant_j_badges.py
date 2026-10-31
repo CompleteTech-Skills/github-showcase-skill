@@ -384,3 +384,15 @@ def test_cli_html_alt_backticks_remain_literal(make_ctx, tmp_path):
     (tmp_path / "README.md").write_text(text.replace(badge_block(text), body), encoding="utf-8")
     result = profile_cli(ctx, tmp_path, "lint", "readme")
     assert not any("without alt" in failure for failure in result["fails"])
+
+
+@pytest.mark.parametrize("repo, migrates", [("Old-Northwind", True), (".github", True), ("Elsewhere", False)])
+def test_legacy_ci_badge_recognizes_personal_profile_repository(make_ctx, tmp_path, repo, migrates):
+    ctx = profile_context(make_ctx, tmp_path)
+    url = f"https://github.com/Old-Northwind/{repo}/actions/workflows/ci.yml"
+    authored = f"![License MIT](https://img.shields.io/badge/license-MIT-64748B)\n[![CI]({url}/badge.svg)]({url})"
+    before = readme.wrap("badges", authored) + "\n\nAuthored paragraph to retain.\n"
+    after, removed = readme.upgrade(ctx, before)
+    assert (authored not in badge_block(after)) is migrates
+    assert "Authored paragraph to retain." in after
+    assert readme.preservation(before, after, removed) == []

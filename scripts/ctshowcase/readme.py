@@ -295,10 +295,10 @@ def legacy_profile_badges(brand, body: str) -> bool:
             kind, label, message, color = 0, "node", alt[5:], colors["accent"]
             suffixes = ["?logo=nodedotjs&logoColor=white"]
         elif alt in ("CI", "Tests"):
-            ci = re.fullmatch(r"https://github\.com/[A-Za-z0-9-]+/\.github/actions/workflows/([^/?#]+\.ya?ml)/badge\.svg", url)
-            if not ci or link != url.removesuffix("/badge.svg"):
+            ci = re.fullmatch(r"https://github\.com/([A-Za-z0-9-]+)/(\.github|[A-Za-z0-9-]+)/actions/workflows/([^/?#]+\.ya?ml)/badge\.svg", url)
+            if not ci or link != url.removesuffix("/badge.svg") or ci.group(2) not in (".github", ci.group(1)):
                 return False
-            name = ci.group(1)
+            name = ci.group(3)
             expected = "Tests" if "test" in name else "CI" if "ci" in name else None
             if alt != expected:
                 return False
