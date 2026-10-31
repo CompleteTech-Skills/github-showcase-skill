@@ -164,6 +164,7 @@ def _outside_code(text: str, mask_inline: bool = True) -> str:
     The result has the same length (and newline positions) as `text`."""
     fences = _fence_spans(text)
     definitions = _definition_spans(text)  # decided before inline code: a definition destination's backtick is literal
+    labels = _reference_label_spans(text)  # resolved full-reference labels: their backticks are literal too
     out, pos = list(text), 0
     tag = comment = inline = dest = None
 
@@ -205,12 +206,17 @@ def _outside_code(text: str, mask_inline: bool = True) -> str:
         fence = fences[n] if n < len(fences) else None
         d = bisect.bisect_left(definitions, (pos, -1))
         definition = definitions[d] if d < len(definitions) else None
+        lb = bisect.bisect_left(labels, (pos, -1))
+        label_span = labels[lb] if lb < len(labels) else None
         code = min([c for c in ((inline if inline else None), fence) if c], default=None)
         found = [m for m in (tag, comment) if m]
         nxt = min(found, key=lambda m: m.start()) if found else None
         if definition and all(definition[0] <= other for other in [c[0] for c in (code, dest) if c]
                               + [m.start() for m in found]):
             pos = definition[1]
+        elif label_span and all(label_span[0] <= other for other in [c[0] for c in (code, dest) if c]
+                                + [m.start() for m in found]):
+            pos = label_span[1]  # a resolved reference label is literal text: its backticks open no code span
         elif dest and all(dest[0] < other for other in [c[0] for c in (code,) if c] + [m.start() for m in found]):
             pos = dest[1]
         elif code and (nxt is None or code[0] <= nxt.start()):
@@ -242,6 +248,41 @@ def _closing_bracket(text: str, start: int) -> int | None:
                 return pos
         pos += 1
     return None
+
+
+def _label_key(value: str) -> str:
+    """Normalised reference label: backslash escapes and entities resolved, whitespace collapsed, case folded."""
+    value = html.unescape(re.sub(r"\\([^\w\s])", r"\1", value))
+    return " ".join(value.split()).casefold()
+
+
+@functools.lru_cache(maxsize=16)
+def _reference_label_spans(document: str) -> tuple[tuple[int, int], ...]:
+    """Label text of each resolved full reference (`[text][label]`): the characters between the brackets of the second
+    pair. Only a label that names a live definition is a reference, so its backticks are literal; an unresolved label
+    stays readable for inline code. Junctions inside fences or definitions are text. Computed once per document;
+    the spans are sorted and never overlap."""
+    keys = {_label_key(m.group(1)) for m in _definitions(document)}
+    fences = mdcode.fence_spans(document)
+    definitions = _definition_spans(document)
+    spans = []
+    for junction in re.finditer(r"\]\[", document):
+        at = junction.start()
+        if _escaped(document, at) or _span_at(fences, at) is not None or _span_at(definitions, at) is not None:
+            continue
+        open_ = at + 1
+        close = _closing_bracket(document, open_)
+        if close is None:
+            continue
+        label = document[open_ + 1:close]
+        if not label.strip() or re.search(r"\n[ \t]*\n", label):
+            continue  # an empty label or one spanning a blank line is not a reference label
+        first_fence = bisect.bisect_left(fences, (open_ + 1, -1))
+        if first_fence < len(fences) and fences[first_fence][0] < close:
+            continue  # a fenced block cannot sit inside a link label
+        if _label_key(label) in keys:
+            spans.append((open_ + 1, close))
+    return tuple(spans)
 
 
 def _inline_image_target(text: str, start: int) -> tuple[str, int] | None:
@@ -446,7 +487,8 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
     # badges 2-4, palette tokens only
     shields: list[str] = []
     header_part = plain.split("\n---\n", 1)[0]
-    badge_header = _outside_code(header_part)
+    # masked over the whole document, then cut to the header: a reference label is resolved by a definition below it
+    badge_header = _outside_code(plain)[:len(header_part)]
     image_sources = [source for _, source in _images(badge_header, plain)]
     nbadges = sum(bool(SHIELDS_SRC.match(src)
                        or re.fullmatch(r"(?:\./)?docs/images/badges/[^/?#]+\.svg(?:[?#].*)?", unquote(src))
