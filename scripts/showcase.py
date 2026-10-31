@@ -960,7 +960,7 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--allow-t3", action="store_true",
                    help="treat a T3 (co-owned) owner as signed off for this run: every repository command and generator, not just `meta`; pass only when a t3-metadata or t3-signoff row is approved (default: T3 owners are refused, exit 2). It also needs a valid sign-off record, by default in <estate root>/decisions/t3-signoffs.yaml (see --t3-signoff-file and references/t3-signoff.md); there is no opt-out")
     p.add_argument("--require-t3-signoff", action="store_true",
-                   help="accepted and ignored (a no-op kept for compatibility), since enforcement is always on: --allow-t3 is honoured only when a valid, "
+                   help="accepted and ignored: enforcement is always on. --allow-t3 is honoured only when a valid, "
                         "unexpired sign-off record covers the owner and repository; otherwise exit 2 "
                         "(t3-signoff:no-file|missing|invalid|expired|scope|revoked)")
     p.add_argument("--t3-signoff-file", metavar="PATH",
