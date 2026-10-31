@@ -331,11 +331,14 @@ def _withdrawn(grant: dict, withdrawals: list[dict], logins: list[str] | None = 
 
 
 def _malformed_withdrawal(ours: list[dict], repo: str | None, logins: list[str], today: _dt.date) -> str | None:
-    """The refusal for a malformed withdrawal (approved: false, failing problems()) that could withdraw a grant for REPO,
-    else None. Possibly relevant: its `repos` is malformed, its approved_on is not a date (none, or a timestamp), REPO
-    is empty, or it covers REPO. A malformed withdrawal clearly for another named repository does not block."""
+    """The refusal for a malformed withdrawal that could withdraw a grant for REPO, else None. A record is a possible
+    withdrawal unless its `approved` is the boolean true: a literal false, or any non-boolean value ("false", "true",
+    0, 1, null, missing), is treated as a withdrawal and fails closed. Only a true grant is skipped here. It is never
+    coerced to a grant or a withdrawal. Possibly relevant: its `repos` is malformed, its approved_on is not a date (none,
+    or a timestamp), REPO is empty, or it covers REPO. A malformed record clearly for another named repository does not
+    block."""
     for r in ours:
-        if r.get("approved") is not False:
+        if r.get("approved") is True:
             continue
         probs = problems(r, today)
         if not probs:
@@ -350,9 +353,11 @@ def evaluate(owners: list[str], repo: str | None = None, today: _dt.date | None 
              records: list[dict] | None = None, now: _dt.datetime | None = None) -> tuple[dict | None, str | None]:
     """(record, None) when signed off, else (None, 'no-file' | 'missing' | 'invalid:<id>: <problem>' | 'expired' | 'scope' |
     'revoked'). The veto is per requested REPO: 'revoked' means every otherwise-grantable record was vetoed for that
-    repository by a withdrawal (see _withdrawn). Fail closed: when a malformed withdrawal (approved: false, failing
-    problems()) could cover REPO, no record is returned and the result is 'invalid:<id>: <problem>'. A malformed
-    withdrawal clearly for another repository does not block. Only owners in the logins are considered.
+    repository by a withdrawal (see _withdrawn). Fail closed: when a malformed withdrawal (a literal approved: false failing
+    problems(), or a record whose `approved` is not a boolean, which is treated as a possible withdrawal and never
+    coerced to a grant or a withdrawal) could cover REPO, no record is returned and the result is
+    'invalid:<id>: <problem>'. A malformed withdrawal clearly for another repository does not block. Only owners in
+    the logins are considered.
     `today` (a date) is kept for callers that only care about date expiries; `now` is an aware instant."""
     if now is None:
         now = _dt.datetime.now(_dt.timezone.utc)
