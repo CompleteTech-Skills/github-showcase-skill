@@ -885,6 +885,87 @@ def test_icon_explicit_transparent_keeps_base_key_threshold():
     assert info["mode"] == "transparent" and out.getbbox() is not None
 
 
+def _ringed(base, ground, glyph=(0, 90, 221), box=(250, 250, 750, 750), ring=40):
+    """Overdraw `base` with a solid glyph whose edge is a `ring`-px gradient from `ground` to the glyph colour, so the
+    edge passes through every dE between the ground and the glyph (a smooth edge, not a hard step)."""
+    from PIL import ImageDraw
+    from ctshowcase.color import rgb
+    g = rgb(ground)
+    d = ImageDraw.Draw(base)
+    x0, y0, x1, y1 = box
+    for k in range(ring, 0, -1):  # outer rings first, so each pixel keeps the colour of its own distance k
+        t = 1 - k / (ring + 1)  # 1 at the glyph edge, falling towards the ground
+        d.rectangle((x0 - k, y0 - k, x1 + k, y1 + k), fill=tuple(round(g[i] + (glyph[i] - g[i]) * t) for i in range(3)))
+    d.rectangle(box, fill=glyph)
+    return base
+
+
+def _flat(im):
+    """Pixels in raster order without the deprecated Image.getdata on Pillow 13."""
+    get = getattr(im, "get_flattened_data", None)
+    return list(get() if get else im.getdata())
+
+
+def _reference_alpha(im, ground):
+    """Independent reference for the default transparent key: a binary dE mask at KEY_DE, the 2 px blur-min the code
+    applies, then the same trim, LANCZOS fit to the live area and centring. Returns the 1024 px alpha canvas."""
+    from PIL import Image, ImageChops, ImageFilter
+    from ctshowcase.color import rgb
+    lab = C._lab_cache()
+    g = lab(rgb(ground))
+    mask = Image.new("L", im.size)
+    mask.putdata([0 if C._de(lab(p), g) <= C.KEY_DE else 255 for p in _flat(im.convert("RGB"))])
+    alpha = ImageChops.darker(mask, mask.filter(ImageFilter.GaussianBlur(2)))
+    cropped = alpha.crop(alpha.point(lambda v: 255 if v > 8 else 0).getbbox())
+    k = C.LIVE / max(cropped.size)
+    small = cropped.resize((max(1, round(cropped.width * k)), max(1, round(cropped.height * k))), Image.LANCZOS)
+    canvas = Image.new("L", (C.ICON_PX, C.ICON_PX), 0)
+    canvas.paste(small, ((C.ICON_PX - small.width) // 2, (C.ICON_PX - small.height) // 2))
+    return canvas
+
+
+def test_icon_default_transparent_key_is_binary():
+    """Default explicit transparent keying is the original binary KEY_DE step (plus the 2 px blur-min), not a soft
+    ramp: a gradient edge with pixels 6-9 dE from the ground keys exactly as the reference does. A raised tolerance
+    still gets the soft ramp (review, #52 default-compatibility adjudication)."""
+    from PIL import Image, ImageChops
+    from ctshowcase.color import rgb
+    ground = "#F8FAFC"
+    im = _ringed(Image.new("RGB", (1024, 1024), rgb(ground)), ground)
+    lab = C._lab_cache()
+    g = lab(rgb(ground))
+    band = [p for p in _flat(im) if 6 < C._de(lab(p), g) <= 9]
+    assert len(band) >= 4  # the gradient really passes through the 6-9 dE band
+    out, info = C.normalize_icon(im, "transparent", "#032530")
+    assert info["mode"] == "transparent"
+    got = out.getchannel("A")
+    assert ImageChops.difference(got, _reference_alpha(im, ground)).getextrema()[1] <= 1
+    # raised tolerance: the widened key keeps a soft ramp along the gradient edge
+    vig = _ringed(_vignette("#F8FAFC", "#EEF0F2"), ground)
+    out, info = C.normalize_icon(vig, "transparent", "#032530", tolerance=5)
+    alpha = out.getchannel("A")
+    assert sum(alpha.histogram()[1:255]) > 0
+    assert alpha.getpixel((512, 512)) == 255
+
+
+def test_icon_default_transparent_keeps_pale_opaque_glyph_for_qa():
+    """A pale opaque glyph (#EAEAEA, about dE 7.3 from white) keys as opaque at the default tolerance, so its interior
+    keeps alpha 255 and icon_qa finds ink on the dark card. Regression: a soft ramp dropped it to ~111 and failed
+    'no opaque ink' (review, #52 default-compatibility adjudication)."""
+    from PIL import Image, ImageDraw
+    card = "#032530"
+    im = Image.new("RGB", (1024, 1024), (255, 255, 255))
+    ImageDraw.Draw(im).rectangle((312, 312, 711, 711), fill=(234, 234, 234))  # 400 x 400 inside the live area
+    out, info = C.normalize_icon(im, "transparent", card)
+    assert info["mode"] == "transparent"
+    alpha = out.getchannel("A")
+    assert alpha.getpixel((512, 512)) == 255
+    assert alpha.crop((462, 462, 562, 562)).getextrema() == (255, 255)
+    qa = C.icon_qa(C.icon_bytes(out)[0], card=card)
+    assert not any(c["detail"] == "no opaque ink" for c in qa["checks"])
+    assert qa["result"] != "fail", qa
+
+
 def test_icon_not_the_org_glyph(brand, tmp_path):
     card = brand.style(NW)["tokens"]["card_fill"]
     img = C.normalize_icon(_candidate(card), "auto", card)[0]
@@ -933,6 +1014,24 @@ def test_icon_prompt_replaces_estate_background_paragraph(brand, icon_ctx):
     bg = next(line for line in p.splitlines() if "BACKGROUND" in line)
     assert "one flat ground, not the avatar night tile" in bg
     assert res["missing"] == []
+
+
+def test_icon_prompt_estate_anchor_inside_background_paragraph_keeps_exact_clause(brand, icon_ctx):
+    """The 'Keep the background empty and the glyph inside' anchor sits inside the numbered BACKGROUND paragraph of an
+    estate template with no {POOL}. The exact ground clause must still appear exactly once, with the flat-ground
+    prohibitions, even though the paragraph replacement rewrites the anchor's own line (review r3, #52)."""
+    glyph = {"glyph_name": "Inbox Tray", "glyph_description": "An open tray seen front-on.",
+             "spark_placement": "held inside the tray", "size_class": "wide"}
+    old = "2 BACKGROUND (identical in all 28 avatars). On it, {POOL}."
+    art = (FIX / "ART_DIRECTION.min.md").read_text(encoding="utf-8")
+    assert old in art
+    art = art.replace(old, "2 BACKGROUND. Keep the background empty and the glyph inside the central 688 x 688 px square.")
+    res = C.icon_prompt(icon_ctx, resolver(brand), art, glyph)
+    p = res["prompt"]
+    card = brand.style(NW)["tokens"]["card_fill"]
+    assert p.count(C.ground_clause(card)) == 1
+    assert "no vignette, texture, gradient, shadow or glow" in p and "perfectly flat" in p
+    assert "{POOL}" not in p and res["missing"] == []
 
 
 def test_icon_cli_ground_tolerance_flag_wired(capsys, tmp_path, brand):
