@@ -188,3 +188,49 @@ def test_non_boolean_approved_is_never_a_valid_approval(bad):
     got, err = _ev(records, "site")
     assert got is None and err and err.startswith("invalid:"), (got, err)
 
+
+
+# Owner-wide wildcard grant with a narrow per-repository withdrawal (synthetic records only).
+PYA = "Pick-Your-AI"
+
+
+def _wildcard_pair():
+    g1 = _rec("g1", ["*"], owner=PYA, approver="coowner", on="2026-01-01")
+    w1 = _rec("w1", ["northwind-member"], approved=False, owner=PYA, approver="coowner", on="2026-06-01")
+    return [g1, w1]
+
+
+def test_wildcard_grant_with_narrow_withdrawal_refuses_only_that_repo():
+    recs = _wildcard_pair()
+    assert _ev(recs, "northwind-member", owners=(PYA,)) == (None, "revoked")
+    assert _ev(recs, "kept-y", owners=(PYA,)) == ("g1", None)
+    # owner-wide authorization is kept; the per-repo check lives in the emitters
+    assert _ev(recs, None, owners=(PYA,)) == ("g1", None)
+
+
+def test_record_for_never_stamps_withdrawn_repo(tmp_path, monkeypatch):
+    from ctshowcase import signoff
+    p = tmp_path / "s.yaml"
+    p.write_text(json.dumps({"signoffs": _wildcard_pair()}), encoding="utf-8")
+    monkeypatch.setenv("SHOWCASE_T3_SIGNOFF_FILE", str(p))
+    run = signoff.reset()
+    try:
+        signoff._grant(PYA.lower(), _wildcard_pair()[0])
+        assert signoff.record_for(PYA, "northwind-member") is None
+        assert signoff.record_for(PYA, "kept-y")["id"] == "g1"
+    finally:
+        signoff.restore(run)
+
+
+@pytest.mark.parametrize("bad", ["false", 0, None])
+def test_malformed_withdrawal_beside_wildcard_grant_stays_invalid(bad):
+    g1 = _rec("g1", ["*"], owner=PYA, approver="coowner", on="2026-01-01")
+    w1 = {**_rec("w1", ["*"], approved=False, owner=PYA, approver="coowner", on="2026-06-01"), "approved": bad}
+    got, err = _ev([g1, w1], "northwind-member", owners=(PYA,))
+    assert got is None and err and err.startswith("invalid"), (got, err)
+
+
+def test_unrelated_owner_withdrawal_is_isolated():
+    recs = [_wildcard_pair()[0],
+            _rec("w2", ["northwind-member"], approved=False, owner="Other-Org", approver="coowner", on="2026-06-01")]
+    assert _ev(recs, "northwind-member", owners=(PYA,)) == ("g1", None)
