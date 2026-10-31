@@ -646,7 +646,33 @@ def test_icon_prompt_states_the_flat_ground_for_estate_template(brand, icon_ctx)
     assert "identical to the Neon Night avatars" not in p
     assert "28 avatars" not in p and "28 repo icons" not in p
     bg = next(line for line in p.splitlines() if "BACKGROUND" in line)
-    assert "one flat ground, not the avatar night tile" in bg
+    assert C.ground_clause(brand.style(NW)["tokens"]["card_fill"]) in bg
+
+
+def test_icon_prompt_estate_explicit_background_is_replaced(brand, icon_ctx):
+    """An estate BACKGROUND paragraph that names its own colours is replaced by the flat card ground, not kept
+    beside it (review: explicit #0B0F16 radial tile contradicted the flat #F8FAFC ground, #52 P2)."""
+    glyph = {"glyph_name": "Inbox Tray", "glyph_description": "An open tray seen front-on.",
+             "spark_placement": "held inside the tray", "size_class": "wide"}
+    card = brand.style(NW)["tokens"]["card_fill"]
+    old = "2 BACKGROUND (identical in all 28 avatars). On it, {POOL}."
+    assert old in ART
+    single = ART.replace(old, "2 BACKGROUND. A #0B0F16 tile fading radially to #1C2333 with a soft vignette at the "
+                              "corners. On it, {POOL}.")
+    assert single != ART
+    # a two-line paragraph (no blank line inside it) followed by a blank line and an unrelated GLYPH line
+    keep = "3 GLYPH. Keep this line intact."
+    two = ART.replace(old, "2 BACKGROUND. A #0B0F16 tile fading radially\nto #1C2333 with a soft vignette at the corners. "
+                           f"On it, {{POOL}}.\n\n{keep}")
+    assert two != ART and two != single
+    for art in (single, two):
+        res = C.icon_prompt(icon_ctx, resolver(brand), art, glyph)
+        p = res["prompt"]
+        for banned in ("#0B0F16", "#1C2333", "fading radially", "vignette at the corners", "{POOL}"):
+            assert banned not in p, banned
+        assert p.count(C.ground_clause(card)) == 1
+        assert "POOL" not in res["missing"]
+    assert keep in C.icon_prompt(icon_ctx, resolver(brand), two, glyph)["prompt"].splitlines()
 
 
 def test_icon_prompt_custom_template_states_the_exact_ground_clause(brand, icon_ctx):
@@ -874,6 +900,42 @@ def test_icon_vignetted_night_tile_passes_qa_after_flattening():
     assert not [c for c in qa["checks"] if c["check"] == "opaque-ground" and c["result"] != "pass"]
 
 
+def _night_bloom(size=512):
+    """A night tile with a vertical vignette (#171D28 to #1F2530) and a soft cyan radial bloom at the centre."""
+    from PIL import Image, ImageDraw
+    from ctshowcase.color import rgb
+    top, bottom = rgb("#171D28"), rgb("#1F2530")
+    im = Image.new("RGB", (size, size))
+    d = ImageDraw.Draw(im)
+    for y in range(size):
+        k = y / (size - 1)
+        d.line([(0, y), (size, y)], fill=tuple(round(top[i] + (bottom[i] - top[i]) * k) for i in range(3)))
+    cyan, cx, cy, radius = (0, 200, 220), size / 2, size / 2, 230.0
+    px = im.load()
+    for y in range(size):
+        for x in range(size):
+            dist = ((x - cx) ** 2 + (y - cy) ** 2) ** 0.5
+            if dist >= radius:
+                continue
+            k = (1 - dist / radius) ** 2  # quadratic falloff: smooth at the centre and at the edge
+            base = px[x, y]
+            px[x, y] = tuple(round(base[i] + (cyan[i] - base[i]) * k) for i in range(3))
+    return im
+
+
+def test_icon_flatten_does_not_band_a_night_tile_bloom():
+    """Review P2 (#52): flattening a kept night tile must not snap a soft bloom into a hard ring. Along the centre
+    row of the 1024 px output no adjacent pixel pair may jump by 3 dE or more."""
+    out, info = C.normalize_icon(_night_bloom(), "auto", "#F8FAFC", tolerance=5)
+    assert info["mode"] == "keep" and info["auto_reason"] == "night-tile"
+    out = out.convert("RGB")
+    assert out.size == (1024, 1024)
+    lab = C._lab_cache()
+    row = [out.getpixel((x, 512)) for x in range(out.width)]
+    worst = max(((x, C._de(lab(row[x - 1]), lab(row[x]))) for x in range(1, len(row))), key=lambda s: s[1])
+    assert worst[1] < 3.0, worst
+
+
 def test_icon_explicit_transparent_keeps_base_key_threshold():
     """Review A/B: within the default tolerance the key stays KEY_DE (6) in explicit modes; it only widens when
     --ground-tolerance is raised above the default."""
@@ -911,6 +973,43 @@ def test_icon_cli_normalize_and_check(capsys, tmp_path, brand):
     code, res = run_content(capsys, "--meta", meta, "--no-repo-dir", "content", "icon", "prompt",
                             "--art-direction", FIX / "ART_DIRECTION.min.md", "--out", tmp_path / "icon.md", *NO_ESTATE)
     assert code == 1 and res["result"] == "needs-writer" and res["out"] is None and not (tmp_path / "icon.md").exists()
+
+
+def _normalize_argv(tmp_path, src, out, *extra):
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    return ("--meta", meta, "--no-repo-dir", "content", "icon", "normalize", "--in", src, "--out", out,
+            "--art-direction", FIX / "ART_DIRECTION.min.md", *extra, *NO_ESTATE)
+
+
+def test_icon_cli_ground_tolerance_flag_is_wired(capsys, tmp_path, brand):
+    """#55 through the CLI: without the flag a vignetted ground fails icon-ground (exit 3, nothing written); with
+    --ground-tolerance 5 the same file passes and the icon is transparent at the corner."""
+    from PIL import Image, ImageDraw
+    src = tmp_path / "v.png"
+    im = _vignette("#F8FAFC", "#EEF0F2")
+    # the helper's green ring is 2.4:1 on the card and fails icon-qa; redraw the same outline in the family ink
+    ImageDraw.Draw(im).rounded_rectangle((250, 250, 750, 750), radius=40, outline=(0, 90, 221), width=40)
+    im.save(src)
+    out = tmp_path / "repo" / "assets" / "icon.png"
+    code, res = run_content(capsys, *_normalize_argv(tmp_path, src, out))
+    assert code == 3 and res["result"] == "art-fail" and "art-fail:icon-ground" in res["logs"]
+    assert not out.exists()
+    code, res = run_content(capsys, *_normalize_argv(tmp_path, src, out, "--ground-tolerance", "5"))
+    assert code == 0 and res["result"] == "pass" and res["info"]["mode"] == "transparent"
+    assert out.is_file()
+    assert Image.open(out).convert("RGBA").getpixel((0, 0))[3] == 0
+
+
+@pytest.mark.parametrize("bad", ["nan", "inf", "-1"])
+def test_icon_cli_ground_tolerance_rejects_bad_values(capsys, tmp_path, brand, bad):
+    """A non-finite or negative --ground-tolerance is a usage error (exit 2) and writes no icon."""
+    src = tmp_path / "v.png"
+    _vignette("#F8FAFC", "#EEF0F2").save(src)
+    out = tmp_path / "repo" / "assets" / "icon.png"
+    code, res = run_content(capsys, *_normalize_argv(tmp_path, src, out, f"--ground-tolerance={bad}"))
+    assert code == 2 and res["result"] == "usage"
+    assert not out.exists()
 
 
 def test_icon_watching_org_is_exempt(capsys, tmp_path):
