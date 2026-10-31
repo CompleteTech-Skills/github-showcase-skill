@@ -1749,6 +1749,7 @@ ICON_PX, ICON_BUDGET = 1024, 300_000
 LIVE_MARGIN = round(82 * ICON_PX / 500)  # 168: the avatar live area (a.3) at 1024 px
 LIVE = ICON_PX - 2 * LIVE_MARGIN          # 688
 KEY_DE, CONTENT_DE = 6.0, 12.0
+FLATTEN_FEATHER = KEY_DE  # width of the soft ramp, in dE (flatten and transparent key)
 ART_FAMILY = {"completetech": "CompleteTech core", "ai-ascension": "AI-Ascension", "jev-engineering": "Jev",
               "jevplay-games": "Jev", "libreevolve": "LibreEvolve", "touchedbyanagent": "TouchedByAnAgent",
               "romgenie": "romgenie utility"}
@@ -1873,6 +1874,10 @@ def ground_clause(card: str) -> str:
             "gradient, shadow or glow in the background.")
 
 
+# a numbered estate BACKGROUND paragraph: its heading line plus every following non-blank line
+_BACKGROUND_PARAGRAPH = re.compile(r"(?m)^(\d+)\s+BACKGROUND\b.*(?:\n(?=[ \t]*\S)[^\n]*)*")
+
+
 def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = None, option: str = "A",
                 language: str | None = None, skill_art: str | None = None) -> dict:
     """The Codex prompt for a repository icon (f.3 option A: the (d) template with "repo icon" for "avatar"; option
@@ -1981,6 +1986,17 @@ def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = Non
         clause = ground_clause(card)
         anchored = "Keep the background empty and the glyph inside" in prompt
         prompt = prompt.replace("Keep the background empty and the glyph inside", clause + " Keep the glyph inside")
+
+        stated = [clause in prompt]  # the clause appears exactly once, even with an anchor and a BACKGROUND paragraph
+
+        def _ground_paragraph(m):  # the whole numbered BACKGROUND paragraph, up to the next blank line
+            body = f"{m.group(1)} BACKGROUND (one flat ground, not the avatar night tile). "
+            if stated[0]:
+                return body.rstrip()
+            stated[0] = True
+            return body + clause
+
+        prompt = _BACKGROUND_PARAGRAPH.sub(_ground_paragraph, prompt)
         for k, v in slots.items():
             if v is not None:
                 prompt = prompt.replace("{" + k + "}", str(v))
@@ -2076,12 +2092,24 @@ def normalize_icon(img, ground: str = "auto", card: str | None = None, pixel_art
         if spread and spread > GROUND_DE:
             # Tolerance was raised above the default: flatten the vignette to one ground so the kept tile's corners
             # agree at the default tolerance that icon_qa, tile.py and iconbox.py use (issue #52 review).
+            # The ramp is feathered to keep glow continuous: a hard threshold would ring a smooth bloom.
             lab = _lab_cache()
             g = lab(hexrgb(gnd))
-            flat = hexrgb(gnd) + (255,)
+            flat_rgb = hexrgb(gnd)
             px = _px(im)
             im = im.copy()
-            im.putdata([flat if _de(lab(p[:3]), g) <= KEY_DE + spread else p for p in px])
+            flattened = []
+            for p in px:
+                d = _de(lab(p[:3]), g)
+                if d <= spread:
+                    w = 1.0
+                elif d >= spread + FLATTEN_FEATHER:
+                    flattened.append(p)
+                    continue
+                else:
+                    w = 1 - (d - spread) / FLATTEN_FEATHER
+                flattened.append(tuple(round(flat_rgb[i] * w + p[i] * (1 - w)) for i in range(3)) + (255,))
+            im.putdata(flattened)
         side = max(im.size)
         sq = Image.new("RGBA", (side, side), hexrgb(gnd) + (255,))
         sq.paste(im, ((side - im.width) // 2, (side - im.height) // 2))
@@ -2107,7 +2135,16 @@ def normalize_icon(img, ground: str = "auto", card: str | None = None, pixel_art
         # corners (spread 0) but a darker interior, so --ground-tolerance must still widen the key (review B, #52).
         key_de = KEY_DE + (max(spread or 0.0, tol) if tol > GROUND_DE else 0.0)
         mask = Image.new("L", im.size)
-        mask.putdata([0 if _de(lab(p[:3]), g) <= key_de else 255 for p in src])
+        half = FLATTEN_FEATHER / 2  # soft alpha ramp over the feather band, so a gradient edge does not step to 0/255
+
+        def _alpha(d: float) -> int:
+            if d <= key_de:
+                return 0
+            if d >= key_de + half:
+                return 255
+            return round(255 * (d - key_de) / half)
+
+        mask.putdata([_alpha(_de(lab(p[:3]), g)) for p in src])
         alpha = _min(mask, mask.filter(ImageFilter.GaussianBlur(2)))  # 2 px feather inside the edge, no ground halo
         gr, gg, gb = hexrgb(gnd)
         rgba = []
