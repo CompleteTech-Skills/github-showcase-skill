@@ -701,13 +701,21 @@ def held_captured_t3(resolver: Resolver | None, spec: dict | None, allow_t3: boo
         except NeedsInput:
             continue
         if str(row.get("tier") or "").split()[0] == "T3":
+            for alias in resolver.aliases(key):  # a description written under a former login still names this org
+                t3[alias.lower()] = key
             t3[resolver.canonical(key).lower()] = key
             t3[str(row.get("display_name") or key).lower()] = key
     out = []
     for o in have.get("options") or []:
         desc = str(o.get("description") or "")
         ident = desc[len(TIER_PREFIX_T3):] if desc.startswith(TIER_PREFIX_T3) else str(o.get("name") or "")
-        key = t3.get(ident.strip().lower())
+        ident = ident.strip().lower()
+        key = t3.get(ident)
+        if key is None and ident:  # an approved rename: resolve the identifier to its current login
+            try:
+                key = t3.get(resolver.canonical(ident).lower())
+            except NeedsInput:
+                key = None
         if key is None:
             continue
         rec, why = signoff.evaluate([key, *resolver.aliases(key)])

@@ -35,10 +35,11 @@ def test_skill_documents_refusals():
 
 
 def test_skill_states_which_commands_do_not_enforce_owner_eligibility():
-    """doctor forces R7=hold only without the flag; local meta and fingerprint never refuse (verified in code/tests)."""
+    """doctor holds R7 unless the flag and a valid record are present; local meta and fingerprint never refuse (verified in code/tests)."""
     skill = _read("SKILL.md")
     para = skill[skill.index(MARKER):].split("\n\n", 1)[0]
-    assert "only without `--allow-t3`" in para, para
+    assert "unless `--allow-t3` is passed and a valid sign-off record covers" in para, para
+    assert "forces the R7 cell to `hold` only without" not in para
     assert "evaluated normally" in para, para
     assert "`fingerprint`" in para and "--from-gh" in para, para
     assert "with or without the flag, with the R7" not in para

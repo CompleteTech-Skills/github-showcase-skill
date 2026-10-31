@@ -1361,3 +1361,70 @@ def test_estate_replan_holds_a_captured_t3_org_after_withdrawal(tmp_path, monkey
     assert opt and name in json.dumps(opt, ensure_ascii=False) and opt[0]["signoff_id"] == "t3s-g", plan["jobs"]
     assert not any("README held" in p.get("why", "") for p in plan["pending"]), plan["pending"]
     assert not [x for x in plan["logs"] if str(x).startswith("t3-signoff:")], plan["logs"]
+
+
+def test_personal_profile_latest_and_languages_omit_a_withdrawn_repository(tmp_path, monkeypatch, brand):
+    """The personal README's recent activity and tech stack are computed from every captured repository of a shown org.
+    A `*` grant with a later withdrawal of withdrawn-x must not let that repository into `latest` or the language
+    share (a wildcard grant passes the org-level gate); the control without the withdrawal names both."""
+    from ctshowcase import org as O
+    from ctshowcase.resolver import Resolver
+    est, reg = _pya_estate(brand)
+    reg["profile"] = {"org_directory": [{"group": "T3", "orgs": [OWNER]}]}
+    metas = {n: {"owner": OWNER, "repo": n, "visibility": "public", "description": "synthetic",
+                 "languages": {lang: 100}, "last_substantive_commit": "2026-09-01T00:00:00Z"}
+             for n, lang in (("withdrawn-x", "Rust"), ("kept-y", "Go"))}
+    est = O.Estate(brand, Resolver(brand, reg, {"rows": set(), "ids": set(), "answers": {}, "extra": [], "actions": []}),
+                   metas)
+    with _Strict(monkeypatch, _file(_bundle(tmp_path / "w", _WILD))):
+        data, logs = O.user_slice(est, "CompleteDotTech", allow_t3=True)
+        blob = json.dumps(data["latest"]) + json.dumps(data["tech_stack"])
+        assert "kept-y" in blob and "Go" in blob, data
+        assert "withdrawn-x" not in blob and "Rust" not in blob, data
+        assert f"t3-signoff:{OWNER}/withdrawn-x" in logs, logs
+    with _Strict(monkeypatch, _file(_bundle(tmp_path / "ok", _WILD[:1]))):
+        data, _ = O.user_slice(est, "CompleteDotTech", allow_t3=True)
+        blob = json.dumps(data["latest"]) + json.dumps(data["tech_stack"])
+        assert "withdrawn-x" in blob and "Rust" in blob, data
+
+
+def test_pin_jobs_carry_the_repository_regrant_not_the_withdrawn_wildcard(tmp_path, monkeypatch, brand):
+    """Wildcard grant G, a later withdrawal of withdrawn-x, then a still-later repository-scoped regrant R: the pin job
+    for withdrawn-x names R (G no longer authorizes it), the other pin keeps G, and the final order job names both."""
+    from ctshowcase import org as O, signoff
+    est, _ = _pya_estate(brand)
+    recs = [*_WILD, {"id": "t3s-regrant", "repos": ["withdrawn-x"], "approved_on": "2026-10-02"}]
+    with _Strict(monkeypatch, _file(_bundle(tmp_path, recs))):
+        res, _ = O.pins(est, OWNER, allow_t3=True)
+        signoff.stamp(res["jobs"])  # the command-level stamp must not overwrite the per-repository record
+        by_repo = {j["id"]: j for j in res["jobs"]}
+        px = [j for i, j in by_repo.items() if i.endswith("-pin-public-1")]
+        py = [j for i, j in by_repo.items() if i.endswith("-pin-public-2")]
+        assert px and px[0]["signoff_id"] == "t3s-regrant", res["jobs"]
+        assert py and py[0]["signoff_id"] == "t3s-all", res["jobs"]
+        order = by_repo[f"p{O.PHASE['pins']}-{OWNER}-pin-public-order"]
+        assert set(order["signoff_ids"]) == {"t3s-regrant", "t3s-all"}, order
+
+
+def test_estate_replan_holds_a_captured_option_written_under_a_former_login(tmp_path, monkeypatch, brand):
+    """An approved rename Pick-Your-AI -> Pick-Your-Stack leaves a captured Org option described `T3: Pick-Your-AI`.
+    After the sign-off is withdrawn, the replan still holds the Org options (no option write, no README naming it)."""
+    from ctshowcase import project as PJ
+    from ctshowcase.config import load_yaml_text
+    from ctshowcase.resolver import Resolver
+    reg = load_yaml_text((ROOT / "tests" / "fixtures" / "org" / "registry.yaml").read_text(encoding="utf-8"))
+    reg["orgs"][OWNER] = {}
+    res = Resolver(brand, reg, {"rows": {("create-project", "@me", "*", "")}, "ids": set(), "answers": {},
+                                "actions": [], "extra": [{"action": "org-rename", "owner": OWNER,
+                                                          "new_name": "Pick-Your-Stack"}]})
+    assert res.canonical(OWNER) == "Pick-Your-Stack"
+    cap = json.loads((ROOT / "tests" / "fixtures" / "project" / "estate-copy-capture.json").read_text(encoding="utf-8"))
+    cap["data"]["user"]["projectV2"]["fields"]["nodes"].append({
+        "__typename": "ProjectV2SingleSelectField", "id": "PVTF_org", "databaseId": 1099, "name": "Org",
+        "dataType": "SINGLE_SELECT", "isIssueField": False, "options": [
+            {"id": "opt-t3-former", "name": "Former Synthetic Name", "color": "GRAY", "description": f"T3: {OWNER}"}]})
+    withdrawn = [{"id": "t3s-g", "approved_on": "2026-01-15"},
+                 {"id": "t3s-w", "approved": False, "approved_on": "2026-10-01"}]
+    with _Strict(monkeypatch, _file(_bundle(tmp_path, withdrawn))):
+        held = PJ.held_captured_t3(res, PJ.normalize(cap), True)
+    assert held and held[0].startswith("t3-signoff:revoked:"), held

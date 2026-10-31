@@ -234,3 +234,10 @@ def test_unrelated_owner_withdrawal_is_isolated():
     recs = [_wildcard_pair()[0],
             _rec("w2", ["northwind-member"], approved=False, owner="Other-Org", approver="coowner", on="2026-06-01")]
     assert _ev(recs, "northwind-member", owners=(PYA,)) == ("g1", None)
+
+
+@pytest.mark.parametrize("repos", [" * ", ["* "], [" site"], " site ", ["Acme/site "]])
+def test_whitespace_padded_withdrawal_scope_still_vetoes_a_single_repository(repos):
+    """A schema-valid but padded `repos` entry must scope the same way for a single repository as for the owner."""
+    recs = [_rec("g1", ["*"]), _rec("w1", repos, approved=False, on="2026-06-01")]
+    assert _ev(recs, "site") == (None, "revoked")

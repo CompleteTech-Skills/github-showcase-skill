@@ -401,6 +401,19 @@ def _t3_moved_held(estate: Estate, full: str, allow_t3: bool) -> bool:
     return r.owner_status(owner) == "t3" and not (allow_t3 and _t3_granted(owner, name))
 
 
+def _pin_signoff(estate: Estate, login: str, pin: str, allow_t3: bool) -> str | None:
+    """The id of the sign-off record that authorizes LOGIN/PIN (signoff.evaluate with the repository: the per-repository
+    veto applies), else None. For a wildcard grant, a later withdrawal of PIN and a still-later repository-scoped
+    regrant this is the regrant, so a pin job never carries a wildcard grant that no longer authorizes that
+    repository. None without --allow-t3 or for an org that is not T3."""
+    r = estate.resolver
+    if not allow_t3 or r.owner_status(login) != "t3":
+        return None
+    from . import signoff
+    rec = signoff.record(login, pin, r.aliases(login))
+    return str(rec["id"]) if rec and rec.get("id") else None
+
+
 def _t3_repo_refusal(estate: Estate, login: str, name: str, allow_t3: bool) -> str | None:
     """The refusal code (`revoked`, `scope`, ...) when LOGIN is a T3 org, --allow-t3 is passed and NAME has no valid
     sign-off of its own, else None. The command gate checks the owner-wide record, which a wildcard grant satisfies even
@@ -1117,6 +1130,9 @@ def user_slice(estate: Estate, login: str, *, allow_t3: bool = False) -> tuple[d
         full = m["_full"]
         if m["_owner"].lower() not in shown_orgs or not estate.is_public(full) or m.get("fork"):
             continue
+        if _t3_held(estate, full, allow_t3):  # a wildcard-granted org still holds a repository whose sign-off was withdrawn
+            logs.append(f"t3-signoff:{full}")
+            continue
         for lang, n in (m.get("languages") or {}).items():
             if isinstance(n, int):
                 langs[lang] = langs.get(lang, 0) + n
@@ -1457,6 +1473,7 @@ def pins(estate: Estate, org: str, *, allow_t3: bool = False, lists_capture: dic
          repo_ids: dict | None = None) -> tuple[dict, int]:
     login, row, reg = _gate(estate, org, allow_t3=allow_t3, allow_hold=True)
     checks, jobs, logs, order = [], [], [], {"public": [], "members": []}
+    pin_records: dict[str, list[str]] = {}
     held = _star_held(estate, org) == "hold"  # STANDARD §12.5 #4: a HOLD org's pins only report, as `profile` refuses
     if held:
         logs.append("pins:hold")
@@ -1523,6 +1540,10 @@ def pins(estate: Estate, org: str, *, allow_t3: bool = False, lists_capture: dic
                  f"Open https://github.com/{login} and check that {pin} now shows in the {label.lower()} row."],
                 org=login, ui_action="org-pin", depends_on=dep or None,
                 note=f"Decision 14 pin {i} of {len(entries)} ({target}); {gate or 'no dependency'}."))
+            _pin_rec = _pin_signoff(estate, login, pin, allow_t3)  # the record that covers THIS repository, not the owner-wide first grant
+            if _pin_rec:
+                jobs[-1]["signoff_id"] = _pin_rec
+                pin_records.setdefault(target, []).append(_pin_rec)
     for target, label, view in (("public", "Public pins", "Public"), ("members", "Members-only pins", "Member")):
         bad = ("fail", "blocked", "unknown", "hold") if target == "public" else ("fail", "blocked", "hold")
         keep = [c["repo"] for c in checks if c.get("target") == target and c.get("repo") and c["result"] not in bad]
@@ -1537,6 +1558,9 @@ def pins(estate: Estate, org: str, *, allow_t3: bool = False, lists_capture: dic
              "Drag the pins into that order, then click 'Save pins'.",
              f"Reload 'View as: {view}' and screenshot the pinned row into state/screens/{login}/."],
             org=login, ui_action="org-pin-order", note=f"Final {target} pin order from the registry (VER-01 check)."))
+        if pin_records.get(target):  # the order job names every repository record behind the pins it sets
+            from . import signoff
+            signoff.stamp_associations(jobs[-1], pin_records[target])
     lists = star_list_plan(estate, org, lists_capture=lists_capture, repo_ids=repo_ids, allow_t3=allow_t3)
     failed = any(c["result"] == "fail" for c in checks)
     res = {"command": "org", "action": "pins", "owner": login,

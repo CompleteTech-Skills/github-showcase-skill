@@ -426,6 +426,7 @@ def _covers(rec: dict, repo: str | None, logins: list[str] | None = None) -> boo
         repos = [repos]
     if not isinstance(repos, list) or not all(isinstance(x, str) for x in repos):
         return False
+    repos = [x.strip() for x in repos]  # same normalisation as _scope_key: padding never hides a scope
     if "*" in repos:
         return True
     name = (repo or "").split("/")[-1].lower()
