@@ -1,6 +1,6 @@
 # T3 sign-off records (`--allow-t3` needs one)
 
-`--allow-t3` is enforced by default: the tool verifies the operator's claim that a co-owner signed off against a record file. `--require-t3-signoff` is accepted for explicitness and changes nothing. There is no opt-out: no flag or environment variable turns the check off. A T3 run therefore needs a valid, unexpired record that covers the owner and, when the record is scoped, the repository.
+`--allow-t3` is enforced by default: the tool verifies the operator's claim that a co-owner signed off against a record file. `--require-t3-signoff` is an accepted no-op, kept for compatibility, and changes nothing. There is no opt-out: no flag or environment variable turns the check off. A T3 run therefore needs a valid, unexpired record that covers the owner and, when the record is scoped, the repository.
 
 ## Where the file lives
 
@@ -30,7 +30,7 @@ signoffs:
 | `approved` | yes | boolean (`"true"` as a string is invalid) |
 | `approver` | yes | non-empty string |
 | `approved_on` | yes | date `YYYY-MM-DD`, not later than today (a sign-off that has not happened yet grants nothing) |
-| `expires` | yes | date `YYYY-MM-DD`, or a timestamp with `Z` or `+HH:MM`; a timestamp without an offset is invalid; not earlier than `approved_on` |
+| `expires` | no | optional; absent means no expiry. When present: date `YYYY-MM-DD`, or a timestamp with `Z` or `+HH:MM`; a timestamp without an offset is invalid; not earlier than `approved_on` |
 | `note` | no | string |
 
 No other fields are allowed. The file itself is an object with the one key `signoffs`, a list of record objects; a top-level list, any other top-level key or a non-object entry makes the whole file authorize nothing (`t3-signoff:missing`), as the schema refuses it.
@@ -43,9 +43,14 @@ Each refusal exits 2 with result `refused`.
 |---|---|
 | `t3-signoff:no-file` | no record file was found; the log names the resolved path |
 | `t3-signoff:missing` | no approved record for the owner (also an unreadable or non-YAML file, or a file whose envelope breaks the schema) |
-| `t3-signoff:invalid` | the owner has no usable approved record and a malformed one is the cause (it breaks the schema, has `approved_on` in the future or `expires` before `approved_on`), or a malformed record would have covered the repository; the error names the record id and the first problem. Two records with one id are also invalid |
+| `t3-signoff:invalid` | the owner has no usable approved record and a malformed one is the cause (it breaks the schema, has `approved_on` in the future or `expires` before `approved_on`, or `expires` is null or unparseable), or a malformed record would have covered the repository (a `repos` that is not `"*"`, a name or a non-empty list of names is invalid, never `scope`); the error names the record id and the first problem. Two records with one id are also invalid |
 | `t3-signoff:scope` | the owner has valid approved records but none covers the repository; an `OWNER/NAME` repository is covered only when that owner is the record's org (only `*` covers another account's repository) |
 | `t3-signoff:expired` | every covering record is past `expires` |
+| `t3-signoff:revoked` | every otherwise-grantable record was withdrawn by a later or same-day `approved: false` record (see Withdrawal) |
+
+## Withdrawal
+
+The file is append-only, so no edit of the original grant is needed. An `approved: false` record for the same owner, with `approved_on` on or after a grant's `approved_on`, whose `repos` cover the grant's scope (`*`, or every repository the grant names), withdraws that grant, and the refusal is `t3-signoff:revoked`. A false record dated before the grant, or scoped to fewer repositories than the grant covers, does not revoke it. A new `approved: true` record dated after the withdrawal grants again. Grants on distinct scopes are independent, so each keeps its own record id.
 
 Excluded owners (`exempt`) and HOLD owners (`hold`) are refused before the record is read. Repository `doctor` stays read-only: it reports R7 `hold` instead of refusing, and with `--allow-t3` shows the granting record as `signoff_id`.
 

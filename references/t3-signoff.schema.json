@@ -21,7 +21,7 @@
     },
     "record": {
       "type": "object",
-      "required": ["id", "owner", "repos", "approved", "approver", "approved_on", "expires"],
+      "required": ["id", "owner", "repos", "approved", "approver", "approved_on"],
       "additionalProperties": false,
       "properties": {
         "id": { "$ref": "#/$defs/nonEmpty", "description": "Carried onto writer jobs and change records as signoff_id." },
@@ -33,11 +33,11 @@
             { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/nonEmpty" } }
           ]
         },
-        "approved": { "type": "boolean", "description": "Only true grants; false is kept for the audit trail." },
+        "approved": { "type": "boolean", "description": "Only true grants. A false record (kept for the audit trail) with approved_on on or after a grant's date, for the same owner and covering the grant's scope, withdraws that grant (t3-signoff:revoked)." },
         "approver": { "$ref": "#/$defs/nonEmpty", "description": "Who signed off." },
         "approved_on": { "$ref": "#/$defs/date", "description": "The date of the sign-off." },
         "expires": {
-          "description": "A date (valid through that day) or a timestamp with a UTC offset (valid before that instant).",
+          "description": "Optional. An absent value means no expiry. Otherwise a date (valid through that day) or a timestamp with a UTC offset (valid before that instant); null is invalid.",
           "oneOf": [ { "$ref": "#/$defs/date" }, { "$ref": "#/$defs/awareTimestamp" } ]
         },
         "note": { "type": ["string", "null"] }
