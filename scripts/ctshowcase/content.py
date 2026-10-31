@@ -2054,7 +2054,9 @@ def normalize_icon(img, ground: str = "auto", card: str | None = None, pixel_art
     trimmed to their alpha box and fitted to the 688 px live area; an icon with its own opaque ground (an avatar-style
     night tile) is kept full-bleed (`ground="keep"`). In auto mode only a dark ground (relative luminance < 0.2) that is
     not within dE 12 of the card colour is kept as a night tile; every other uniform ground is keyed out. The four
-    corners count as one ground when they are within `tolerance` dE (default 3.0, `--ground-tolerance`)."""
+    corners count as one ground when they are within `tolerance` dE (default 3.0, `--ground-tolerance`). A raised
+    tolerance flattens a kept vignetted tile with a feathered ramp (FLATTEN_FEATHER dE) and the transparent key uses a
+    soft alpha ramp, so a glow around the glyph stays continuous while the glyph edge stays hard."""
     from PIL import Image, ImageFilter
     from .color import rgb as hexrgb
     from .iconbox import DARK_PLATE, GROUND_DE, corner_ground, corner_spread, native_pixels
