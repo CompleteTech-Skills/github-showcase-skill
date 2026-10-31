@@ -1058,6 +1058,49 @@ def test_icon_prompt_estate_anchor_inside_background_paragraph_keeps_exact_claus
     assert "{POOL}" not in p and res["missing"] == []
 
 
+def _collapse_template_blank_lines(art: str) -> str:
+    """Collapse the blank lines of the (d) prompt template block only, so its numbered sections sit on adjacent lines
+    (the other fenced blocks of the art-direction file are left as they are)."""
+    old = "2 BACKGROUND (identical in all 28 avatars). On it, {POOL}."
+
+    def collapse(m):
+        body = m.group(1)
+        if old not in body:
+            return m.group(0)
+        return "```text\n" + re.sub(r"\n{2,}", "\n", body) + "\n```"
+
+    return re.sub(r"```text\n(.*?)\n```", collapse, art, flags=re.S)
+
+
+def test_icon_prompt_single_newline_template_keeps_following_sections_and_needs_writer(brand, icon_ctx):
+    """With no blank line after the BACKGROUND paragraph, the paragraph replacement must stop before the next numbered
+    section, so the glyph sections survive and the writer's fields stay required (review P2, #52)."""
+    old = "2 BACKGROUND (identical in all 28 avatars). On it, {POOL}."
+    art = _collapse_template_blank_lines((FIX / "ART_DIRECTION.min.md").read_text(encoding="utf-8"))
+    assert old in art and "\n4 LIGHT." in art
+    res = C.icon_prompt(icon_ctx, resolver(brand), art, None)
+    assert res["missing"] == ["GLYPH_DESCRIPTION", "GLYPH_NAME", "SIZE_CLASS", "SPARK_PLACEMENT"]
+
+
+def test_icon_prompt_single_newline_template_with_glyph_keeps_adjacent_sections(brand, icon_ctx):
+    """The collapsed template with a full glyph: the sections after BACKGROUND (light, spark, composition, glyph,
+    exclusions) all survive, and the flat ground is stated exactly once (review P2, #52)."""
+    glyph = {"glyph_name": "Inbox Tray", "glyph_description": "An open tray seen front-on.",
+             "spark_placement": "held inside the tray", "size_class": "wide"}
+    art = _collapse_template_blank_lines((FIX / "ART_DIRECTION.min.md").read_text(encoding="utf-8"))
+    card = brand.style(NW)["tokens"]["card_fill"]
+    res = C.icon_prompt(icon_ctx, resolver(brand), art, glyph)
+    p = res["prompt"]
+    assert res["missing"] == []
+    assert "Inbox Tray" in p and "An open tray seen front-on." in p
+    assert "4 LIGHT" in p
+    assert "Inside the central 688 × 688 px square" in p  # composition section
+    assert "Any text, letters, numbers or words; borders." in p  # exclusions section
+    assert p.count(C.ground_clause(card)) == 1
+    bg = next(line for line in p.splitlines() if "BACKGROUND" in line)
+    assert "one flat ground, not the avatar night tile" in bg
+
+
 def test_icon_cli_ground_tolerance_flag_wired(capsys, tmp_path, brand):
     """--ground-tolerance reaches normalize_icon through the CLI: a vignette 3.48 dE apart in its corners is refused
     at the default tolerance (nothing written) and keyed to a transparent corner at --ground-tolerance 5."""
