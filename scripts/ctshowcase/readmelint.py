@@ -63,15 +63,27 @@ def _in_inline_code(text: str, index: int) -> bool:
     return _span_at(mdcode.inline_code_spans(text), index, strict=True) is not None
 
 
-_SHIELDS_SEGMENT_DASH = re.compile(r"(?<!-)-(?!-)")  # Shields: a single dash separates segments, "--" is a literal dash
-
-
 def _badge_colour(path: str) -> str:
-    """Upper-cased colour of a Shields badge path (the text after `/badge/`): its last single-dash segment, with the
-    query and fragment removed. Labels and messages may hold apostrophes, escaped dashes or hex-looking text; only the
-    final segment is the colour."""
+    """Upper-cased colour of a Shields badge path (the text after `/badge/`): its last segment, with the query and
+    fragment removed. Shields escapes a literal dash as a pair `--`; a lone `-` is the structural separator. The scan
+    runs left to right, so `type-example---FF0000` reads as `type`, `example-`, `FF0000`. Labels and messages may hold
+    apostrophes or hex-looking text; only the final segment is the colour."""
     path = path.split("#", 1)[0].split("?", 1)[0]  # literal delimiters only: an encoded %23 or %3F belongs to a label
-    return _SHIELDS_SEGMENT_DASH.split(unquote(path))[-1].upper()
+    text = unquote(path)
+    segments, current, i = [], [], 0
+    while i < len(text):
+        if text[i] == "-" and text[i + 1:i + 2] == "-":  # an escaped literal dash
+            current.append("-")
+            i += 2
+        elif text[i] == "-":  # the structural separator
+            segments.append("".join(current))
+            current = []
+            i += 1
+        else:
+            current.append(text[i])
+            i += 1
+    segments.append("".join(current))
+    return segments[-1].upper()
 
 
 def _definition_candidates(document: str) -> str:
@@ -81,10 +93,19 @@ def _definition_candidates(document: str) -> str:
         for i in range(a, b):
             if out[i] != "\n":
                 out[i] = " "
-    for m in HTML_COMMENT.finditer(document):
+    fences = mdcode.fence_spans(document)
+    pos = 0
+    while (m := HTML_COMMENT.search(document, pos)):
+        start = m.start()
+        # an opener that is escaped, inside inline code or inside a fence is text: the search resumes one character on,
+        # so a code-span `<!--` never consumes text up to a later real `-->`
+        if _escaped(document, start) or _in_inline_code(document, start) or _span_at(fences, start) is not None:
+            pos = start + 1
+            continue
         for i in range(*m.span()):
             if out[i] != "\n":
                 out[i] = " "
+        pos = m.end()
     return "".join(out)
 
 
