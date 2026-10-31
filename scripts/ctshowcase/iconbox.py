@@ -41,9 +41,13 @@ def corner_spread(im: Image.Image) -> float | None:
 
 def corner_ground(im: Image.Image, tolerance: float = GROUND_DE) -> str | None:
     """Hex of the icon's own ground when its four corners are opaque and closer than `tolerance` ΔE to each other
-    (`--ground-tolerance`, default GROUND_DE), else None."""
+    (`--ground-tolerance`, default GROUND_DE), else None.
+
+    Identical corners (spread 0) always count as one ground, so `--ground-tolerance 0` accepts a perfectly flat
+    ground and rejects anything with a measurable difference. A positive tolerance keeps the strict boundary:
+    a spread equal to the tolerance is not one ground."""
     spread = corner_spread(im)
-    if spread is None or spread >= tolerance:
+    if spread is None or (spread > 0 and spread >= tolerance):
         return None
     rgba = im.convert("RGBA")
     w, h = rgba.size
