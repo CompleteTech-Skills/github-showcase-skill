@@ -226,11 +226,14 @@ def _markdown_images(text: str, document: str) -> list[tuple[str, str, int, int]
         alt = text[match.end():close]
         consumed = close + 1
         if consumed < len(text) and text[consumed] == "(":
-            target = _inline_image_target(text, consumed)
+            # Destinations are read from the written document: the masked copy blanks literal backticks in filenames.
+            target = _inline_image_target(document if len(document) >= len(text) else text, consumed)
             if target:
-                source, consumed = target
-                sources.append((alt, source, match.start(), consumed))
-            continue
+                source, end = target
+                sources.append((alt, source, match.start(), end))
+                consumed = end
+                continue
+            consumed = close + 1  # not an inline destination (for example, a space-containing label): try a shortcut reference
         # `text` masks inline code to spaces (a prefix-aligned copy): labels are matched on the written source, literal backticks included
         key = label(document[match.end():close] if len(document) >= len(text) else alt)
         if consumed < len(text) and text[consumed] == "[":
