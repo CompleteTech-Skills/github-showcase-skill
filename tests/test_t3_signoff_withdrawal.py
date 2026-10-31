@@ -141,3 +141,50 @@ def test_cli_refuses_a_withdrawn_repository_and_a_malformed_withdrawal(tmp_path)
     ok = [_rec("g1", ["*"], owner=own), _rec("w1", ["some-other-repo"], approved=False, on="2026-06-01", owner=own)]
     r = _cli(tmp_path / "c", ok, "describe")
     assert r.returncode == 0, r.stdout + r.stderr
+
+
+# Non-boolean `approved` values on a record beside a valid grant (synthetic). Only a literal False is a withdrawal, so
+# a string "false", 0, null, or any other non-boolean must refuse as invalid, never be ignored in favour of g1.
+NON_BOOLEAN_APPROVED = ["false", "true", 0, 1, None]
+
+
+@pytest.mark.parametrize("bad", NON_BOOLEAN_APPROVED)
+@pytest.mark.parametrize("repos,repo", [(["*"], "site"), (["site"], "site"), (["*"], None), (["site"], None)])
+def test_non_boolean_approved_beside_valid_grant_fails_closed(bad, repos, repo):
+    records = [_rec("g1", ["*"]), {**_rec("w1", repos, approved=False, on="2026-06-01"), "approved": bad}]
+    got, err = _ev(records, repo)
+    assert got is None and err and err.startswith("invalid:w1:") and "approved" in err, (got, err)
+
+
+@pytest.mark.parametrize("bad", NON_BOOLEAN_APPROVED)
+def test_non_boolean_approved_dated_before_the_grant_still_fails_closed(bad):
+    records = [_rec("g1", ["*"]), {**_rec("w1", ["*"], approved=False, on="2020-01-01"), "approved": bad}]
+    got, err = _ev(records, "site")
+    assert got is None and err and err.startswith("invalid:w1:") and "approved" in err, (got, err)
+
+
+@pytest.mark.parametrize("bad", NON_BOOLEAN_APPROVED)
+def test_non_boolean_approved_for_an_unrelated_owner_does_not_block(bad):
+    records = [_rec("g1", ["*"]),
+               {**_rec("w1", ["*"], approved=False, on="2026-06-01", owner="Other"), "approved": bad}]
+    assert _ev(records, "site") == ("g1", None)
+
+
+@pytest.mark.parametrize("bad", NON_BOOLEAN_APPROVED)
+def test_non_boolean_approved_for_another_repository_does_not_block(bad):
+    records = [_rec("g1", ["*"]), {**_rec("w1", ["other"], approved=False, on="2026-06-01"), "approved": bad}]
+    assert _ev(records, "site") == ("g1", None)
+
+
+def test_literal_false_withdrawal_and_valid_grant_controls():
+    withdrawn = [_rec("g1", ["*"]), _rec("w1", ["*"], approved=False, on="2026-06-01")]
+    assert _ev(withdrawn, "site") == (None, "revoked")
+    assert _ev([_rec("g1", ["*"])], "site") == ("g1", None)
+
+
+@pytest.mark.parametrize("bad", NON_BOOLEAN_APPROVED)
+def test_non_boolean_approved_is_never_a_valid_approval(bad):
+    records = [{**_rec("g1", ["*"]), "approved": bad}]
+    got, err = _ev(records, "site")
+    assert got is None and err and err.startswith("invalid:"), (got, err)
+
