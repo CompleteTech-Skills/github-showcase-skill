@@ -20,7 +20,6 @@ def _run(tmp_path, *argv, owner="Pick-Your-AI"):
     meta = tmp_path / "meta.json"
     meta.write_text(json.dumps(dict(META, owner=owner, repo="northwind-synthetic")), encoding="utf-8")
     env = dict(os.environ, SHOWCASE_T3_SIGNOFF_FILE=str(RECORDS))
-    env.pop("SHOWCASE_REQUIRE_T3_SIGNOFF", None)
     return subprocess.run([*SHOWCASE, "--meta", str(meta), "--no-repo-dir", *argv], cwd=ROOT, env=env,
                           capture_output=True, text=True, encoding="utf-8")
 

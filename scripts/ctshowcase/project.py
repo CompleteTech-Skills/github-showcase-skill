@@ -188,7 +188,7 @@ def _gate_target(resolver: Resolver | None, owner: str, *, allow_t3: bool = Fals
     if st == "t3" and not allow_t3:
         raise Refused(f"{owner} is T3: reading its project is fine, changing anything needs co-owner sign-off",
                       log="t3-signoff")
-    if st == "t3":  # registers the grant so writer jobs carry signoff_id; refuses t3-signoff:<why>; no-op when opted out (--no-require-t3-signoff)
+    if st == "t3":  # registers the grant so writer jobs carry signoff_id; refuses t3-signoff:<why>
         from . import signoff
         signoff.require(owner, None, resolver.aliases(owner))
     return resolver.canonical(owner)
@@ -1083,7 +1083,7 @@ def lint(capture: dict, *, role: str = "org", owner: str | None = None, display_
 # =====================================================================================================
 def estate_orgs(resolver: Resolver, *, allow_t3: bool = False) -> list[dict]:
     """In-scope orgs for the Estate's Org field: T1, T2, T2-R (T3 only after sign-off; never HOLD or excluded).
-    Under --require-t3-signoff a T3 org also needs a valid record, and its entry keeps that record's id as
+    A T3 org also needs a valid record, and its entry keeps that record's id as
     `signoff_id` so estate_plan can carry it onto the jobs that bring the org into the personal board."""
     from . import signoff
     out = []
@@ -1102,10 +1102,9 @@ def estate_orgs(resolver: Resolver, *, allow_t3: bool = False) -> list[dict]:
         if tier == "T3":
             if not allow_t3:
                 continue
-            if signoff.required():
-                rec = signoff.record(key, None, resolver.aliases(key))
-                if rec is None:
-                    continue
+            rec = signoff.record(key, None, resolver.aliases(key))
+            if rec is None:
+                continue
         if tier in TIER_COLOR:
             entry = {"login": resolver.canonical(key), "name": row.get("display_name") or key, "tier": tier}
             if rec is not None and rec.get("id"):
@@ -1146,7 +1145,7 @@ def _job_tokens(job: dict) -> set[str]:
 
 
 def _stamp_estate_orgs(jobs: list[dict], orgs: list[dict]) -> None:
-    """Under --require-t3-signoff: each job that names a signed-off T3 org (its Org-field option, its login) carries
+    """Each job that names a signed-off T3 org (its Org-field option, its login) carries
     that org's record. The jobs target @me, so stamping by target owner never finds the T3 grant; several T3 orgs on
     one job give `signoff_ids` (signoff.stamp_associations). No-op when no org carries a signoff_id.
     (tests/test_t3_signoff_require.py::test_estate_plan_jobs_carry_the_t3_orgs_signoff)"""

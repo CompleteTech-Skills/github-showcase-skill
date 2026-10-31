@@ -147,12 +147,11 @@ def t3_record(tmp_path, monkeypatch):
 @pytest.fixture(autouse=True)
 def _isolated_signoff_state():
     """Sign-off enforcement is on by default (issue 23), so library calls outside showcase.main() now register grants in the
-    module's context. Give every test fresh grants and the default `required` and record file, and restore them after."""
+    module's context. Give every test fresh grants and the default record file, and restore them after."""
     from ctshowcase import signoff
-    run, req, file = signoff.reset(), signoff.set_required(True), signoff.set_file(None)
+    run, file = signoff.reset(), signoff.set_file(None)
     try:
         yield
     finally:
         signoff.reset_file(file)
-        signoff.reset_required(req)
         signoff.restore(run)

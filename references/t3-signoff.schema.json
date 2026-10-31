@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/CompleteTech-Skills/github-showcase-skill/references/t3-signoff.schema.json",
   "title": "T3 co-owner sign-off records",
-  "description": "The file that --require-t3-signoff reads (passed with --t3-signoff-file or SHOWCASE_T3_SIGNOFF_FILE). Dates are written as YAML dates or ISO 8601 strings; validate after converting YAML dates to ISO strings. See references/t3-signoff.md.",
+  "description": "The file that --allow-t3 is checked against: --t3-signoff-file PATH, else SHOWCASE_T3_SIGNOFF_FILE, else <estate root>/decisions/t3-signoffs.yaml. The tool also rejects an approved_on later than today and an expires earlier than approved_on, which a schema cannot state. Dates are written as YAML dates or ISO 8601 strings; validate after converting YAML dates to ISO strings. See references/t3-signoff.md.",
   "type": "object",
   "required": ["signoffs"],
   "additionalProperties": false,

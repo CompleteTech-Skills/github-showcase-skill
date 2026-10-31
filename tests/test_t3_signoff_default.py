@@ -40,7 +40,7 @@ def _run(tmp_path, root, *argv, env=None, owner=OWNER):
     meta = tmp_path / "meta.json"
     meta.write_text(json.dumps(dict(META, owner=owner, repo="northwind-synthetic")), encoding="utf-8")
     e = dict(os.environ)
-    for k in ("SHOWCASE_REQUIRE_T3_SIGNOFF", "SHOWCASE_T3_SIGNOFF_FILE", "SHOWCASE_ESTATE_ROOT"):
+    for k in ("SHOWCASE_T3_SIGNOFF_FILE", "SHOWCASE_ESTATE_ROOT"):
         e.pop(k, None)
     if root is not None:
         e["SHOWCASE_ESTATE_ROOT"] = str(root)
@@ -99,20 +99,16 @@ def test_record_file_resolution_order_flag_then_env_then_default(tmp_path, monke
         signoff.reset_file(token)
 
 
-def test_explicit_opt_out_restores_trust_only_and_is_logged(tmp_path):
+def test_there_is_no_opt_out(tmp_path):
+    """Adjudication t3-no-bypass: neither a flag nor an environment variable turns enforcement off."""
     root = _bundle(tmp_path, write=False)
     r = _run(tmp_path, root, "--no-require-t3-signoff", "--allow-t3", "describe")
-    assert r.returncode != 2 and "t3-signoff:opt-out" in _out(r), _out(r)
-    r = _run(tmp_path, root, "--allow-t3", "describe", env={"SHOWCASE_REQUIRE_T3_SIGNOFF": "0"})
-    assert r.returncode != 2 and "t3-signoff:opt-out" in _out(r), _out(r)
-    r = _run(tmp_path, root, "--require-t3-signoff", "--no-require-t3-signoff", "--allow-t3", "describe")
-    assert r.returncode == 2 and "mutually exclusive" in _out(r), _out(r)
-
-
-def test_opt_out_does_not_lift_excluded_owners(tmp_path):
-    r = _run(tmp_path, _bundle(tmp_path, write=False), "--no-require-t3-signoff", "--allow-t3", "describe",
-             owner="BunsDev")
-    assert r.returncode == 2, _out(r)
+    assert r.returncode == 2 and "unrecognized arguments" in _out(r), _out(r)
+    for value in ("0", "false", "no", "off"):
+        r = _run(tmp_path, root, "--allow-t3", "describe", env={"SHOWCASE_REQUIRE_T3_SIGNOFF": value})
+        assert r.returncode == 2 and "t3-signoff:no-file" in _out(r), (value, _out(r))
+    r = _run(tmp_path, root, "--require-t3-signoff", "--allow-t3", "describe")  # the compatible no-op flag
+    assert r.returncode == 2 and "t3-signoff:no-file" in _out(r), _out(r)
 
 
 def test_writer_jobs_carry_the_default_records_id(tmp_path):

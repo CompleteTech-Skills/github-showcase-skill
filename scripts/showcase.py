@@ -477,7 +477,7 @@ def cmd_describe(args):
 
 
 def _stamp_signoff_ids(rec: dict, association_ids, ctx) -> None:
-    """Under --require-t3-signoff: the topics change record names every record that authorized it, the target owner's
+    """The topics change record names every record that authorized it, the target owner's
     own grant first (a T3 target) and then each T3 `also_in` association's (topics.merge `signoff_ids`).
     `signoff_id` is the first; `signoff_ids` lists all of them only when there is more than one."""
     from ctshowcase import signoff
@@ -958,13 +958,11 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--format", choices=("json", "text"), default=None, help="output style")
     p.add_argument("--quiet", action="store_true")
     p.add_argument("--allow-t3", action="store_true",
-                   help="treat a T3 (co-owned) owner as signed off for this run: every repository command and generator, not just `meta`; pass only when a t3-metadata or t3-signoff row is approved (default: T3 owners are refused, exit 2)")
+                   help="treat a T3 (co-owned) owner as signed off for this run: every repository command and generator, not just `meta`; pass only when a t3-metadata or t3-signoff row is approved (default: T3 owners are refused, exit 2). It also needs a valid sign-off record, by default in <estate root>/decisions/t3-signoffs.yaml (see --t3-signoff-file and references/t3-signoff.md); there is no opt-out")
     p.add_argument("--require-t3-signoff", action="store_true",
-                   help="the default, accepted for explicitness: --allow-t3 is honoured only when a valid, unexpired sign-off record "
-                        "covers the owner and repository; otherwise exit 2 (t3-signoff:no-file|missing|invalid|expired|scope)")
-    p.add_argument("--no-require-t3-signoff", action="store_true",
-                   help="explicit opt-out (env SHOWCASE_REQUIRE_T3_SIGNOFF=0): --allow-t3 is trusted without a record, as before issue 23; "
-                        "logged as t3-signoff:opt-out")
+                   help="accepted for explicitness and a no-op, since enforcement is always on: --allow-t3 is honoured only when a valid, "
+                        "unexpired sign-off record covers the owner and repository; otherwise exit 2 "
+                        "(t3-signoff:no-file|missing|invalid|expired|scope)")
     p.add_argument("--t3-signoff-file", metavar="PATH",
                    help="the sign-off record file to read instead of the default <estate root>/decisions/t3-signoffs.yaml "
                         "(env SHOWCASE_T3_SIGNOFF_FILE; format: references/t3-signoff.md). Order: this flag, the env, the default. "
@@ -1210,12 +1208,11 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main(argv=None) -> int:
-    """Run one invocation. `--allow-t3` and `--require-t3-signoff` hold only for this call (and this context): the prior
+    """Run one invocation. `--allow-t3` and the sign-off record file hold only for this call (and this context): the prior
     values, and the sign-off grants of any enclosing run, are restored on every exit."""
     from ctshowcase.config import reset_t3_signed_off, set_t3_signed_off, t3_signed_off
     from ctshowcase import signoff
     token = set_t3_signed_off(t3_signed_off())
-    required_token = signoff.set_required(signoff.required())
     file_token = signoff.set_file(signoff._FILE.get())
     run_token = signoff.reset()
     try:
@@ -1223,7 +1220,6 @@ def main(argv=None) -> int:
     finally:
         signoff.restore(run_token)
         signoff.reset_file(file_token)
-        signoff.reset_required(required_token)
         reset_t3_signed_off(token)
 
 
@@ -1250,12 +1246,7 @@ def _main(argv=None) -> int:
     from ctshowcase.config import set_t3_signed_off
     set_t3_signed_off(getattr(args, "allow_t3", False))
     from ctshowcase import signoff
-    if getattr(args, "no_require_t3_signoff", False) and getattr(args, "require_t3_signoff", False):
-        cli.error("--require-t3-signoff and --no-require-t3-signoff are mutually exclusive")
-    signoff.set_required(False if getattr(args, "no_require_t3_signoff", False)
-                         else bool(getattr(args, "require_t3_signoff", False)) or signoff.env_required())
     signoff.set_file(getattr(args, "t3_signoff_file", None))
-    signoff.set_opt_out_t3(_is_t3_owner(args) if (not signoff.required() and getattr(args, "allow_t3", False)) else None)
     if args.format is None:
         args.format = "text" if args.command in GENERATORS else "json"
     try:
@@ -1274,34 +1265,12 @@ def _main(argv=None) -> int:
         if args.format == "text" and not args.quiet:
             print(f"{args.command}: {obj['error']}", file=sys.stderr)
             return code
-    audit = []  # opt-out diagnostics, independent of whether the command returned an object
-    if not signoff.required() and signoff.explicit_file() is not None:  # a file nobody enforces is not silently ignored
-        audit.append("t3-signoff:file-ignored")
-    if not signoff.required() and getattr(args, "allow_t3", False):  # trust-only --allow-t3 is visible in the output
-        audit.append("t3-signoff:opt-out")
     if obj is not None:
-        if audit:
-            obj["logs"] = [*(obj.get("logs") or []), *audit]
-            if "t3-signoff:file-ignored" in audit and args.format == "text" and not args.quiet:
-                print("t3-signoff:file-ignored: a sign-off record file was given with sign-off enforcement opted out, "
-                      "so no record is read or enforced", file=sys.stderr)
         for key in ("jobs", "records"):  # writer jobs and change records (adopt, new, enterprise plan)
             if isinstance(obj.get(key), list):
-                signoff.stamp(obj[key])  # the granting record, or "opt-out" for T3 items under the opt-out
+                signoff.stamp(obj[key])  # the granting record
         emit(args, obj)
-    elif audit:  # direct-print commands (doctor, lint, meta without --out): stderr keeps their stdout formats intact
-        for a in audit:
-            print(f"{a}: sign-off enforcement is opted out for this run", file=sys.stderr)
     return code
-
-
-def _is_t3_owner(args):
-    """A predicate for signoff.stamp_opt_out: is OWNER a T3 org in the brand data (False when it cannot be read)."""
-    try:
-        b = brand(args, prefer_lock=True)
-    except Exception:
-        return lambda owner: False
-    return lambda owner: b.owner_status(owner) == "t3"
 
 
 if __name__ == "__main__":

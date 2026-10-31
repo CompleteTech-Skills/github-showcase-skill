@@ -192,14 +192,12 @@ def merge(ctx: RepoContext, also_in: list[str] | None = None) -> dict:
 
 
 def _with_signoffs(res: dict, ctx: RepoContext, orgs: list[str], topics_: list[str], proposed: list[str]) -> dict:
-    """Under --require-t3-signoff, name the records that let a T3 org's membership topic into `proposed` as
+    """Name the records that let a T3 org's membership topic into `proposed` as
     `signoff_ids`, so cmd_topics carries them onto the change record. membership_topics only asks granted(), which
     registers no grant, and records.append stamps by the target owner (often T1), so without this the record that
     authorized the T3 association was lost (tests/test_t3_signoff_require.py
-    ::test_t3_also_in_association_carries_its_signoff_id). No key at all when the flag is off or no T3 org applies."""
+    ::test_t3_also_in_association_carries_its_signoff_id). No key at all when no T3 org applies."""
     from . import signoff
-    if not signoff.required():
-        return res
     resolver = ctx.brand.resolver()
     ids: list[str] = []
     for org, topic in zip(orgs, topics_):

@@ -65,9 +65,9 @@ def test_help_text_matches_docs():
     )
     assert result.returncode == 0, result.stderr
     assert "--allow-t3" in result.stdout
-    # issue 23 adds --require-t3-signoff (default) and its opt-out right after --allow-t3; the synopsis must keep up with --help
-    fragment = "[--quiet] [--allow-t3] [--require-t3-signoff | --no-require-t3-signoff] [--t3-signoff-file PATH] [--version]"
-    usage_fragment = "[--allow-t3] [--require-t3-signoff] [--no-require-t3-signoff] [--t3-signoff-file PATH] [--version]"
+    # issue 23 adds --require-t3-signoff (default) and right after --allow-t3 (there is no opt-out flag); the synopsis must keep up with --help
+    fragment = "[--quiet] [--allow-t3] [--require-t3-signoff] [--t3-signoff-file PATH] [--version]"
+    usage_fragment = "[--allow-t3] [--require-t3-signoff] [--t3-signoff-file PATH] [--version]"
     help_usage = " ".join(result.stdout.split())
     skill = _read("SKILL.md")
     ref = skill[skill.index("## Command Reference"):]
@@ -85,12 +85,21 @@ def test_skill_documents_require_t3_signoff_beside_allow_t3():
         assert code in para, code
 
 
-def test_skill_documents_default_on_enforcement_path_and_opt_out():
+def test_skill_documents_default_on_enforcement_path_and_no_opt_out():
     """Issue 23: SKILL.md, ONBOARDING.md, CHANGELOG.md and references/t3-signoff.md describe the default-on record check."""
     skill = _read("SKILL.md")
     para = skill[skill.index(MARKER):].split("\n\n", 1)[0]
     assert "on by default" in para and "decisions/t3-signoffs.yaml" in skill, para
-    assert "--no-require-t3-signoff" in para and "SHOWCASE_REQUIRE_T3_SIGNOFF=0" in para, para
+    assert "no opt-out" in para and "--no-require-t3-signoff" not in para and "SHOWCASE_REQUIRE_T3_SIGNOFF" not in para, para
+    for name in ("SKILL.md", "ONBOARDING.md", "CHANGELOG.md", "references/t3-signoff.md", "references/org.md",
+                 "references/constraints.md"):
+        text = _read(name)
+        assert "--no-require-t3-signoff" not in text and "SHOWCASE_REQUIRE_T3_SIGNOFF" not in text, name
+    assert "Earlier, opt-in form" not in _read("CHANGELOG.md")
+    helptext = " ".join(subprocess.run([sys.executable, str(ROOT / "scripts" / "showcase.py"), "--help"],
+                                       capture_output=True, encoding="utf-8",
+                                       env=dict(os.environ, COLUMNS="5000")).stdout.split())
+    assert "valid sign-off record" in helptext and "decisions/t3-signoffs.yaml" in helptext  # --allow-t3 help names the record
     assert "default off" not in para and "is always named explicitly" not in para, para
     assert "it is never read from a config file or environment." not in para, para
     assert "decisions/t3-signoffs.yaml" in _read("ONBOARDING.md")

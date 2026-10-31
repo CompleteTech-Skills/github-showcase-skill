@@ -166,19 +166,18 @@ def row(ctx: RepoContext) -> dict:
            "done": "yes" if done else "no", "logs": sorted(set(logs + ctx.logs))}
     from . import signoff
     rec = None
-    if signoff.required() and ctx.brand.owner_status(ctx.owner) == "t3" and t3_signed_off(ctx.owner, ctx.repo):
+    if ctx.brand.owner_status(ctx.owner) == "t3" and t3_signed_off(ctx.owner, ctx.repo):
         # evaluated directly (not via the gate's cache) so `doctor --estate` rows, which never run check_owner, show it too
         rec, _ = signoff.evaluate(ctx.brand.aliases(ctx.owner), ctx.repo)
-    if rec is not None:  # only under --require-t3-signoff with a valid record: show which sign-off lifted the hold
+    if rec is not None:  # only with a valid record: show which sign-off lifted the hold
         row["signoff_id"] = str(rec.get("id") or "")
         row["signoff_expires"] = str(rec.get("expires") or "")
     return row
 
 
 def _signoff_cols() -> list[str]:
-    from . import signoff
-    # extra column only when --allow-t3 is passed with enforcement on; the documented row shape is unchanged otherwise
-    return ["signoff_id"] if signoff.required() and t3_signed_off() else []
+    # extra column only when --allow-t3 is passed; the documented row shape is unchanged otherwise
+    return ["signoff_id"] if t3_signed_off() else []
 
 
 def _signoff_vals(r: dict) -> list[str]:

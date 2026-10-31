@@ -57,8 +57,8 @@ def reset_t3_signed_off(token: Token) -> None:
 
 
 def t3_signed_off(owner: str | None = None, repo: str | None = None) -> bool:
-    """The run's `--allow-t3` (context-local). With an owner and `--require-t3-signoff`, also needs a valid sign-off
-    record (ctshowcase/signoff.py); without the opt-in flag the answer is the bare flag, as before."""
+    """The run's `--allow-t3` (context-local). With an owner, also needs a valid sign-off
+    record (ctshowcase/signoff.py): enforcement is always on, and no flag or environment variable opts out of it."""
     signed = _T3_SIGNED_OFF.get()
     if owner is not None and signed:
         from . import signoff
@@ -127,7 +127,7 @@ class Brand:
             raise Refused(f"{owner} is T3; needs co-owner sign-off", log="t3-signoff")
         if status == "t3" and verify_signoff:
             from . import signoff
-            signoff.require(owner, repo, self.aliases(owner))  # no-op when opted out (--no-require-t3-signoff)
+            signoff.require(owner, repo, self.aliases(owner))
         return status
 
     def org(self, owner: str) -> dict:

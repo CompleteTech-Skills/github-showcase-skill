@@ -1,6 +1,6 @@
-# T3 sign-off records (`--require-t3-signoff`)
+# T3 sign-off records (`--allow-t3` needs one)
 
-`--allow-t3` is enforced by default: the tool verifies the operator's claim that a co-owner signed off against a record file. `--require-t3-signoff` is accepted for explicitness and changes nothing. The one escape is the explicit opt-out `--no-require-t3-signoff` (or `SHOWCASE_REQUIRE_T3_SIGNOFF=0`), which restores the trust-only meaning of `--allow-t3` for that run and is logged `t3-signoff:opt-out`; T3 writer jobs and change records made under it carry `signoff_id: "opt-out"`; the two flags together are a usage error. A T3 run therefore needs a valid, unexpired record that covers the owner and, when the record is scoped, the repository.
+`--allow-t3` is enforced by default: the tool verifies the operator's claim that a co-owner signed off against a record file. `--require-t3-signoff` is accepted for explicitness and changes nothing. There is no opt-out: no flag or environment variable turns the check off. A T3 run therefore needs a valid, unexpired record that covers the owner and, when the record is scoped, the repository.
 
 ## Where the file lives
 
@@ -17,8 +17,8 @@ signoffs:
     repos: ["*"]               # "*" (also needed for owner-wide actions), repository names, or OWNER/NAME
     approved: true             # a boolean; only true grants
     approver: example-co-owner # who signed off
-    approved_on: 2026-01-15    # the date they signed off
-    expires: 2099-12-31        # a date (valid through that day) or a timestamp with a UTC offset (valid before that instant)
+    approved_on: 2026-01-15    # the date they signed off (not in the future)
+    expires: 2099-12-31        # not before approved_on; a date (valid through that day) or a timestamp with a UTC offset (valid before that instant)
     note: "optional free text"
 ```
 
@@ -29,8 +29,8 @@ signoffs:
 | `repos` | yes | `"*"`, a name, or a non-empty list of names / `OWNER/NAME` |
 | `approved` | yes | boolean (`"true"` as a string is invalid) |
 | `approver` | yes | non-empty string |
-| `approved_on` | yes | date `YYYY-MM-DD` |
-| `expires` | yes | date `YYYY-MM-DD`, or a timestamp with `Z` or `+HH:MM`; a timestamp without an offset is invalid |
+| `approved_on` | yes | date `YYYY-MM-DD`, not later than today (a sign-off that has not happened yet grants nothing) |
+| `expires` | yes | date `YYYY-MM-DD`, or a timestamp with `Z` or `+HH:MM`; a timestamp without an offset is invalid; not earlier than `approved_on` |
 | `note` | no | string |
 
 No other fields are allowed. The file itself is an object with the one key `signoffs`, a list of record objects; a top-level list, any other top-level key or a non-object entry makes the whole file authorize nothing (`t3-signoff:missing`), as the schema refuses it.
@@ -43,10 +43,10 @@ Each refusal exits 2 with result `refused`.
 |---|---|
 | `t3-signoff:no-file` | no record file was found; the log names the resolved path |
 | `t3-signoff:missing` | no approved record for the owner (also an unreadable or non-YAML file, or a file whose envelope breaks the schema) |
-| `t3-signoff:invalid` | the owner has records but every one breaks the schema; the error names the record id and the first problem |
+| `t3-signoff:invalid` | the owner has no usable approved record and a malformed one is the cause (it breaks the schema, has `approved_on` in the future or `expires` before `approved_on`), or a malformed record would have covered the repository; the error names the record id and the first problem. Two records with one id are also invalid |
 | `t3-signoff:scope` | the owner has valid approved records but none covers the repository; an `OWNER/NAME` repository is covered only when that owner is the record's org (only `*` covers another account's repository) |
 | `t3-signoff:expired` | every covering record is past `expires` |
 
-Excluded owners (`exempt`) and HOLD owners (`hold`) are refused before the record is read. Repository `doctor` stays read-only: it reports R7 `hold` instead of refusing, and under the flag shows the granting record as `signoff_id`.
+Excluded owners (`exempt`) and HOLD owners (`hold`) are refused before the record is read. Repository `doctor` stays read-only: it reports R7 `hold` instead of refusing, and with `--allow-t3` shows the granting record as `signoff_id`.
 
-The owner checked is also the one that holds the repository today: a repository named under one org whose approved pending transfer resolves to a T3 org is gated as that T3 org's (org label jobs, profile home repositories, favorites and star-List items). A T3 org's association carries that org's record id (`signoff_id`; `signoff_ids` lists every id when more than one record applies): the topics change record of `topics --also-in`, the topics job and change record of `adopt` for a repository whose metadata lists the org in `also_in`, and the `project estate-plan` jobs that put the org in the personal board's Org field (its `orgs` entry shows the id too). A job's existing `approval_id` is kept.
+The owner checked is also the one that holds the repository today: a repository named under one org whose approved pending transfer resolves to a T3 org is gated as that T3 org's (org label jobs, profile home repositories, favorites and star-List items). A T3 org's association carries that org's record id (`signoff_id`; `signoff_ids` lists every id when more than one record applies, for example a star-List item job that adds a T3 repository to a T3 org's List carries the favorite's record and the List org's record): the topics change record of `topics --also-in`, the topics job and change record of `adopt` for a repository whose metadata lists the org in `also_in`, and the `project estate-plan` jobs that put the org in the personal board's Org field (its `orgs` entry shows the id too). A job's existing `approval_id` is kept.

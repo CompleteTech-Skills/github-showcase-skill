@@ -14,7 +14,7 @@ python3 $S org health  ORG [--dot-github CHECKOUT]                  # O4: §8.1 
 python3 $S org doctor  ORG --snapshot org-snapshot.json [--dot-github CHECKOUT] [--avatar avatar.png] [--doctor-format tsv|json|md] [--header]
 ```
 
-Every action takes `ORG` (any former login resolves, see below), `--registry`, `--meta-dir`, `--decisions`, `--approved`, `--approved-yaml`, `--actions`, `--allow-t3` and `--jobs FILE` (append the writer jobs as JSON lines). The global `--allow-t3` (before the command) is equivalent. Either needs a valid sign-off record by default (`<estate root>/decisions/t3-signoffs.yaml` or `--t3-signoff-file`; `t3-signoff:no-file|missing|invalid|expired|scope` otherwise, see [t3-signoff.md](t3-signoff.md)); `--no-require-t3-signoff` is the explicit opt-out.
+Every action takes `ORG` (any former login resolves, see below), `--registry`, `--meta-dir`, `--decisions`, `--approved`, `--approved-yaml`, `--actions`, `--allow-t3` and `--jobs FILE` (append the writer jobs as JSON lines). The global `--allow-t3` (before the command) is equivalent. Either needs a valid sign-off record by default (`<estate root>/decisions/t3-signoffs.yaml` or `--t3-signoff-file`; `t3-signoff:no-file|missing|invalid|expired|scope` otherwise, see [t3-signoff.md](t3-signoff.md)); there is no opt-out.
 
 | Action | Reads | Emits | Writes |
 |---|---|---|---|
