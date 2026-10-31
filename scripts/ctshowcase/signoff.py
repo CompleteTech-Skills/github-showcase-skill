@@ -5,8 +5,9 @@ owner (and the repository when the record is scoped). The record file is the pri
 `<estate_root>/decisions/t3-signoffs.yaml` (default_record_path(); estate_root is resolver.estate_root()). An explicit
 `--t3-signoff-file PATH` (env SHOWCASE_T3_SIGNOFF_FILE) overrides it. The order is: the explicit flag, then the env,
 then the default. The tool never creates the file and never falls back to trusting the flag when it is absent.
-There is no opt-out: no flag or environment variable turns enforcement off, and `--require-t3-signoff` is only an
-accepted no-op. The file is read, never copied.
+There is no opt-out: no flag or environment variable turns enforcement off. The file is read, never copied.
+A writer job carries the granting record as `signoff_id` (and `signoff_ids` when several records authorized it).
+`approval_id` is never set from a sign-off: it names the decisions/APPROVED_ACTIONS.yaml row.
 Format (the contract is references/t3-signoff.schema.json, described in references/t3-signoff.md)::
 
     signoffs:
@@ -20,11 +21,11 @@ Format (the contract is references/t3-signoff.schema.json, described in referenc
         note: "optional free text"
 
 Refusals are exit 2 with log `t3-signoff:no-file` (no record file at the resolved path, or no estate root to resolve one; the log names the path), `t3-signoff:missing` (no approved record
-for the owner), `t3-signoff:invalid` (the owner's records all break the schema, or a malformed record would have covered the
+for the owner), `t3-signoff:invalid` (the owner's records all break the schema, or a malformed record or withdrawal could cover the
 repository; the error names the first problem),
 `t3-signoff:expired` (every matching record is past `expires`) or `t3-signoff:scope` (the owner has records but none
 covers the repository; an owner-wide command with no repository needs a `*` record), or `t3-signoff:revoked` (a
-later or same-day `approved: false` record withdraws every covering grant). Excluded and HOLD owners are
+later or same-day `approved: false` record withdraws every grant covering the repository). Excluded and HOLD owners are
 refused before this runs.
 """
 from __future__ import annotations
@@ -294,12 +295,16 @@ def _scope_key(entry: str, logins: list[str] | None) -> str:
     return e
 
 
-def _withdrawn(grant: dict, withdrawals: list[dict], logins: list[str] | None = None) -> bool:
+def _withdrawn(grant: dict, withdrawals: list[dict], logins: list[str] | None = None,
+               repo: str | None = None) -> bool:
     """True when an approved:false record (a withdrawal) vetoes GRANT: its approved_on is on or after the grant's
-    approved_on (same day counts), its owner is one of LOGINS (when given), and its repos cover everything the grant
-    covers (`*`, or every scope of the grant appears among its own). Scopes are compared owner- and alias-aware: a bare
+    approved_on (same day counts), and its owner is one of LOGINS (when given). A malformed `repos` never withdraws.
+    With REPO (non-empty) the veto is per repository: a withdrawal vetoes the grant when the grant covers REPO and the
+    withdrawal covers REPO (_covers), whether or not it covers the grant's whole scope. So a grant of [a, b] or `*`
+    withdrawn for [a] is refused for a and still grants b. Without REPO the whole-grant rule applies: the withdrawal
+    has `*`, or every scope of the grant appears among its own. Scopes are compared owner- and alias-aware: a bare
     name equals OWNER/NAME when OWNER is one of the owner's own LOGINS, so the two forms revoke each other, and another
-    account's OWNER/NAME stays distinct. A malformed `repos` never withdraws."""
+    account's OWNER/NAME stays distinct."""
     g_on = _parse_when(grant.get("approved_on"))
     g_repos = _repo_list(grant.get("repos"))
     if g_on is None or g_repos is None or isinstance(g_on, _dt.datetime):
@@ -313,6 +318,10 @@ def _withdrawn(grant: dict, withdrawals: list[dict], logins: list[str] | None = 
         f_repos = _repo_list(f.get("repos"))
         if f_on is None or f_repos is None or isinstance(f_on, _dt.datetime) or f_on < g_on:
             continue
+        if repo:
+            if _covers(grant, repo, logins) and _covers(f, repo, logins):
+                return True
+            continue
         f_keys = {_scope_key(x, logins) for x in f_repos}
         if "*" in f_keys:
             return True
@@ -321,10 +330,29 @@ def _withdrawn(grant: dict, withdrawals: list[dict], logins: list[str] | None = 
     return False
 
 
+def _malformed_withdrawal(ours: list[dict], repo: str | None, logins: list[str], today: _dt.date) -> str | None:
+    """The refusal for a malformed withdrawal (approved: false, failing problems()) that could withdraw a grant for REPO,
+    else None. Possibly relevant: its `repos` is malformed, its approved_on is not a date (none, or a timestamp), REPO
+    is empty, or it covers REPO. A malformed withdrawal clearly for another named repository does not block."""
+    for r in ours:
+        if r.get("approved") is not False:
+            continue
+        probs = problems(r, today)
+        if not probs:
+            continue
+        on = _parse_when(r.get("approved_on"))
+        if _repos_malformed(r) or on is None or isinstance(on, _dt.datetime) or not repo or _covers(r, repo, logins):
+            return f"invalid:{str(r.get('id') or '?')}: {probs[0]}"
+    return None
+
+
 def evaluate(owners: list[str], repo: str | None = None, today: _dt.date | None = None,
              records: list[dict] | None = None, now: _dt.datetime | None = None) -> tuple[dict | None, str | None]:
-    """(record, None) when signed off, else (None, 'no-file' | 'missing' | 'invalid:<problem>' | 'expired' | 'scope' |
-    'revoked'). 'revoked' means every otherwise-grantable record was vetoed by a withdrawal (see _withdrawn).
+    """(record, None) when signed off, else (None, 'no-file' | 'missing' | 'invalid:<id>: <problem>' | 'expired' | 'scope' |
+    'revoked'). The veto is per requested REPO: 'revoked' means every otherwise-grantable record was vetoed for that
+    repository by a withdrawal (see _withdrawn). Fail closed: when a malformed withdrawal (approved: false, failing
+    problems()) could cover REPO, no record is returned and the result is 'invalid:<id>: <problem>'. A malformed
+    withdrawal clearly for another repository does not block. Only owners in the logins are considered.
     `today` (a date) is kept for callers that only care about date expiries; `now` is an aware instant."""
     if now is None:
         now = _dt.datetime.now(_dt.timezone.utc)
@@ -350,7 +378,7 @@ def evaluate(owners: list[str], repo: str | None = None, today: _dt.date | None 
     withdrawals = [r for r in valid if r.get("approved") is False]
     mine = [r for r in valid if r.get("approved") is True]
     had_grants = bool(mine)
-    revoked = [g for g in mine if _withdrawn(g, withdrawals, sorted(logins))]
+    revoked = [g for g in mine if _withdrawn(g, withdrawals, sorted(logins), repo)]
     mine = [g for g in mine if g not in revoked]
     if had_grants and not mine:
         return None, "revoked"
@@ -376,6 +404,9 @@ def evaluate(owners: list[str], repo: str | None = None, today: _dt.date | None 
     live = [r for r in scoped if _live(r, now)]
     if not live:
         return None, "expired"
+    unsafe = _malformed_withdrawal(ours, repo, sorted(logins), today)
+    if unsafe:  # a malformed withdrawal that could cover the repository never lets the grant through
+        return None, unsafe
     return live[0], None
 
 
@@ -431,11 +462,15 @@ def require(owner: str, repo: str | None = None, aliases: list[str] | None = Non
 
 
 def record_for(owner: str, repo: str | None = None) -> dict | None:
+    """The granted record covering OWNER (and REPO) that no withdrawal in the record file vetoes for REPO, else None.
+    The same per-repository veto as evaluate() applies (a withdrawal that names REPO after the grant still refuses the
+    stamp), so the file's withdrawals are read here, only when this run holds a grant."""
     logins = _expand([owner or ""])  # a grant cached under a former login still applies once the alias is registered
     granted = _granted()
+    withdrawals = [r for r in load_records() if r.get("approved") is False] if granted else []
     for login in dict.fromkeys([(owner or "").lower(), *logins]):
         for rec in granted.get(login, ()):
-            if _covers(rec, repo, logins):
+            if _covers(rec, repo, logins) and not _withdrawn(rec, withdrawals, logins, repo):
                 return rec
     return None
 
@@ -443,9 +478,11 @@ def record_for(owner: str, repo: str | None = None) -> dict | None:
 def stamp(items, owner: str | None = None):
     """Carry the granting sign-off onto this run's output:
 
-    - writer jobs (dicts with `phase`) for a signed-off T3 owner get `signoff_id`, and `approval_id` when none is set;
-    - change records (records.record(): dicts with `std`, `owner` and `repo`, no `phase`) get `signoff_id` only, since
-      they are not writer jobs and carry no approval_id.
+    - writer jobs (dicts with `phase`) for a signed-off T3 owner get `signoff_id`;
+    - change records (records.record(): dicts with `std`, `owner` and `repo`, no `phase`) get `signoff_id` too.
+
+    Jobs carry `signoff_id` (and `signoff_ids` via stamp_associations). `approval_id` is left untouched on every item,
+    because it names the decisions/APPROVED_ACTIONS.yaml row, not a sign-off.
 
     `owner` names the gated owner explicitly when a job's target is another account (the star-List jobs of a T3 org's
     `org pins` run as the personal account, org.star_list_plan); without it the owner is read from the item. An item
@@ -465,10 +502,9 @@ def stamp(items, owner: str | None = None):
 
 
 def _put(j: dict, rec: dict | None) -> None:
+    """Set `signoff_id` (only) on J from REC. approval_id is never set here (it names an APPROVED_ACTIONS.yaml row)."""
     if rec is not None and rec.get("id"):
         j["signoff_id"] = str(rec["id"])
-        if "phase" in j:
-            j.setdefault("approval_id", str(rec["id"]))
 
 
 def stamp_associations(item: dict, association_ids, owner: str | None = None, repo: str | None = None) -> dict:
@@ -476,8 +512,8 @@ def stamp_associations(item: dict, association_ids, owner: str | None = None, re
     grant first (when OWNER/REPO is a signed-off T3 target), then each id in ASSOCIATION_IDS (a T3 org that ITEM
     brings in without targeting it: topics.merge `signoff_ids` for an `also_in` membership topic, project.estate_plan
     for a T3 org in the personal Estate's Org field). `signoff_id` is the first id and `signoff_ids` lists all of them
-    only when there is more than one. A writer job also gets `approval_id` = the first id unless it already has one
-    (an existing approval_id is never replaced). No-op when there are no association ids.
+    only when there is more than one. Jobs carry only these sign-off ids: approval_id is never read or set here, since
+    it names the decisions/APPROVED_ACTIONS.yaml row. No-op when there are no association ids.
     Shared by showcase.cmd_topics, intake.adopt and project.estate_plan
     (tests/test_t3_signoff_require.py::test_adopt_topics_job_carries_the_also_in_signoff,
     ::test_estate_plan_jobs_carry_the_t3_orgs_signoff)."""
@@ -488,8 +524,6 @@ def stamp_associations(item: dict, association_ids, owner: str | None = None, re
     item["signoff_id"] = ids[0]
     if len(ids) > 1:
         item["signoff_ids"] = ids
-    if "phase" in item:
-        item.setdefault("approval_id", ids[0])
     return item
 
 
