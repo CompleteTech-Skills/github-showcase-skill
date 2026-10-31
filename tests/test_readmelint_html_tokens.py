@@ -118,3 +118,62 @@ def test_even_backslash_run_before_backtick_is_real_code(make_ctx, tmp_path):
     usage = r"\\`![Screenshot](<docs/images/missing.png>)`"
     result = lint_reference(make_ctx, tmp_path, usage, "")
     assert "R7 local image does not resolve: docs/images/missing.png" not in result["fails"]
+
+
+MISSING = "![Shot](docs/images/missing.png)"
+
+
+@pytest.mark.parametrize("count", range(8))
+def test_backslash_parity_before_backtick_controls_code_masking(count):
+    document = "\\" * count + "`![Shot](<docs/images/missing.png>)`"
+    expected = [("Shot", "docs/images/missing.png")] if count % 2 else []
+    assert images(document) == expected
+
+
+def test_escaped_backtick_then_real_span_masks_image():
+    assert images("\\``" + MISSING + "` y") == []
+    assert images("\\``code` " + MISSING) == [("Shot", "docs/images/missing.png")]
+
+
+@pytest.mark.parametrize("count", range(8))
+def test_backslash_parity_before_html_comment_opener(count):
+    document = "\\" * count + "<!-- " + MISSING + " -->"
+    expected = [("Shot", "docs/images/missing.png")] if count % 2 else []
+    assert images(document) == expected
+
+
+@pytest.mark.parametrize("count", range(8))
+def test_backslash_parity_before_html_img_open_tag(count):
+    document = "\\" * count + '<img src="docs/images/missing.png" alt="Shot">'
+    found = images(document)
+    # An escaped "<" is literal text, so odd runs render no HTML image.
+    assert found == ([] if count % 2 else [("Shot", "docs/images/missing.png")])
+
+
+def test_reference_definition_title_is_not_rendered_markdown():
+    document = ('[unused]: https://example.test/page "![Ghost][ghost]"\n'
+                "[ghost]: docs/images/missing.png\n")
+    assert images(document) == []
+    with_real = document + "\n![Real][ghost]\n"
+    assert images(with_real) == [("Real", "docs/images/missing.png")]
+
+
+def test_html_img_inside_reference_definition_title_is_not_an_image():
+    document = '[unused]: https://example.test/page "<img src=\'docs/images/missing.png\' alt=\'Ghost\'>"\n'
+    assert images(document) == []
+
+
+def test_http_shields_badges_count_and_pass_r7(make_ctx, tmp_path):
+    usage = ("![Type](http://img.shields.io/badge/type-GitHub%20profile-005ADD)\n"
+             "![License](http://img.shields.io/badge/license-MIT-64748B)")
+    result = lint_reference(make_ctx, tmp_path, usage, "")
+    assert not any("badge" in failure for failure in result["fails"]), result
+    assert images(usage) == [
+        ("Type", "http://img.shields.io/badge/type-GitHub%20profile-005ADD"),
+        ("License", "http://img.shields.io/badge/license-MIT-64748B"),
+    ]
+
+
+def test_off_palette_http_badge_still_fails(make_ctx, tmp_path):
+    result = lint_reference(make_ctx, tmp_path, "![Type](http://img.shields.io/badge/type-x-FF0000)", "")
+    assert "R7 off-palette badge colour FF0000" in result["fails"]
