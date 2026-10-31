@@ -73,7 +73,7 @@ Each label and message segment doubles `-` and `_` (shields.io's escapes) and is
 | Positive | `067647` | `dependencies-none-067647`, `network-offline-067647` |
 | Neutral | `64748B` | license |
 
-T2 uses these tokens, except jevplay-games (brand `E551BA`, accent `F386A1`, neutral `1E1E1E`, `labelColor=1E1E1E`). AI-Ascension keeps its badges unchanged. Never off-palette colours. Profile READMEs render badges offline (`--badges local`); repository READMEs use shields.io.
+These are CompleteTech's tokens. Every other family replaces Brand blue and Accent with its own `badge_brand` and `badge_accent` from `references/brand.yaml` (contrast-checked, at least 4.5:1 with the white badge text), so no T2 README carries `005ADD` or `1E3A8A`; jevplay-games also sets `labelColor=1E1E1E`. AI-Ascension keeps its badges unchanged. Never off-palette colours. Profile READMEs render badges offline (`--badges local`); repository READMEs use shields.io.
 
 ## Shared rules (MUST)
 
@@ -246,7 +246,7 @@ Never modify, rename or delete an existing LICENSE, NOTICE or COPYING file.
 <!-- showcase:footer:end -->
 ```
 
-The 10 lines between the markers are byte-exact; `footer --check` reports `fail:missing`, `fail:not-last`, `fail:drift` or `fail:duplicate` (an old footer-like block, centred with "Built by" and complete.tech outside code, kept before the decision 18 footer), and `footer --check README.md --online` also sends a read-only HEAD to both raw logo URLs and fails (`fail:offline`) unless both return 200 (the Phase 4.0 hard gate before any README PR links them). It comes after the License section. Scope: every in-scope README, T2 families included. Exceptions: watching-org forks (`exempt`; the watching org's `.github` gets the footer, and its other non-fork repositories are held, `hold:watching-non-fork`, until decided) and T3 until sign-off (refused). TouchedByAnAgent is included (decision 18); an org whose `footer` is set to `hold` in `brand.yaml` logs `hold`. Forks outside the watching org (G), archived repositories (H) and `.github` repositories (J) get the footer too. It is the only `<picture>` the skill emits.
+The 10 lines between the markers are byte-exact; `footer --check` reports `fail:missing`, `fail:not-last`, `fail:drift` or `fail:duplicate` (an old footer-like block, centred with "Built by" and complete.tech outside code, kept before the decision 18 footer), and `footer --check README.md --online` also sends a read-only HEAD to both raw logo URLs and fails (`fail:offline`) unless both return 200 (the Phase 4.0 hard gate before any README PR links them). It comes after the License section. Scope: every in-scope README, T2 families included. Exceptions: watching-org forks (`exempt`; the watching org's `.github` gets the footer, and its other non-fork repositories are held, `hold:watching-non-fork`, until decided) and T3 until sign-off (refused). TouchedByAnAgent is included (decision 18); an org whose `footer` is set to `hold` in `brand.yaml` logs `hold`. Forks outside the watching org (G), archived repositories (H) and `.github` repositories (J) get the footer too. It is the only `<picture>` the skill emits. With `--meta FILE`, `footer --check` takes the owner from the metadata and answers like `--org`.
 
 ## What `readme` does
 

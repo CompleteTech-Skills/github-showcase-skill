@@ -117,6 +117,8 @@
  },
  "families": {
   "ai-ascension": {
+   "badge_accent": "2A241C",
+   "badge_brand": "8A591C",
    "banner": "keep-existing",
    "canvas": {
     "color": "#15120E",
@@ -172,6 +174,8 @@
    "measured": true
   },
   "jev-engineering": {
+   "badge_accent": "010104",
+   "badge_brand": "0C075C",
    "canvas": {
     "color": "#010104",
     "grid": "#22D3EE",
@@ -213,6 +217,8 @@
    }
   },
   "jevplay-games": {
+   "badge_accent": "3A1A33",
+   "badge_brand": "6B214F",
    "canvas": {
     "color": "#1E1E1E",
     "dot": "#E551BA",
@@ -269,6 +275,8 @@
    }
   },
   "libreevolve": {
+   "badge_accent": "032530",
+   "badge_brand": "065F46",
    "canvas": {
     "color": "#021527",
     "grid": "#10B981",
@@ -365,6 +373,8 @@
    }
   },
   "romgenie": {
+   "badge_accent": "002C31",
+   "badge_brand": "183B31",
    "canvas": {
     "color": "#002C31",
     "grid": "#F4C430",
@@ -405,6 +415,8 @@
    }
   },
   "touchedbyanagent": {
+   "badge_accent": "2F0132",
+   "badge_brand": "E11D74",
    "canvas": {
     "color": "#1D1116",
     "grid": "#F59E0B",
@@ -465,6 +477,9 @@
   "logo_dark_url": "https://raw.githubusercontent.com/CompleteTech-LLC/.github/main/brand/logo-dark.png",
   "logo_light_url": "https://raw.githubusercontent.com/CompleteTech-LLC/.github/main/brand/logo.png",
   "width": 200
+ },
+ "isolation": {
+  "unknown_org": "completetech"
  },
  "languages": {
   "Astro": "#FF5A03",

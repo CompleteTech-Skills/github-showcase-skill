@@ -338,15 +338,56 @@ def cmd_intro(args):
             "logs": logs}, OK
 
 
+def _readme_checkout(readme: str) -> Path | None:
+    """Top level of the git checkout that holds `readme` (a local `git rev-parse`, no network), else None."""
+    import subprocess
+    d = Path(readme).resolve().parent
+    while not d.is_dir() and d != d.parent:
+        d = d.parent
+    try:
+        top = subprocess.run(["git", "-C", str(d), "rev-parse", "--show-toplevel"], capture_output=True, text=True,
+                             timeout=10).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return Path(top) if top else None
+
+
+def _footer_owner_source(args) -> tuple[dict | None, Path | None]:
+    """(metadata, checkout) that names the owner for `footer --check` without `--org` (issue 44).
+    `--meta FILE`: the metadata; with an explicit `--repo-dir DIR` also that checkout, merged exactly as `doctor` merges
+    the same two arguments (meta.merged, RepoContext reading the checkout's `.github/showcase.yml` with its `for`
+    scoping), so the two verdicts agree; without `--repo-dir` the metadata alone (unchanged behaviour).
+    Otherwise, unless `--no-repo-dir`: `--repo-dir DIR`, else the checkout that holds the README being checked (not the
+    current directory: a README of another checkout must not take the cwd owner's exemption), owner and repo from its
+    origin (a local `git remote get-url`, no network). (None, None) when nothing names an owner: the README is checked
+    as before."""
+    from ctshowcase.meta import from_repo_dir, load_file, merged, normalize
+    if args.meta:
+        if args.no_repo_dir or args.repo_dir is None:
+            return load_file(args.meta), None
+        rd = repo_dir(args)  # the slug check doctor applies (review A4): a checkout of another repository refuses
+        return merged(args.meta, str(rd)), rd
+    if args.no_repo_dir:
+        return None, None
+    rd = repo_dir(args) if args.repo_dir is not None else _readme_checkout(args.check)
+    if rd is None:
+        return None, None
+    m = from_repo_dir(rd)
+    if not m.get("owner"):
+        return None, None
+    return normalize(m), rd
+
+
 def cmd_footer(args):
     from ctshowcase import footer
     b = brand(args)
     # the watching org's exemption covers only its forks, which `--org` cannot tell from its `.github` (which gets the
-    # footer): `--check` reads the README there instead of answering `exempt` (fail closed)
+    # footer): `--check` reads the README there instead of answering `exempt` (fail closed). With `--check --meta FILE`
+    # the owner comes from the metadata instead (the branch below), so the same answers hold without `--org`.
     if args.org and not (args.check and b.owner_status(args.org) == "watching"):
         status = b.owner_status(args.org)
         if status in ("excluded", "hold", "t3"):
-            b.check_owner(args.org)
+            b.check_owner(args.org, identity=False)  # the decision 18 footer is CompleteTech's own, never a family's
         if status == "watching":
             return {"command": "footer", "owner": args.org, "result": "exempt", "logs": ["exempt"]}, OK
         fv = b.org(args.org).get("footer", True)
@@ -354,6 +395,32 @@ def cmd_footer(args):
             return {"command": "footer", "owner": args.org, "result": "hold", "logs": ["hold"]}, OK
         if fv is False:
             return {"command": "footer", "owner": args.org, "result": "exempt", "logs": ["exempt:footer"]}, OK
+    fm, frd = _footer_owner_source(args) if not args.org and args.check else (None, None)
+    if fm is not None:
+        # the owner's `footer` setting from the metadata (no checkout, cwd or network read), or, without --meta, from
+        # the checkout's origin as `doctor` reads it (issue 44), answered as `--org` would
+        from ctshowcase.context import RepoContext
+        m = fm
+        owner = m.get("owner")
+        if owner and owner != "unknown":
+            b.check_owner(owner, identity=False)  # raises Refused (exit 2) for excluded, hold and unsigned T3 owners
+            if b.owner_status(owner) == "watching":
+                # only the watching org's verdict depends on the repository (fork, `.github`): ask the context
+                # a fork (GitHub's flag or a `-fork` slug, detect.is_fork rule 1) is exempt from metadata alone, before
+                # any captured rendering config is parsed; only the rest needs the context
+                from ctshowcase.detect import is_fork
+                # `--type` is part of the verdict (RepoContext honours it), so the shortcut applies only without it
+                tov = getattr(args, "type_override", None)
+                why = ("exempt:watching-fork" if not tov and is_fork(m)
+                       else RepoContext(b, m, frd, type_override=tov).footer_status())
+            else:
+                # no RepoContext: building one parses the captured rendering config, which this check must not
+                # depend on (a malformed `.github/showcase.yml` in the metadata is not a footer verdict)
+                fv = b.org(owner).get("footer", True)
+                why = None if fv is True else ("hold" if fv == "hold" else "exempt:footer")
+            if why:  # the footer does not apply
+                res = "hold" if why.startswith("hold") else "exempt"
+                return {"command": "footer", "owner": owner, "result": res, "logs": [why]}, OK
     if args.online and not args.check:
         raise ShowcaseError("--online goes with --check README.md", log="usage")
     if args.check:
@@ -595,7 +662,7 @@ def cmd_meta(args):
         status = brand(args, prefer_lock=True).owner_status(owner)
         if status in ("excluded", "hold", "t3"):
             # raises Refused (exit 2); --allow-t3 only after an approved t3-metadata or t3-signoff row
-            brand(args, prefer_lock=True).check_owner(owner, allow_t3=args.allow_t3)
+            brand(args, prefer_lock=True).check_owner(owner, allow_t3=args.allow_t3, identity=False)
         m = M.from_gh(args.from_gh)
     else:
         rd = repo_dir(args)
@@ -842,7 +909,7 @@ def cmd_doctor(args):
                                    template_dir=args.template_dir, checkouts=args.checkouts, out=args.out)
         return res, OK
     ctx = context(args)
-    ctx.brand.check_owner(ctx.owner, allow_t3=True)
+    ctx.brand.check_owner(ctx.owner, allow_t3=True, identity=False)  # doctor reports; it renders nothing (issue 40)
     r = doctor.row(ctx)
     fmt = args.doctor_format
     if fmt == "tsv":

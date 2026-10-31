@@ -384,6 +384,19 @@ def _license_paragraphs(body: str) -> list[tuple[str, bool]]:
     return out
 
 
+# A line that starts a new Markdown block and so ends a paragraph without a blank line (CommonMark interruptions):
+# ATX heading, fence, block quote, list item, thematic break, HTML (including the next `<!-- showcase:` marker).
+BLOCK_START = re.compile(r"^ {0,3}(?:#{1,6}(?:[ \t]|$)|`{3,}|~{3,}|>|[-*+][ \t]|\d{1,9}[.)][ \t]|(?:[-*_][ \t]*){3,}$|<)")
+
+
+def _paragraph_len(lines: list[str]) -> int:
+    """How many leading `lines` belong to one generated paragraph: up to a blank line or a block-starting line."""
+    for n, ln in enumerate(lines):
+        if not ln.strip() or BLOCK_START.match(ln):
+            return n
+    return len(lines)
+
+
 def split_generated_license(body: str, unmarked_private: bool = True) -> tuple[list[str], str]:
     """Split a License section body into (lines this tool generated, authored remainder). Generated: the one paragraph
     after a `showcase:license` mark (the mark goes too), and any paragraph that is exactly a row the tool wrote (private
@@ -405,12 +418,22 @@ def split_generated_license(body: str, unmarked_private: bool = True) -> tuple[l
             after_mark = True
             continue
         marked = p.startswith(LICENSE_MARK + "\n")
-        if marked or after_mark or (unmarked_private and GENERATED_PRIVATE.fullmatch(p)) or any(x.fullmatch(p) for x in pubs):
+        if marked or after_mark:
+            # the generated row ends at the first Markdown block boundary (a heading, list, quote, fence, HTML or
+            # thematic break line): `### Additional terms` written right under the row, with no blank line, is
+            # authored and stays verbatim (epic 35 review)
+            lines = p.split("\n")[1:] if marked else p.split("\n")
+            cut = _paragraph_len(lines)
             if marked:
                 gen.append(LICENSE_MARK)
-                p = p[len(LICENSE_MARK):].strip()
-            gen += [ln for ln in p.splitlines() if ln.strip()]
+            gen += [ln.strip() for ln in lines[:cut] if ln.strip()]
+            tail = "\n".join(lines[cut:])
+            if tail.strip():
+                keep.append(tail)
             after_mark = False
+            continue
+        if (unmarked_private and GENERATED_PRIVATE.fullmatch(p)) or any(x.fullmatch(p) for x in pubs):
+            gen += [ln for ln in p.splitlines() if ln.strip()]
             continue
         keep.append(raw)
     return gen, "\n\n".join(keep)
@@ -447,12 +470,17 @@ def gate_managed_license(ctx: RepoContext, text: str, removed: list[str]) -> str
     """Upgrade of a README that already has a managed `showcase:license` section: without org `license_wording` the
     rights sentence is replaced by the factual line (public) or the section is dropped (private). Orgs with wording
     are untouched. Lines that go are recorded in `removed` as intentional (issue 36)."""
-    if (ctx.org.get("license_wording") or "").strip() or _mark_index(text) < 0:
+    i = -1 if (ctx.org.get("license_wording") or "").strip() else _mark_index(text)
+    if i < 0:
         return text
     new = license_block(ctx, text)
     if new != text:
+        # only lines of the managed span (heading, mark, the paragraph after it) are recorded as intentional; any
+        # other line that went missing stays unrecorded, so `preservation()` reports it instead of accepting it
+        start, end, _ = _managed_license_span(text, i)
+        managed = set(text[start:end].splitlines())
         gone = set(new.splitlines())
-        removed += [ln for ln in text.splitlines() if ln.strip() and ln not in gone]
+        removed += [ln for ln in text.splitlines() if ln.strip() and ln not in gone and ln in managed]
         ctx.log("needs-input:license-wording")
     return new
 
@@ -991,13 +1019,58 @@ LICENSE_MARK = "<!-- showcase:license -->"
 
 
 def _mark_index(text: str) -> int:
-    """Offset of the first `showcase:license` mark outside fenced, inline and indented code, or -1."""
+    """Offset of the first managed `showcase:license` mark, or -1. Managed means outside fenced and inline code AND at
+    the start of its line (at most three spaces, no tab), as the generator writes it. A mark after other text on its
+    line, or on a line indented four columns or more (indented code, `    prefix <!-- showcase:license -->`), is an
+    authored example and is never rewritten: the same rule `_license_paragraphs` uses to keep indented code."""
     m = masked(text)
     for hit in re.finditer(re.escape(LICENSE_MARK), m):
         lead = m[m.rfind("\n", 0, hit.start()) + 1:hit.start()]
-        if lead.strip() or (len(lead) < 4 and "\t" not in lead):
+        if not lead.strip() and len(lead) < 4 and "\t" not in lead:
             return hit.start()
     return -1
+
+
+LICENSE_H2_BEFORE_MARK = re.compile(r"(?m)^## (?:License|Licensing|Licence)[ \t]*\n\n?\Z")
+# The License section ends at the next H1/H2 or showcase block. An H3-H6 (`### Additional terms`) is content of the
+# section and keeps its `## License` heading (epic 35 review 3), as upgrade (split_generated_license) keeps it.
+SECTION_STOP = re.compile(r"(?m)^(?: {0,3}#{1,2}[ \t]|" + re.escape("<!-- showcase:") + ")")
+
+
+def _managed_license_span(text: str, i: int) -> tuple[int, int, int | None]:
+    """(start, end, heading start or None) of the managed License text at mark offset `i`: the H2 right above the
+    mark (when there is one), the mark and the one paragraph after it. Nothing outside this span is generated."""
+    para = _managed_paragraph(text, i)
+    head = LICENSE_H2_BEFORE_MARK.search(text[:i])
+    return (head.start() if head else i), (para[2] if para else i), (head.start() if head else None)
+
+
+def _managed_paragraph(text: str, i: int) -> tuple[int, str, int] | None:
+    """For the mark at offset `i`: (end of the generated paragraph, the separator after it, end of the separator), or
+    None when the mark is not followed by a newline. The paragraph ends at a blank line, at the end of the text or at a
+    Markdown block boundary (`BLOCK_START`), so a heading or list written right under the row is never part of it."""
+    if not text.startswith(LICENSE_MARK + "\n", i):
+        return None
+    nl = i + len(LICENSE_MARK)
+    lines = text[nl + 1:].split("\n")
+    # blank lines between the mark and its row belong to the row, as split_generated_license reads a lone mark
+    # paragraph (epic 35 review 3): a mark, a blank line and the old rights sentence are still one managed row.
+    # Indented code after the gap is an authored example (as in _license_paragraphs) and is never generated.
+    k = 0
+    while k < len(lines) - 1 and not lines[k].strip():
+        k += 1
+    rest = _paragraph_len(lines[k:])
+    n = k + rest if rest and not (k and lines[k].startswith(("    ", "\t"))) else 0
+    body_end = nl + sum(len(ln) + 1 for ln in lines[:n])  # the newline that ends the last generated line (or the mark)
+    body_end = min(body_end, len(text))
+    sep = "\n\n" if text.startswith("\n\n", body_end) else ("\n" if text.startswith("\n", body_end) else "")
+    return body_end, sep, body_end + len(sep)
+
+
+def _authored_section_rest(text: str, pos: int) -> str:
+    """The License section's text after `pos` up to the next heading or showcase block (outside code)."""
+    hit = SECTION_STOP.search(masked(text), pos)
+    return text[pos:hit.start() if hit else len(text)]
 
 
 def license_block(ctx: RepoContext, text: str) -> str:
@@ -1008,15 +1081,19 @@ def license_block(ctx: RepoContext, text: str) -> str:
     if i < 0:
         return text
     lic = license_section(ctx)
-    if not lic and license_omitted(ctx):  # intentional omission: drop the managed heading and paragraph
-        m = re.compile(re.escape(LICENSE_MARK) + r"\n.*?(?:\n\n|\n?$)", re.S).match(text, i)
-        head = re.search(r"(?m)^## (?:License|Licensing|Licence)[ \t]*\n\n?\Z", text[:i])
-        return text[:head.start() if head else i] + text[m.end() if m else i:]
+    if not lic and license_omitted(ctx):  # intentional omission: drop the managed paragraph
+        _, end, head = _managed_license_span(text, i)
+        if head is not None and _authored_section_rest(text, end).strip():
+            # authored legal text follows the managed paragraph: it keeps its own `## License` heading, as upgrade
+            # does, instead of sliding under the previous section (header refresh and bootstrap share this path)
+            head = None
+        return text[:head if head is not None else i] + text[end:]
     if not lic:
         return text
-    m = re.compile(re.escape(LICENSE_MARK) + r"\n(.*?)(\n\n|\n?$)", re.S).match(text, i)
-    if m:
-        text = text[:i] + LICENSE_MARK + "\n" + lic[1] + m.group(2) + text[m.end():]
+    para = _managed_paragraph(text, i)  # ends at a blank line or a block boundary (epic 35 review)
+    if para:
+        sep = para[1] or ("\n" if para[2] < len(text) else "")
+        text = text[:i] + LICENSE_MARK + "\n" + lic[1] + sep + text[para[2]:]
     h = re.search(r"(?m)^## (?:License|Licensing|Licence)[ \t]*\n(\n?)\Z", text[:i])
     return text[:h.start()] + f"## {lic[0]}\n" + h.group(1) + text[i:] if h else text
 

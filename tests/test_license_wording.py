@@ -336,3 +336,154 @@ def test_preserve_mode_gates_unmarked_generated_license_row(make_ctx, tmp_path):
     # an unmarked private "Proprietary..." paragraph cannot be told from an owner's notice: kept and flagged, never deleted
     assert "All rights reserved" in out and "needs-input:license-wording" in ctx.logs
     assert "Run it. xxx" in out
+
+
+# --- epic 35 review: indented-code marks are authored, and the License heading stays over authored legal text ---
+def test_upgrade_keeps_prefixed_marker_inside_indented_code(make_ctx, tmp_path):
+    # `    prefix <!-- showcase:license -->` is indented code: on the epic base upgrade deleted the example line and
+    # joined the next paragraph onto `prefix`, and recorded every lost line as intentional (preservation() == [])
+    ctx = _libre(make_ctx, tmp_path)
+    body = "Example:\n\n    prefix <!-- showcase:license -->\n    example line\n\nAuthored terms stay."
+    text = _readme_with_license(body)
+    out, removed = readme.upgrade(ctx, text)
+    assert body in out
+    assert not any("example line" in r or "Authored terms" in r or "showcase:license" in r for r in removed)
+    assert readme.preservation(text, out, removed) == []
+
+
+def test_upgrade_cli_keeps_prefixed_marker_inside_indented_code(tmp_path):
+    import json
+    from conftest import meta_dict, run_cli
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    body = "Example:\n\n    prefix <!-- showcase:license -->\n    example line\n\nAuthored terms stay."
+    (repo / "README.md").write_text(_readme_with_license(body), encoding="utf-8")
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict(owner="LibreEvolve", repo="thing", license=None, visibility="private",
+                                         created_at="2025-01-01T00:00:00Z", description="A thing.")), encoding="utf-8")
+    p = run_cli("--meta", meta, "--repo-dir", repo, "readme", "--mode", "upgrade", "--write")
+    after = (repo / "README.md").read_text(encoding="utf-8")
+    assert body in after, p.stdout + p.stderr
+
+
+def test_managed_removal_records_only_the_managed_span(make_ctx, tmp_path):
+    ctx = _libre(make_ctx, tmp_path)
+    text = ("# thing\n\n## License\n\n<!-- showcase:license -->\nProprietary. Copyright (c) 2025 X. All rights reserved."
+            "\n\nInternal use only.\n")
+    removed = []
+    out = readme.gate_managed_license(ctx, text, removed)
+    assert "Internal use only." in out
+    assert set(removed) <= {"<!-- showcase:license -->", "Proprietary. Copyright (c) 2025 X. All rights reserved.",
+                            "## License"}
+
+
+def test_header_refresh_keeps_license_heading_over_authored_paragraph(make_ctx, tmp_path):
+    # on the epic base header refresh dropped `## License`, leaving the authored terms under `## Usage`
+    ctx = _libre(make_ctx, tmp_path, description="A thing.")
+    text = _readme_with_license("<!-- showcase:license -->\nProprietary. Copyright (c) 2025 X. All rights reserved."
+                                "\n\nInternal use only.")
+    out = readme.header_only(ctx, text)
+    assert "All rights reserved" not in out
+    assert "## License\n\nInternal use only." in out
+    up, _ = readme.upgrade(_libre(make_ctx, tmp_path, description="A thing."), text)
+    assert "## License" in up and "Internal use only." in up  # upgrade agrees
+
+
+def test_header_refresh_still_drops_heading_when_nothing_authored_remains(make_ctx, tmp_path):
+    ctx = _libre(make_ctx, tmp_path, description="A thing.")
+    text = _readme_with_license("<!-- showcase:license -->\nProprietary. Copyright (c) 2025 X. All rights reserved.")
+    text += "\n## Next\n\nMore.\n"
+    out = readme.header_only(ctx, text)
+    assert "## License" not in out and "## Next\n\nMore." in out
+
+
+# --- epic 35 review round 2: the generated row ends at a Markdown block boundary, not only at a blank line ---
+# On the pre-fix HEAD `readme --mode upgrade --write` deleted `### Additional terms` and the attribution written right
+# under the managed row (no blank line) and recorded them as intentionally removed; the epic base kept both lines.
+TIGHT_TERMS = "### Additional terms\nPreserve this mandatory attribution."
+
+
+def test_upgrade_cli_keeps_subsection_right_under_managed_row(tmp_path):
+    import json
+    from conftest import meta_dict, run_cli
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "LICENSE").write_text("MIT", encoding="utf-8")
+    (repo / "README.md").write_text(
+        _readme_with_license("<!-- showcase:license -->\n" + FACTUAL_MIT + "\n" + TIGHT_TERMS), encoding="utf-8")
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict(owner="LibreEvolve", repo="thing", license="MIT", description="A thing.")),
+                    encoding="utf-8")
+    p = run_cli("--meta", meta, "--repo-dir", repo, "readme", "--mode", "upgrade", "--write")
+    after = (repo / "README.md").read_text(encoding="utf-8")
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert TIGHT_TERMS in after and FACTUAL_MIT in after, after
+
+
+def test_upgrade_keeps_subsection_under_generated_rights_row(make_ctx, tmp_path):
+    ctx = make_ctx(repo_dir=tmp_path, owner="LibreEvolve", repo="thing", license="MIT")
+    old = "<!-- showcase:license -->\n" + RV["t2_mit"].replace("<Brand>", "LibreEvolve") + "\n" + TIGHT_TERMS
+    text = _readme_with_license(old)
+    out, removed = readme.upgrade(ctx, text)
+    assert TIGHT_TERMS in out and "reserved" not in out
+    assert not any("attribution" in r or "Additional terms" in r for r in removed)
+    assert readme.preservation(text, out, removed) == []
+
+
+def test_private_omission_keeps_subsection_under_managed_row(make_ctx, tmp_path):
+    ctx = _libre(make_ctx, tmp_path, description="A thing.")
+    text = _readme_with_license("<!-- showcase:license -->\nProprietary. Copyright (c) 2025 X. All rights reserved.\n"
+                                + TIGHT_TERMS)
+    out = readme.header_only(ctx, text)  # license_block path (header refresh and bootstrap)
+    assert "All rights reserved" not in out and TIGHT_TERMS in out
+    up, removed = readme.upgrade(_libre(make_ctx, tmp_path, description="A thing."), text)
+    assert TIGHT_TERMS in up and "All rights reserved" not in up
+    assert readme.preservation(text, up, removed) == []
+
+
+def test_header_refresh_rewrite_keeps_subsection_under_managed_row(make_ctx, tmp_path):
+    ctx = make_ctx(repo_dir=tmp_path, owner="CompleteTech-LLC", repo="thing", license="MIT", description="A thing.")
+    text = _readme_with_license("<!-- showcase:license -->\n" + FACTUAL_MIT + "\n" + TIGHT_TERMS)
+    out = readme.header_only(ctx, text)
+    assert "<!-- showcase:license -->\n" + RV["t1_mit"] + "\n" + TIGHT_TERMS in out
+
+
+# --- epic 35 review round 3: a blank line after the mark, and H3-H6 inside the License section ---
+# On the round 2 HEAD a mark followed by a blank line and the old rights sentence left that sentence behind on header
+# refresh (public: the factual line was inserted above it; private: only the mark went), and `### Additional terms`
+# after the managed row made the section look empty, so header refresh dropped `## License` while upgrade kept it.
+OLD_T2 = RV["t2_mit"].replace("<Brand>", "LibreEvolve")
+PRIVATE_ROW = "Proprietary. Copyright (c) 2025 X. All rights reserved."
+
+
+def test_header_refresh_replaces_rights_row_after_a_blank_line(make_ctx, tmp_path):
+    ctx = make_ctx(repo_dir=tmp_path, owner="LibreEvolve", repo="thing", license="MIT", description="A thing.")
+    text = _readme_with_license("<!-- showcase:license -->\n\n" + OLD_T2)
+    assert OLD_T2 not in readme.split_generated_license("<!-- showcase:license -->\n\n" + OLD_T2)[1]  # upgrade's view
+    for out in (readme.header_only(ctx, text), readme.license_block(ctx, text)):  # header refresh; bootstrap's path
+        assert "## License\n\n<!-- showcase:license -->\n" + FACTUAL_MIT in out
+        assert "reserved" not in out and "CompleteTech" not in out and OLD_T2 not in out, out
+
+
+def test_private_refresh_removes_rights_row_after_a_blank_line(make_ctx, tmp_path):
+    ctx = _libre(make_ctx, tmp_path, description="A thing.")
+    text = _readme_with_license("<!-- showcase:license -->\n\n" + PRIVATE_ROW) + "\n## Next\n\nMore.\n"
+    out = readme.header_only(ctx, text)
+    assert "All rights reserved" not in out and "## License" not in out and "## Next\n\nMore." in out, out
+
+
+def test_blank_line_then_indented_code_after_mark_stays_authored(make_ctx, tmp_path):
+    ctx = _libre(make_ctx, tmp_path, description="A thing.")
+    code = "    Copyright (c) 2025 X. All rights reserved."
+    text = _readme_with_license("<!-- showcase:license -->\n\n" + code)
+    assert code in readme.header_only(ctx, text)
+
+
+def test_header_refresh_keeps_license_heading_over_nested_subsection(make_ctx, tmp_path):
+    ctx = _libre(make_ctx, tmp_path, description="A thing.")
+    text = _readme_with_license("<!-- showcase:license -->\n" + PRIVATE_ROW + "\n\n### Additional terms\n\nKeep this.")
+    out = readme.header_only(ctx, text)
+    assert "All rights reserved" not in out
+    assert "## License\n\n### Additional terms\n\nKeep this." in out, out
+    up, _ = readme.upgrade(_libre(make_ctx, tmp_path, description="A thing."), text)
+    assert "## License" in up and "### Additional terms" in up  # upgrade agrees

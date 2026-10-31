@@ -104,8 +104,9 @@ class Brand:
                     return status
         return None
 
-    def check_owner(self, owner: str, *, allow_t3: bool = False) -> str | None:
-        """Raise Refused for excluded/hold/T3 owners; return 'watching' or None."""
+    def check_owner(self, owner: str, *, allow_t3: bool = False, identity: bool = True) -> str | None:
+        """Raise Refused for excluded/hold/T3 owners; return 'watching' or None. With `identity` (generators and
+        planners) an owner without a brand identity of its own also refuses: see `require_identity`."""
         status = self.owner_status(owner)
         if status == "excluded":
             raise Refused(f"{owner} is an excluded owner; every command refuses", log="exempt")
@@ -113,7 +114,39 @@ class Brand:
             raise Refused(f"{owner} is on HOLD", log="hold")
         if status == "t3" and not (allow_t3 or t3_signed_off()):
             raise Refused(f"{owner} is T3; needs co-owner sign-off", log="t3-signoff")
+        if identity:
+            self.require_identity(owner)
         return status
+
+    def identity_gap(self, owner: str) -> str | None:
+        """Issue 40 (epic 35): why `owner` has no brand identity of its own, or None.
+        `org-family`: a known row filed under the `completetech` family whose display name is not a CompleteTech brand
+        and whose approved rights holder (`license_wording`, issue 36) is not the CompleteTech company either (that
+        holder marks CompleteTech's own rows: the user account, the synthetic demo owner). Rendering it would print
+        the CompleteTech eyebrow, palette and 005ADD badges on another org, so it fails loudly instead.
+        `org-row`: an owner with no row, only when brand.yaml `isolation.unknown_org` is `refuse` (default
+        `completetech` keeps the historical fallback and only logs needs-input:org-row: an unlisted owner is most
+        often a new CompleteTech org, and refusing it by default would change behaviour the issue did not ask for)."""
+        org = self.org(owner)
+        if not org.get("known"):
+            return "org-row" if (self.raw.get("isolation") or {}).get("unknown_org") == "refuse" else None
+        if org.get("family") != "completetech":
+            return None
+        if self.strings["short"].lower() in str(org.get("display_name") or "").lower():
+            return None
+        if str(org.get("license_wording") or "").strip() == self.strings["company"]:
+            return None
+        return "org-family"
+
+    def require_identity(self, owner: str) -> None:
+        gap = self.identity_gap(owner)
+        if gap == "org-family":
+            raise NeedsInput("org-family", f"{owner} ({self.org(owner).get('display_name')}) is filed under the "
+                             "completetech family but is not a CompleteTech brand; give its brand.yaml row its own "
+                             "family (owner-supplied palette and mark) before generating anything for it")
+        if gap == "org-row":
+            raise NeedsInput("org-row", f"{owner} has no brand.yaml org row and isolation.unknown_org is refuse; add "
+                             "its row (family, display name) before generating anything for it")
 
     def org(self, owner: str) -> dict:
         orgs = self.raw.get("orgs", {})

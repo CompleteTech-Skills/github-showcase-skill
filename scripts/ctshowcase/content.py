@@ -2484,7 +2484,8 @@ def _cmd_sidebar(args, cli, resolver, head):
     keyed = isinstance(facts, dict) and facts and all(isinstance(k, str) and "/" in k for k in facts)
     if not keyed:
         ctx = _ctx(args, cli, resolver)
-        resolver.check_owner(ctx.owner)
+        # the sidebar plan (Releases, Packages, Deployments boxes) renders no brand text: no issue 40 identity gate
+        resolver.check_owner(ctx.owner, identity=False)
         res = sidebar_plan(ctx.meta, facts, resolver=resolver, packages=pk,
                            current=current.get(f"{ctx.owner}/{ctx.repo}") or current or None)
         obj = dict(head, owner=ctx.owner, repo=ctx.repo, **{k: v for k, v in res.items() if k != "logs"},
@@ -2496,8 +2497,8 @@ def _cmd_sidebar(args, cli, resolver, head):
         if args.only and not (resolver.same(o, args.only.split("/")[0]) and r.lower() == args.only.split("/")[1].lower()):
             continue
         try:
-            resolver.check_owner(o)
-        except Refused as exc:
+            resolver.check_owner(o, identity=False)  # renders no brand text (see above)
+        except (Refused, NeedsInput) as exc:  # one gated owner skips its repository, never the whole batch
             skipped.append({"repo": full, "why": exc.log})
             continue
         meta = dict((f or {}).get("meta") or {}, owner=o, repo=r)

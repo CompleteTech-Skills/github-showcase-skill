@@ -188,6 +188,9 @@ def _gate_target(resolver: Resolver | None, owner: str, *, allow_t3: bool = Fals
     if st == "t3" and not allow_t3:
         raise Refused(f"{owner} is T3: reading its project is fine, changing anything needs co-owner sign-off",
                       log="t3-signoff")
+    # issue 40: a board written for an owner without its own brand identity (org-family, or org-row when
+    # isolation.unknown_org is refuse) is needs-input, after the approval gates above and even with --display-name
+    resolver.require_identity(owner)
     return resolver.canonical(owner)
 
 
@@ -1222,6 +1225,8 @@ def cmd_project(args):
         if not owner:
             raise ShowcaseError("readme needs --owner", log="usage")
         estate = args.role == "estate" or is_user(owner)
+        if not estate:  # the board README names the org: the same issue 40 identity gate as copy-plan
+            r.require_identity(owner)
         name = args.display_name or ("CompleteTech Estate" if estate else brand_display_name(r, owner))
         if not name:
             raise NeedsInput("display-name", f"{owner} has no display_name in references/brand.yaml (pass --display-name)")

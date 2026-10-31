@@ -424,6 +424,18 @@
     }
    }
   },
+  "isolation": {
+   "type": "object",
+   "additionalProperties": false,
+   "properties": {
+    "unknown_org": {
+     "enum": [
+      "completetech",
+      "refuse"
+     ]
+    }
+   }
+  },
   "readme": {
    "type": "object",
    "additionalProperties": false,
