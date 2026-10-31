@@ -1,7 +1,8 @@
-"""`--require-t3-signoff` (issue 23): `--allow-t3` needs a valid, unexpired sign-off record in the file named by
+"""`--allow-t3` sign-off enforcement (issue 23): `--allow-t3` needs a valid, unexpired sign-off record in the file named by
 `--t3-signoff-file` (env SHOWCASE_T3_SIGNOFF_FILE) or, by default, in the private estate bundle
-(`<estate root>/decisions/t3-signoffs.yaml`; tests/test_t3_signoff_default.py). The enforcement is default-on; the tests
-there is no opt-out (tests/test_t3_signoff_default.py::test_there_is_no_opt_out).
+(`<estate root>/decisions/t3-signoffs.yaml`; tests/test_t3_signoff_default.py). The enforcement is default-on and
+there is no opt-out (tests/test_t3_signoff_default.py::test_there_is_no_opt_out); `--require-t3-signoff` is an accepted
+no-op flag.
 
 Synthetic records only (owner Pick-Your-AI is the brand.yaml T3 owner; the ids and dates are made up). The existing
 tests/test_allow_t3_global.py pins the refusals without `--allow-t3`; it only gained the record-file environment that
@@ -91,13 +92,14 @@ def test_valid_wildcard_and_repo_scoped_records_are_honoured(tmp_path):
         assert r.returncode != 2 and "t3-signoff" not in _out(r), (repos, _out(r))
 
 
-def test_env_var_is_equivalent_to_the_flag(tmp_path):
-    b = _bundle(tmp_path, [])
-    r = _run(tmp_path, b, "--allow-t3", "describe", env={"SHOWCASE_REQUIRE_T3_SIGNOFF": "1"})
-    assert r.returncode == 2 and "t3-signoff:missing" in _out(r), _out(r)
+@pytest.mark.parametrize("value", ["0", "false"])
+def test_unrelated_env_cannot_disable_enforcement(tmp_path, value):
+    """No environment variable turns the check off: SHOWCASE_REQUIRE_T3_SIGNOFF is not a knob."""
+    r = _run(tmp_path, _bundle(tmp_path, []), "--allow-t3", "describe", env={"SHOWCASE_REQUIRE_T3_SIGNOFF": value})
+    assert r.returncode == 2 and ("t3-signoff:missing" in _out(r) or "t3-signoff:no-file" in _out(r)), _out(r)
 
 
-# Guard test: passes on base 2be04ac by design (verified: 28 of 30 tests in this file fail on base, only the two guards pass). It pins the unchanged default.
+# Guard test: pins the unchanged refusal when --allow-t3 is absent, even with the (no-op) flag.
 def test_flag_without_allow_t3_still_refuses_as_before(tmp_path):
     r = _run(tmp_path, _bundle(tmp_path, [{"id": "t3s-4"}]), "--require-t3-signoff", "describe")
     assert r.returncode == 2 and "t3-signoff" in _out(r)
@@ -875,6 +877,17 @@ def test_estate_plan_jobs_carry_the_t3_orgs_signoff(tmp_path, monkeypatch, brand
     with _Strict(monkeypatch, _file(_bundle(tmp_path / "none", []))):
         plan = PJ.estate_plan(res, copied=cap, user_id=100, allow_t3=True)
         assert OWNER not in [o["login"] for o in plan["orgs"]] and OWNER not in json.dumps(plan["jobs"])
+        assert f"t3-signoff:missing:{OWNER}" in plan["logs"], plan["logs"]
+    for tag, recs, code in (("exp", [{"id": "t3s-x", "expires": "2020-01-01"}], "expired"),
+                            ("rev", [{"id": "t3s-g", "approved_on": "2026-01-15"},
+                                     {"id": "t3s-w", "approved": False, "approved_on": "2026-10-01"}], "revoked")):
+        with _Strict(monkeypatch, _file(_bundle(tmp_path / tag, recs))):
+            plan = PJ.estate_plan(res, copied=cap, user_id=100, allow_t3=True)
+            assert OWNER not in [o["login"] for o in plan["orgs"]], plan["orgs"]
+            assert f"t3-signoff:{code}:{OWNER}" in plan["logs"], (code, plan["logs"])
+    with _Strict(monkeypatch, _file(_bundle(tmp_path / "ok2", [{"id": "t3s-board"}]))):
+        plan = PJ.estate_plan(res, copied=cap, user_id=100, allow_t3=True)
+        assert not [x for x in plan["logs"] if str(x).startswith("t3-signoff:")], plan["logs"]
 
 
 # --- review round 5: evidence for each fixed finding (synthetic records and slugs only) ---
@@ -1186,3 +1199,58 @@ def test_readme_naming_only_a_non_t3_org_gets_no_signoff_id():
     jobs = [{"id": "r", "phase": 1, "argv": ["gh", "project", "edit", "7", "--readme", "| Acme | own |"]}]
     PJ._stamp_estate_orgs(jobs, orgs)
     assert jobs[0].get("signoff_id") == "t3s-acme"
+
+
+# --- review fix round 2: withdrawal scope equivalence, malformed scope beside a valid grant ---
+
+def _withdraw_case(grant_repos, withdraw_repos, repo="site", owner="Ex-Co", w_owner=None, logins=None):
+    from ctshowcase import signoff
+    g = _rec(id="g1", owner=owner, repos=grant_repos, approved_on="2026-01-01")
+    w = _rec(id="w1", owner=w_owner or owner, repos=withdraw_repos, approved=False, approved_on="2026-02-01")
+    return signoff.evaluate(logins or [owner], repo, records=[g, w])
+
+
+@pytest.mark.parametrize("grant,withdrawal", [
+    (["Ex-Co/site"], ["site"]),
+    (["site"], ["Ex-Co/site"]),
+    (["site"], ["ex-co/SITE"]),
+    (["Ex-Co/site"], ["*"]),
+])
+def test_withdrawal_covers_the_grant_in_either_scope_form(grant, withdrawal):
+    assert _withdraw_case(grant, withdrawal) == (None, "revoked")
+
+
+def test_withdrawal_under_an_alias_login_revokes():
+    from ctshowcase import signoff
+    g = _rec(id="g1", owner="Old-Login", repos=["Old-Login/site"], approved_on="2026-01-01")
+    w = _rec(id="w1", owner="New-Login", repos=["New-Login/site"], approved=False, approved_on="2026-02-01")
+    assert signoff.evaluate(["New-Login", "Old-Login"], "site", records=[g, w]) == (None, "revoked")
+
+
+def test_withdrawal_for_another_account_or_repo_does_not_revoke():
+    got, why = _withdraw_case(["Ex-Co/site"], ["Other/site"])
+    assert why is None and got["id"] == "g1", (got, why)
+    got, why = _withdraw_case(["site"], ["Other/site"])
+    assert why is None and got["id"] == "g1", (got, why)
+    got, why = _withdraw_case(["Ex-Co/site"], ["other-repo"])
+    assert why is None and got["id"] == "g1", (got, why)
+    got, why = _withdraw_case(["Ex-Co/site"], ["Ex-Co/other-repo"])
+    assert why is None and got["id"] == "g1", (got, why)
+
+
+def test_cli_withdrawal_in_the_other_scope_form_refuses_revoked(tmp_path):
+    b = _bundle(tmp_path, [{"id": "t3s-g", "repos": [f"{OWNER}/northwind-synthetic"], "approved_on": "2026-01-15"},
+                           {"id": "t3s-w", "repos": ["northwind-synthetic"], "approved": False,
+                            "approved_on": "2026-10-01"}])
+    r = _run(tmp_path, b, "--allow-t3", "describe")
+    assert r.returncode == 2 and "t3-signoff:revoked" in _out(r), _out(r)
+
+
+@pytest.mark.parametrize("bad_repos", [7, []])
+def test_malformed_repos_beside_a_valid_unrelated_grant_is_invalid_not_scope(bad_repos):
+    from ctshowcase import signoff
+    good = _rec(id="t3s-1", repos=["other-repo"])
+    bad = _rec(id="t3s-2", repos=bad_repos)
+    got, why = signoff.evaluate([OWNER], "northwind-synthetic", records=[good, bad])
+    assert got is None and why.startswith("invalid:t3s-2: repos"), (got, why)
+    assert signoff.evaluate([OWNER], "northwind-synthetic", records=[good]) == (None, "scope")

@@ -107,3 +107,13 @@ def test_skill_documents_default_on_enforcement_path_and_no_opt_out():
     assert "Default-on T3 sign-off enforcement" in changelog and "decisions/t3-signoffs.yaml" in changelog
     ref = _read("references/t3-signoff.md")
     assert "DEFAULT OFF" not in ref and "decisions/t3-signoffs.yaml" in ref
+
+
+def test_require_t3_signoff_is_documented_as_accepted_and_ignored():
+    """The flag is a no-op, never a released compatibility surface: no doc says it is kept for compatibility."""
+    for name in ("SKILL.md", "CHANGELOG.md", "references/t3-signoff.md"):
+        text = _read(name)
+        for line in text.splitlines():
+            if "--require-t3-signoff" in line:
+                assert "kept for compatibility" not in line, (name, line[:200])
+        assert "accepted and ignored" in text, name
