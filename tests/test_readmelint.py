@@ -45,3 +45,32 @@ def test_incomplete_only_needs_input(make_ctx, tmp_path, brand):
     r = readmelint.lint(ctx, p)
     assert r["result"] == "incomplete" and "needs-input:C:Usage" in r["logs"]
     assert footer.check(brand, p.read_text(encoding="utf-8"))[0] == "pass"
+
+
+def _insert_usage(tmp_path, extra):
+    p = tmp_path / "README.md"
+    p.write_text(p.read_text(encoding="utf-8").replace("## License", extra + "\n\n## License", 1), encoding="utf-8")
+    return p
+
+
+def test_image_destination_with_backticks_is_read_unmasked(make_ctx, tmp_path, brand):
+    ctx = good_readme(make_ctx, tmp_path, brand)
+    (tmp_path / "docs/images/build`draft`.png").write_bytes(b"x")
+    p = _insert_usage(tmp_path, "![Shot](<docs/images/build`draft`.png>)")
+    res = readmelint.lint(ctx, p)
+    assert not any("local image" in f for f in res["fails"]), res["fails"]
+
+
+def test_missing_image_with_backticks_is_reported_under_its_real_name(make_ctx, tmp_path, brand):
+    ctx = good_readme(make_ctx, tmp_path, brand)
+    p = _insert_usage(tmp_path, "![Shot](<docs/images/build`draft`.png>)")
+    res = readmelint.lint(ctx, p)
+    assert "R7 local image does not resolve: docs/images/build`draft`.png" in res["fails"], res["fails"]
+
+
+def test_multiline_inline_code_placeholder_is_not_flagged(make_ctx, tmp_path, brand):
+    ctx = good_readme(make_ctx, tmp_path, brand)
+    p = _insert_usage(tmp_path, "Example ```sample\nTODO``` end.")
+    res = readmelint.lint(ctx, p)
+    assert not any("placeholder" in f.lower() for f in res["fails"]), res["fails"]
+    assert not any("TODO" in f for f in res["fails"]), res["fails"]

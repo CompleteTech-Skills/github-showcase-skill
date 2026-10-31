@@ -12,6 +12,7 @@ def lint_reference(make_ctx, tmp_path, usage, definitions, files=None):
     (tmp_path / "docs/images").mkdir(parents=True)
     (tmp_path / "docs/images/banner.png").write_bytes(b"banner")
     for name in files or []:
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / name).write_bytes(b"image")
     ctx = make_ctx(repo_dir=tmp_path, repo="sample-library", language=None, license=None)
     ctx.det.update(type="library", variant="C", category="Library")
@@ -171,3 +172,20 @@ def test_html_inside_code_keeps_source_offsets(document, alts):
     outside = readmelint._outside_code(document)
     assert len(outside) == len(document)
     assert [alt for alt, _ in readmelint._images(outside, document)] == alts
+
+
+def test_failed_inline_destination_falls_back_to_shortcut_reference(make_ctx, tmp_path):
+    result = lint_reference(make_ctx, tmp_path, "![CI](current build)", f"[CI]: {URL}")
+    assert not any("badge" in failure for failure in result["fails"]), result
+
+
+def test_fallback_reference_with_local_definition_is_checked_for_existence(make_ctx, tmp_path):
+    missing = lint_reference(make_ctx, tmp_path, "![CI](current build)", "[CI]: docs/images/badges/ci.svg")
+    assert "R7 local image does not resolve: docs/images/badges/ci.svg" in missing["fails"], missing
+    assert not any("header badges" in failure for failure in missing["fails"]), missing
+
+
+def test_fallback_reference_with_existing_local_definition_passes(make_ctx, tmp_path):
+    result = lint_reference(make_ctx, tmp_path, "![CI](current build)", "[CI]: docs/images/badges/ci.svg",
+                            files=["docs/images/badges/ci.svg"])
+    assert not any("local image" in failure or "header badges" in failure for failure in result["fails"]), result
