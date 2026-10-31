@@ -84,3 +84,21 @@ def test_authored_content_inside_footer_markers_is_not_exempt(brand, tmp_path):
     assert "Authored partner acknowledgement." not in removed
     assert any("Authored partner acknowledgement." in problem
                for problem in readme.preservation(before, after, removed))
+
+
+def test_scheduled_workflow_really_heads_the_footer_logos():
+    import re
+
+    import yaml
+
+    text = (ROOT / ".github" / "workflows" / "footer-assets.yml").read_text(encoding="utf-8")
+    wf = yaml.safe_load(text)
+    triggers = wf.get("on", wf.get(True))  # PyYAML reads the bare key `on` as True
+    assert triggers["schedule"] and "cron" in triggers["schedule"][0]
+    assert "workflow_dispatch" in triggers
+    steps = [s for job in wf["jobs"].values() for s in job["steps"]]
+    online = [s for s in steps if s.get("run", "").strip() == "python scripts/showcase.py footer --check README.md --online"]
+    assert len(online) == 1
+    assert "continue-on-error" not in online[0]
+    assert not any("continue-on-error" in job for job in wf["jobs"].values())
+    assert not re.search(r"\|\|\s*(true|:)", text)

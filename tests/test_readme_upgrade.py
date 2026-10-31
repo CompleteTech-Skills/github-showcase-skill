@@ -126,3 +126,18 @@ def test_template_bootstrap_b9(tmp_path):
     again = json.loads(run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--bootstrap").stdout)
     assert again["result"] == "unchanged"
     assert "Northwind-Trading-Co/.github" in (tmp_path / "CONTRIBUTING.md").read_text(encoding="utf-8")
+
+
+def test_template_fixture_footer_migrates_legacy_urls(brand, tmp_path):
+    """tests/fixtures/template-README.md deliberately keeps the former CompleteTech-LLC/.github/main/brand/ footer
+    URLs (lines 77-78): it is the legacy-migration input for issue 47, so its bytes must not be regenerated."""
+    from conftest import meta_dict
+    from ctshowcase.meta import normalize
+    legacy = "https://raw.githubusercontent.com/CompleteTech-LLC/.github/main/brand/"
+    before = (ROOT / "tests" / "fixtures" / "template-README.md").read_text(encoding="utf-8")
+    assert legacy + "logo.png" in before and legacy + "logo-dark.png" in before
+    ctx = RepoContext(brand, normalize(meta_dict()), tmp_path)
+    after, removed = readme.upgrade(ctx, before)
+    assert legacy not in after
+    assert brand.raw["footer"]["logo_light_url"] in after and brand.raw["footer"]["logo_dark_url"] in after
+    assert footer.check(brand, after)[0] == "pass"

@@ -1,6 +1,8 @@
 # User decisions this skill implements
 
-Verbatim excerpt from `decisions/USER_DECISIONS.md` (Timothy Wayne Gregg, 2026-10-25) in the estate hand-off bundle, with the footer image publication URLs repaired at the user's request on 2026-10-29. These decisions outrank the estate standard `ct-std-v1` (`STANDARD.md`), the art direction and every audit proposal. Where this skill's references paraphrase the standard, the decisions below have already been applied.
+Verbatim excerpt from `decisions/USER_DECISIONS.md` (Timothy Wayne Gregg, 2026-10-25) in the estate hand-off bundle. These decisions outrank the estate standard `ct-std-v1` (`STANDARD.md`), the art direction and every audit proposal. Where this skill's references paraphrase the standard, the decisions below have already been applied.
+
+Footer logo URLs repaired for #47 (former URLs returned 404); layout, credit and artwork unchanged.
 
 | Decision | Where the skill applies it |
 |---|---|
@@ -59,7 +61,7 @@ Verbatim excerpt from `decisions/USER_DECISIONS.md` (Timothy Wayne Gregg, 2026-1
 
 ## Footer and brand master
 
-18. **Every in-scope README ends with the CompleteTech LLC footer** (user screenshot, 2026-10-25; publication-path repair requested 2026-10-29):
+18. **Every in-scope README ends with the CompleteTech LLC footer** (user screenshot, 2026-10-25):
     - a centred logo about 200 px wide, linking to https://www.complete.tech
     - under it, the line `Built by [CompleteTech LLC](https://www.complete.tech) · Innovation at Every Integration`
 

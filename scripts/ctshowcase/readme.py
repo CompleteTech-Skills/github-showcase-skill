@@ -463,11 +463,14 @@ def fork_callout(ctx: RepoContext) -> str | None:
 BANNER_BLOCK = re.compile(re.escape(start("banner")) + r".*?" + re.escape(end("banner")) + r"\n*", re.S)
 
 
-def callout_only(ctx: RepoContext, text: str) -> str:
+def callout_only(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
     """Variants G and H (§7.4): the hero banner block, then the callout (unless one is already there), then the body
     unchanged, then the decision 18 footer. Nothing else changes. Watching-org forks never reach here (`readme`
     exempts them). Review q27 "Full CompleteTech treatment" (brand.yaml readme.fork_readme: full) means the fork
-    follows its §5.4 variant instead: pass that variant with `readme --variant`."""
+    follows its §5.4 variant instead: pass that variant with `readme --variant`.
+    Returns (text, removed lines): a recognized old footer (marked or unmarked, `is_footer_copy`: for example one with
+    the former logo URLs) is replaced by the current one, and its lines are reported so the preservation check accepts
+    them. A marked footer that is not a footer copy (a partner image) is left as it is."""
     if ctx.det["variant"] == "G" and ctx.brand.readme_opts.get("fork_readme") == "full":
         ctx.log("needs-input:fork-variant (q27 full treatment: pass readme --variant for the §5.4 variant)")
     body = text
@@ -490,9 +493,21 @@ def callout_only(ctx: RepoContext, text: str) -> str:
     elif m:
         lead_banner = text.lstrip("\n")[:m.end()].rstrip("\n") + "\n\n"
     out = lead_banner + out.lstrip("\n")
-    if footer_wanted(ctx) and footermod.check(ctx.brand, out)[0] == "fail:missing":
-        out = out.rstrip("\n") + "\n\n" + footermod.block(ctx.brand) + "\n"
-    return out
+    removed: list[str] = []
+    if footer_wanted(ctx):
+        if footermod.check(ctx.brand, out)[0] != "pass":
+            pos, kept = 0, []
+            for fm in find_blocks(MARK, out):
+                if fm.group(1) == "footer" and is_footer_copy(fm.group(2), ctx.brand):
+                    kept.append(out[pos:fm.start()])
+                    removed += [ln for ln in fm.group(2).splitlines() if ln.strip()]
+                    pos = fm.end()
+            out = "".join(kept) + out[pos:]
+            out, old_footer = drop_old_footer(out, ctx.brand)
+            removed += old_footer
+        if footermod.check(ctx.brand, out)[0] == "fail:missing":
+            out = out.rstrip("\n") + "\n\n" + footermod.block(ctx.brand) + "\n"
+    return out, removed
 
 
 def preserved(ctx: RepoContext, text: str) -> bool:
@@ -547,7 +562,7 @@ def _footer_logo_url(url: str, brand) -> bool:
 def is_footer_copy(block: str, brand) -> bool:
     """Every line of `block` is a line of the decision 18 footer or a drifted copy of one: only centring, link, logo,
     `<br>`/`<sub>` markup, with complete.tech links, the footer's own logo image (its src or srcset is the brand footer
-    logo URL or a drifted form of it, or its alt is exactly the company) and as text only the credit line ("Built by
+    logo URL or a drifted form of it; an image without src/srcset passes on an alt that is exactly the company) and as text only the credit line ("Built by
     <company>", optionally with the suffix). A sponsor or partner image (whatever its file name), a thanks line or
     any other authored text makes it not a footer copy, so it is never removed."""
     import html
@@ -560,15 +575,17 @@ def is_footer_copy(block: str, brand) -> bool:
             return True
         if name == "a":
             return "complete.tech" in attrs.lower()
+        alt_ok, urls = False, []
         for a in FOOTER_ATTR.finditer(attrs):  # never a file name that merely contains "logo"
             key = a.group(1).lower()
             val = html.unescape(next(g for g in a.groups()[1:] if g is not None)).strip()
-            if key == "alt" and val in (company, f["alt"]):
-                return True
-            parts = [p.split()[0] for p in val.split(",") if p.split()]
-            if key in ("src", "srcset") and parts and all(_footer_logo_url(u, brand) for u in parts):
-                return True
-        return False
+            if key == "alt":
+                alt_ok = alt_ok or val in (company, f["alt"])
+            else:
+                urls.append([p.split()[0] for p in val.split(",") if p.split()])
+        if urls:  # a matching alt never vouches for another image: every src/srcset must be a footer logo URL
+            return all(parts and all(_footer_logo_url(u, brand) for u in parts) for parts in urls)
+        return alt_ok
 
     for line in block.splitlines():
         if not line.strip():
@@ -602,7 +619,7 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
     variant = ctx.det["variant"]
     rv = standard("readme-variants")
     if variant in ("G", "H"):
-        return callout_only(ctx, normalize_text(text)), []
+        return callout_only(ctx, normalize_text(text))
     text = normalize_text(text)
     body, blocks = _strip_markers(text)
     want_footer = footer_wanted(ctx)
