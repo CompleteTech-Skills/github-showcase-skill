@@ -12,18 +12,19 @@ Format (the contract is references/t3-signoff.schema.json, described in referenc
     signoffs:
       - id: t3s-001                 # carried onto writer jobs and change records as `signoff_id`
         owner: Example-Co-Owned     # any login of the org (renames resolve through the aliases the gate passes in)
-        repos: ["*"]                # "*" or repository names / OWNER/NAME; absent or empty matches nothing
+        repos: ["*"]                # "*" or repository names / OWNER/NAME; an absent or empty value makes the record invalid (t3-signoff:invalid)
         approved: true
         approver: example-co-owner  # who signed off (audit)
         approved_on: 2026-01-15     # when they signed off (audit); a future date grants nothing yet
-        expires: 2099-12-31         # a date (valid through that day) or a timestamp with a UTC offset; not before approved_on
+        expires: 2099-12-31         # optional; absent means no expiry. A date (valid through that day) or a timestamp with a UTC offset; not before approved_on
         note: "optional free text"
 
 Refusals are exit 2 with log `t3-signoff:no-file` (no record file at the resolved path, or no estate root to resolve one; the log names the path), `t3-signoff:missing` (no approved record
 for the owner), `t3-signoff:invalid` (the owner's records all break the schema, or a malformed record would have covered the
 repository; the error names the first problem),
 `t3-signoff:expired` (every matching record is past `expires`) or `t3-signoff:scope` (the owner has records but none
-covers the repository; an owner-wide command with no repository needs a `*` record). Excluded and HOLD owners are
+covers the repository; an owner-wide command with no repository needs a `*` record), or `t3-signoff:revoked` (a
+later or same-day `approved: false` record withdraws every covering grant). Excluded and HOLD owners are
 refused before this runs.
 """
 from __future__ import annotations
@@ -222,7 +223,7 @@ def problems(rec: dict, today: _dt.date | None = None) -> list[str]:
     approved_on = _parse_when(rec.get("approved_on"))
     if approved_on is None or isinstance(approved_on, _dt.datetime):
         out.append("approved_on: needs a date (YYYY-MM-DD)")
-    if _expiry(rec) is None:
+    if "expires" in rec and _parse_when(rec["expires"]) is None:
         out.append("expires: needs a date (YYYY-MM-DD) or a timestamp with a UTC offset")
     if "note" in rec and rec["note"] is not None and not isinstance(rec["note"], str):
         out.append("note: needs a string")
@@ -247,7 +248,9 @@ def problems(rec: dict, today: _dt.date | None = None) -> list[str]:
 def _live(rec: dict, now: _dt.datetime) -> bool:
     """A date expiry is valid through the end of that day (inclusive, local calendar day, as before); a timestamp
     expiry is valid only strictly before that instant, compared timezone-aware (a record expiring at
-    2026-10-30T00:00:00+00:00 is dead at 2026-10-30T12:44Z)."""
+    2026-10-30T00:00:00+00:00 is dead at 2026-10-30T12:44Z). An absent `expires` means no expiry, so it is always live."""
+    if "expires" not in rec:
+        return True
     exp = _expiry(rec)
     if isinstance(exp, _dt.datetime):
         return exp > now
@@ -256,9 +259,44 @@ def _live(rec: dict, now: _dt.datetime) -> bool:
     return False
 
 
+def _repo_list(repos) -> list[str] | None:
+    """`repos` as a list of strings (a bare string is one entry), or None when it is malformed."""
+    if isinstance(repos, str):
+        return [repos]
+    if isinstance(repos, list) and all(isinstance(x, str) for x in repos):
+        return repos
+    return None
+
+
+def _withdrawn(grant: dict, withdrawals: list[dict], logins: list[str] | None = None) -> bool:
+    """True when an approved:false record (a withdrawal) vetoes GRANT: its approved_on is on or after the grant's
+    approved_on (same day counts), its owner is one of LOGINS (when given), and its repos cover everything the grant
+    covers (`*`, or every entry of the grant's repos, case-insensitively, appears in its own repos). A malformed
+    `repos` never withdraws."""
+    g_on = _parse_when(grant.get("approved_on"))
+    g_repos = _repo_list(grant.get("repos"))
+    if g_on is None or g_repos is None or isinstance(g_on, _dt.datetime):
+        return False
+    owners = {x.lower() for x in logins} if logins is not None else None
+    for f in withdrawals:
+        if owners is not None and str(f.get("owner") or "").lower() not in owners:
+            continue
+        f_on = _parse_when(f.get("approved_on"))
+        f_repos = _repo_list(f.get("repos"))
+        if f_on is None or f_repos is None or isinstance(f_on, _dt.datetime) or f_on < g_on:
+            continue
+        if "*" in f_repos:
+            return True
+        have = {x.lower() for x in f_repos}
+        if all(x.lower() in have for x in g_repos):
+            return True
+    return False
+
+
 def evaluate(owners: list[str], repo: str | None = None, today: _dt.date | None = None,
              records: list[dict] | None = None, now: _dt.datetime | None = None) -> tuple[dict | None, str | None]:
-    """(record, None) when signed off, else (None, 'no-file' | 'missing' | 'invalid:<problem>' | 'expired' | 'scope').
+    """(record, None) when signed off, else (None, 'no-file' | 'missing' | 'invalid:<problem>' | 'expired' | 'scope' |
+    'revoked'). 'revoked' means every otherwise-grantable record was vetoed by a withdrawal (see _withdrawn).
     `today` (a date) is kept for callers that only care about date expiries; `now` is an aware instant."""
     if now is None:
         now = _dt.datetime.now(_dt.timezone.utc)
@@ -281,7 +319,12 @@ def evaluate(owners: list[str], repo: str | None = None, today: _dt.date | None 
     ours = [r for r in records if str(r.get("owner") or "").lower() in logins]
     today = now.astimezone().date()
     valid = [r for r in ours if not problems(r, today)]
+    withdrawals = [r for r in valid if r.get("approved") is False]
     mine = [r for r in valid if r.get("approved") is True]
+    had_grants = bool(mine)
+    mine = [g for g in mine if not _withdrawn(g, withdrawals, sorted(logins))]
+    if had_grants and not mine:
+        return None, "revoked"
     if not mine:
         bad = [r for r in ours if problems(r, today)]
         if bad:  # a malformed record never authorizes, and the refusal says why instead of a silent 'missing'
@@ -304,7 +347,8 @@ def _covers(rec: dict, repo: str | None, logins: list[str] | None = None) -> boo
     """`*` covers everything; a bare name covers that repository; OWNER/NAME needs the owner to be one of `logins`
     (the requested owner and its org aliases) as well as the name. A repository given as OWNER/NAME is covered only
     when that owner is one of `logins` too (only `*` covers another account's repository). A malformed `repos` (not a string or a list of
-    strings) covers nothing, so it surfaces as t3-signoff:scope instead of an uncaught exception."""
+    strings) covers nothing; evaluate() reports such a record as t3-signoff:invalid through problems(), not as
+    t3-signoff:scope."""
     repos = rec.get("repos")
     if isinstance(repos, str):
         repos = [repos]
