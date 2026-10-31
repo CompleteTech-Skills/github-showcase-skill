@@ -69,8 +69,9 @@ def _badge_colour(path: str) -> str:
     """Upper-cased colour of a Shields badge path (the text after `/badge/`): its last single-dash segment, with the
     query and fragment removed. Labels and messages may hold apostrophes, escaped dashes or hex-looking text; only the
     final segment is the colour."""
-    path = unquote(path)
+    # literal delimiters first: an encoded %23 or %3F inside a label is label text, not the start of a fragment or query
     path = path.split("#", 1)[0].split("?", 1)[0]
+    path = unquote(path)
     return _SHIELDS_SEGMENT_DASH.split(path)[-1].upper()
 
 
@@ -268,26 +269,49 @@ def _markdown_images(text: str, document: str) -> list[tuple[str, str, int, int]
         if close is None:
             continue
         alt = text[match.end():close]
-        consumed = close + 1
-        if consumed < len(text) and text[consumed] == "(":
+        # tentative offset: only an image that is actually appended may consume its text, so a failed outer
+        # candidate leaves any nested image inside it searchable
+        tentative = close + 1
+        if tentative < len(text) and text[tentative] == "(":
             # Destinations are read from the written document: the masked copy blanks literal backticks in filenames.
-            target = _inline_image_target(document if len(document) >= len(text) else text, consumed)
+            target = _inline_image_target(document if len(document) >= len(text) else text, tentative)
             if target:
                 source, end = target
                 sources.append((alt, source, match.start(), end))
                 consumed = end
                 continue
-            consumed = close + 1  # not an inline destination (for example, a space-containing label): try a shortcut reference
+            # not an inline destination (for example, a space-containing label): try a shortcut reference
         # `text` masks inline code to spaces (a prefix-aligned copy): labels are matched on the written source, literal backticks included
         key = label(document[match.end():close] if len(document) >= len(text) else alt)
-        if consumed < len(text) and text[consumed] == "[":
-            ref_close = _closing_bracket(text, consumed)
+        if tentative < len(text) and text[tentative] == "[":
+            ref_close = _closing_bracket(text, tentative)
             if ref_close is not None:
-                key = label((document if len(document) >= len(text) else text)[consumed + 1:ref_close]) or key
-                consumed = ref_close + 1
+                key = label((document if len(document) >= len(text) else text)[tentative + 1:ref_close]) or key
+                tentative = ref_close + 1
         if key in definitions:
-            sources.append((alt, definitions[key], match.start(), consumed))
+            sources.append((alt, definitions[key], match.start(), tentative))
+            consumed = tentative
     return sources
+
+
+def _containment_index(intervals) -> tuple[list[int], list[int]]:
+    """Lookup table for "does some interval (a, b) contain (x, y)": `intervals` sorted by start, as the starts and the
+    running maximum of the ends. One bisection then answers containment, nested intervals included."""
+    starts, reach, best = [], [], -1
+    for a, b in intervals:
+        starts.append(a)
+        best = max(best, b)
+        reach.append(best)
+    return starts, reach
+
+
+def _covered(index: tuple[list[int], list[int]], start: int, end: int) -> bool:
+    """True when an indexed interval holds [start, end) entirely: the last interval starting at or before `start` is
+    the only candidate that can reach `end` (the running maximum covers nested intervals)."""
+    mdcode.WORK["span_checks"] += 1
+    starts, reach = index
+    n = bisect.bisect_right(starts, start) - 1
+    return n >= 0 and reach[n] >= end
 
 
 def _images(text: str, document: str) -> list[tuple[str, str]]:
@@ -296,8 +320,10 @@ def _images(text: str, document: str) -> list[tuple[str, str]]:
     markdown = _markdown_images(text, document)
     # Angle-delimited destinations (and HTML in alt text) belong to their Markdown image,
     # while a Markdown-looking string wholly inside a real HTML tag is attribute text.
-    tags = [(start, end) for start, end in parser.tags
-            if not any(mstart <= start and end <= mend for _, _, mstart, mend in markdown)]
+    image_index = _containment_index(sorted((start, end) for _, _, start, end in markdown))
+    tags = [(start, end) for start, end in parser.tags if not _covered(image_index, start, end)]
+    tag_index = _containment_index(tags)  # parser tags come in start order, so the kept tags are sorted too
+    kept = set(tags)
     def written_alt(alt, start):
         # `text` has Markdown code masked to spaces (same length): read code-formatted alt text from the document
         begin = start + 2
@@ -307,9 +333,9 @@ def _images(text: str, document: str) -> list[tuple[str, str]]:
     def in_definition(start):
         return _span_at(spans, start) is not None
     result = [(written_alt(alt, start), source) for alt, source, start, end in markdown
-              if not in_definition(start) and not any(tstart <= start and end <= tend for tstart, tend in tags)]
+              if not in_definition(start) and not _covered(tag_index, start, end)]
     result += [(alt, source) for alt, source, start, end in parser.images
-               if (start, end) in tags and not in_definition(start)]
+               if (start, end) in kept and not in_definition(start)]
     return result
 
 
