@@ -1081,10 +1081,12 @@ def lint(capture: dict, *, role: str = "org", owner: str | None = None, display_
 # =====================================================================================================
 # estate-plan (§13.10): the cross-org personal Estate project on CompleteDotTech
 # =====================================================================================================
-def estate_orgs(resolver: Resolver, *, allow_t3: bool = False) -> list[dict]:
+def estate_orgs(resolver: Resolver, *, allow_t3: bool = False, refusals: list[str] | None = None) -> list[dict]:
     """In-scope orgs for the Estate's Org field: T1, T2, T2-R (T3 only after sign-off; never HOLD or excluded).
     A T3 org also needs a valid record, and its entry keeps that record's id as
-    `signoff_id` so estate_plan can carry it onto the jobs that bring the org into the personal board."""
+    `signoff_id` so estate_plan can carry it onto the jobs that bring the org into the personal board.
+    A T3 org without a valid record is omitted; when `refusals` is a list, each such org is reported there as
+    `t3-signoff:<code>:<login>`."""
     from . import signoff
     out = []
     groups = (resolver.registry.get("profile") or {}).get("org_directory") or []
@@ -1102,8 +1104,11 @@ def estate_orgs(resolver: Resolver, *, allow_t3: bool = False) -> list[dict]:
         if tier == "T3":
             if not allow_t3:
                 continue
-            rec = signoff.record(key, None, resolver.aliases(key))
+            rec, why = signoff.evaluate([key, *resolver.aliases(key)])
             if rec is None:
+                code = (why or "missing").partition(":")[0]
+                if refusals is not None:
+                    refusals.append(f"t3-signoff:{code}:{resolver.canonical(key)}")
                 continue
         if tier in TIER_COLOR:
             entry = {"login": resolver.canonical(key), "name": row.get("display_name") or key, "tier": tier}
@@ -1193,7 +1198,8 @@ def _stamp_estate_orgs(jobs: list[dict], orgs: list[dict]) -> None:
 
 def estate_plan(resolver: Resolver, *, source: str | None = None, copied: dict | None = None, user_id: int | None = None,
                 approval_id: str | None = None, allow_t3: bool = False, reviewed: str | None = None) -> dict:
-    orgs = estate_orgs(resolver, allow_t3=allow_t3)
+    t3_refusals: list[str] = []
+    orgs = estate_orgs(resolver, allow_t3=allow_t3, refusals=t3_refusals)
     if len(orgs) > 50:
         raise ShowcaseError("more than 50 orgs for the Org single-select", log="usage")
     org_field = dict(ESTATE_FIELDS[0], options=[(o["name"], TIER_COLOR[o["tier"]], f"{o['tier']}: {o['login']}") for o in orgs])
@@ -1203,7 +1209,8 @@ def estate_plan(resolver: Resolver, *, source: str | None = None, copied: dict |
                      display_name="CompleteTech Estate", status_update=False, allow_t3=allow_t3)
     plan["action"] = "estate-plan"
     plan["orgs"] = orgs
-    plan["reads"] += [{"name": f"estate-items:{o['login']}",
+    plan["logs"] = [*plan.get("logs", []), *dict.fromkeys(t3_refusals)]
+    plan["reads"] +=[{"name": f"estate-items:{o['login']}",
                        "argv": ["gh", "search", "issues", "--owner", o["login"], "--label", "estate", "--state", "open",
                                 "--json", "url", "--limit", "200"]} for o in orgs]
     plan["pending"].append({"why": "add each labelled Initiative or Feature with `gh project item-add N --owner @me --url URL` "
