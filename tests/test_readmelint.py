@@ -138,3 +138,42 @@ def test_off_palette_badge_colour_is_reported_once(make_ctx, tmp_path, brand):
     p = tmp_path / "README.md"
     p.write_text("# X\n\n![Type](https://img.shields.io/badge/type-x-FF0000)\n", encoding="utf-8")
     assert readmelint.lint(ctx, p)["fails"].count("R7 off-palette badge colour FF0000") == 1
+
+
+# --- Shields badge colour is the last structural segment of the complete destination ------------------------------
+import pytest  # noqa: E402
+
+
+def _badge_fails(make_ctx, tmp_path, brand, body):
+    ctx = good_readme(make_ctx, tmp_path, brand)
+    p = tmp_path / "README.md"
+    p.write_text("# X\n\n" + body + "\n", encoding="utf-8")
+    return readmelint.lint(ctx, p)["fails"]
+
+
+@pytest.mark.parametrize("body", [
+    "![Type](https://img.shields.io/badge/type-facade's-005ADD)",
+    "![Type](https://img.shields.io/badge/type-DEADBE's-005ADD)",
+    "![Type](https://img.shields.io/badge/my--label-a__b-005ADD)",
+    "![Type](https://img.shields.io/badge/my__label-x--y-64748B)",
+    "![Type](https://img.shields.io/badge/type-facade's-005ADD?style=flat)",
+    '<img alt="Type" src="https://img.shields.io/badge/type-facade\'s-005ADD">',
+], ids=["apostrophe-probe", "hex-message-before-apostrophe", "escaped-dashes-label", "escaped-underscores-label",
+        "apostrophe-with-query", "html-img-apostrophe"])
+def test_shields_colour_is_the_last_segment(make_ctx, tmp_path, brand, body):
+    assert not any("off-palette" in f for f in _badge_fails(make_ctx, tmp_path, brand, body))
+
+
+@pytest.mark.parametrize("body", [
+    "![Type](https://img.shields.io/badge/type-facade's-123ABC)",
+    "![Type](https://img.shields.io/badge/type-x-123ABC)",
+    "![Type](https://img.shields.io/badge/my--label-x--y-123ABC)",
+    '<img alt="Type" src="https://img.shields.io/badge/type-facade\'s-123ABC">',
+])
+def test_genuinely_off_palette_colour_still_fails(make_ctx, tmp_path, brand, body):
+    assert "R7 off-palette badge colour 123ABC" in _badge_fails(make_ctx, tmp_path, brand, body)
+
+
+def test_hex_shaped_message_is_not_taken_for_the_colour():
+    assert readmelint._badge_colour("type-DEADBE's-005ADD") == "005ADD"
+    assert readmelint._badge_colour("a--b-c__d-64748B?logo=x#frag") == "64748B"

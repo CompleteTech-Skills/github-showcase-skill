@@ -1,13 +1,16 @@
 """README lint: R7 + decision 13 (banner first, plain <img>) + decision 18 (footer last, exact) (spec A6.11)."""
 from __future__ import annotations
 
+import bisect
+import functools
 import html
 import re
 from pathlib import Path
 from urllib.parse import unquote
 
 from . import footer as footermod
-from .mdcode import FENCE_OPEN, code_spans, find_inline_code
+from . import mdcode
+from .mdcode import find_inline_code
 from .context import RepoContext
 from .detect import standard
 from .readme import BANNER_BLOCK, EMOJI, MARK, is_footer_like, masked, normalize_text, nav_first, preserved, split_sections
@@ -45,22 +48,18 @@ def _search_unescaped(pattern, text: str, pos: int):
     return match
 
 
+def _span_at(spans, index: int, strict: bool = False):
+    """The (a, b) span of a sorted, non-overlapping sequence that holds `index` (a <= index < b; strict: a < index < b),
+    found by bisection so membership is a lookup, not a walk from offset 0."""
+    n = bisect.bisect_left(spans, (index, -1) if strict else (index + 1, -1)) - 1
+    if n >= 0 and (spans[n][0] < index < spans[n][1] if strict else spans[n][0] <= index < spans[n][1]):
+        return spans[n]
+    return None
+
+
 def _in_inline_code(text: str, index: int) -> bool:
     """True when `index` lies strictly inside a non-fenced inline code span (a < index < b for a span (a, b))."""
-    fences = _fence_spans(text)
-    start = 0
-    while True:
-        found = find_inline_code(text, start)
-        if not found or found[0] > index:
-            return False
-        a, b = found
-        inside = next((f for f in fences if f[0] <= a < f[1]), None)
-        if inside is None:
-            if a < index < b:
-                return True
-            start = b
-        else:
-            start = inside[1]
+    return _span_at(mdcode.inline_code_spans(text), index, strict=True) is not None
 
 
 _SHIELDS_SEGMENT_DASH = re.compile(r"(?<!-)-(?!-)")  # Shields: a single dash separates segments, "--" is a literal dash
@@ -75,10 +74,12 @@ def _badge_colour(path: str) -> str:
     return _SHIELDS_SEGMENT_DASH.split(path)[-1].upper()
 
 
-def _definition_spans(document: str) -> list[tuple[int, int]]:
-    """Spans of complete reference definitions (label, destination and title): their text is not Markdown."""
-    return [(m.start(), m.end()) for m in REF_DEFINITION.finditer(_outside_code(document, mask_inline=False))
-            if not _in_inline_code(document, m.start())]
+@functools.lru_cache(maxsize=16)
+def _definition_spans(document: str) -> tuple[tuple[int, int], ...]:
+    """Spans of complete reference definitions (label, destination and title): their text is not Markdown. Computed
+    once per document; the spans are sorted and never overlap."""
+    return tuple((m.start(), m.end()) for m in REF_DEFINITION.finditer(_outside_code(document, mask_inline=False))
+                 if not _in_inline_code(document, m.start()))
 
 
 class _HTMLTokens:
@@ -100,17 +101,12 @@ class _HTMLTokens:
                 self.images.append((first.get("alt") or "", first.get("src") or "", start, end))
 
 
-def _fence_spans(text: str) -> list[tuple[int, int]]:
-    """Fenced code blocks only (the spans `code_spans` opens at a fence line)."""
-    fences = []
-    for a, b in code_spans(text):
-        begin = text.rfind("\n", 0, a) + 1
-        end = text.find("\n", begin)
-        if FENCE_OPEN.match(text[begin:end if end >= 0 else len(text)]) and not text[begin:a].strip():
-            fences.append((a, b))
-    return sorted(fences)
+def _fence_spans(text: str) -> tuple[tuple[int, int], ...]:
+    """Fenced code blocks, including fences inside block quotes (cached per document by `mdcode`)."""
+    return mdcode.fence_spans(text)
 
 
+@functools.lru_cache(maxsize=16)
 def _outside_code(text: str, mask_inline: bool = True) -> str:
     """Mask Markdown code and comments without reading literal backticks in HTML attributes as code.
     Constructs are taken left to right, and inline code is looked for again after every HTML tag or comment, so a
@@ -131,7 +127,7 @@ def _outside_code(text: str, mask_inline: bool = True) -> str:
             found = find_inline_code(text, start)  # (start, end) or None
             if not found:
                 return False
-            inside = next((f for f in fences if f[0] <= found[0] < f[1]), None)
+            inside = _span_at(fences, found[0])
             if inside is None:
                 return found
             start = inside[1]
@@ -155,7 +151,8 @@ def _outside_code(text: str, mask_inline: bool = True) -> str:
             tag = _search_unescaped(HTML_OPEN_TAG, text, pos) or False
         if comment is not False and (comment is None or comment.start() < pos):
             comment = _search_unescaped(HTML_COMMENT, text, pos) or False
-        fence = next((f for f in fences if f[0] >= pos), None)
+        n = bisect.bisect_left(fences, (pos, -1))
+        fence = fences[n] if n < len(fences) else None
         code = min([c for c in ((inline if inline else None), fence) if c], default=None)
         found = [m for m in (tag, comment) if m]
         nxt = min(found, key=lambda m: m.start()) if found else None
@@ -260,7 +257,7 @@ def _markdown_images(text: str, document: str) -> list[tuple[str, str, int, int]
     for match in re.finditer(r"!\[", text):
         if match.start() < consumed:
             continue
-        if any(a <= match.start() < b for a, b in spans):
+        if _span_at(spans, match.start()):
             continue
         pos = match.start() - 1
         while pos >= 0 and text[pos] == "\\":
@@ -308,7 +305,7 @@ def _images(text: str, document: str) -> list[tuple[str, str]]:
 
     spans = _definition_spans(document)
     def in_definition(start):
-        return any(a <= start < b for a, b in spans)
+        return _span_at(spans, start) is not None
     result = [(written_alt(alt, start), source) for alt, source, start, end in markdown
               if not in_definition(start) and not any(tstart <= start and end <= tend for tstart, tend in tags)]
     result += [(alt, source) for alt, source, start, end in parser.images

@@ -1,5 +1,7 @@
 """Block structure is decided before inline code: a span never pairs across a block boundary. Expected renders follow
 the GitHub Markdown API (gfm mode) and CommonMark 0.31.2 HTML blocks 1-6 (type 7 cannot interrupt a paragraph)."""
+import re
+
 import pytest
 
 from ctshowcase import mdcode, readme, readmelint
@@ -132,3 +134,56 @@ def test_matrix_image_stays_rendered(kind, above, tail):
 def test_matrix_soft_break_control_still_pairs(above, tail):
     t = above + "\n" + IMAGE + tail + "\n"
     assert images(t) == []
+
+
+# --- fences inside block quotes (container-aware) ---------------------------------------------------------------
+def placeholder(text):
+    from ctshowcase.detect import standard
+    return re.search(standard("readme-variants")["placeholder_regex"], readmelint._outside_code(text))
+
+
+# (document, exact fenced span expected from fence_spans)
+QUOTED_FENCES = [
+    pytest.param("> ```text\n> TODO\n> ```", "> ```text\n> TODO\n> ```", id="probe"),
+    pytest.param("> > ```\n> > TODO\n> > ```", "> > ```\n> > TODO\n> > ```", id="nested-quote"),
+    pytest.param("> ~~~\n> TODO\n> ~~~", "> ~~~\n> TODO\n> ~~~", id="tilde"),
+    pytest.param("   > ```\n   > TODO\n   > ```", "   > ```\n   > TODO\n   > ```", id="indented-quote"),
+    pytest.param("> ```\n> TODO\nplain after", "> ```\n> TODO\n", id="lower-depth-line-ends-it-unclosed"),
+    pytest.param("> ```\n> TODO\n", "> ```\n> TODO\n", id="unclosed-at-end"),
+    pytest.param("> > ```\n> > TODO\n> outer\n", "> > ```\n> > TODO\n", id="inner-quote-ends-at-outer-depth"),
+]
+
+
+@pytest.mark.parametrize("doc,fenced", QUOTED_FENCES)
+def test_quoted_fence_is_code(doc, fenced):
+    assert [doc[a:b] for a, b in mdcode.fence_spans(doc)] == [fenced]
+    assert covers(doc, "TODO")
+    assert (0, len(fenced)) in mdcode.code_spans(doc)
+    assert "TODO" not in mdcode.masked(doc)
+    assert placeholder(doc) is None
+
+
+@pytest.mark.parametrize("opener,closer", [("> ```text", "> ```"), ("> > ```", "> > ```"), ("> ~~~", "> ~~~"),
+                                           ("   > ```", "   > ```")])
+def test_closed_quoted_fence_leaves_later_text_visible(opener, closer):
+    doc = f"{opener}\n{closer.split('>')[0]}> x\n{closer}\n\nTODO later\n"
+    assert not covers(doc, "TODO later")
+    assert placeholder(doc).group(0) == "TODO"
+
+
+def test_genuine_placeholder_outside_code_still_fails():
+    assert placeholder("# X\n\nTODO write this\n") is not None
+    assert placeholder("> note\n> TODO inside a plain quote\n") is not None
+
+
+def test_quoted_fence_does_not_swallow_a_following_paragraph():
+    doc = "> ```\n> code\nTODO paragraph\n"
+    assert covers(doc, "code")
+    assert not covers(doc, "TODO paragraph")
+    assert placeholder(doc) is not None
+
+
+def test_top_level_fence_behaviour_is_unchanged():
+    doc = "```\nTODO\n```\n\n> TODO quoted prose\n"
+    assert [doc[a:b] for a, b in mdcode.fence_spans(doc)] == ["```\nTODO\n```\n"]
+    assert not covers(doc, "TODO quoted prose")
