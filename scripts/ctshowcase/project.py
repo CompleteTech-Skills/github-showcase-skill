@@ -1144,24 +1144,48 @@ def _job_tokens(job: dict) -> set[str]:
     return out
 
 
+def _readme_signoff_ids(orgs: list[dict], text: str) -> list[str]:
+    """The signoff_id of every org in ORGS that carries one and whose login or display name appears in TEXT
+    (a README Markdown table, say). Case-insensitive, on word boundaries: a name inside a longer word or a
+    hyphenated name (`Acme` in `Acme-Tools`) does not match. An empty name matches nothing."""
+    out: list[str] = []
+    for o in orgs:
+        if not o.get("signoff_id"):
+            continue
+        for name in (o.get("login"), o.get("name")):
+            if not name:
+                continue
+            if re.search(r"(?<![\w-])" + re.escape(str(name)) + r"(?![\w-])", text, re.IGNORECASE):
+                out.append(str(o["signoff_id"]))
+                break
+    return out
+
+
 def _stamp_estate_orgs(jobs: list[dict], orgs: list[dict]) -> None:
     """Each job that names a signed-off T3 org (its Org-field option, its login) carries
     that org's record. The jobs target @me, so stamping by target owner never finds the T3 grant; several T3 orgs on
-    one job give `signoff_ids` (signoff.stamp_associations). No-op when no org carries a signoff_id.
+    one job give `signoff_ids` (signoff.stamp_associations). A `--readme` Markdown value names orgs inside its text,
+    so it is also searched by name. No-op when no org carries a signoff_id.
     (tests/test_t3_signoff_require.py::test_estate_plan_jobs_carry_the_t3_orgs_signoff)"""
     from . import signoff
     t3 = [o for o in orgs if o.get("signoff_id")]
     if not t3:
         return
+    # a name that is also another org's login or display name is ambiguous: only that org's login or its
+    # `T3: login` description credits the job (exact identity, never a shared label)
+    others = {x.lower() for o in orgs if not o.get("signoff_id") for x in (o["login"], o["name"])}
+    # for README text the display name counts only when it is not ambiguous; the login always may
+    readme_orgs = [o if o["name"].lower() not in others else {**o, "name": ""} for o in t3]
     for j in jobs:
         tokens = _job_tokens(j)
-        # a name that is also another org's login or display name is ambiguous: only that org's login or its
-        # `T3: login` description credits the job (exact identity, never a shared label)
-        others = {x.lower() for o in orgs if not o.get("signoff_id") for x in (o["login"], o["name"])}
         ids = [o["signoff_id"] for o in t3
                if o["login"].lower() in tokens or f"{TIER_PREFIX_T3}{o['login']}".lower() in tokens
                or (o["name"].lower() in tokens and o["name"].lower() not in others)]
-        signoff.stamp_associations(j, ids)
+        argv = j.get("argv") if isinstance(j.get("argv"), list) else []
+        for i, arg in enumerate(argv[:-1]):
+            if arg == "--readme" and isinstance(argv[i + 1], str):
+                ids += _readme_signoff_ids(readme_orgs, argv[i + 1])
+        signoff.stamp_associations(j, list(dict.fromkeys(ids)))
 
 
 def estate_plan(resolver: Resolver, *, source: str | None = None, copied: dict | None = None, user_id: int | None = None,
