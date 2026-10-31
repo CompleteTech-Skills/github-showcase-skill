@@ -913,6 +913,127 @@ def test_icon_cli_normalize_and_check(capsys, tmp_path, brand):
     assert code == 1 and res["result"] == "needs-writer" and res["out"] is None and not (tmp_path / "icon.md").exists()
 
 
+def test_icon_prompt_replaces_estate_background_paragraph(brand, icon_ctx):
+    """An estate template whose BACKGROUND paragraph states its own colours and light pool (several lines long) is
+    replaced by the flat ground, so the prompt never contradicts the card ground (review r3 finding 2, #52)."""
+    glyph = {"glyph_name": "Inbox Tray", "glyph_description": "An open tray seen front-on.",
+             "spark_placement": "held inside the tray", "size_class": "wide"}
+    old = "2 BACKGROUND (identical in all 28 avatars). On it, {POOL}."
+    art = (FIX / "ART_DIRECTION.min.md").read_text(encoding="utf-8")
+    assert old in art
+    art = art.replace(old, "2 BACKGROUND (identical in all 28 avatars). A #0B0F16 tile fading radially to #1C2333 with "
+                           "a soft light pool of 880 px at the top left.\nOn it, {POOL}.")
+    res = C.icon_prompt(icon_ctx, resolver(brand), art, glyph)
+    p = res["prompt"]
+    for stale in ("#0B0F16", "#1C2333", "radially", "soft light pool", "880 px"):
+        assert stale not in p
+    card = brand.style(NW)["tokens"]["card_fill"]
+    assert p.count(C.ground_clause(card)) == 1
+    assert "4 LIGHT" in p
+    bg = next(line for line in p.splitlines() if "BACKGROUND" in line)
+    assert "one flat ground, not the avatar night tile" in bg
+    assert res["missing"] == []
+
+
+def test_icon_cli_ground_tolerance_flag_wired(capsys, tmp_path, brand):
+    """--ground-tolerance reaches normalize_icon through the CLI: a vignette 3.48 dE apart in its corners is refused
+    at the default tolerance (nothing written) and keyed to a transparent corner at --ground-tolerance 5."""
+    from PIL import Image, ImageDraw
+    src = tmp_path / "v.png"
+    img = _vignette("#F8FAFC", "#EEF0F2")  # same corners and outline geometry, with a card-contrasting ink
+    ImageDraw.Draw(img).rounded_rectangle((250, 250, 750, 750), radius=40, outline=(0, 90, 221), width=40)
+    img.save(src)
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    out = tmp_path / "out.png"
+    args = ("--meta", meta, "--no-repo-dir", "content", "icon", "normalize", "--in", src, "--out", out,
+            "--art-direction", FIX / "ART_DIRECTION.min.md", *NO_ESTATE)
+    code, res = run_content(capsys, *args, "--ground-tolerance", "5")
+    assert code == 0 and res["result"] == "pass" and out.is_file()
+    with Image.open(out) as im:
+        assert im.convert("RGBA").getpixel((0, 0))[3] == 0
+    out.unlink()
+    code, res = run_content(capsys, *args)
+    assert code != 0 and res["result"] == "art-fail" and "icon-ground" in res["error"]
+    assert not out.exists()
+
+
+@pytest.mark.parametrize("bad", ["nan", "-1", "inf"])
+def test_icon_cli_ground_tolerance_rejects_bad_values(capsys, tmp_path, brand, bad):
+    """A non-finite or negative --ground-tolerance is a usage error (exit 2, log 'usage'); nothing is written."""
+    card = brand.style(NW)["tokens"]["card_fill"]
+    src = tmp_path / "cand.png"
+    _candidate(card).save(src)
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    out = tmp_path / "icon.png"
+    code, res = run_content(capsys, "--meta", meta, "--no-repo-dir", "content", "icon", "normalize", "--in", src,
+                            "--out", out, "--art-direction", FIX / "ART_DIRECTION.min.md", *NO_ESTATE,
+                            f"--ground-tolerance={bad}")
+    assert code == 2 and res["result"] == "usage" and "--ground-tolerance" in res["error"]
+    assert not out.exists()
+
+
+def _glow_scene(size=512, core=60):
+    """Synthetic night tile: a vertical vignette #171D28 -> #1F2530, a smooth cyan radial bloom and a near-white core.
+    The core radius is 60 px: at 40 px the icon fails the contrast-on-card gate, so the disc must dominate
+    the ink count."""
+    from PIL import Image, ImageDraw
+    from ctshowcase.color import rgb
+    top, bottom, cyan = rgb("#171D28"), rgb("#1F2530"), (0, 229, 255)
+    im = Image.new("RGB", (size, size))
+    px = im.load()
+    c = size / 2
+    for y in range(size):
+        k = y / (size - 1)
+        g = [top[i] + (bottom[i] - top[i]) * k for i in range(3)]
+        for x in range(size):
+            r = ((x - c) ** 2 + (y - c) ** 2) ** 0.5
+            t = max(0.0, 1 - r / 200) ** 2
+            px[x, y] = tuple(round(g[i] + (cyan[i] - g[i]) * 0.85 * t) for i in range(3))
+    ImageDraw.Draw(im).ellipse((c - core, c - core, c + core, c + core), fill=(246, 248, 250))
+    return im
+
+
+def _max_channel_steps(im, points):
+    vals = [im.getpixel(p)[:3] for p in points]
+    return [max(abs(a[i] - b[i]) for i in range(3)) for a, b in zip(vals, vals[1:])]
+
+
+def test_icon_cli_glow_stays_smooth_while_glyph_edge_stays_hard(capsys, tmp_path, brand):
+    """The CLI keeps a smooth glow smooth (no ring at the key threshold) and the glyph edge hard, along a row and a
+    column through the centre of a vignetted night tile normalised with --ground-tolerance 5 (review, #52)."""
+    import statistics
+    from PIL import Image
+    src = tmp_path / "glow.png"
+    _glow_scene(512, 60).save(src)
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    out = tmp_path / "icon.png"
+    code, res = run_content(capsys, "--meta", meta, "--no-repo-dir", "content", "icon", "normalize", "--in", src,
+                            "--out", out, "--art-direction", FIX / "ART_DIRECTION.min.md", *NO_ESTATE,
+                            "--ground-tolerance", "5")
+    assert code == 0 and res["result"] in ("pass", "warn") and out.is_file()
+    with Image.open(out) as o:
+        out_img = o.convert("RGB")
+    in_up = _glow_scene(512, 60).resize((1024, 1024), Image.LANCZOS)
+    core_out = 2 * 60
+    band = range(core_out + 6, int(0.4 * 1024) + 1)
+    for name, step_pts in (
+            ("row", lambda r: [(512 + r, 512), (512 + r + 1, 512)]),
+            ("column", lambda r: [(512, 512 + r), (512, 512 + r + 1)])):
+        def steps(img, radii):
+            return [max(_max_channel_steps(img, step_pts(r))) for r in radii]
+        out_steps = steps(out_img, band)
+        in_steps = steps(in_up, band)
+        glyph = steps(out_img, range(core_out - 6, core_out + 6))
+        assert max(out_steps) <= max(max(in_steps), 0) + 3, name
+        assert max(out_steps) <= 8, name
+        median = statistics.median(out_steps)
+        assert max(out_steps) <= 3 * median + 2, name
+        assert max(glyph) >= 40, name
+
+
 def test_icon_watching_org_is_exempt(capsys, tmp_path):
     meta = tmp_path / "meta.json"
     meta.write_text(json.dumps(meta_dict(owner="romgenie-following-repos", repo="tool", fork=True)), encoding="utf-8")
