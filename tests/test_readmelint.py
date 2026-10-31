@@ -302,3 +302,36 @@ def test_trailing_dash_message_with_palette_colour_passes(make_ctx, tmp_path, br
 def test_extra_quote_markers_in_a_quoted_fence_do_not_hide_a_missing_image(make_ctx, tmp_path, brand):
     snippet = "> ```text\n> > ```\n> code\n> ```\n> ![Shot](<docs/images/missing.png>)"
     assert MISSING in _usage_fails(make_ctx, tmp_path, brand, snippet)
+
+
+# --- a resolved full-reference label is literal text: its backticks never open inline code ---------------------------
+REF_LABEL_DEFINITION = "[docs`ref]: https://example.test/docs"
+REF_LABEL_LAYOUT = ("[Docs][docs`ref] ![Type](<https://img.shields.io/badge/type-GitHub%20profile-{type}>) "
+                    "![License](<https://img.shields.io/badge/license-MIT-{license}>) `help`")
+
+
+def test_backtick_in_a_resolved_reference_label_does_not_pair_with_later_code(make_ctx, tmp_path, brand):
+    licence_off = REF_LABEL_LAYOUT.format(type="005ADD", license="FF0000") + "\n\n" + REF_LABEL_DEFINITION
+    assert "R7 off-palette badge colour FF0000" in _badge_fails(make_ctx, tmp_path, brand, licence_off)
+    type_off = REF_LABEL_LAYOUT.format(type="FF0000", license="64748B") + "\n\n" + REF_LABEL_DEFINITION
+    assert "R7 off-palette badge colour FF0000" in _badge_fails(make_ctx, tmp_path, brand, type_off)
+
+
+def test_backtick_in_an_unresolved_reference_label_still_opens_code(make_ctx, tmp_path, brand):
+    # no `[docs`ref]:` definition: the label is not a reference, so its backtick pairs with the one before `help`
+    body = REF_LABEL_LAYOUT.format(type="005ADD", license="FF0000")
+    assert "R7 off-palette badge colour FF0000" not in _badge_fails(make_ctx, tmp_path, brand, body)
+
+
+def test_code_before_the_label_keeps_precedence(make_ctx, tmp_path, brand):
+    # the code span opened before the label ends at the label's backtick (CommonMark), so the badge inside it is code
+    body = ("![License](<https://img.shields.io/badge/license-MIT-FF0000>) `x ![Type](<https://img.shields.io/badge/type-x-ABCDEF>)"
+            " [a][docs`ref] y`\n\n" + REF_LABEL_DEFINITION)
+    fails = _badge_fails(make_ctx, tmp_path, brand, body)
+    assert "R7 off-palette badge colour FF0000" in fails
+    assert "R7 off-palette badge colour ABCDEF" not in fails
+
+
+def test_resolved_reference_label_scan_stays_linear():
+    text = "[a][docs`ref] " * 2000 + "\n\n" + REF_LABEL_DEFINITION + "\n"
+    assert len(readmelint._outside_code(text)) == len(text)
