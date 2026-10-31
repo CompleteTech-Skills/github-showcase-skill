@@ -4,7 +4,9 @@ CommonMark escaping: the parity of the backslashes directly before a backtick de
 even = real), for any number of backslashes. Block structure is decided before inline spans (CommonMark appendix A):
 an inline code span never pairs across a block boundary. A fence inside a block quote or a list item is container-aware:
 it opens and closes on the container's own lines, its quote and item markers are container syntax, and a line of lower
-quote depth (or, in an item, a line left of the item's content column) ends it."""
+quote depth (or, in an item, a line left of the item's content column) ends it. A raw HTML block (CommonMark 4.6) is
+tracked the same way: its lines are literal text, so a backtick inside one never opens a code span; types 1-5 run to
+their own end condition, types 6 and 7 to the next blank line, and normal Markdown resumes after it."""
 from __future__ import annotations
 
 import bisect
@@ -34,6 +36,32 @@ _TYPE_6 = ("address article aside base basefont blockquote body caption center c
 _HTML_BLOCK = re.compile(
     r"^ {0,3}(?:<(?:script|pre|style|textarea)(?:[ \t>]|$)|<!--|<\?|<![A-Za-z]|<!\[CDATA\[|</?(?:"
     + "|".join(_TYPE_6) + r")(?:[ \t]|/?>|$))", re.I)
+
+
+# the seven HTML block kinds (CommonMark 4.6). Types 1-5 end at a marker found on a line (the start line included);
+# types 6 and 7 end at the next blank line. Type 7 is one complete open or closing tag alone on its line and cannot
+# interrupt a paragraph, so an inline tag in running text (`<span>a` b</span>`) stays Markdown.
+_HTML_OPEN_1_5 = (
+    (re.compile(r"^ {0,3}<(?:script|pre|style|textarea)(?:[ \t>]|$)", re.I),
+     re.compile(r"</(?:script|pre|style|textarea)>", re.I)),
+    (re.compile(r"^ {0,3}<!--"), re.compile(r"-->")),
+    (re.compile(r"^ {0,3}<\?"), re.compile(r"\?>")),
+    (re.compile(r"^ {0,3}<![A-Za-z]"), re.compile(r">")),
+    (re.compile(r"^ {0,3}<!\[CDATA\["), re.compile(r"\]\]>")),
+)
+_HTML_TYPE_6 = re.compile(r"^ {0,3}</?(?:" + "|".join(_TYPE_6) + r")(?:[ \t]|/?>|$)", re.I)
+_HTML_TYPE_7 = re.compile(
+    r"^ {0,3}(?:<[A-Za-z][A-Za-z0-9-]*(?:[ \t]+[A-Za-z_:][\w:.-]*(?:[ \t]*=[ \t]*(?:[^\s\"'=<>`]+|'[^']*'|\"[^\"]*\"))?)*"
+    r"[ \t]*/?>|</[A-Za-z][A-Za-z0-9-]*[ \t]*>)[ \t]*$")
+
+
+def _html_block(line: str):
+    """None when `line` (container markers removed) does not start an HTML block; otherwise the end-condition regex of
+    a type 1-5 block, or True for a type 6 or 7 block, which ends at the next blank line."""
+    for opener, end in _HTML_OPEN_1_5:
+        if opener.match(line):
+            return end
+    return True if _HTML_TYPE_6.match(line) or _HTML_TYPE_7.match(line) else None
 
 
 def _run_end(text: str, i: int) -> int:
@@ -144,6 +172,8 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
     seg: list[tuple[int, str]] = []
     # an open fence: (fence run, block-quote depth, list-item content column (0 outside an item), item-before-quote flag)
     fence, fstart, table, para_depth, base, pos = None, 0, False, 0, 0, 0
+    # an open raw HTML block: (end regex, or None for a block that ends at a blank line; the same container fields)
+    html = None
 
     def flush(rows):
         if rows:
@@ -178,6 +208,20 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
                 if close and close.group(1)[0] == run[0] and len(close.group(1)) >= len(run):
                     fences.append((fstart, pos))
                     fence = None
+                continue
+        if html is not None:
+            end, hdepth, hcol, houter = html
+            inner = _strip_quotes(body, hdepth)
+            lead = len(body) - len(body.lstrip(" ")) if houter else len(inner) - len(inner.lstrip(" "))
+            if depth < hdepth or (hcol and depth == hdepth and rest.strip(" \t") and lead < hcol):
+                html = None   # its quote or list item ended: an HTML block has no lazy continuation
+            elif end is None:
+                if rest.strip(" \t"):
+                    continue
+                html = None   # a type 6 or 7 block ends at the blank line, which is then handled as usual
+            else:
+                if end.search(rest):
+                    html = None
                 continue
         if not rest.strip(" \t"):
             flush(seg)
@@ -214,8 +258,12 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
         opener = FENCE_OPEN.match(crest)
         if opener:
             fence, fstart = (opener.group(1), cdepth, col, bool(col) and not _QUOTE.match(body)), at
-        elif _ATX_HEADING.match(rest) or _HTML_BLOCK.match(rest):
+        elif _ATX_HEADING.match(rest):
             regions.append((at, pos))
+        elif (kind := _html_block(crest)) is not None:
+            # raw HTML: no inline region, so a backtick on these lines never pairs and the block's images stay visible
+            if kind is True or not kind.search(crest):
+                html = (None if kind is True else kind, cdepth, col, bool(col) and not _QUOTE.match(body))
         elif not _THEMATIC.match(rest):
             item = _ITEM_PREFIX.match(rest)
             seg, para_depth, base = [(at, raw)], depth, (item.end() if item else 0)

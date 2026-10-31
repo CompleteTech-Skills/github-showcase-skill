@@ -315,3 +315,35 @@ def test_type_7_paragraph_still_pairs_its_backticks():
 def test_type_1_block_closed_on_its_own_line_leaves_the_next_line_as_markdown():
     t = "<pre>x</pre>\nRun `npx` now\n"
     assert [t[a:b] for a, b in mdcode.inline_code_spans(t)] == ["`npx`"]
+
+
+# --- container-aware and boundary behaviour of the raw HTML block --------------------------------------------------
+def test_quoted_html_block_keeps_the_image_visible_and_ends_with_the_quote():
+    t = "> <div>\n> Use a literal ` character.\n> " + RAW_IMG + "\n> Another ` character.\n> </div>\n"
+    assert mdcode.inline_code_spans(t) == ()
+    lazy = "> <div>\nlazy ` x\n" + IMAGE + "\ny `\n"   # an HTML block has no lazy continuation: this is a paragraph
+    assert covers(lazy, IMAGE)
+
+
+def test_list_item_html_block_keeps_the_image_visible_and_ends_left_of_the_item():
+    t = "- <div>\n  Use a literal ` character.\n  " + RAW_IMG + "\n  Another ` character.\n  </div>\n"
+    assert mdcode.inline_code_spans(t) == ()
+    left = "- <div>\n  x\nUse ` here " + IMAGE + " there `\n"
+    assert covers(left, IMAGE)
+
+
+def test_blank_line_ends_a_type_6_block_and_markdown_resumes_after_it():
+    t = "<div>\nraw\n</div>\n\nUse ` here " + IMAGE + " there `\n"
+    assert covers(t, IMAGE)
+
+
+def test_type_7_tag_alone_on_a_line_is_raw_but_cannot_interrupt_a_paragraph():
+    raw = "<custom-tag>\nUse ` here\n" + IMAGE + "\nthere `\n"
+    assert mdcode.inline_code_spans(raw) == ()
+    para = "Run `a\n<custom-tag>\nb` c\n"
+    assert [para[a:b] for a, b in mdcode.inline_code_spans(para)] == ["`a\n<custom-tag>\nb`"]
+
+
+def test_unclosed_type_2_block_runs_to_the_end_and_masks_nothing():
+    t = "<!--\n`a\n" + IMAGE + "\nb`\n"
+    assert mdcode.inline_code_spans(t) == ()

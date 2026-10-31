@@ -406,3 +406,24 @@ def test_container_definition_counts_its_header_badge(make_ctx, tmp_path, defini
 def test_missing_container_definition_still_reports_one_header_badge(make_ctx, tmp_path):
     fails = _variant_j_badge_fails(make_ctx, tmp_path, "")
     assert "R7 2-4 header badges required (found 1)" in fails, fails
+
+
+RAW_HTML_IMG = '<img src="docs/images/missing.png" alt="Shot">'
+
+
+def test_literal_backticks_in_a_raw_html_block_do_not_hide_a_missing_image(make_ctx, tmp_path, brand):
+    ctx = good_readme(make_ctx, tmp_path, brand)
+    p = _insert_usage(tmp_path, "<div>\nUse a literal ` character.\n" + RAW_HTML_IMG + "\nAnother ` character.\n</div>")
+    assert "R7 local image does not resolve: docs/images/missing.png" in readmelint.lint(ctx, p)["fails"]
+
+
+def test_a_real_img_inside_an_html_block_is_still_counted_for_r7(make_ctx, tmp_path, brand):
+    ctx = good_readme(make_ctx, tmp_path, brand)
+    p = _insert_usage(tmp_path, "<div>\n" + RAW_HTML_IMG + "\n</div>")
+    assert "R7 local image does not resolve: docs/images/missing.png" in readmelint.lint(ctx, p)["fails"]
+
+
+def test_backticks_after_the_html_block_ends_at_a_blank_line_still_hide_an_image(make_ctx, tmp_path, brand):
+    ctx = good_readme(make_ctx, tmp_path, brand)
+    p = _insert_usage(tmp_path, "<div>\nraw\n</div>\n\nUse ` and " + RAW_HTML_IMG + " and `")
+    assert not any("local image" in f for f in readmelint.lint(ctx, p)["fails"])

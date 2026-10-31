@@ -57,15 +57,16 @@ def test_inline_code_angle_bracket_does_not_hide_html_images_from_lint(make_ctx,
 @pytest.mark.parametrize("document,expected", [
     ('<img alt="a`b" src="https://img.shields.io/badge/a-b-005ADD"> see `![F](https://img.shields.io/badge/c-d-005ADD)`',
      [("a`b", "https://img.shields.io/badge/a-b-005ADD")]),
-    ("<!-- `x -->`![F](y.png)`", []),
-    ("<!-- `x -->`![F](y.png)` ![G](g.png)", [("G", "g.png")]),
+    ("A <!-- `x -->`![F](y.png)`", []),
+    ("A <!-- `x -->`![F](y.png)` ![G](g.png)", [("G", "g.png")]),
 ])
+# the comment sits inside a paragraph: a line that starts with a comment is a raw HTML block (CommonMark type 2), not Markdown
 def test_code_span_after_a_winning_tag_or_comment_is_still_code(document, expected):
     assert images(document) == expected
 
 
 def test_code_example_after_attribute_backtick_is_not_a_badge_or_local_file(make_ctx, tmp_path):
-    usage = '<!-- `x -->`![F](y.png)`'
+    usage = 'A <!-- `x -->`![F](y.png)`'
     result = lint_reference(make_ctx, tmp_path, usage, "")
     assert "R7 local image does not resolve: y.png" not in result["fails"]
     assert "R7 2-4 header badges required (found 1)" in result["fails"]
