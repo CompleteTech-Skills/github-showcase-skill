@@ -1,4 +1,4 @@
-"""Issue 47 round 3: fenced footer-like examples, the footer workflow triggers and the decisions.md provenance gate.
+"""Issue 47 round 3: fenced footer-like examples and the footer workflow triggers.
 
 Synthetic fixtures only.
 """
