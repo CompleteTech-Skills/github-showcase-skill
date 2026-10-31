@@ -19,9 +19,10 @@ IMG_MD = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)[^)]*\)")
 IMG_HTML = re.compile(r"<img\b([^>]*)>", re.I)
 PALETTE = {"1E3A8A", "005ADD", "067647", "64748B", "E551BA", "F386A1", "1E1E1E"}
 REF_DEFINITION = re.compile(
-    r"^ {0,3}\[((?:\\.|[^\]\\\n])+)\]:[ \t]*(?:\n[ \t]*)?(?:<([^<>\n]+)>|(\S+?))"
-    r"(?:(?:[ \t]+|[ \t]*\n[ \t]*)(?:\"(?:\\.|[^\"\\\n]|\n(?![ \t]*\n))*\"|'(?:\\.|[^'\\\n]|\n(?![ \t]*\n))*'"
-    r"|\((?:\\.|[^()\\\n]|\n(?![ \t]*\n))*\)))?[ \t]*$", re.M)  # a title may span lines but never a blank one
+    r"^\x00* {0,3}\[((?:\\.|[^\]\\\n])+)\]:[ \t\x00]*(?:\n[ \t\x00]*)?(?:<([^<>\n]+)>|([^\s\x00]+?))"
+    r"(?:(?:[ \t]+|[ \t\x00]*\n[ \t\x00]*)(?:\"(?:\\.|[^\"\\\n]|\n(?![ \t\x00]*\n))*\"|'(?:\\.|[^'\\\n]|\n(?![ \t\x00]*\n))*'"
+    r"|\((?:\\.|[^()\\\n]|\n(?![ \t\x00]*\n))*\)))?[ \t]*$", re.M)
+# a title may span lines but never a blank one; NUL stands in for a blanked quote or list-item prefix (see below)
 # CommonMark raw HTML: an open tag needs a valid tag name, valid attributes and a closing `>`; anything else is text
 _ATTR = r"""\s+[A-Za-z_:][A-Za-z0-9_.:-]*(?:\s*=\s*(?:[^\s"'=<>`]+|'[^']*'|"[^"]*"))?"""
 HTML_OPEN_TAG = re.compile(rf"<([A-Za-z][A-Za-z0-9-]*)((?:{_ATTR})*)\s*/?>")
@@ -106,6 +107,16 @@ def _definition_candidates(document: str) -> str:
             if out[i] != "\n":
                 out[i] = " "
         pos = m.end()
+    # Quote and list-item markers are container syntax: a definition inside `> ` or `- ` is still a definition and is
+    # global to the document. Each peeled prefix becomes NUL (same length), so offsets are unchanged and the pattern
+    # sees an ordinary line start. Fenced lines are already blanked; blanked comment text has no prefix to peel.
+    pos = 0
+    for raw in re.findall(r"[^\n]*\n|[^\n]+", document):
+        body = raw.rstrip("\r\n")
+        line = "".join(out[pos:pos + len(body)])
+        prefix = len(line) - len(mdcode._containers(line)[2])
+        out[pos:pos + prefix] = ["\x00"] * prefix
+        pos += len(raw)
     return "".join(out)
 
 

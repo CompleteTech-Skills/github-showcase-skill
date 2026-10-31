@@ -81,3 +81,18 @@ def test_layout_is_built_once_per_document_across_the_whole_path():
         readmelint._images(readmelint._outside_code(doc), doc)
         readmelint._definition_spans(doc)
     assert mdcode.WORK["layout_builds"] == 1
+
+
+def test_container_definitions_add_no_layout_work_and_grow_linearly():
+    """Definitions inside quote and list containers are read by one pass over the lines (no per-definition rescan):
+    the layout is still built once and the regions visited grow with the document. Counted, never timed."""
+    def doc(n):
+        prefixes = ["> ", "- ", "1. ", "> - "]
+        body = "".join(f"![x{i}][ref{i}] text `c{i}`\n\n" for i in range(n))
+        return body + "".join(f"{prefixes[i % 4]}[ref{i}]: https://example.test/img{i}.png\n\n" for i in range(n))
+    small = measure(doc(N), lambda d: readmelint._images(readmelint._outside_code(d), d))
+    large = measure(doc(2 * N), lambda d: readmelint._images(readmelint._outside_code(d), d))
+    assert len(readmelint._definitions(doc(N))) == N
+    assert small["layout_builds"] == large["layout_builds"] == 1, (small, large)
+    assert large.get("regions", 0) <= 2.5 * small.get("regions", 0), (small, large)
+    assert large["span_checks"] <= 2.5 * small["span_checks"], (small, large)
