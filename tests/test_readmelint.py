@@ -337,3 +337,72 @@ def test_code_before_the_label_keeps_precedence(make_ctx, tmp_path, brand):
 def test_resolved_reference_label_scan_stays_linear():
     text = "[a][docs`ref] " * 2000 + "\n\n" + REF_LABEL_DEFINITION + "\n"
     assert len(readmelint._outside_code(text)) == len(text)
+
+
+# --- round-7 reference definitions inside blockquote and list containers --------------------------------------------
+CONTAINER_DEFINITIONS = [
+    "> [shot]: docs/images/missing.png",
+    "- [shot]: docs/images/missing.png",
+    "1. [shot]: docs/images/missing.png",
+    "> - [shot]: docs/images/missing.png",
+    "- > [shot]: docs/images/missing.png",
+    "> > [shot]: docs/images/missing.png",
+    "> [shot]: <docs/images/missing.png>",
+]
+CONTAINER_IDS = ["quote", "bullet", "ordered", "quote-bullet", "bullet-quote", "nested-quote", "quote-angle"]
+
+
+@pytest.mark.parametrize("definition", CONTAINER_DEFINITIONS, ids=CONTAINER_IDS)
+def test_container_reference_definition_reports_missing_local_image(make_ctx, tmp_path, brand, definition):
+    assert MISSING in _usage_fails(make_ctx, tmp_path, brand, f"![Screenshot][shot]\n\n{definition}")
+
+
+CONTAINER_CONTROLS = [
+    ("fenced", "```text\n[shot]: docs/images/missing.png\n```"),
+    ("inline-code", "Use `[shot]: docs/images/missing.png` here."),
+    ("indented-code", "    [shot]: docs/images/missing.png"),
+    ("paragraph-continuation", "> text\n> [shot]: docs/images/missing.png"),
+]
+
+
+@pytest.mark.parametrize("control", [c for _, c in CONTAINER_CONTROLS], ids=[i for i, _ in CONTAINER_CONTROLS])
+def test_container_control_is_not_a_definition_and_renders_no_image(make_ctx, tmp_path, brand, control):
+    fails = _usage_fails(make_ctx, tmp_path, brand, f"![Screenshot][shot]\n\n{control}")
+    assert MISSING not in fails, fails
+    text = (tmp_path / "README.md").read_text(encoding="utf-8")
+    assert not any("missing.png" in source for _, source in readmelint._images(readmelint._outside_code(text), text))
+
+
+BADGE_TYPE_LINE = "![Type](<https://img.shields.io/badge/type-GitHub%20profile-005ADD>)"
+BADGE_LICENSE_LINE = "![License][lic]"
+LICENSE_DEFINITION = "<https://img.shields.io/badge/license-MIT-64748B>"
+
+
+def _variant_j_badge_fails(make_ctx, tmp_path, definition):
+    # Inlined from the Variant J fixture in test_variant_j_badges.py: a profile repo with the header badges replaced
+    # by the reference-style pair under test, and the definition placed after the header and before the footer.
+    (tmp_path / "docs/images").mkdir(parents=True)
+    (tmp_path / "docs/images/banner.png").write_bytes(b"banner")
+    ctx = make_ctx(repo_dir=tmp_path, repo=".github", language=None,
+                   description="Community health files for Northwind Trading Co.")
+    text = readme.scaffold(ctx)
+    original = next(m.group(2) for m in readme.MARK.finditer(text) if m.group(1) == "badges")
+    text = text.replace(original, BADGE_TYPE_LINE + "\n" + BADGE_LICENSE_LINE + "\n")
+    text = text.replace("<!-- showcase:footer:start -->", definition + "\n\n<!-- showcase:footer:start -->")
+    path = tmp_path / "README.md"
+    path.write_text(text, encoding="utf-8")
+    return readmelint.lint(ctx, path)["fails"]
+
+
+@pytest.mark.parametrize("definition", [
+    f"> [lic]: {LICENSE_DEFINITION}",
+    f"- [lic]: {LICENSE_DEFINITION}",
+], ids=["quote", "bullet"])
+def test_container_definition_counts_its_header_badge(make_ctx, tmp_path, definition):
+    fails = _variant_j_badge_fails(make_ctx, tmp_path, definition)
+    assert not any("2-4 header badges required" in f for f in fails), fails
+
+
+def test_missing_container_definition_still_reports_one_header_badge(make_ctx, tmp_path):
+    fails = _variant_j_badge_fails(make_ctx, tmp_path, "")
+    assert "R7 2-4 header badges required (found 1)" in fails, fails
