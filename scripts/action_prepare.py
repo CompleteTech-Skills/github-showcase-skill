@@ -93,7 +93,7 @@ def summary(meta: str) -> None:
     for cmd in ("describe", "topics"):
         p = subprocess.run([sys.executable, str(script), "--meta", meta, "--repo-dir", ".", cmd, "--gh"] if cmd == "topics"
                            else [sys.executable, str(script), "--meta", meta, "--repo-dir", ".", cmd],
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, encoding="utf-8")
         try:
             r = json.loads(p.stdout)
         except ValueError:
@@ -119,6 +119,9 @@ def summary(meta: str) -> None:
         with open(target, "a", encoding="utf-8") as fh:
             fh.write(text)
     else:
+        reconfigure = getattr(sys.stdout, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors=sys.stdout.errors)
         sys.stdout.write(text)
 
 

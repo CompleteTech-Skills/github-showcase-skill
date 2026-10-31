@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .config import Brand, load_repo_override, override_from_manifests
+from .config import Brand, load_repo_override, override_from_manifests, t3_signed_off
 from .detect import detect
 from .errors import ConfigError, NeedsInput
 from .facts import RepoFacts
@@ -150,7 +150,7 @@ class RepoContext:
         no_card = "exempt:no-card" if self.card_exempt() else None  # §5.4 holds whatever the owner code says
         if watching:  # a watching-org repository that is not a fork and not its `.github`: decided explicitly
             return {"banner": watching, "card": no_card or watching, "icon": watching}
-        if status in ("t3", "hold", "excluded"):
+        if status in ("t3", "hold", "excluded") and not (status == "t3" and t3_signed_off()):
             code = {"t3": "t3-signoff", "hold": "hold", "excluded": "exempt"}[status]
             return {"banner": code, "card": no_card or code, "icon": code}
         if no_card:
@@ -182,7 +182,7 @@ class RepoContext:
         """None when the decision 18 footer applies, else why not: `exempt:watching-fork`, `hold:watching-non-fork`,
         `t3-signoff`, `hold` (org row `footer: hold`) or `exempt:footer` (org row `footer: false`). The watching org's
         `footer: false` exempts only its forks (org.md), so its `.github` needs the footer."""
-        if self.brand.owner_status(self.owner) == "t3":
+        if self.brand.owner_status(self.owner) == "t3" and not t3_signed_off():
             return "t3-signoff"
         watching = self.watching_status()
         if watching or self.brand.owner_status(self.owner) == "watching":

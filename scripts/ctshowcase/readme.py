@@ -158,7 +158,10 @@ def banner_html(ctx: RepoContext) -> str:
 
 def badges(ctx: RepoContext) -> list[tuple[str, str, str | None]]:
     """[(alt, image url, link)] per §7.2: language, type, license, CI. 2-4."""
-    b = ctx.brand.raw["badges"]
+    b = dict(ctx.brand.raw["badges"])
+    for k in ("brand", "accent"):  # a family outside CompleteTech carries its own badge colours (brand.yaml badge_brand, badge_accent)
+        if ctx.style.get(f"badge_{k}"):
+            b[k] = ctx.style[f"badge_{k}"]
     jev = ctx.style["name"] == "jevplay-games"
     extra = "?labelColor=1E1E1E" if jev else ""
     out = []
@@ -388,11 +391,14 @@ def license_section(ctx: RepoContext) -> tuple[str, str] | None:
         if not year:
             ctx.log("needs-input:license-year")
             return None
-        return "License", rv["private"].replace("<year>", year)
+        private = rv["private"].replace("<year>", year)
+        if ctx.org.get("family") not in (None, "completetech"):
+            private = private.replace("CompleteTech LLC", ctx.org.get("display_name") or ctx.owner)
+        return "License", private
     if lic == "MIT":
         if f.exists("BRAND_ASSETS.md"):
             return "License", rv["skills_mit"]
-        if ctx.tier.startswith("T2"):
+        if ctx.tier.startswith("T2") or ctx.org.get("family") not in (None, "completetech"):
             return "License", rv["t2_mit"].replace("<Brand>", ctx.org.get("display_name") or ctx.owner)
         return "License", rv["t1_mit"]
     if lic and lic not in ("NOASSERTION",):
@@ -435,6 +441,8 @@ def section_facts(ctx: RepoContext, h2: str) -> str | None:
         if hp and ctx.meta.get("homepage_status") == 200:
             return f"**[{re.sub(r'^https?://', '', hp).rstrip('/')}]({hp})**"
     if h2 == "Ownership":
+        if ctx.org.get("family") not in (None, "completetech"):
+            return f"Organization: {ctx.owner}"
         return f"Owner: @CompleteDotTech · Organization: {ctx.owner}"
     if h2 == "Files" and ctx.det["variant"] == "J":
         rows = [("profile/README.md", f"Organization profile shown at github.com/{ctx.owner}")]

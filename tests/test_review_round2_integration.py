@@ -6,12 +6,12 @@ import datetime
 import json
 import os
 import shutil
-import subprocess
 import sys
 
 import yaml
+import pytest
 
-from conftest import EX, ROOT, run_cli
+from conftest import EX, ROOT, run_bash, run_cli
 from ctshowcase import footer, readme
 from ctshowcase import project as PJ
 from ctshowcase.resolver import Resolver
@@ -69,23 +69,24 @@ def test_no_status_update_when_the_board_already_has_one(brand, monkeypatch):
 
 # ------------------------------------------------------------------------- Action: only a held README is skipped
 def _generate(tmp_path, showcase_yml):
-    step = next(s for s in yaml.safe_load((ROOT / "action.yml").read_text())["runs"]["steps"] if s.get("id") == "generate")
+    step = next(s for s in yaml.safe_load((ROOT / "action.yml").read_text(encoding="utf-8"))["runs"]["steps"] if s.get("id") == "generate")
     repo, rt = tmp_path / "repo", tmp_path / "rt"
     shutil.copytree(EX / "repos" / "northwind-support-triage-agent", repo)
     rt.mkdir()
     (repo / ".github").mkdir(exist_ok=True)
-    (repo / ".github" / "showcase.yml").write_text(showcase_yml)
+    (repo / ".github" / "showcase.yml").write_text(showcase_yml, encoding="utf-8")
     shutil.copy(EX / "meta" / "northwind-support-triage-agent.json", rt / "meta.json")
     out = tmp_path / "gh_out"
-    out.write_text("")
+    out.write_text("", encoding="utf-8")
     env = dict(os.environ, GITHUB_ACTION_PATH=str(ROOT), RUNNER_TEMP=str(rt), GITHUB_OUTPUT=str(out),
                GITHUB_REPOSITORY=f"{N}/support-triage-agent", SHOWCASE_OUTPUTS="", SHOWCASE_README="header",
                SHOWCASE_IS_TEMPLATE="false", SHOWCASE_ALLOW_UNMEASURED="false",
                PATH=os.path.dirname(sys.executable) + os.pathsep + os.environ.get("PATH", ""))
-    p = subprocess.run(["bash", "-c", step["run"]], cwd=repo, env=env, capture_output=True, text=True)
-    return p, out.read_text()
+    p = run_bash(step["run"], cwd=repo, env=env)
+    return p, out.read_text(encoding="utf-8")
 
 
+@pytest.mark.requires_bash
 def test_action_fails_on_a_readme_config_error(tmp_path):
     p, outputs = _generate(tmp_path, 'accent: "#FF0000"\n')
     assert p.returncode == 2, p.stdout + p.stderr
@@ -110,11 +111,11 @@ def test_footer_copy_needs_the_footers_own_logo(brand):
 def test_upgrade_keeps_a_partner_logo_in_a_credited_block(tmp_path, brand):
     repo = tmp_path / "repo"
     repo.mkdir()
-    (repo / "README.md").write_text("# Support Triage Agent\n\nTriage agent.\n\n## Usage\n\nRun it.\n\n" + PARTNER)
+    (repo / "README.md").write_text("# Support Triage Agent\n\nTriage agent.\n\n## Usage\n\nRun it.\n\n" + PARTNER, encoding="utf-8")
     p = run_cli("--meta", EX / "meta" / "northwind-support-triage-agent.json", "--repo-dir", repo, "--format", "json",
                 "readme", "--mode", "upgrade", "--write")
     out = json.loads(p.stdout)
     assert p.returncode == 0 and out["result"] == "changed", p.stdout + p.stderr
-    text = (repo / "README.md").read_text()
+    text = (repo / "README.md").read_text(encoding="utf-8")
     assert all(ln in text.splitlines() for ln in PARTNER.splitlines())  # the whole block, partner logo included
     assert footer.check(brand, text)[0] == "fail:duplicate"

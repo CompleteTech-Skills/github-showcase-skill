@@ -1,5 +1,6 @@
 """Regressions found in test round 1 (real estate metadata across every family)."""
 import json
+from pathlib import Path
 
 import pytest
 
@@ -105,7 +106,7 @@ def test_lint_all_fails_a_missing_banner(tmp_path):
     m.write_text(json.dumps({"owner": "CompleteTech-LLC", "repo": "demo", "visibility": "public", "description": "Run it."}))
     p = run_cli("--meta", m, "--repo-dir", tmp_path, "lint", "all")
     lines = [json.loads(x) for x in p.stdout.splitlines()]
-    assert p.returncode == 1 and {x["file"].split("/")[-1] for x in lines if x["result"] == "FAIL"} == {"banner.png", "card.svg"}
+    assert p.returncode == 1 and {Path(x["file"]).name for x in lines if x["result"] == "FAIL"} == {"banner.png", "card.svg"}
 
 
 def test_preserved_readme_lints_like_it_was_upgraded(brand, tmp_path):

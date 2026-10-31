@@ -131,7 +131,7 @@
    "type": "object",
    "additionalProperties": false,
    "patternProperties": {
-    "^(eyebrow|title|subtitle|body|muted|ink|plate_low|card_fill|card_ink|card_edge|gold_trace|accent|accent_mid|accent_deep|signal_core)$": {
+    "^(eyebrow|title|subtitle|body|muted|ink|plate_low|card_fill|card_ink|card_edge|gold_trace|accent|accent_mid|accent_deep|signal_core|icon_ink|icon_spark)$": {
      "$ref": "#/$defs/hex"
     }
    },
@@ -195,6 +195,12 @@
      ]
     },
     "company_label": {
+     "type": "string"
+    },
+    "badge_brand": {
+     "type": "string"
+    },
+    "badge_accent": {
      "type": "string"
     },
     "eyebrow_case": {

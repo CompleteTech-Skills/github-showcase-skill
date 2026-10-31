@@ -105,6 +105,8 @@
    },
    "eyebrow": "#00A7FD",
    "gold_trace": "#FFC300",
+   "icon_ink": "#005ADD",
+   "icon_spark": "#A87C00",
    "ink": "#0F172A",
    "muted": "#94A3B8",
    "plate_low": "#001F3F",
@@ -157,6 +159,8 @@
     },
     "eyebrow": "#F2B75C",
     "gold_trace": "#F2B75C",
+    "icon_ink": "#15120E",
+    "icon_spark": "#8A591C",
     "muted": "#C9BFAE",
     "plate_low": "#2A241C",
     "signal_core": "#FFF4E0",
@@ -202,6 +206,8 @@
     },
     "eyebrow": "#22D3EE",
     "gold_trace": "#22D3EE",
+    "icon_ink": "#8B5CF6",
+    "icon_spark": "#22D3EE",
     "plate_low": "#0C075C",
     "title": "#F1F5F9"
    }
@@ -252,6 +258,8 @@
     },
     "eyebrow": "#F386A1",
     "gold_trace": "#F386A1",
+    "icon_ink": "#3A1A33",
+    "icon_spark": "#6B214F",
     "ink": "#1E1E1E",
     "muted": "#C9CDD3",
     "plate_low": "#1E1E1E",
@@ -295,8 +303,65 @@
     },
     "eyebrow": "#10B981",
     "gold_trace": "#10B981",
+    "icon_ink": "#10B981",
+    "icon_spark": "#F1F5F9",
     "plate_low": "#021527",
     "title": "#F1F5F9"
+   }
+  },
+  "pickyourai": {
+   "badge_accent": "115E59",
+   "badge_brand": "0F766E",
+   "canvas": {
+    "color": "#042F2E",
+    "grid": "#14B8A6",
+    "grid_opacity": 0.07,
+    "kind": "flat-grid"
+   },
+   "company_label": "Pick Your AI",
+   "eyebrow_case": "upper",
+   "measured": false,
+   "tokens": {
+    "accent": "#14B8A6",
+    "accent_deep": "#115E59",
+    "accent_mid": "#14B8A6",
+    "bar": {
+     "from": "#115E59",
+     "height": 6,
+     "to": "#14B8A6"
+    },
+    "body": "#CCFBF1",
+    "card_edge": "#CCFBF1",
+    "card_fill": "#F0FDFA",
+    "card_ink": "#042F2E",
+    "card_shadow": {
+     "blur": 12,
+     "color": "#000000",
+     "dx": 6,
+     "dy": 8,
+     "opacity": 0.35
+    },
+    "chip_attr": {
+     "bg": "#115E59",
+     "fg": "#F0FDFA"
+    },
+    "chip_key": {
+     "bg": "#FBBF24",
+     "fg": "#042F2E"
+    },
+    "edge": {
+     "color": "#14B8A6",
+     "opacity": 0.28
+    },
+    "eyebrow": "#5EEAD4",
+    "gold_trace": "#FBBF24",
+    "icon_ink": "#0F766E",
+    "icon_spark": "#B45309",
+    "ink": "#042F2E",
+    "muted": "#99F6E4",
+    "plate_low": "#042F2E",
+    "subtitle": "#CCFBF1",
+    "title": "#F0FDFA"
    }
   },
   "romgenie": {
@@ -333,6 +398,8 @@
     },
     "eyebrow": "#F4C430",
     "gold_trace": "#F4C430",
+    "icon_ink": "#B8860B",
+    "icon_spark": "#F8FAFC",
     "plate_low": "#002C31",
     "title": "#F8FAFC"
    }
@@ -372,6 +439,8 @@
     },
     "eyebrow": "#F59E0B",
     "gold_trace": "#F59E0B",
+    "icon_ink": "#E11D74",
+    "icon_spark": "#F59E0B",
     "plate_low": "#1D1116",
     "title": "#FDF2F8"
    }
@@ -769,10 +838,12 @@
    "description": null,
    "display_name": "Pick Your AI",
    "eyebrow": null,
-   "family": "completetech",
+   "family": "pickyourai",
    "family_topics": [],
    "footer": false,
    "former_slugs": [],
+   "hub_url": "https://pickyour.ai",
+   "mark": "assets/orgs/Pick-Your-AI/mark.png",
    "nav_name": "Pick Your AI",
    "tier": "T3"
   },

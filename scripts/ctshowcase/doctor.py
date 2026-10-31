@@ -8,6 +8,7 @@ from PIL import Image
 
 from . import describe, footer as footermod, labels as labelsmod, pnglint, readmelint, svglint, topics as topicsmod
 from . import readme as readmemod
+from .config import t3_signed_off
 from .context import RepoContext
 from .detect import standard
 
@@ -88,7 +89,7 @@ def row(ctx: RepoContext) -> dict:
         logs += rl.get("logs", [])
     else:
         cells["R7"] = "unknown" if not rd else "fail"
-    if ctx.brand.owner_status(ctx.owner) == "t3":
+    if ctx.brand.owner_status(ctx.owner) == "t3" and not t3_signed_off():
         cells["R7"] = "hold"  # T3: no README change before co-owner sign-off (lint readme refuses)
     lic = ctx.meta.get("license")
     cells["R8"] = "pass" if lic or not ctx.public else "warn"

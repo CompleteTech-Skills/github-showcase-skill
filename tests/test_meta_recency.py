@@ -1,11 +1,9 @@
 """Red-team round: `meta --from-gh` records CQ-16 recency, takes --allow-t3 after sign-off, and `--meta-dir` is recursive.
-Synthetic data only; `gh` is a local stub that answers read-only GETs."""
+Synthetic data only; the subprocess transport stub answers read-only GETs on every platform."""
 import json
-import os
-import stat
-import sys
+import subprocess
 
-from conftest import ROOT
+import showcase
 
 from ctshowcase import meta as M
 from ctshowcase import org as O
@@ -30,45 +28,37 @@ def test_normalize_keeps_recency_fields():
     assert m["last_substantive_commit"] == "2025-03-01T12:00:00Z" and m["last_substantive_sha"] == "c1"
 
 
-def _stub_gh(tmp_path, owner, repo):
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    data = tmp_path / "data"
-    data.mkdir()
-    (data / "repo.json").write_text(json.dumps({"name": repo, "full_name": f"{owner}/{repo}", "owner": {"login": owner},
-                                                "private": False, "visibility": "public", "default_branch": "main",
-                                                "pushed_at": "2026-10-06T00:00:00Z"}))
-    (data / "commits.json").write_text(json.dumps(COMMITS))
-    script = bin_dir / "gh"
-    script.write_text(f"""#!{sys.executable}
-import sys
-args = sys.argv[1:]
-if "-X" in args and args[args.index("-X") + 1] != "GET":
-    sys.exit(9)
-path = [a for a in args if a.startswith("repos/")][0]
-d = {str(data)!r}
-if path == "repos/{owner}/{repo}":
-    print(open(d + "/repo.json").read())
-elif "/commits?" in path:
-    print(open(d + "/commits.json").read())
-else:
-    sys.exit(1)
-""")
-    script.chmod(script.stat().st_mode | stat.S_IEXEC)
-    return dict(os.environ, PATH=f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+def _stub_gh(monkeypatch, owner, repo):
+    requests = []
+    repo_data = {"name": repo, "full_name": f"{owner}/{repo}", "owner": {"login": owner},
+                 "private": False, "visibility": "public", "default_branch": "main",
+                 "pushed_at": "2026-10-06T00:00:00Z"}
+
+    def run(argv, **kwargs):
+        assert argv[:4] == ["gh", "api", "-X", "GET"], argv
+        assert kwargs["capture_output"] and kwargs["text"] and kwargs["timeout"] == 60
+        path = argv[4]
+        requests.append(path)
+        data = repo_data if path == f"repos/{owner}/{repo}" else COMMITS if "/commits?" in path else None
+        return subprocess.CompletedProcess(argv, 0 if data is not None else 1,
+                                           json.dumps(data) if data is not None else "", "")
+
+    monkeypatch.setattr(M.subprocess, "run", run)
+    return requests
 
 
-def test_meta_from_gh_t3_needs_allow_t3_and_records_recency(tmp_path):
-    import subprocess
-    env = _stub_gh(tmp_path, "Pick-Your-AI", "core")
-    cmd = [sys.executable, str(ROOT / "scripts" / "showcase.py"), "meta", "--from-gh", "Pick-Your-AI/core"]
-    refused = subprocess.run(cmd, cwd=ROOT, env=env, capture_output=True, text=True)
-    assert refused.returncode == 2, refused.stdout + refused.stderr
+def test_meta_from_gh_t3_needs_allow_t3_and_records_recency(tmp_path, monkeypatch, capsys):
+    requests = _stub_gh(monkeypatch, "Pick-Your-AI", "core")
+    cmd = ["meta", "--from-gh", "Pick-Your-AI/core"]
+    assert showcase.main(cmd) == 2
+    refused = json.loads(capsys.readouterr().out)
+    assert refused["result"] == "refused" and any("t3-signoff" in code for code in refused["logs"])
     out = tmp_path / "m.json"
-    ok = subprocess.run(cmd + ["--allow-t3", "--out", str(out)], cwd=ROOT, env=env, capture_output=True, text=True)
-    assert ok.returncode == 0, ok.stdout + ok.stderr
-    m = json.loads(out.read_text())
+    assert showcase.main(cmd + ["--allow-t3", "--out", str(out)]) == 0
+    assert json.loads(capsys.readouterr().out)["result"] == "ok"
+    m = json.loads(out.read_text(encoding="utf-8"))
     assert m["last_substantive_commit"] == "2025-03-01T12:00:00Z" and m["pushed_at"] == "2026-10-06T00:00:00Z"
+    assert "repos/Pick-Your-AI/core/commits?sha=main&per_page=100" in requests
 
 
 def test_load_metas_is_recursive(tmp_path, brand):

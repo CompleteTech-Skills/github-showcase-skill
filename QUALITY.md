@@ -33,6 +33,11 @@ Run the test suite as well:
 python -m pytest -q
 ```
 
+The `Test portability` workflow runs this full suite on Windows, Linux and macOS.
+Only Action shell tests marked `requires_bash` may skip when a compatible shell is
+absent; Windows uses Git for Windows' shell, not the WSL launcher. See the
+[Windows test triage](references/windows-testing.md) for encoding and path handling.
+
 It covers the typesetting engine, the PNG and SVG backends, banner geometry against the golden layout mask, chip rules, cards, tiles, intros, the footer, README scaffold and upgrade (including the never-delete multiset property), descriptions, topics, type detection, labels, both linters, contact sheets, `doctor`, the Action contract, the org resolver (renamed and merged org logins), the `org`, `project`, `enterprise` and `content` modules, and the command-group wiring in `showcase.py` (`tests/test_cli_groups.py`: every contract name parses, `content social` writes the same file as the hidden, deprecated `social-preview` alias, writer jobs carry the contract keys). `tests/test_estate_corpus.py` runs only when `SHOWCASE_CORPUS_DIR` points at a local metadata corpus; it writes nothing into the package.
 
 ## Optional render gate

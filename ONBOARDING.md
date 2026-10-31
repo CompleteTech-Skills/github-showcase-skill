@@ -26,6 +26,10 @@ python scripts/showcase.py fonts --check
 
 On Windows PowerShell, create the environment with `py -3 -m venv .venv`, then use `.\.venv\Scripts\python.exe` instead of `python` in subsequent commands. Activation is optional; do not change machine execution policy for this skill. For an existing checkout, skip `git clone` and start at environment setup.
 
+The CLI writes UTF-8 to stdout and stderr, including redirected Windows output. When
+capturing output from Python, use `subprocess.run(..., encoding="utf-8")`. No
+`PYTHONIOENCODING` override is required for non-ASCII JSON, footer text or diagnostics.
+
 ## 3. Run a safe demonstration
 
 Run from the skill root. The commands below use the bundled synthetic Northwind Trading Co. metadata and a small synthetic checkout in `examples/repos/`, not a real repository, and name that checkout with `--repo-dir`. On a real repository, run `python3 <skill-dir>/scripts/showcase.py` from inside the repository's checkout instead: with `--meta` and no `--repo-dir`, the command refuses (exit 2) unless the current directory is the checkout the metadata describes, so it never writes into the skill. Outputs go to `output/`, which git ignores; choose new filenames when retaining earlier output.
@@ -64,7 +68,7 @@ For a multi-skill handoff, preserve the source facts, artifact paths, `logs[]` c
 
 ## Safety and permissions
 
-The documented generation workflow is local. Installation may contact GitHub and package indexes. `meta --from-gh` makes read-only `gh api` GETs, and `fonts --fetch` downloads the pinned fonts; nothing else uses the network. Generation does not push commits, change descriptions, topics, labels or settings, publish documents, grant approval or install background services. Review the boundaries in [SKILL.md](SKILL.md) before using real repositories.
+The documented generation workflow is local. Installation may contact GitHub and package indexes. `meta --from-gh` and the opt-in `org labels ORG --repos-from-gh` mode make read-only `gh api` GETs. `fonts --fetch` downloads the pinned fonts. Org-wide label planning emits proposed jobs for review; it never applies them. Generation does not push commits, change descriptions, topics, labels or settings, publish documents, grant approval or install background services. Review the boundaries in [SKILL.md](SKILL.md) before using real repositories.
 
 ## Troubleshooting and verification
 

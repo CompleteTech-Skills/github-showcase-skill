@@ -141,6 +141,8 @@ defaults:
     accent_mid: "#0081ED"
     accent_deep: "#005ADD"
     signal_core: "#E0F4FF"
+    icon_ink: "#005ADD"
+    icon_spark: "#A87C00"        # deep gold: readable on the light icon card
   fonts:
     eyebrow: poppins-semibold
     title: mono-bold
@@ -180,6 +182,8 @@ families:
       accent_mid: "#E39B3A"
       accent_deep: "#E39B3A"
       signal_core: "#FFF4E0"
+      icon_ink: "#15120E"
+      icon_spark: "#8A591C"      # dark amber: readable on paper
     fonts: {title: fraunces-semibold, eyebrow: mono-medium, subtitle: bricolage-medium, card_name: fraunces-semibold,
             card_body: bricolage-medium, display: fraunces-semibold}
   jev-engineering:
@@ -201,6 +205,8 @@ families:
       accent: "#22D3EE"
       accent_mid: "#8B5CF6"
       accent_deep: "#8B5CF6"
+      icon_ink: "#8B5CF6"
+      icon_spark: "#22D3EE"
   jevplay-games:
     # Dark design (decision 21, "I like the dark ones"): ink canvas with the family's magenta halftone,
     # pink/magenta accents from §9.3 and the art-direction night tile. The pink-ground variant is not used.
@@ -229,6 +235,39 @@ families:
       accent_mid: "#E551BA"
       accent_deep: "#E551BA"
       signal_core: "#FFE0E5"
+      icon_ink: "#3A1A33"
+      icon_spark: "#6B214F"      # deep magenta: readable on pink
+  pickyourai:
+    # Pick Your AI's own palette, from Pick-Your-AI/.github assets/PROMPTS.md and build_assets.py (teal surfaces, one amber
+    # accent, deep teal ground). Not CompleteTech branding. Unmeasured: the layout has no Pick Your AI golden yet.
+    measured: false
+    company_label: Pick Your AI
+    badge_brand: "0F766E"          # README badges (shields.io hex, no #): teal, not CompleteTech blue
+    badge_accent: "115E59"
+    eyebrow_case: upper
+    canvas: {kind: flat-grid, color: "#042F2E", grid: "#14B8A6", grid_opacity: 0.07}
+    tokens:
+      eyebrow: "#5EEAD4"
+      title: "#F0FDFA"
+      subtitle: "#CCFBF1"
+      body: "#CCFBF1"
+      muted: "#99F6E4"
+      ink: "#042F2E"
+      plate_low: "#042F2E"
+      card_fill: "#F0FDFA"           # light icon card, as CompleteTech: the icon prompt and QA assume dark ink on a light plate
+      card_ink: "#042F2E"
+      card_edge: "#CCFBF1"
+      card_shadow: {dx: 6, dy: 8, blur: 12, color: "#000000", opacity: 0.35}
+      chip_key: {bg: "#FBBF24", fg: "#042F2E"}
+      chip_attr: {bg: "#115E59", fg: "#F0FDFA"}
+      bar: {from: "#115E59", to: "#14B8A6", height: 6}
+      edge: {color: "#14B8A6", opacity: 0.28}
+      gold_trace: "#FBBF24"
+      accent: "#14B8A6"
+      accent_mid: "#14B8A6"
+      accent_deep: "#115E59"
+      icon_ink: "#0F766E"
+      icon_spark: "#B45309"          # deep amber: readable on the light icon card (the chip and accent stay #FBBF24)
   libreevolve:
     measured: false
     company_label: LibreEvolve
@@ -248,6 +287,8 @@ families:
       accent: "#10B981"
       accent_mid: "#10B981"
       accent_deep: "#065F46"
+      icon_ink: "#10B981"
+      icon_spark: "#F1F5F9"
   touchedbyanagent:
     measured: false
     hold: true
@@ -268,6 +309,8 @@ families:
       accent: "#F59E0B"
       accent_mid: "#E11D74"
       accent_deep: "#E11D74"
+      icon_ink: "#E11D74"
+      icon_spark: "#F59E0B"
   romgenie:
     measured: false
     company_label: romgenie
@@ -287,6 +330,8 @@ families:
       accent: "#F4C430"
       accent_mid: "#B8860B"
       accent_deep: "#B8860B"
+      icon_ink: "#B8860B"
+      icon_spark: "#F8FAFC"
 
 # One row per in-scope owner. display_name/description/eyebrow copied verbatim from STANDARD §2.3.
 orgs:
@@ -604,7 +649,7 @@ orgs:
     family_topics: []
     footer: true
   Pick-Your-AI:
-    family: completetech
+    family: pickyourai
     former_slugs: []
     tier: T3
     display_name: Pick Your AI
@@ -613,6 +658,8 @@ orgs:
     eyebrow: null
     brand_topic: pick-your-ai
     family_topics: []
+    mark: assets/orgs/Pick-Your-AI/mark.png
+    hub_url: https://pickyour.ai
     footer: false
   Jevelopers-neatHack-2026:
     family: completetech

@@ -40,6 +40,21 @@ def canonical(obj) -> str:
     return json.dumps(obj, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
 
 
+_T3_SIGNED_OFF = False
+
+
+def set_t3_signed_off(value: bool) -> None:
+    """Record the run's `--allow-t3`: set once by the CLI, read by every owner gate (check_owner, art_status,
+    footer_status). Off by default, so a T3 owner is refused unless the caller passes the flag after an approved
+    t3-metadata or t3-signoff row."""
+    global _T3_SIGNED_OFF
+    _T3_SIGNED_OFF = bool(value)
+
+
+def t3_signed_off() -> bool:
+    return _T3_SIGNED_OFF
+
+
 class Brand:
     """Merged view over brand.yaml."""
 
@@ -96,7 +111,7 @@ class Brand:
             raise Refused(f"{owner} is an excluded owner; every command refuses", log="exempt")
         if status == "hold":
             raise Refused(f"{owner} is on HOLD", log="hold")
-        if status == "t3" and not allow_t3:
+        if status == "t3" and not (allow_t3 or t3_signed_off()):
             raise Refused(f"{owner} is T3; needs co-owner sign-off", log="t3-signoff")
         return status
 
