@@ -1,15 +1,10 @@
 # T3 sign-off records (`--require-t3-signoff`)
 
-`--allow-t3` alone is trust-only: the operator asserts that a co-owner signed off. The opt-in global `--require-t3-signoff` (or `SHOWCASE_REQUIRE_T3_SIGNOFF=1`; default off) makes the tool verify that claim against a record file. Without the flag nothing here applies and `--allow-t3` behaves as before.
+`--allow-t3` is enforced by default. The tool requires `--require-t3-signoff` to be on (it is on by default) and verifies the operator's claim that a co-owner signed off against a record file. A T3 run therefore needs a valid, unexpired record that covers the owner and, when the record is scoped, the repository.
 
 ## Where the file lives
 
-Pass the file explicitly: the global `--t3-signoff-file PATH`, or `SHOWCASE_T3_SIGNOFF_FILE=PATH`. **There is no default location.** The records belong in the private estate bundle (issue 24: tracked there, never copied into target repositories), but the canonical path inside the bundle is still the maintainer's choice. Until it is chosen, the tool never picks a file on its own, and `--require-t3-signoff` without a file refuses with `t3-signoff:no-file`. Real records come only from the estate bundle; the files under `tests/fixtures/t3-signoff/` are synthetic.
-
-## Open maintainer decisions (not resolved by this change)
-
-- **Default off.** Enforcement is opt-in (`--require-t3-signoff`) because a behaviour-changing default stays off unless the issue says otherwise and no maintainer has asked for default-on. Flipping the default is a follow-up decision for #23 and #25; until it is recorded, a run without the flag is still trust-only.
-- **Canonical file path (#24, "Choose file path").** Not chosen: this is deferred to the maintainer, so the subtask stays open and the issue PR should not claim it. A record file given without `--require-t3-signoff` is never read; the run logs `t3-signoff:file-ignored` (and prints it on stderr in text mode) instead of looking enforced.
+The canonical private path is `<estate_root>/decisions/t3-signoffs.yaml`, where the estate root is `resolver.estate_root()`: `SHOWCASE_ESTATE_ROOT` when set, otherwise the skill's parent bundle. An explicit `--t3-signoff-file PATH` or `SHOWCASE_T3_SIGNOFF_FILE=PATH` overrides the canonical path. The records belong in the private estate bundle (issue 24: tracked there, never copied into target repositories). Never copy a record into a repository. Real records come only from the estate bundle; the files under `tests/fixtures/t3-signoff/` are synthetic.
 
 ## Format
 
@@ -46,7 +41,7 @@ Each refusal exits 2 with result `refused`.
 
 | Log | Meaning |
 |---|---|
-| `t3-signoff:no-file` | the flag is on but no record file was given |
+| `t3-signoff:no-file` | no record file was found; the log names the resolved path |
 | `t3-signoff:missing` | no approved record for the owner (also an unreadable or non-YAML file, or a file whose envelope breaks the schema) |
 | `t3-signoff:invalid` | the owner has records but every one breaks the schema; the error names the record id and the first problem |
 | `t3-signoff:scope` | the owner has valid approved records but none covers the repository |
@@ -54,4 +49,4 @@ Each refusal exits 2 with result `refused`.
 
 Excluded owners (`exempt`) and HOLD owners (`hold`) are refused before the record is read. Repository `doctor` stays read-only: it reports R7 `hold` instead of refusing, and under the flag shows the granting record as `signoff_id`.
 
-Under `--require-t3-signoff` only, the owner checked is also the one that holds the repository today: a repository named under one org whose approved pending transfer resolves to a T3 org is gated as that T3 org's (org label jobs, profile home repositories, favorites and star-List items). Without the flag those cases behave as before. A T3 org's association carries that org's record id (`signoff_id`; `signoff_ids` lists every id when more than one record applies): the topics change record of `topics --also-in`, the topics job and change record of `adopt` for a repository whose metadata lists the org in `also_in`, and the `project estate-plan` jobs that put the org in the personal board's Org field (its `orgs` entry shows the id too). A job's existing `approval_id` is kept.
+The owner checked is also the one that holds the repository today: a repository named under one org whose approved pending transfer resolves to a T3 org is gated as that T3 org's (org label jobs, profile home repositories, favorites and star-List items). A T3 org's association carries that org's record id (`signoff_id`; `signoff_ids` lists every id when more than one record applies): the topics change record of `topics --also-in`, the topics job and change record of `adopt` for a repository whose metadata lists the org in `also_in`, and the `project estate-plan` jobs that put the org in the personal board's Org field (its `orgs` entry shows the id too). A job's existing `approval_id` is kept.
