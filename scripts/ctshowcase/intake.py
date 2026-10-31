@@ -99,8 +99,8 @@ def adopt(ctx, resolver=None, *, approval_id: str | None = None, fresh: bool = F
         jobs.append(_job(_jid("p3", "topics", sid), argv, full, "§5.6 topics (full ordered list; PUT replaces the set).",
                          approval_id, kind="topics"))
         recs.append(records.record(owner, repo, "topics", "topics", tp["current"], tp["proposed"], "§5.6 merge"))
-        # a T3 `also_in` membership topic: carry the record(s) that let it in, as cmd_topics does (no-op unless
-        # --require-t3-signoff; a job's existing approval_id is kept)
+        # a T3 `also_in` membership topic: carry the record(s) that let it in, as cmd_topics does (no-op when opted out;
+        # a job's existing approval_id is kept)
         from .signoff import stamp_associations
         for item in (jobs[-1], recs[-1]):
             stamp_associations(item, tp.get("signoff_ids"), owner, repo)

@@ -367,7 +367,7 @@ def public_favorites(estate: Estate, reg: dict, *, allow_t3: bool = False) -> tu
 
 def _t3_held(estate: Estate, full: str, allow_t3: bool) -> bool:
     """A repository of a T3 org (any of its logins) before co-owner sign-off: never named on a public profile.
-    The slug as named is checked as before. Under --require-t3-signoff only, the slug it has today (estate.current:
+    The slug as named is checked as before. Only when --allow-t3 is passed (with enforcement on), the slug it has today (estate.current:
     an approved pending transfer) is checked too (_t3_moved_held)."""
     if "/" not in (full or ""):
         return False
@@ -378,16 +378,17 @@ def _t3_held(estate: Estate, full: str, allow_t3: bool) -> bool:
 
 
 def _t3_moved_held(estate: Estate, full: str, allow_t3: bool) -> bool:
-    """Under --require-t3-signoff: FULL is named under one org but a T3 org holds it today (an approved pending
+    """When the T3 flag (--allow-t3) is passed with enforcement on: FULL is named under one org but a T3 org holds it today (an approved pending
     transfer, estate.current), and that T3 org has no --allow-t3 plus valid record covering the repository.
 
-    Opt-in only: without the flag this is always False, so the default (base 2be04ac) behaviour of profiles, star
+    Opt-in only: without --allow-t3 this is always False (enforcement being default-on does not change that), so the default (base 2be04ac) behaviour of profiles, star
     Lists and `org labels` is unchanged; no issue of epic #22 asks for a default-on tightening
     (tests/test_t3_signoff_require.py::test_transfer_to_a_t3_org_is_unchanged_without_the_flag). With the flag:
     ::test_favorite_transferred_to_a_t3_org_is_held_without_its_record and
     ::test_home_repository_held_by_a_t3_org_is_omitted_without_its_record."""
     from . import signoff
-    if not signoff.required() or "/" not in (full or ""):
+    from .config import t3_signed_off
+    if not (allow_t3 or t3_signed_off()) or not signoff.required() or "/" not in (full or ""):
         return False
     r = estate.resolver
     cur = estate.current(r.slug(full))
@@ -1672,12 +1673,12 @@ def _star_list_plan(estate: Estate, org: str, *, lists_capture: dict | None = No
             signoff.stamp_source(item, f, r.aliases(f.split("/")[0]))
         added = sorted(i for i in targets.get(f.lower(), set()) - have - {list_id} if i in list_signoffs)
         if added and signoff.required():  # a newly added T3 destination List carries the record that admitted it
-            ids = [item["signoff_id"]] if "signoff_id" in item else []
-            if not ids and r.owner_status(login) == "t3":
+            sids = [item["signoff_id"]] if "signoff_id" in item else []
+            if not sids and r.owner_status(login) == "t3":
                 own = signoff.record(login, None, r.aliases(login))
-                ids = [str(own["id"])] if own and own.get("id") else []
+                sids = [str(own["id"])] if own and own.get("id") else []
             item.pop("signoff_id", None)
-            signoff.stamp_associations(item, ids + [list_signoffs[i] for i in added])
+            signoff.stamp_associations(item, sids + [list_signoffs[i] for i in added])
         out["jobs"].append(item)
     return dict(out, result="incomplete" if incomplete else "ok", list_id=list_id)
 
@@ -1853,7 +1854,8 @@ def labels_plan(estate: Estate, org: str, *, allow_t3: bool = False, checkouts: 
         full = estate.current(f"{login}/{n}")  # labels are written where the repository is today
         current_owner, current_name = full.split("/", 1)
         from . import signoff
-        if (signoff.required() and not estate.resolver.same(current_owner, login)
+        from .config import t3_signed_off
+        if (signoff.required() and (allow_t3 or t3_signed_off()) and not estate.resolver.same(current_owner, login)
                 and estate.resolver.owner_status(current_owner) == "t3"):
             # Under --require-t3-signoff only: an approved pending transfer whose label jobs target the T3 org that
             # holds the repository today passes that org's gate (--allow-t3 and its record; check_owner also

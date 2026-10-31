@@ -21,7 +21,7 @@ def append(path: str | Path | None, recs: list[dict]) -> None:
     if not path or not recs:
         return
     from .signoff import stamp
-    stamp(recs)  # only under --require-t3-signoff: jobs and change records of a signed-off T3 owner carry signoff_id
+    stamp(recs)  # jobs and change records of a signed-off T3 owner carry signoff_id (or "opt-out" under the opt-out)
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     with p.open("a", encoding="utf-8") as fh:

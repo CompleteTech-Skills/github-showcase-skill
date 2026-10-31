@@ -45,6 +45,8 @@ _OFF = ("0", "false", "no", "off")
 # (tests/test_t3_signoff_require.py::test_signoff_state_is_context_local). showcase.main() opens a fresh run state
 # and restores the enclosing one on every exit.
 _REQUIRE: ContextVar[bool] = ContextVar("ctshowcase_t3_signoff_required", default=True)
+# Under the opt-out with --allow-t3: owner -> is it a T3 org (set by showcase.main), so stamp() can mark T3 output "opt-out".
+_OPT_OUT_T3: ContextVar = ContextVar("ctshowcase_t3_signoff_opt_out_t3", default=None)
 _FILE: ContextVar[str | None] = ContextVar("ctshowcase_t3_signoff_file", default=None)
 # (granted, aliases): lowercase login -> the records that granted it, for stamping this run's writer jobs; and
 # lowercase login -> every login of its org, filled by Resolver.aliases by default. None until first use.
@@ -282,6 +284,12 @@ def evaluate(owners: list[str], repo: str | None = None, today: _dt.date | None 
             return None, f"no-file:{path}"
         records = load_records()
     logins = set(_expand([o for o in owners if o]))
+    seen: set[str] = set()
+    for r in records:  # signoff_id is the audit key carried onto jobs, so an id must name exactly one record
+        rid = str(r.get("id") or "")
+        if rid and rid in seen:
+            return None, f"invalid:{rid}: duplicate id (record ids must be unique within the file)"
+        seen.add(rid)
     ours = [r for r in records if str(r.get("owner") or "").lower() in logins]
     valid = [r for r in ours if not problems(r)]
     mine = [r for r in valid if r.get("approved") is True]
@@ -373,7 +381,12 @@ def stamp(items, owner: str | None = None):
     `owner` names the gated owner explicitly when a job's target is another account (the star-List jobs of a T3 org's
     `org pins` run as the personal account, org.star_list_plan); without it the owner is read from the item. An item
     that already carries a `signoff_id` is left as it is."""
-    if not required() or not _granted():
+    if not required():
+        pred = _OPT_OUT_T3.get()
+        if pred is not None:
+            stamp_opt_out(items, pred)
+        return items
+    if not _granted():
         return items
     for j in items or []:
         if not isinstance(j, dict) or "signoff_id" in j:
@@ -385,6 +398,34 @@ def stamp(items, owner: str | None = None):
         who = owner or j.get("org") or j.get("owner") or (full.split("/")[0] if "/" in full else "")
         _put(j, record_for(str(who), full or None))
     return items
+
+
+OPT_OUT = "opt-out"
+
+
+def set_opt_out_t3(predicate) -> Token:
+    """Register IS_T3(owner) for this context so stamp() marks T3 jobs and change records `signoff_id: "opt-out"` while
+    enforcement is opted out; None clears it. Returns a token for reset_opt_out_t3."""
+    return _OPT_OUT_T3.set(predicate)
+
+
+def reset_opt_out_t3(token: Token) -> None:
+    _OPT_OUT_T3.reset(token)
+
+
+def stamp_opt_out(items, is_t3) -> None:
+    """Under the explicit opt-out with --allow-t3, mark every T3 writer job and change record `signoff_id: "opt-out"`
+    so the serialized artifacts show that no record authorized them. IS_T3(owner) says whether OWNER is a T3 org.
+    Items that already carry a signoff_id are left alone."""
+    for j in items or []:
+        if not isinstance(j, dict) or "signoff_id" in j:
+            continue
+        if "phase" not in j and not ("std" in j and "owner" in j and "repo" in j):
+            continue
+        full = str(j.get("repo") or "")
+        who = j.get("org") or j.get("owner") or (full.split("/")[0] if "/" in full else "")
+        if who and is_t3(str(who)):
+            j["signoff_id"] = OPT_OUT
 
 
 def _put(j: dict, rec: dict | None) -> None:

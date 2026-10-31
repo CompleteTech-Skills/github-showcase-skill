@@ -1,6 +1,6 @@
 # T3 sign-off records (`--require-t3-signoff`)
 
-`--allow-t3` is enforced by default: the tool verifies the operator's claim that a co-owner signed off against a record file. `--require-t3-signoff` is accepted for explicitness and changes nothing. The one escape is the explicit opt-out `--no-require-t3-signoff` (or `SHOWCASE_REQUIRE_T3_SIGNOFF=0`), which restores the trust-only meaning of `--allow-t3` for that run and is logged `t3-signoff:opt-out`; the two flags together are a usage error. A T3 run therefore needs a valid, unexpired record that covers the owner and, when the record is scoped, the repository.
+`--allow-t3` is enforced by default: the tool verifies the operator's claim that a co-owner signed off against a record file. `--require-t3-signoff` is accepted for explicitness and changes nothing. The one escape is the explicit opt-out `--no-require-t3-signoff` (or `SHOWCASE_REQUIRE_T3_SIGNOFF=0`), which restores the trust-only meaning of `--allow-t3` for that run and is logged `t3-signoff:opt-out`; T3 writer jobs and change records made under it carry `signoff_id: "opt-out"`; the two flags together are a usage error. A T3 run therefore needs a valid, unexpired record that covers the owner and, when the record is scoped, the repository.
 
 ## Where the file lives
 

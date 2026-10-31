@@ -177,7 +177,8 @@ def row(ctx: RepoContext) -> dict:
 
 def _signoff_cols() -> list[str]:
     from . import signoff
-    return ["signoff_id"] if signoff.required() else []  # extra column only under --require-t3-signoff
+    # extra column only when --allow-t3 is passed with enforcement on; the documented row shape is unchanged otherwise
+    return ["signoff_id"] if signoff.required() and t3_signed_off() else []
 
 
 def _signoff_vals(r: dict) -> list[str]:

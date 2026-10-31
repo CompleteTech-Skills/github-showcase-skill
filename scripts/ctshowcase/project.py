@@ -188,7 +188,7 @@ def _gate_target(resolver: Resolver | None, owner: str, *, allow_t3: bool = Fals
     if st == "t3" and not allow_t3:
         raise Refused(f"{owner} is T3: reading its project is fine, changing anything needs co-owner sign-off",
                       log="t3-signoff")
-    if st == "t3":  # registers the grant so writer jobs carry signoff_id; refuses t3-signoff:<why>; no-op unless the flag is on
+    if st == "t3":  # registers the grant so writer jobs carry signoff_id; refuses t3-signoff:<why>; no-op when opted out (--no-require-t3-signoff)
         from . import signoff
         signoff.require(owner, None, resolver.aliases(owner))
     return resolver.canonical(owner)

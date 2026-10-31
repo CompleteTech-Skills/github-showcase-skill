@@ -2349,7 +2349,7 @@ def _ctx(args, cli, resolver):
 def _finish(args, obj: dict, code: int):
     jobs = list(obj.get("jobs") or []) + ([obj["job"]] if obj.get("job") else [])
     from .signoff import stamp
-    stamp(jobs)  # before any serialization (--jobs, --report): a no-op unless --require-t3-signoff
+    stamp(jobs)  # before any serialization (--jobs, --report): a no-op when opted out (--no-require-t3-signoff)
     if getattr(args, "jobs", None) and jobs:  # writer jobs only; unapproved proposals stay in the report
         from .records import append
         append(args.jobs, jobs)

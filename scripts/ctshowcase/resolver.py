@@ -301,7 +301,7 @@ class Resolver:
             raise Refused(f"{login} is T3; needs co-owner sign-off", log="t3-signoff")
         if st == "t3" and verify_signoff:  # doctor passes False: it reports the hold instead of refusing
             from . import signoff
-            signoff.require(login, repo, self.aliases(login))  # no-op unless --require-t3-signoff
+            signoff.require(login, repo, self.aliases(login))  # no-op when opted out (--no-require-t3-signoff)
         return st
 
     def family_hold(self, login: str) -> bool:

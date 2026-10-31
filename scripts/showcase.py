@@ -1255,6 +1255,7 @@ def _main(argv=None) -> int:
     signoff.set_required(False if getattr(args, "no_require_t3_signoff", False)
                          else bool(getattr(args, "require_t3_signoff", False)) or signoff.env_required())
     signoff.set_file(getattr(args, "t3_signoff_file", None))
+    signoff.set_opt_out_t3(_is_t3_owner(args) if (not signoff.required() and getattr(args, "allow_t3", False)) else None)
     if args.format is None:
         args.format = "text" if args.command in GENERATORS else "json"
     try:
@@ -1273,19 +1274,34 @@ def _main(argv=None) -> int:
         if args.format == "text" and not args.quiet:
             print(f"{args.command}: {obj['error']}", file=sys.stderr)
             return code
+    audit = []  # opt-out diagnostics, independent of whether the command returned an object
+    if not signoff.required() and signoff.explicit_file() is not None:  # a file nobody enforces is not silently ignored
+        audit.append("t3-signoff:file-ignored")
+    if not signoff.required() and getattr(args, "allow_t3", False):  # trust-only --allow-t3 is visible in the output
+        audit.append("t3-signoff:opt-out")
     if obj is not None:
-        if not signoff.required() and signoff.explicit_file() is not None:  # a file nobody enforces is not silently ignored
-            obj["logs"] = [*(obj.get("logs") or []), "t3-signoff:file-ignored"]
-            if args.format == "text" and not args.quiet:
+        if audit:
+            obj["logs"] = [*(obj.get("logs") or []), *audit]
+            if "t3-signoff:file-ignored" in audit and args.format == "text" and not args.quiet:
                 print("t3-signoff:file-ignored: a sign-off record file was given with sign-off enforcement opted out, "
                       "so no record is read or enforced", file=sys.stderr)
-        if not signoff.required() and getattr(args, "allow_t3", False):  # trust-only --allow-t3 is visible in the output
-            obj["logs"] = [*(obj.get("logs") or []), "t3-signoff:opt-out"]
         for key in ("jobs", "records"):  # writer jobs and change records (adopt, new, enterprise plan)
-            if signoff.required() and isinstance(obj.get(key), list):
-                signoff.stamp(obj[key])
+            if isinstance(obj.get(key), list):
+                signoff.stamp(obj[key])  # the granting record, or "opt-out" for T3 items under the opt-out
         emit(args, obj)
+    elif audit:  # direct-print commands (doctor, lint, meta without --out): stderr keeps their stdout formats intact
+        for a in audit:
+            print(f"{a}: sign-off enforcement is opted out for this run", file=sys.stderr)
     return code
+
+
+def _is_t3_owner(args):
+    """A predicate for signoff.stamp_opt_out: is OWNER a T3 org in the brand data (False when it cannot be read)."""
+    try:
+        b = brand(args, prefer_lock=True)
+    except Exception:
+        return lambda owner: False
+    return lambda owner: b.owner_status(owner) == "t3"
 
 
 if __name__ == "__main__":

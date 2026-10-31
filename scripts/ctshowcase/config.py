@@ -127,7 +127,7 @@ class Brand:
             raise Refused(f"{owner} is T3; needs co-owner sign-off", log="t3-signoff")
         if status == "t3" and verify_signoff:
             from . import signoff
-            signoff.require(owner, repo, self.aliases(owner))  # no-op unless --require-t3-signoff
+            signoff.require(owner, repo, self.aliases(owner))  # no-op when opted out (--no-require-t3-signoff)
         return status
 
     def org(self, owner: str) -> dict:

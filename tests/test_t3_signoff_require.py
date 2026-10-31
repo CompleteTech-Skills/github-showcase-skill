@@ -522,7 +522,7 @@ def test_topics_change_records_carry_the_signoff_id(tmp_path):
     assert recs and all(x["signoff_id"] == "t3s-cr" and "approval_id" not in x for x in recs), recs
     plain = tmp_path / "plain.jsonl"
     _run(tmp_path, b, "--no-require-t3-signoff", "--allow-t3", "topics", "--records", str(plain))
-    assert all("signoff_id" not in json.loads(x) for x in plain.read_text(encoding="utf-8").splitlines())
+    assert all(json.loads(x)["signoff_id"] == "opt-out" for x in plain.read_text(encoding="utf-8").splitlines())  # no record authorized them
 
 
 def test_adopt_json_output_stamps_change_records_and_jobs(tmp_path):
@@ -736,10 +736,11 @@ def test_org_labels_gate_the_t3_owner_a_transfer_resolves_to(tmp_path, monkeypat
         assert jobs, res
         signoff.stamp(jobs)  # showcase.main stamps every emitted job list the same way
         assert all(j["signoff_id"] == "t3s-lbl" for j in jobs), jobs
-    # no --allow-t3: the T3 org that holds the repository today is held like any T3 org (decision 12)
+    # no --allow-t3: the base behaviour is kept (the transfer-target hold is opt-in via the T3 flag, not via the
+    # default-on enforcement), so T1/T2 org output does not change
     with _Strict(monkeypatch, _file(_bundle(tmp_path / "noflag", [{"id": "t3s-x"}])), allow_t3=False):
         res, _ = O.labels_plan(est, T1, allow_t3=False)
-        assert res["repos"][0]["result"] == "held" and res["repos"][0]["log"] == "t3-signoff", res
+        assert res["result"] == "plan" and not [x for x in res["repos"] if x.get("result") == "held"], res
 
 
 def test_favorite_transferred_to_a_t3_org_is_held_without_its_record(tmp_path, monkeypatch, brand):
@@ -784,7 +785,7 @@ def test_t3_also_in_association_carries_its_signoff_id(tmp_path):
     plain = tmp_path / "plain.jsonl"  # without the flag: no key, behaviour unchanged
     r = _run(tmp_path, b, "--no-require-t3-signoff", "--allow-t3", "topics", "--also-in", OWNER, "--records", str(plain), owner=T1)
     assert "signoff_ids" not in json.loads(r.stdout), r.stdout
-    assert all("signoff_id" not in json.loads(x) for x in plain.read_text(encoding="utf-8").splitlines())
+    assert all("signoff_id" not in json.loads(x) for x in plain.read_text(encoding="utf-8").splitlines())  # T1-owner record: not a T3 item
 
 
 _GOOD = {"id": "t3s-env", "owner": OWNER, "repos": ["*"], "approved": True, "approver": "synthetic-co-owner",
@@ -819,17 +820,18 @@ def test_file_envelope_follows_the_schema(tmp_path, doc, ok):
 # --- review round 4: evidence for each fixed finding (synthetic records only) ---
 
 def test_transfer_to_a_t3_org_is_unchanged_without_the_flag(monkeypatch, brand):
-    """Flag off (the default), no --allow-t3: a T1 member whose approved pending transfer resolves to the T3 org keeps
+    """Enforcement left at its real default (on), no --allow-t3: a T1 member whose approved pending transfer resolves to the T3 org keeps
     the base (2be04ac) behaviour. `org labels` plans its label jobs and the favorite and home entry stay public,
     exactly as before this epic. The transfer-target T3 checks (org._t3_moved_held, the labels_plan gate) belong to
-    the opt-in --require-t3-signoff only: no issue of epic #22 (#31, #28, #23-#27) asks for a default-on tightening."""
+    --allow-t3 only (enforcement defaulting on changes nothing here): no issue of epic #22 (#31, #28, #23-#27) asks for a default-on tightening."""
     from ctshowcase import org as O, signoff
     from ctshowcase.config import reset_t3_signed_off, set_t3_signed_off
     monkeypatch.delenv("SHOWCASE_REQUIRE_T3_SIGNOFF", raising=False)
     monkeypatch.delenv("SHOWCASE_T3_SIGNOFF_FILE", raising=False)
     fav = f"{T1}/northwind-member"
     est, reg = _transfer_estate(brand, favorites=[fav])
-    t3, req = set_t3_signed_off(False), signoff.set_required(False)
+    t3 = set_t3_signed_off(False)
+    assert signoff.required() is True  # the shipped default, not forced off
     try:
         res, _ = O.labels_plan(est, T1, allow_t3=False)
         assert res["result"] == "plan" and not [x for x in res["repos"] if x.get("result") == "held"], res
@@ -840,7 +842,6 @@ def test_transfer_to_a_t3_org_is_unchanged_without_the_flag(monkeypatch, brand):
         assert f"{OWNER}/northwind-member" in json.dumps(data), data
         assert not any(x.startswith("t3-signoff") for x in logs), logs
     finally:
-        signoff.reset_required(req)
         reset_t3_signed_off(t3)
 
 
@@ -860,8 +861,8 @@ def test_home_repository_held_by_a_t3_org_is_omitted_without_its_record(tmp_path
         assert [e["full_name"] for e in data["featured"]] == [full], data
         assert f"t3-signoff:{full}" not in logs, logs
     with _Strict(monkeypatch, _file(_bundle(tmp_path / "noflag", [{"id": "t3s-x"}])), allow_t3=False):
-        data, logs = O.public_slice(est, T1, allow_t3=False)  # a record alone is not --allow-t3
-        assert full not in json.dumps(data), data
+        data, logs = O.public_slice(est, T1, allow_t3=False)  # no --allow-t3: base behaviour, no transfer-target hold
+        assert full in json.dumps(data) and f"t3-signoff:{full}" not in logs, (data, logs)
 
 
 def test_adopt_topics_job_carries_the_also_in_signoff(tmp_path):
@@ -1012,3 +1013,47 @@ def test_list_union_job_carries_the_signoff_of_a_t3_destination_list(tmp_path, m
         plan = O.star_list_plan(est, t1, lists_capture=lists, allow_t3=False, repo_ids=ids)
         items = [j for j in plan["jobs"] if "list-item" in j["id"]]
         assert items and "UL_t3" not in items[0]["argv"][-1] and "signoff_id" not in items[0], items
+
+
+# --- review round 5: opt-out audit, duplicate ids, doctor shape, direct-print diagnostics ---
+
+def test_duplicate_record_ids_refuse_invalid(tmp_path):
+    """signoff_id is the audit key on jobs, so two records sharing an id make a file that authorizes nothing."""
+    from ctshowcase import signoff
+    base = {"id": "t3s-001", "owner": OWNER, "repos": ["*"], "approved": True, "approver": "a",
+            "approved_on": "2026-01-15", "expires": "2099-12-31"}
+    other = dict(base, owner="Jevelopers-neatHack-2026", repos=["x"], approver="b")
+    rec, why = signoff.evaluate([OWNER], None, records=[base, other])
+    assert rec is None and why.startswith("invalid:t3s-001") and "duplicate id" in why, (rec, why)
+    rec, why = signoff.evaluate([OWNER], None, records=[base, dict(other, id="t3s-002")])
+    assert why is None and rec["id"] == "t3s-001"
+
+
+def test_opt_out_marks_t3_jobs_and_records(tmp_path):
+    """--allow-t3 --no-require-t3-signoff: the serialized jobs say no record authorized them."""
+    jobs, recs = tmp_path / "jobs.jsonl", tmp_path / "recs.jsonl"
+    r = _run(tmp_path, _bundle(tmp_path, []), "--no-require-t3-signoff", "--allow-t3", "adopt",
+             f"{OWNER}/northwind-synthetic", "--jobs", str(jobs), "--records", str(recs))
+    assert r.returncode != 2, _out(r)
+    rows = [json.loads(x) for f in (jobs, recs) if f.exists() for x in f.read_text(encoding="utf-8").splitlines() if x.strip()]
+    assert rows, _out(r)
+    assert all(j.get("signoff_id") == "opt-out" for j in rows), rows
+
+
+def test_direct_print_commands_emit_the_opt_out_audit_on_stderr(tmp_path):
+    bundle = _bundle(tmp_path, [])
+    r = _run(tmp_path, bundle, "--no-require-t3-signoff", "--allow-t3", "doctor", "--format", "json")
+    assert r.returncode != 2, _out(r)
+    assert "t3-signoff:opt-out" in r.stderr, r.stderr
+    json.loads(r.stdout.splitlines()[0])  # stdout format intact
+    r = _run(tmp_path, bundle, "--no-require-t3-signoff", "--allow-t3", "--t3-signoff-file", str(tmp_path / "x.yaml"),
+             "doctor", "--format", "json")
+    assert "t3-signoff:file-ignored" in r.stderr, r.stderr
+
+
+def test_doctor_row_shape_is_unchanged_without_allow_t3(tmp_path):
+    """The documented row (R1-R11, banner, icon, card, footer, done) gains signoff_id only when --allow-t3 is passed."""
+    bundle = _bundle(tmp_path, [])
+    r = _run(tmp_path, bundle, "doctor", "--header", owner="CompleteTech-Skills")
+    head = r.stdout.splitlines()[0].split("\t")
+    assert head[-1] == "done" and "signoff_id" not in head, r.stdout
