@@ -396,3 +396,27 @@ def test_legacy_ci_badge_recognizes_personal_profile_repository(make_ctx, tmp_pa
     assert (authored not in badge_block(after)) is migrates
     assert "Authored paragraph to retain." in after
     assert readme.preservation(before, after, removed) == []
+
+
+def test_cli_markdown_alt_backticks_remain_literal(make_ctx, tmp_path):
+    ctx = profile_context(make_ctx, tmp_path)
+    text = readme.scaffold(ctx)
+    body = ("![`showcase.py --help`](https://img.shields.io/badge/type-GitHub%20profile-005ADD)\n"
+            "![License](https://img.shields.io/badge/license-MIT-64748B)")
+    (tmp_path / "README.md").write_text(text.replace(badge_block(text), body), encoding="utf-8")
+    result = profile_cli(ctx, tmp_path, "lint", "readme")
+    assert not any("without alt" in failure for failure in result["fails"])
+
+
+def test_cli_angle_bracketed_shield_destinations_use_palette_tokens(make_ctx, tmp_path):
+    ctx = profile_context(make_ctx, tmp_path)
+    text = readme.scaffold(ctx)
+    body = ("![Type](<https://img.shields.io/badge/type-GitHub%20profile-005ADD>)\n"
+            "![License](<https://img.shields.io/badge/license-MIT-64748B>)")
+    (tmp_path / "README.md").write_text(text.replace(badge_block(text), body), encoding="utf-8")
+    result = profile_cli(ctx, tmp_path, "lint", "readme")
+    assert not any("palette" in failure.lower() or "badge" in failure.lower() for failure in result["fails"])
+    bad = body.replace("64748B>", "FF0000>")
+    (tmp_path / "README.md").write_text(text.replace(badge_block(text), bad), encoding="utf-8")
+    result = profile_cli(ctx, tmp_path, "lint", "readme", expected_code=1)
+    assert any("palette" in failure.lower() for failure in result["fails"])

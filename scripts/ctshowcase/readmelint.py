@@ -185,7 +185,12 @@ def _images(text: str, document: str) -> list[tuple[str, str]]:
     # while a Markdown-looking string wholly inside a real HTML tag is attribute text.
     tags = [(start, end) for start, end in parser.tags
             if not any(mstart <= start and end <= mend for _, _, mstart, mend in markdown)]
-    result = [(alt, source) for alt, source, start, end in markdown
+    def written_alt(alt, start):
+        # `text` has Markdown code masked to spaces (same length): read code-formatted alt text from the document
+        begin = start + 2
+        return document[begin:begin + len(alt)] if len(document) >= begin + len(alt) else alt
+
+    result = [(written_alt(alt, start), source) for alt, source, start, end in markdown
               if not any(tstart <= start and end <= tend for tstart, tend in tags)]
     result += [(alt, source) for alt, source, start, end in parser.images if (start, end) in tags]
     return result
@@ -261,7 +266,7 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
     elif len(h1s) != 1:
         fails.append(f"R7 exactly one H1 required (found {len(h1s)})")
     # badges 2-4, palette tokens only
-    shields = re.findall(r"img\.shields\.io/badge/([^)\"\s]+)", plain)
+    shields = re.findall(r"img\.shields\.io/badge/([^)\"'<>\s]+)", plain)
     header_part = plain.split("\n---\n", 1)[0]
     badge_header = _outside_code(header_part)
     image_sources = [source for _, source in _images(badge_header, plain)]
