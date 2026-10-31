@@ -2,11 +2,17 @@
 `readme` (and through it `readmelint` and `footer`) and the stdlib-only `meta` find marker blocks the same way.
 CommonMark escaping: the parity of the backslashes directly before a backtick decides escaping (odd = escaped,
 even = real), for any number of backslashes. Block structure is decided before inline spans (CommonMark appendix A):
-an inline code span never pairs across a block boundary."""
+an inline code span never pairs across a block boundary. A fence inside a block quote is container-aware: it opens and
+closes on the quote's own lines, its quote markers are container syntax, and a line of lower quote depth ends it."""
 from __future__ import annotations
 
+import bisect
+import collections
 import functools
 import re
+
+# Work counters for the cached scanners (layout builds on a cache miss, inline regions examined); tests read them.
+WORK: collections.Counter = collections.Counter()
 
 # CommonMark: a backtick fence's info string has no backtick, so "```npm test``` runs" is inline code, not a fence
 FENCE_OPEN = re.compile(r"^ {0,3}(`{3,}(?=[^`\n]*$)|~{3,})")
@@ -103,6 +109,7 @@ def _interrupts(rest: str, depth: int, para_depth: int, base: int) -> bool:
 def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, int], ...]]:
     """(inline regions, fenced spans). An inline region is a stretch in which one inline code span can live: a
     paragraph, a heading line, an HTML block start line or one table cell."""
+    WORK['layout_builds'] += 1
     regions: list[tuple[int, int]] = []
     fences: list[tuple[int, int]] = []
     seg: list[tuple[int, str]] = []
@@ -118,13 +125,20 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
     for raw in re.findall(r"[^\n]*\n|[^\n]+", text):
         at, pos = pos, pos + len(raw)
         body = raw.rstrip("\r\n")
-        if fence is not None:
-            close = _FENCE_CLOSE.match(body)
-            if close and close.group(1)[0] == fence[0] and len(close.group(1)) >= len(fence):
-                fences.append((fstart, pos))
-                fence = None
-            continue
         depth, rest = _quotes(body)
+        if fence is not None:
+            run, fdepth = fence
+            if depth < fdepth:
+                # the quote container of an open '> ```' fence ended: the fence ends unclosed, this line is normal
+                fences.append((fstart, at))
+                fence = None
+            else:
+                # a depth-0 fence is closed by its raw line, as before; a quoted fence by the line inside its quote
+                close = _FENCE_CLOSE.match(rest if fdepth else body)
+                if close and close.group(1)[0] == run[0] and len(close.group(1)) >= len(run):
+                    fences.append((fstart, pos))
+                    fence = None
+                continue
         if not rest.strip(" \t"):
             flush(seg)
             seg, table, base = [], False, 0
@@ -150,9 +164,9 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
                 continue
             flush(seg)
             seg, base = [], 0
-        opener = FENCE_OPEN.match(body)
+        opener = FENCE_OPEN.match(rest)
         if opener:
-            fence, fstart = opener.group(1), at
+            fence, fstart = (opener.group(1), depth), at
         elif _ATX_HEADING.match(rest) or _HTML_BLOCK.match(rest):
             regions.append((at, pos))
         elif not _THEMATIC.match(rest):
@@ -177,6 +191,15 @@ def _closing_run(text: str, pos: int, k: int, limit: int) -> tuple[int, int] | N
         pos = q
 
 
+@functools.lru_cache(maxsize=16)
+def _region_bounds(text: str) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    """(starts, ends) of the inline regions that hold a backtick, as parallel tuples in document order. Regions are
+    sorted and non-overlapping, so the first region that ends after an offset is found by bisection; a region with no
+    backtick has no code span and is left out."""
+    kept = [(lo, hi) for lo, hi in _layout(text)[0] if "`" in text[lo:hi]]
+    return tuple(lo for lo, _ in kept), tuple(hi for _, hi in kept)
+
+
 def find_inline_code(text: str, start: int = 0) -> tuple[int, int] | None:
     """(start, end) of the first CommonMark inline code span whose opening run begins at or after `start`. The span
     runs from the opening backtick run to the end of its closing run; escaping backslashes are not part of it. A
@@ -184,9 +207,10 @@ def find_inline_code(text: str, start: int = 0) -> tuple[int, int] | None:
     content must be non-empty. It may span single newlines within one paragraph, but the closing run must lie in the
     same inline region: no blank line, fence, heading, list item, new block quote, thematic break, setext underline,
     HTML block start (types 1-6) or table cell boundary in between. Fenced text holds no inline span."""
-    for lo, hi in _layout(text)[0]:
-        if hi <= start:
-            continue
+    los, his = _region_bounds(text)
+    for n in range(bisect.bisect_right(his, start), len(los)):
+        WORK['regions'] += 1
+        lo, hi = los[n], his[n]
         i = max(start, lo)
         while (i := text.find("`", i, hi)) >= 0:
             if i == start and i > 0 and text[i - 1] == "`":
@@ -211,14 +235,27 @@ def find_inline_code(text: str, start: int = 0) -> tuple[int, int] | None:
     return None
 
 
-def code_spans(text: str) -> list[tuple[int, int]]:
-    """(start, end) offsets of fenced code (``` and ~~~, an unclosed fence runs to the end) and inline code spans."""
-    spans = list(_layout(text)[1])
+@functools.lru_cache(maxsize=16)
+def fence_spans(text: str) -> tuple[tuple[int, int], ...]:
+    """Sorted (start, end) of every fenced block, including fences inside block quotes (the cached `_layout` fences)."""
+    return tuple(sorted(_layout(text)[1]))
+
+
+@functools.lru_cache(maxsize=16)
+def inline_code_spans(text: str) -> tuple[tuple[int, int], ...]:
+    """Sorted, non-overlapping inline code spans: `find_inline_code` repeated from offset 0, each call resuming at the
+    end of the previous span."""
+    spans: list[tuple[int, int]] = []
     at = 0
     while (span := find_inline_code(text, at)) is not None:
         spans.append(span)
         at = span[1]
-    return sorted(spans)
+    return tuple(sorted(spans))
+
+
+def code_spans(text: str) -> list[tuple[int, int]]:
+    """(start, end) offsets of fenced code (``` and ~~~, an unclosed fence runs to the end) and inline code spans."""
+    return sorted(fence_spans(text) + inline_code_spans(text))
 
 
 def masked(text: str) -> str:
