@@ -6,6 +6,11 @@
 
 Pass the file explicitly: the global `--t3-signoff-file PATH`, or `SHOWCASE_T3_SIGNOFF_FILE=PATH`. **There is no default location.** The records belong in the private estate bundle (issue 24: tracked there, never copied into target repositories), but the canonical path inside the bundle is still the maintainer's choice. Until it is chosen, the tool never picks a file on its own, and `--require-t3-signoff` without a file refuses with `t3-signoff:no-file`. Real records come only from the estate bundle; the files under `tests/fixtures/t3-signoff/` are synthetic.
 
+## Open maintainer decisions (not resolved by this change)
+
+- **Default off.** Enforcement is opt-in (`--require-t3-signoff`) because a behaviour-changing default stays off unless the issue says otherwise and no maintainer has asked for default-on. Flipping the default is a follow-up decision for #23 and #25; until it is recorded, a run without the flag is still trust-only.
+- **Canonical file path (#24, "Choose file path").** Not chosen: this is deferred to the maintainer, so the subtask stays open and the issue PR should not claim it. A record file given without `--require-t3-signoff` is never read; the run logs `t3-signoff:file-ignored` (and prints it on stderr in text mode) instead of looking enforced.
+
 ## Format
 
 The contract is [t3-signoff.schema.json](t3-signoff.schema.json). YAML dates are written bare (`2099-12-31`); convert them to ISO strings before validating with a generic JSON Schema validator. `scripts/ctshowcase/signoff.py` checks the same rules (`problems()`): a string date or timestamp must match the schema's `date` or `awareTimestamp` pattern before it is parsed, so compact (`20991231`) and week (`2099-W52-1`) forms are invalid in both. The one deliberate difference is that a pattern-shaped but impossible date (`2099-02-30`) is also invalid in the tool. Tests keep the two in step, including one that applies the schema's patterns without needing `jsonschema`.

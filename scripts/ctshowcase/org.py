@@ -393,7 +393,11 @@ def _t3_moved_held(estate: Estate, full: str, allow_t3: bool) -> bool:
     cur = estate.current(r.slug(full))
     owner, _, name = cur.partition("/")
     if r.same(owner, full.split("/")[0]):
-        return False  # not moving to another org: the named check in _t3_held (or the org gate) covers it
+        # same org: the named slug was checked by _t3_held, but a pending rename emits the slug it has today, so that
+        # name needs the record too (tests/test_t3_signoff_require.py::test_pending_rename_is_gated_on_the_emitted_name)
+        if name.lower() == full.partition("/")[2].lower():
+            return False
+        return r.owner_status(owner) == "t3" and not (allow_t3 and _t3_granted(owner, name))
     return r.owner_status(owner) == "t3" and not (allow_t3 and _t3_granted(owner, name))
 
 
@@ -1536,7 +1540,8 @@ def _list_complete(node: dict) -> bool:
     return isinstance(total, int) and total <= len([x for x in items["nodes"] if x])
 
 
-def _estate_list_targets(estate: Estate, nodes: list[dict], *, allow_t3: bool = False) -> dict[str, set[str]]:
+def _estate_list_targets(estate: Estate, nodes: list[dict], *, allow_t3: bool = False,
+                         signoffs: dict[str, str] | None = None) -> dict[str, set[str]]:
     """{favorite (lower): ids of every captured estate star List that some org's plan puts it on}. An
     updateUserListsForItem job replaces the item's whole set, so each org's job carries every estate List the item
     belongs on, and two orgs sharing a favorite never undo each other whichever job runs last."""
@@ -1552,6 +1557,11 @@ def _estate_list_targets(estate: Estate, nodes: list[dict], *, allow_t3: bool = 
         node = by_name.get(ent["name"].lower())
         if node is None:
             continue  # created later: its own plan, after a re-capture, adds the item with the union then
+        if signoffs is not None and r.owner_status(key) == "t3":  # list id -> the record that admitted this T3 org
+            from . import signoff
+            rec = signoff.record(key, None, r.aliases(key))
+            if rec is not None and rec.get("id"):
+                signoffs[node["id"]] = str(rec["id"])
         for f in public_favorites(estate, reg or {}, allow_t3=allow_t3)[0]:
             out.setdefault(f.lower(), set()).add(node["id"])
     return out
@@ -1630,7 +1640,8 @@ def _star_list_plan(estate: Estate, org: str, *, lists_capture: dict | None = No
                                "needs": "a complete star_lists capture (every List's items.totalCount captured)"})
         return dict(out, result="needs-input", list_id=list_id,
                     logs=sorted(set(fav_logs) | {"needs-input:star-lists-items-paged"}))
-    targets = _estate_list_targets(estate, nodes, allow_t3=allow_t3)
+    list_signoffs: dict[str, str] = {}
+    targets = _estate_list_targets(estate, nodes, allow_t3=allow_t3, signoffs=list_signoffs)
     member_of: dict[str, set[str]] = {}
     ids: dict[str, str] = {k.lower(): v for k, v in (repo_ids or {}).items()}
     for n in nodes:
@@ -1656,9 +1667,17 @@ def _star_list_plan(estate: Estate, org: str, *, lists_capture: dict | None = No
                    ["gh", "api", "graphql", "-f", f"query={q}"], org=USER_LOGIN,
                    note=f"Add {f} to '{name}', keeping its {len(have)} other list(s) and every estate star "
                         "List that also takes it (union; never unstar).")
+        from . import signoff
         if r.owner_status(f.split("/")[0]) == "t3":  # a T3 favorite carries its own record (signoff.stamp_source)
-            from . import signoff
             signoff.stamp_source(item, f, r.aliases(f.split("/")[0]))
+        added = sorted(i for i in targets.get(f.lower(), set()) - have - {list_id} if i in list_signoffs)
+        if added and signoff.required():  # a newly added T3 destination List carries the record that admitted it
+            ids = [item["signoff_id"]] if "signoff_id" in item else []
+            if not ids and r.owner_status(login) == "t3":
+                own = signoff.record(login, None, r.aliases(login))
+                ids = [str(own["id"])] if own and own.get("id") else []
+            item.pop("signoff_id", None)
+            signoff.stamp_associations(item, ids + [list_signoffs[i] for i in added])
         out["jobs"].append(item)
     return dict(out, result="incomplete" if incomplete else "ok", list_id=list_id)
 

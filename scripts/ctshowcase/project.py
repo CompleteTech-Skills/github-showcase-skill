@@ -1114,6 +1114,37 @@ def estate_orgs(resolver: Resolver, *, allow_t3: bool = False) -> list[dict]:
     return out
 
 
+TIER_PREFIX_T3 = "T3: "  # the Org-field option description is "{tier}: {login}" (estate_plan)
+_QUOTED = re.compile(r'"((?:[^"\\]|\\.)*)"')
+
+
+def _job_tokens(job: dict) -> set[str]:
+    """Whole values a job names, lowercased: every string in it, the value of a `key=value` argv element and every
+    double-quoted literal inside a GraphQL string. An org matches only a whole token, never a substring, so a job
+    for `Acme-Tools` or `Acme Tools` is not credited to a T3 org named `Acme`
+    (tests/test_t3_signoff_require.py::test_estate_plan_stamping_matches_whole_names_not_substrings)."""
+    out: set[str] = set()
+
+    def walk(v):
+        if isinstance(v, str):
+            out.add(v.lower())
+            out.add(v.partition("=")[2].lower())
+            for m in _QUOTED.finditer(v):
+                try:
+                    out.add(json.loads(m.group(0)).lower())
+                except ValueError:
+                    out.add(m.group(1).lower())
+        elif isinstance(v, dict):
+            for x in v.values():
+                walk(x)
+        elif isinstance(v, (list, tuple)):
+            for x in v:
+                walk(x)
+    walk(job)
+    out.discard("")
+    return out
+
+
 def _stamp_estate_orgs(jobs: list[dict], orgs: list[dict]) -> None:
     """Under --require-t3-signoff: each job that names a signed-off T3 org (its Org-field option, its login) carries
     that org's record. The jobs target @me, so stamping by target owner never finds the T3 grant; several T3 orgs on
@@ -1124,8 +1155,9 @@ def _stamp_estate_orgs(jobs: list[dict], orgs: list[dict]) -> None:
     if not t3:
         return
     for j in jobs:
-        blob = json.dumps(j, ensure_ascii=False)
-        ids = [o["signoff_id"] for o in t3 if o["name"] in blob or o["login"] in blob]
+        tokens = _job_tokens(j)
+        ids = [o["signoff_id"] for o in t3 if o["name"].lower() in tokens or o["login"].lower() in tokens
+               or f"{TIER_PREFIX_T3}{o['login']}".lower() in tokens]
         signoff.stamp_associations(j, ids)
 
 

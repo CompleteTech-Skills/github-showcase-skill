@@ -1269,6 +1269,11 @@ def _main(argv=None) -> int:
             print(f"{args.command}: {obj['error']}", file=sys.stderr)
             return code
     if obj is not None:
+        if not signoff.required() and signoff.record_file() is not None:  # a file nobody enforces is not silently ignored
+            obj["logs"] = [*(obj.get("logs") or []), "t3-signoff:file-ignored"]
+            if args.format == "text" and not args.quiet:
+                print("t3-signoff:file-ignored: a sign-off record file was given without --require-t3-signoff, "
+                      "so no record is read or enforced", file=sys.stderr)
         for key in ("jobs", "records"):  # writer jobs and change records (adopt, new, enterprise plan)
             if signoff.required() and isinstance(obj.get(key), list):
                 signoff.stamp(obj[key])

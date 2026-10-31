@@ -327,9 +327,12 @@ def require(owner: str, repo: str | None = None, aliases: list[str] | None = Non
 
 
 def record_for(owner: str, repo: str | None = None) -> dict | None:
-    for rec in _granted().get((owner or "").lower(), ()):
-        if _covers(rec, repo, _expand([owner or ""])):
-            return rec
+    logins = _expand([owner or ""])  # a grant cached under a former login still applies once the alias is registered
+    granted = _granted()
+    for login in dict.fromkeys([(owner or "").lower(), *logins]):
+        for rec in granted.get(login, ()):
+            if _covers(rec, repo, logins):
+                return rec
     return None
 
 

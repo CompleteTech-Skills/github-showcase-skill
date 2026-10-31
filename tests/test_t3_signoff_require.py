@@ -104,7 +104,7 @@ def test_flag_without_allow_t3_still_refuses_as_before(tmp_path):
 def test_default_is_unchanged_without_the_new_flag(tmp_path):
     """No flag and no records at all: `--allow-t3` alone still lifts the refusal (byte-for-byte old behaviour)."""
     r = _run(tmp_path, _bundle(tmp_path, []), "--allow-t3", "describe")
-    assert r.returncode != 2 and "t3-signoff" not in _out(r), _out(r)
+    assert r.returncode != 2 and "t3-signoff" not in _out(r).replace("t3-signoff:file-ignored", ""), _out(r)
 
 
 def test_excluded_owner_is_refused_even_with_a_record(tmp_path):
@@ -911,3 +911,91 @@ def test_estate_plan_jobs_carry_the_t3_orgs_signoff(tmp_path, monkeypatch, brand
         assert OWNER not in [o["login"] for o in plan["orgs"]] and OWNER not in json.dumps(plan["jobs"])
     plan = PJ.estate_plan(res, copied=cap, user_id=100, allow_t3=True)  # flag off: included, nothing stamped
     assert OWNER in [o["login"] for o in plan["orgs"]] and "signoff_id" not in json.dumps(plan)
+
+
+# --- review round 5: evidence for each fixed finding (synthetic records and slugs only) ---
+
+def test_signoff_file_without_the_flag_is_logged_not_silently_ignored(tmp_path):
+    """A record file given without --require-t3-signoff is never read; the run says so instead of looking enforced."""
+    b = _bundle(tmp_path, [{"id": "t3s-ign", "expires": "2020-01-01"}])
+    r = _run(tmp_path, b, "--allow-t3", "describe")
+    assert r.returncode != 2 and "t3-signoff:file-ignored" in _out(r), _out(r)
+    r = _run(tmp_path, b, "--allow-t3", "--require-t3-signoff", "describe")  # enforced: expired record refuses
+    assert r.returncode == 2 and "file-ignored" not in _out(r), _out(r)
+    r = _run(tmp_path, None, "--allow-t3", "describe")  # no file at all: nothing to report
+    assert "file-ignored" not in _out(r), _out(r)
+
+
+def test_estate_plan_stamping_matches_whole_names_not_substrings(tmp_path, monkeypatch):
+    """A job that names `Acme Tools` / `Acme-Tools` must not be credited to a T3 org named `Acme`."""
+    from ctshowcase import project as PJ
+    orgs = [{"login": "Acme", "name": "Acme", "tier": "T3", "signoff_id": "t3s-acme"},
+            {"login": "Acme-Tools", "name": "Acme Tools", "tier": "T1"}]
+    jobs = [{"id": "other", "phase": 1, "argv": ["gh", "x", "name=Acme Tools"], "note": "Acme-Tools and Acme Tools"},
+            {"id": "own", "phase": 1, "argv": ["gh", "api", "graphql", "-f", 'query=m { o: [{name: "Acme", description: "T3: Acme"}] }']},
+            {"id": "plain", "phase": 1, "argv": ["gh", "x", "name=Acme"]}]
+    with _Strict(monkeypatch, _file(_bundle(tmp_path, [{"id": "t3s-acme", "owner": "Acme"}]))):
+        PJ._stamp_estate_orgs(jobs, orgs)
+    got = {j["id"]: j.get("signoff_id") for j in jobs}
+    assert got == {"other": None, "own": "t3s-acme", "plain": "t3s-acme"}, got
+    assert "approval_id" not in jobs[0], jobs[0]
+
+
+def test_pending_rename_is_gated_on_the_emitted_name(tmp_path, monkeypatch, brand):
+    """A favorite named under its new name, while metadata and the emitted slug are the old name: a record scoped to
+    the new name alone must not let the old name into public (same owner, so the transfer check skipped it)."""
+    from ctshowcase import org as O
+    from ctshowcase.resolver import Resolver
+    fav = f"{OWNER}/new-name"
+    approvals = {"rows": set(), "ids": {"rn-synthetic"}, "answers": {}, "extra": [], "actions": [
+        {"id": "rn-synthetic", "action": "rename", "owner": OWNER, "repo": "old-name", "new_name": "new-name"}]}
+    reg = {"orgs": {"Northwind-Trading-Co": {"favorites": [{"full_name": fav}],
+                                             "star_list": {"name": "Misc", "description": ""}}}}
+    est = O.Estate(brand, Resolver(brand, reg, approvals),
+                   {"m": {"owner": OWNER, "repo": "old-name", "visibility": "public"}})
+    assert est.current(fav) == f"{OWNER}/old-name"
+    with _Strict(monkeypatch, _file(_bundle(tmp_path / "new", [{"id": "t3s-new", "repos": ["new-name"]}]))):
+        favs, logs = O.public_favorites(est, reg["orgs"]["Northwind-Trading-Co"], allow_t3=True)
+        assert favs == [] and logs == [f"t3-signoff:{fav}"], (favs, logs)
+    with _Strict(monkeypatch, _file(_bundle(tmp_path / "both", [{"id": "t3s-both", "repos": ["new-name", "old-name"]}]))):
+        favs, _ = O.public_favorites(est, reg["orgs"]["Northwind-Trading-Co"], allow_t3=True)
+        assert favs == [f"{OWNER}/old-name"], favs
+    favs, _ = O.public_favorites(est, reg["orgs"]["Northwind-Trading-Co"], allow_t3=True)  # flag off: unchanged
+    assert favs == [f"{OWNER}/old-name"], favs
+
+
+def test_record_for_follows_an_alias_registered_after_the_grant(tmp_path, monkeypatch):
+    from ctshowcase import signoff
+    with _Strict(monkeypatch, _file(_bundle(tmp_path, [{"id": "t3s-al"}]))):
+        signoff.require(OWNER)
+        assert signoff.record_for("Renamed-Org") is None
+        signoff.register_aliases([OWNER, "Renamed-Org"])
+        assert signoff.record_for("Renamed-Org")["id"] == "t3s-al"
+        job = {"phase": 1, "org": "Renamed-Org"}
+        assert signoff.stamp([job])[0]["signoff_id"] == "t3s-al"
+
+
+def test_list_union_job_carries_the_signoff_of_a_t3_destination_list(tmp_path, monkeypatch, brand):
+    """Two orgs share a public T1 favorite; `org pins` for the T1 org adds it to the T3 org's existing List as well.
+    That membership needs the T3 org's record on the job."""
+    from ctshowcase import org as O
+    from ctshowcase.resolver import Resolver
+    t1, fav = "Northwind-Trading-Co", "Northwind-Trading-Co/shared-synthetic"
+    reg = {"orgs": {t1: {"favorites": [{"full_name": fav}], "star_list": {"name": "Misc", "description": ""}},
+                    OWNER: {"favorites": [{"full_name": fav}], "star_list": {"name": "Built on", "description": ""}}}}
+    est = O.Estate(brand, Resolver(brand, reg, {"rows": set(), "ids": set(), "answers": {}, "actions": [], "extra": []}),
+                   {"m": {"owner": t1, "repo": "shared-synthetic", "visibility": "public"}})
+    def lst(i, n):
+        return {"id": i, "name": n, "slug": n.lower(), "description": "", "isPrivate": False,
+                "items": {"totalCount": 0, "nodes": []}}
+    lists = {"data": {"viewer": {"login": "x", "lists": {"totalCount": 2, "nodes": [lst("UL_t1", "Misc"), lst("UL_t3", "Built on")]}}}}
+    ids = {fav: "R_shared"}
+    with _Strict(monkeypatch, _file(_bundle(tmp_path / "ok", [{"id": "t3s-dest"}]))):
+        plan = O.star_list_plan(est, t1, lists_capture=lists, allow_t3=True, repo_ids=ids)
+        items = [j for j in plan["jobs"] if "list-item" in j["id"]]
+        assert len(items) == 1 and "UL_t3" in items[0]["argv"][-1], plan["jobs"]
+        assert items[0]["signoff_id"] == "t3s-dest", items
+    with _Strict(monkeypatch, _file(_bundle(tmp_path / "none", [])), allow_t3=False):
+        plan = O.star_list_plan(est, t1, lists_capture=lists, allow_t3=False, repo_ids=ids)
+        items = [j for j in plan["jobs"] if "list-item" in j["id"]]
+        assert items and "UL_t3" not in items[0]["argv"][-1] and "signoff_id" not in items[0], items
