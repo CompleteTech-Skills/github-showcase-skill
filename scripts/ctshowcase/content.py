@@ -1981,6 +1981,10 @@ def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = Non
         clause = ground_clause(card)
         anchored = "Keep the background empty and the glyph inside" in prompt
         prompt = prompt.replace("Keep the background empty and the glyph inside", clause + " Keep the glyph inside")
+        # replace the estate template's whole numbered BACKGROUND paragraph (its {POOL} and any explicit colours or
+        # gradients go with it), so the prompt states one flat ground and never a contradicting one
+        prompt = re.sub(r"^(\d+ BACKGROUND)\b(?:[^\n]|\n(?!\s*\n))*", lambda m: f"{m.group(1)}. {clause}", prompt,
+                        flags=re.M)
         for k, v in slots.items():
             if v is not None:
                 prompt = prompt.replace("{" + k + "}", str(v))
@@ -2076,12 +2080,14 @@ def normalize_icon(img, ground: str = "auto", card: str | None = None, pixel_art
         if spread and spread > GROUND_DE:
             # Tolerance was raised above the default: flatten the vignette to one ground so the kept tile's corners
             # agree at the default tolerance that icon_qa, tile.py and iconbox.py use (issue #52 review).
+            # Flatten only the ground itself (within the corner spread of the mean ground), never the glyph glow:
+            # pixels farther out, such as a bloom or glow falloff, stay untouched, so no step ring appears.
             lab = _lab_cache()
             g = lab(hexrgb(gnd))
             flat = hexrgb(gnd) + (255,)
             px = _px(im)
             im = im.copy()
-            im.putdata([flat if _de(lab(p[:3]), g) <= KEY_DE + spread else p for p in px])
+            im.putdata([flat if _de(lab(p[:3]), g) <= spread else p for p in px])
         side = max(im.size)
         sq = Image.new("RGBA", (side, side), hexrgb(gnd) + (255,))
         sq.paste(im, ((side - im.width) // 2, (side - im.height) // 2))
