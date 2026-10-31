@@ -6,7 +6,8 @@ import re
 
 # CommonMark: a backtick fence's info string has no backtick, so "```npm test``` runs" is inline code, not a fence
 FENCE_OPEN = re.compile(r"^ {0,3}(`{3,}(?=[^`\n]*$)|~{3,})")
-INLINE_CODE = re.compile(r"(`+)(?!`).+?(?<!`)\1(?!`)")
+# CommonMark: a backslash-escaped backtick cannot open a code span
+INLINE_CODE = re.compile(r"(?<!(?<!\\)\\)(?<!`)(`+)(?!`).+?(?<!`)\1(?!`)")
 
 
 def code_spans(text: str) -> list[tuple[int, int]]:
