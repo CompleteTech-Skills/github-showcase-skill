@@ -100,3 +100,21 @@ def test_apostrophe_in_markdown_badge_url_cannot_hide_an_off_palette_colour(make
     assert "R7 off-palette badge colour FF0000" in result["fails"]
     quoted = lint_reference(make_ctx, tmp_path / "q", "![Type](<https://img.shields.io/badge/type-it's-FF0000?style=flat-square>)", "")
     assert "R7 off-palette badge colour FF0000" in quoted["fails"]
+
+
+def test_escaped_backticks_do_not_hide_angle_image_from_lint(make_ctx, tmp_path):
+    usage = r"\`![Screenshot](<docs/images/missing.png>)\`"
+    result = lint_reference(make_ctx, tmp_path, usage, "")
+    assert "R7 local image does not resolve: docs/images/missing.png" in result["fails"]
+
+
+def test_real_inline_code_still_hides_angle_image_from_lint(make_ctx, tmp_path):
+    usage = "`![Screenshot](<docs/images/missing.png>)`"
+    result = lint_reference(make_ctx, tmp_path, usage, "")
+    assert "R7 local image does not resolve: docs/images/missing.png" not in result["fails"]
+
+
+def test_even_backslash_run_before_backtick_is_real_code(make_ctx, tmp_path):
+    usage = r"\\`![Screenshot](<docs/images/missing.png>)`"
+    result = lint_reference(make_ctx, tmp_path, usage, "")
+    assert "R7 local image does not resolve: docs/images/missing.png" not in result["fails"]
