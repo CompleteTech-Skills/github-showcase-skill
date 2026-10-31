@@ -948,6 +948,30 @@ def test_icon_default_transparent_key_is_binary():
     assert alpha.getpixel((512, 512)) == 255
 
 
+# sha256 of the decoded RGBA pixels the pre-change (origin/main f9ec72a) CLI wrote for the fixture below.
+_BASE_DEFAULT_KEY_SHA256 = "a9c81f60a8fcf24ab3707c86d4f7dd42e3625025c552c207291064de2045d493"
+
+
+@pytest.mark.parametrize("ground", ["auto", "transparent"])
+def test_icon_cli_default_ground_output_matches_pre_change_binary_key(capsys, tmp_path, ground):
+    """CLI-level guard: at the default --ground-tolerance a 40 px gradient edge on a pale ground (pixels 6-9 dE from
+    the ground) is keyed exactly as before #52, i.e. the pixel hash equals the one the base commit produced (the
+    documented 'explicit modes stay byte-identical at the default'; a soft ramp would change it)."""
+    import hashlib
+    from PIL import Image
+    src = tmp_path / "ring.png"
+    _ringed(Image.new("RGB", (1024, 1024), (248, 250, 252)), "#F8FAFC").save(src)
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    out = tmp_path / "out.png"
+    code, res = run_content(capsys, "--meta", meta, "--no-repo-dir", "content", "icon", "normalize", "--in", src,
+                            "--out", out, "--art-direction", FIX / "ART_DIRECTION.min.md", "--ground", ground,
+                            *NO_ESTATE)
+    assert code == 0 and out.is_file(), res
+    with Image.open(out) as im:
+        assert hashlib.sha256(im.convert("RGBA").tobytes()).hexdigest() == _BASE_DEFAULT_KEY_SHA256
+
+
 def test_icon_default_transparent_keeps_pale_opaque_glyph_for_qa():
     """A pale opaque glyph (#EAEAEA, about dE 7.3 from white) keys as opaque at the default tolerance, so its interior
     keeps alpha 255 and icon_qa finds ink on the dark card. Regression: a soft ramp dropped it to ~111 and failed
