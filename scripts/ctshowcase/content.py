@@ -1945,7 +1945,9 @@ def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = Non
                           "social preview", SECONDARY_LIGHT="", SECONDARY_LINE="", SPARK_D="94", SPARK_CORE_D="37",
                      TEXT_RULE="Any text, letters, numbers or words",
                      SEED=seed or "not set",
-                     SEED_INSTRUCTION=f"Use seed {seed} when supported." if seed else "Use the tool's default seed.",
+                     SEED_INSTRUCTION=(f"Seed {seed} is requested only if the generator exposes a seed setting; most image "
+                                       "tools do not, so do not report it as applied." if seed else
+                                       "No seed is requested."),
                      STYLE_REFERENCES="the three approved pilot renders from art/golden/neon-night/.",
                      BRAND_REFERENCE=f"Org avatar art/reference/avatars/{org['canonical']}.png for family consistency "
                                      "only: do not copy its glyph; this repository's silhouette must differ from it at "
@@ -1967,9 +1969,10 @@ def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = Non
         slots["EXTRA_NEGATIVES"] = " ".join(x for x in (glyph.get("EXTRA_NEGATIVES"), neg) if x)
         prompt = re.sub(r"\(a\) Geometry:.*?(?= \(b\) Style:)",
                         "(a) Geometry: none yet; this glyph is new, so section 7 is the geometry and the lock pass "
-                        "traces the chosen candidate into the compositor.", tpl, flags=re.S)
-        prompt = re.sub(r"output art/out/avatars/\S+", f"output art/out/icons/{org['current']}/{repo}-1024-c{{1..4}}.png",
+                        "traces the returned image into the compositor.", tpl, flags=re.S)
+        prompt = re.sub(r"output art/out/avatars/\S+", f"output art/out/icons/{org['current']}/{repo}-1024.png",
                         prompt)
+        prompt = re.sub(r"\b4 candidates;\s*", "one image per request; ", prompt)
         prompt = re.sub(r"The pipeline downsamples your image[^.]*\.",
                         "The lock pass traces your image into the compositor, which renders the flat 1024 × 1024 px "
                         "assets/icon.png in the family light-surface inks.", prompt)
@@ -1983,6 +1986,7 @@ def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = Non
         for k, v in slots.items():
             if v is not None:
                 prompt = prompt.replace("{" + k + "}", str(v))
+    prompt = prompt.replace("Produce four candidates.", "Produce one image.")
     missing = sorted(set(re.findall(r"\{([A-Z_]+)\}", prompt)))
     ink = colours.get("INK") or []
     return {"prompt": prompt, "missing": missing, "invalid": invalid, "facts": facts, "option": option.upper(),

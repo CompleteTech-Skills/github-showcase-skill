@@ -103,7 +103,7 @@ glyph outline in {LINE_HEX} so the spark remains distinct at small sizes.
 
 No text, letters, numbers, words, logos, brand marks, human figures or third-party IP.
 {EXTRA_NEGATIVES}
-Produce four candidates. {SEED_INSTRUCTION}
+Produce one image. {SEED_INSTRUCTION}
 The lock pass renders assets/icon.png as a flat glyph in the family's light-surface
 inks, without a tile or glow. Do not render the repository name in the image.
 ```
@@ -151,10 +151,10 @@ No text, letters, numbers, symbols, words, labels, signatures, watermarks, logos
 ## assets/icon.png
 - Date: YYYY-MM-DD
 - Tool and model: TOOL / MODEL ID AND VERSION
-- Seed: SEED or "not supported"
+- Seed: requested SEED, applied yes/no; write "not supported" when the tool has no seed setting or none was passed
 - Reference images: golden reference path, jev-reference.png, or "none"
 - Prompt: (verbatim, fenced)
-- Candidates: 4 or 8; selected: N (reason: one line)
+- Images requested: N (1 for single-image generators); selected: N (reason: one line)
 - Post-processing: showcase.py VERSION; output sha256 HASH; size KB
 ```
 

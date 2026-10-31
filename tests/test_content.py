@@ -612,9 +612,9 @@ def test_icon_prompt_needs_writer_then_ok(brand, icon_ctx):
     p = res["prompt"]
     assert res["missing"] == [] and p.startswith("NEON NIGHT REPO ICON · STYLE LOCK v1.2 · Northwind-Trading-Co/")
     assert "#46B8FF" in p and "#CBEBFF" in p and "#0081ED" in p and "Bulb Gold #FFC300" in p
-    assert "Size class WIDE:" in p and "seed 1025" in p and "GitHub avatar" not in p and "28 avatars in" not in p
+    assert "Size class WIDE:" in p and "Seed 1025 is requested only if" in p and "GitHub avatar" not in p and "28 avatars in" not in p
     assert "art/reference/avatars/Northwind-Trading-Co.png" not in p.split("(b) Style")[0]
-    assert "art/out/icons/Northwind-Trading-Co/support-triage-agent-1024-c{1..4}.png" in p
+    assert "art/out/icons/Northwind-Trading-Co/support-triage-agent-1024.png" in p
     assert "Do not draw the Northwind-Trading-Co org glyph (Compass rose" in p
     assert res["render"]["ink"] == "#005ADD" and res["render"]["live_area"] == [168, 168, 856, 856]
     md = C.prompt_markdown(res)

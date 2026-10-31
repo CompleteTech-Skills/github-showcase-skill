@@ -122,7 +122,8 @@ def test_bundled_prompt_has_a_valid_seed_instruction(owner, seed, brand, make_ct
     from ctshowcase.resolver import Resolver
 
     result = C.icon_prompt(make_ctx(owner=owner), Resolver(brand, {}, {}), C.load_art_direction())
-    expected = f"Use seed {seed} when supported." if seed else "Use the tool's default seed."
+    expected = (f"Seed {seed} is requested only if the generator exposes a seed setting" if seed
+                else "No seed is requested.")
     assert expected in result["prompt"]
     assert "seed not set" not in result["prompt"]
 
@@ -186,3 +187,38 @@ def test_legacy_config_option_b_does_not_require_glyph_inks(explicit_art_directi
     result = json.loads(proc.stdout.decode("utf-8"))
     assert result["result"] == "ok" and result["missing"] == []
     assert "A tray holding an envelope." in output.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("owner", ["CompleteTech-Skills", "AI-Ascension"])
+def test_prompt_does_not_promise_candidates_or_seed_support(owner, brand, make_ctx):
+    from ctshowcase.resolver import Resolver
+
+    glyph = {"glyph_name": "Inbox Tray", "glyph_description": "An open tray seen front-on.",
+             "spark_placement": "held inside the tray", "size_class": "wide"}
+    ctx = make_ctx(owner=owner)
+    prompt = C.icon_prompt(ctx, Resolver(brand, {}, {}), C.load_art_direction(), glyph)["prompt"]
+    assert "four candidates" not in prompt.lower()
+    assert "when supported" not in prompt
+    assert "-c{1..4}" not in prompt
+    assert "Produce one image." in prompt
+    assert "not set" not in prompt
+
+
+@pytest.mark.parametrize("owner", ["CompleteTech-Skills", "AI-Ascension"])
+def test_prompt_option_b_has_no_candidate_promise(owner, brand, make_ctx):
+    from ctshowcase.resolver import Resolver
+
+    glyph = {"subject": "A tray holding an envelope.", "objects": "A tray and envelope."}
+    ctx = make_ctx(owner=owner)
+    prompt = C.icon_prompt(ctx, Resolver(brand, {}, {}), C.load_art_direction(), glyph, option="B",
+                           skill_art=C.SKILL_ART_DIRECTION.read_text(encoding="utf-8"))["prompt"]
+    assert "four candidates" not in prompt.lower()
+    assert "when supported" not in prompt
+    assert "-c{1..4}" not in prompt
+
+
+def test_provenance_template_records_seed_honestly():
+    text = C.DEFAULT_ART_DIRECTION.read_text(encoding="utf-8")
+    assert "Images requested:" in text
+    assert "Candidates: 4 or 8" not in text
+    assert "not supported" in text

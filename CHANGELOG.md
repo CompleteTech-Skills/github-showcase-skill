@@ -10,6 +10,7 @@ All notable changes to `github-showcase-skill` are recorded here. Versions follo
 
 ### Fixed
 
+- `content icon prompt` (issues 62 and 63) asks for one image instead of four candidates, drops the `-c1..4` output suffix and stops promising seed support: the seed is an optional request that is recorded as applied yes/no, or `not supported` when the tool has no seed setting. The provenance template records images requested rather than candidates.
 - Windows contributor tests now use explicit UTF-8, native path basenames, a platform-independent read-only metadata stub, and Git Bash with stdin-safe Action scripts. All 15 issue #9 failures are individually documented; the full suite now runs in Windows, Linux and macOS CI.
 - Lint accepts file operands after options on older Python 3.12 versions while continuing to reject unrecognized options.
 - The Action's optional render arguments support macOS Bash 3.2, including an empty argument array with `set -u`.
