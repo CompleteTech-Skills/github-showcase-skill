@@ -2295,9 +2295,14 @@ def icon_qa(data: bytes, *, card: str, ink: list[str] | None = None, org_mark: P
     add("png", True)
     add("size", (w, h) == (ICON_PX, ICON_PX), f"{w}x{h}")
     add("bytes", len(data) <= ICON_BUDGET, f"{len(data)} <= {ICON_BUDGET}")
-    im = Image.open(io.BytesIO(data))
-    im.load()
-    rgba = im.convert("RGBA")
+    try:
+        im = Image.open(io.BytesIO(data))
+        im.load()
+        rgba = im.convert("RGBA")
+    except (OSError, ValueError, SyntaxError, Image.DecompressionBombError) as exc:
+        # structurally valid PNG whose compressed IDAT data cannot be decoded: a structured failure, never a traceback
+        add("png", False, f"undecodable image data: {str(exc)[:80]}")
+        return {"result": "fail", "checks": checks, **({"logs": []} if ocr else {})}
     alpha = rgba.getchannel("A")
     transparent = colour in (4, 6) or (colour == 3 and "transparency" in im.info)
     lab = _lab_cache()

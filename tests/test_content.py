@@ -1543,3 +1543,22 @@ def test_icon_ocr_malformed_png_keeps_logs_key(monkeypatch):
     qa = C.icon_qa(b"bad", card="#0B1020", ocr=True)
     assert qa["result"] == "fail" and qa["logs"] == [], qa
     assert "logs" not in C.icon_qa(b"bad", card="#0B1020")
+
+
+def test_icon_ocr_undecodable_idat_is_structured_failure(monkeypatch):
+    # valid signature, IHDR, chunk CRCs and IEND, but IDAT is not a zlib stream: validate_png accepts it and Pillow's
+    # load() raised OSError('broken data stream') out of icon_qa (no JSON, no logs) before this was handled
+    import struct, zlib
+    from ctshowcase.pnglint import validate_png
+
+    def chunk(kind, body):
+        return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body) & 0xFFFFFFFF)
+    data = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 1024, 1024, 8, 6, 0, 0, 0))
+            + chunk(b"IDAT", b"this is not a zlib stream") + chunk(b"IEND", b""))
+    validate_png(data)  # structurally accepted, so the failure comes from decoding
+    monkeypatch.setattr(C, "_tesseract", lambda: None)
+    qa = C.icon_qa(data, card="#0B1020", ocr=True)
+    assert qa["result"] == "fail" and qa["logs"] == [], qa
+    assert any(c["check"] == "png" and c["result"] == "fail" and "undecodable" in c["detail"] for c in qa["checks"]), qa
+    plain = C.icon_qa(data, card="#0B1020")
+    assert plain["result"] == "fail" and "logs" not in plain, plain
