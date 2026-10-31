@@ -569,6 +569,25 @@ FOOTER_HREF = re.compile(r"""\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""", 
 # (title="href=...") is never read as an attribute of its own
 FOOTER_ATTR_TOKEN = re.compile(r"""\s*([^\s"'=>/]+)(\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))?""")
 
+FOOTER_IMG_ATTRS = ("alt", "src", "srcset")
+
+
+def _footer_attrs(attrs: str) -> dict[str, str]:
+    """The `alt`, `src` and `srcset` attributes of one tag's attribute text, parsed as whole attributes: exact
+    (case-insensitive) names only, so `data-alt`, `xalt` or text inside another attribute's quoted value never count;
+    the first occurrence of a name wins, as a browser reads it; the value is returned with its quotes removed."""
+    got: dict[str, str] = {}
+    for tok in FOOTER_ATTR_TOKEN.finditer(attrs):
+        name = tok.group(1).lower()
+        if name not in FOOTER_IMG_ATTRS or name in got or tok.group(2) is None:
+            continue
+        val = tok.group(2).split("=", 1)[1].strip()
+        if len(val) >= 2 and val[0] in "\"'" and val[-1] == val[0]:
+            val = val[1:-1]
+        got[name] = val
+    return got
+
+
 OLD_LOCAL_LOGOS = {'assets/logo.png', 'logo.png', 'assets/logo-dark.png', 'logo-dark.png'}
 
 
@@ -665,8 +684,8 @@ def is_footer_copy(block: str, brand, loose_src: bool = False, own_site: bool = 
     credit = {f"{f['line_prefix']} {company}", f"{f['line_prefix']} {company} {f['line_suffix']}"}
 
     def _alts(attrs: str) -> list[str]:
-        return [html.unescape(next(g for g in a.groups()[1:] if g is not None)).strip()
-                for a in FOOTER_ATTR.finditer(attrs) if a.group(1).lower() == "alt"]
+        alt = _footer_attrs(attrs).get("alt")
+        return [] if alt is None else [html.unescape(alt).strip()]
 
     # a <source> carries no alt: the block's own <img> alt vouches for its former local logo files
     block_alt_ok = any(v in (company, f["alt"]) for m in FOOTER_TAG.finditer(block)
@@ -685,9 +704,8 @@ def is_footer_copy(block: str, brand, loose_src: bool = False, own_site: bool = 
                     break
             return href is not None and _footer_href_ok(href, brand)
         alt_ok, urls = False, []
-        for a in FOOTER_ATTR.finditer(attrs):  # never a file name that merely contains "logo"
-            key = a.group(1).lower()
-            val = html.unescape(next(g for g in a.groups()[1:] if g is not None)).strip()
+        for key, raw in _footer_attrs(attrs).items():  # whole attributes, exact names; never a file name that merely contains "logo"
+            val = html.unescape(raw).strip()
             if key == "alt":
                 alt_ok = alt_ok or val in (company, f["alt"])
             else:
