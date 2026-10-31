@@ -144,3 +144,57 @@ def test_non_footer_images_are_not_footer_copies_and_are_left(brand, block):
     assert not readme.is_footer_copy(block, brand)
     text = "# A\n\n" + block
     assert readme.drop_old_footer(text, brand) == (text, [])
+
+
+@pytest.mark.parametrize("marked", [True, False], ids=["marked", "unmarked"])
+@pytest.mark.parametrize("variant", ["G", "H"])
+def test_reemitted_footer_lines_are_not_reported_as_removed(brand, tmp_path, variant, marked):
+    from collections import Counter
+
+    ctx = ctx_for(brand, variant, tmp_path)
+    before = legacy_readme(brand, marked)
+    after, removed = readme.upgrade(ctx, before)
+    assert removed, "the replaced footer lines are reported"
+    kept = Counter(ln.strip() for ln in footer.block(brand).splitlines() if ln.strip())
+    for ln in removed:
+        # a line the replacement footer carries again is not a removal, so it must not be exempted from the guard
+        assert kept[ln.strip()] == 0, f"re-emitted footer line reported as removed: {ln.strip()}"
+    assert '<p align="center">' not in [ln.strip() for ln in removed]
+    assert "</p>" not in [ln.strip() for ln in removed]
+    assert readme.preservation(before, after, removed) == []
+
+
+BANNER_BODY = '<a href="https://www.complete.tech">\n<img src="banner.png" alt="banner">\n</a>'
+
+
+def banner_wrapped_legacy_readme(brand):
+    banner = f"{readme.start('banner')}\n{BANNER_BODY}\n{readme.end('banner')}"
+    filler = "Authored paragraph that stays exactly as written in the upstream project.\n\n" * 40
+    return banner + "\n\n" + UPSTREAM + "\n" + filler + footer.block(legacy_brand(brand)) + "\n"
+
+
+@pytest.mark.parametrize("variant", ["G", "H"])
+def test_banner_wrapper_loss_beside_legacy_footer_is_refused(brand, tmp_path, variant):
+    ctx = ctx_for(brand, variant, tmp_path)
+    before = banner_wrapped_legacy_readme(brand)
+    after, removed = readme.upgrade(ctx, before)
+    problems = readme.preservation(before, after, removed)
+    assert problems, "the banner loss must not be accepted"
+    # the footer also carries a standalone </a>, so the banner's own wrapper line must still be counted as lost
+    assert "lost line: </a>" in problems, problems
+
+
+@pytest.mark.parametrize("variant", ["G", "H"])
+def test_cli_refuses_banner_wrapper_loss_on_fork_footer_migration(brand, tmp_path, variant):
+    import json
+
+    from conftest import run_cli
+
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict(**VARIANTS[variant])), encoding="utf-8")
+    readme_path = tmp_path / "README.md"
+    before = banner_wrapped_legacy_readme(brand)
+    readme_path.write_text(before, encoding="utf-8", newline="")
+    p = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--write")
+    assert p.returncode != 0 and "readme-shrink" in p.stdout + p.stderr, p.stdout + p.stderr
+    assert readme_path.read_bytes() == before.encode("utf-8"), "a refused write must leave README.md unchanged"
