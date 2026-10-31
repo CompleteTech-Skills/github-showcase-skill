@@ -268,6 +268,24 @@ def gate_changelog(root: Path = ROOT) -> None:
     print(f"changelog ok ({versions[0]})")
 
 
+def gate_decisions_provenance(root: Path = ROOT) -> None:
+    """references/decisions.md must not claim to be fully verbatim, and the #47 skill note sits outside the quoted decision."""
+    lines = (root / "references" / "decisions.md").read_text(encoding="utf-8").splitlines()
+    if len(lines) < 3 or "Verbatim excerpt" not in lines[2] or "except decision 18" not in lines[2]:
+        raise RuntimeError("references/decisions.md line 3 must say the excerpt is verbatim except decision 18 (#47)")
+    note = "**Skill note (#47, not part of the user decision):**"
+    note_lines = [i for i, ln in enumerate(lines) if note in ln]
+    if len(note_lines) != 1:
+        raise RuntimeError("references/decisions.md needs exactly one labelled '#47' skill note")
+    markup_lines = [i for i, ln in enumerate(lines) if "Exact markup:" in ln]
+    if not markup_lines or note_lines[0] < markup_lines[0]:
+        raise RuntimeError("the #47 skill note must follow the quoted decision's exact markup")
+    for i, ln in enumerate(lines):
+        if ("bundled with this skill" in ln or "returned 404" in ln) and i not in (4, note_lines[0]):
+            raise RuntimeError(f"references/decisions.md line {i + 1}: skill-authored #47 wording sits inside the quoted text")
+    print("decisions provenance ok")
+
+
 def gate_labels() -> None:
     import hashlib
     out = showcase("labels", "--emit-yml").stdout
@@ -473,6 +491,7 @@ def main() -> int:
     gate_fonts()
     gate_package_extras()
     gate_changelog()
+    gate_decisions_provenance()
     gate_labels()
     gate_action()
     gate_privacy()
