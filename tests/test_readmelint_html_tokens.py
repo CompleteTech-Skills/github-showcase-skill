@@ -52,3 +52,51 @@ def test_inline_code_angle_bracket_does_not_hide_html_images_from_lint(make_ctx,
     assert "R7 local image does not resolve: docs/missing.png" in result["fails"]
     prose = lint_reference(make_ctx, tmp_path / "second", 'Compare a <b and c.\n\n<img src="docs/missing.png" alt="">', "")
     assert "R7 local image does not resolve: docs/missing.png" in prose["fails"]
+
+
+@pytest.mark.parametrize("document,expected", [
+    ('<img alt="a`b" src="https://img.shields.io/badge/a-b-005ADD"> see `![F](https://img.shields.io/badge/c-d-005ADD)`',
+     [("a`b", "https://img.shields.io/badge/a-b-005ADD")]),
+    ("<!-- `x -->`![F](y.png)`", []),
+    ("<!-- `x -->`![F](y.png)` ![G](g.png)", [("G", "g.png")]),
+])
+def test_code_span_after_a_winning_tag_or_comment_is_still_code(document, expected):
+    assert images(document) == expected
+
+
+def test_code_example_after_attribute_backtick_is_not_a_badge_or_local_file(make_ctx, tmp_path):
+    usage = '<!-- `x -->`![F](y.png)`'
+    result = lint_reference(make_ctx, tmp_path, usage, "")
+    assert "R7 local image does not resolve: y.png" not in result["fails"]
+    assert "R7 2-4 header badges required (found 1)" in result["fails"]
+
+
+def test_multiline_reference_title_keeps_the_definition(make_ctx, tmp_path):
+    from test_reference_badge_count import URL
+    assert images('![A][a]\n\n[a]: x.png "Build\nstatus"\n') == [("A", "x.png")]
+    assert images("![A][a]\n\n[a]: x.png (Build\nstatus)\n") == [("A", "x.png")]
+    assert images('![A][a]\n\n[a]: x.png "Build\n\nstatus"\n') == []  # a blank line ends the paragraph: not a definition
+    ok = lint_reference(make_ctx, tmp_path / "ok", "![CI][ci]", f'[ci]: {URL} "Build\nstatus"')
+    assert not any("badge" in failure for failure in ok["fails"]), ok
+    missing = lint_reference(make_ctx, tmp_path / "missing", "![CI][ci]", '[ci]: docs/images/missing.svg "Build\nstatus"')
+    assert "R7 local image does not resolve: docs/images/missing.svg" in missing["fails"]
+
+
+def test_reference_labels_keep_literal_backticks(make_ctx, tmp_path):
+    from test_reference_badge_count import URL
+    document = "![CI][ci`current`]\n\n[ci`old`]: docs/images/missing.svg\n[ci`current`]: https://example.test/b.svg\n"
+    assert images(document) == [("CI", "https://example.test/b.svg")]
+    shortcut = "![ci`x`]\n\n[ci`y`]: a.png\n[ci`x`]: b.png\n"
+    assert images(shortcut) == [("ci`x`", "b.png")]
+    result = lint_reference(make_ctx, tmp_path, "![CI][ci`current`]",
+                            f"[ci`old`]: docs/images/missing.svg\n[ci`current`]: {URL}")
+    assert not any("missing.svg" in failure for failure in result["fails"]), result
+    assert not any("badge" in failure for failure in result["fails"]), result
+    assert images("`[ci]: a.png`\n\n![C][ci]") == []
+
+
+def test_apostrophe_in_markdown_badge_url_cannot_hide_an_off_palette_colour(make_ctx, tmp_path):
+    result = lint_reference(make_ctx, tmp_path, "![Type](https://img.shields.io/badge/type-it's-FF0000)", "")
+    assert "R7 off-palette badge colour FF0000" in result["fails"]
+    quoted = lint_reference(make_ctx, tmp_path / "q", "![Type](<https://img.shields.io/badge/type-it's-FF0000?style=flat-square>)", "")
+    assert "R7 off-palette badge colour FF0000" in quoted["fails"]

@@ -7,7 +7,7 @@ from pathlib import Path
 from urllib.parse import unquote
 
 from . import footer as footermod
-from .mdcode import code_spans
+from .mdcode import FENCE_OPEN, INLINE_CODE, code_spans
 from .context import RepoContext
 from .detect import standard
 from .readme import BANNER_BLOCK, EMOJI, MARK, is_footer_like, masked, normalize_text, nav_first, preserved, split_sections
@@ -17,7 +17,8 @@ IMG_HTML = re.compile(r"<img\b([^>]*)>", re.I)
 PALETTE = {"1E3A8A", "005ADD", "067647", "64748B", "E551BA", "F386A1", "1E1E1E"}
 REF_DEFINITION = re.compile(
     r"^ {0,3}\[((?:\\.|[^\]\\\n])+)\]:[ \t]*(?:\n[ \t]*)?(?:<([^<>\n]+)>|(\S+?))"
-    r"(?:[ \t]+(?:\"(?:\\.|[^\"\\\n])*\"|'(?:\\.|[^'\\\n])*'|\((?:\\.|[^()\\\n])*\)))?[ \t]*$", re.M)
+    r"(?:(?:[ \t]+|[ \t]*\n[ \t]*)(?:\"(?:\\.|[^\"\\\n]|\n(?![ \t]*\n))*\"|'(?:\\.|[^'\\\n]|\n(?![ \t]*\n))*'"
+    r"|\((?:\\.|[^()\\\n]|\n(?![ \t]*\n))*\)))?[ \t]*$", re.M)  # a title may span lines but never a blank one
 # CommonMark raw HTML: an open tag needs a valid tag name, valid attributes and a closing `>`; anything else is text
 _ATTR = r"""\s+[A-Za-z_:][A-Za-z0-9_.:-]*(?:\s*=\s*(?:[^\s"'=<>`]+|'[^']*'|"[^"]*"))?"""
 HTML_OPEN_TAG = re.compile(rf"<([A-Za-z][A-Za-z0-9-]*)((?:{_ATTR})*)\s*/?>")
@@ -47,31 +48,56 @@ class _HTMLTokens:
                 self.images.append((first.get("alt") or "", first.get("src") or "", start, end))
 
 
-def _outside_code(text: str) -> str:
+def _fence_spans(text: str) -> list[tuple[int, int]]:
+    """Fenced code blocks only (the spans `code_spans` opens at a fence line)."""
+    fences = []
+    for a, b in code_spans(text):
+        begin = text.rfind("\n", 0, a) + 1
+        end = text.find("\n", begin)
+        if FENCE_OPEN.match(text[begin:end if end >= 0 else len(text)]) and not text[begin:a].strip():
+            fences.append((a, b))
+    return sorted(fences)
+
+
+def _outside_code(text: str, mask_inline: bool = True) -> str:
     """Mask Markdown code and comments without reading literal backticks in HTML attributes as code.
-    Constructs are taken left to right, so a comment opener inside a code span is code and a code span inside an
-    attribute is attribute text. The result has the same length (and newline positions) as `text`."""
-    spans = sorted(code_spans(text))
-    out, pos, index = list(text), 0, 0
-    tag = comment = None
+    Constructs are taken left to right, and inline code is looked for again after every HTML tag or comment, so a
+    backtick inside an attribute or comment is literal and the next real code span still opens (CommonMark).
+    `mask_inline=False` still lets inline code win precedence but leaves its characters readable (reference labels).
+    The result has the same length (and newline positions) as `text`."""
+    fences = _fence_spans(text)
+    out, pos = list(text), 0
+    tag = comment = inline = None
 
     def blank(a, b):
         for i in range(a, b):
             if out[i] != "\n":
                 out[i] = " "
 
+    def next_inline(start):
+        while True:
+            found = INLINE_CODE.search(text, start)
+            if not found:
+                return False
+            inside = next((f for f in fences if f[0] <= found.start() < f[1]), None)
+            if inside is None:
+                return found
+            start = inside[1]
+
     while pos < len(text):
-        while index < len(spans) and spans[index][0] < pos:
-            index += 1
-        code = spans[index] if index < len(spans) else None
+        if inline is not False and (inline is None or inline.start() < pos):
+            inline = next_inline(pos)
         if tag is not False and (tag is None or tag.start() < pos):
             tag = HTML_OPEN_TAG.search(text, pos) or False
         if comment is not False and (comment is None or comment.start() < pos):
             comment = HTML_COMMENT.search(text, pos) or False
+        fence = next((f for f in fences if f[0] >= pos), None)
+        code = min([c for c in ((inline.span() if inline else None), fence) if c], default=None)
         found = [m for m in (tag, comment) if m]
         nxt = min(found, key=lambda m: m.start()) if found else None
         if code and (nxt is None or code[0] <= nxt.start()):
-            blank(*code)
+            if mask_inline or code is fence:
+                blank(*code)
             pos = code[1]
         elif nxt is not None:
             if nxt is comment:
@@ -157,7 +183,7 @@ def _markdown_images(text: str, document: str) -> list[tuple[str, str, int, int]
         return " ".join(value.split()).casefold()
 
     definitions = {}
-    for match in REF_DEFINITION.finditer(_outside_code(document)):
+    for match in REF_DEFINITION.finditer(_outside_code(document, mask_inline=False)):
         target = html.unescape(re.sub(r"\\([^\w\s])", r"\1", match.group(2) or match.group(3)))
         definitions.setdefault(label(match.group(1)), target)
     sources = []
@@ -181,11 +207,12 @@ def _markdown_images(text: str, document: str) -> list[tuple[str, str, int, int]
                 source, consumed = target
                 sources.append((alt, source, match.start(), consumed))
             continue
-        key = label(alt)
+        # `text` masks inline code to spaces (a prefix-aligned copy): labels are matched on the written source, literal backticks included
+        key = label(document[match.end():close] if len(document) >= len(text) else alt)
         if consumed < len(text) and text[consumed] == "[":
             ref_close = _closing_bracket(text, consumed)
             if ref_close is not None:
-                key = label(text[consumed + 1:ref_close]) or key
+                key = label((document if len(document) >= len(text) else text)[consumed + 1:ref_close]) or key
                 consumed = ref_close + 1
         if key in definitions:
             sources.append((alt, definitions[key], match.start(), consumed))
@@ -295,6 +322,9 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
             fails.append(f"R7 2-4 header badges required (found {nbadges})")
         elif nbadges < 2:
             warns.append(f"badges-short: {nbadges} badge (no licence or language to show yet)")
+    # colours are read from parsed image destinations too, so an apostrophe or other HTML delimiter inside a Markdown URL hides nothing
+    shields += [m.group(1).split("?")[0].split("#")[0] for _, src in _images(_outside_code(plain), plain)
+                if (m := re.match(r"https://img\.shields\.io/badge/(.+)", src))]
     for s in shields:
         col = re.split(r"[?)]", s.rsplit("-", 1)[-1])[0].upper()
         family_cols = {str(ctx.style.get(k) or "").upper() for k in ("badge_brand", "badge_accent")}
