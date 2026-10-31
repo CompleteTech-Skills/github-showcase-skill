@@ -130,3 +130,29 @@ def test_angle_destinations_and_html_inside_code_are_excluded(make_ctx, tmp_path
 def test_angle_bracketed_inline_destinations_count(make_ctx, tmp_path, usage):
     result = lint_reference(make_ctx, tmp_path, usage, "")
     assert not any("badge" in failure for failure in result["fails"]), result
+
+
+COMMENT = "<!-- showcase:badges:generated sha256=" + "a" * 64 + " -->"
+
+
+@pytest.mark.parametrize("document, alts", [
+    (COMMENT + "\n![`gh` screenshot](docs/images/s.png)\n", ["`gh` screenshot"]),
+    ("<!-- note -->\n" + " " * 20 + "\n![Logo](docs/images/logo.png)\n", ["Logo"]),
+    ("<!--x-->\n![ ](docs/images/shot.png)\n", [" "]),
+    ("<!-- " + "c" * 60 + " -->\nprose\n![ ](https://example.com/b.png)\n", [" "]),
+])
+def test_alt_text_is_read_at_source_offsets_after_html_comments(document, alts):
+    assert len(readmelint._outside_code(document)) == len(document)
+    assert [alt for alt, _ in readmelint._images(readmelint._outside_code(document), document)] == alts
+
+
+def test_comment_before_blank_alt_image_is_still_flagged(make_ctx, tmp_path):
+    result = lint_reference(make_ctx, tmp_path, COMMENT + "\n![ ](docs/images/shot.png)", "[ci]: " + URL,
+                            files=["docs/images/shot.png"])
+    assert any(f.startswith("R7 image without alt text") for f in result["fails"]), result
+
+
+def test_reference_destination_unescapes_markdown_punctuation(make_ctx, tmp_path):
+    result = lint_reference(make_ctx, tmp_path, "![Shot][shot]", r"[shot]: docs/images/shot\(1\).png",
+                            files=["docs/images/shot(1).png"])
+    assert not any("does not resolve" in f for f in result["fails"]), result

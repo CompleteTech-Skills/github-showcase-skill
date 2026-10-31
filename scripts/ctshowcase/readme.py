@@ -237,7 +237,7 @@ def badge_body(ctx: RepoContext, existing: str | None = None) -> str:
     """Refresh owned rows; a missing or changed digest makes a J block authored."""
     if ctx.det["variant"] != "J":
         return badges_html(ctx) if ctx.det["variant"] == "F" else badges_md(ctx)
-    is_legacy = (legacy_profile_badges(ctx.brand, existing or "")
+    is_legacy = (legacy_profile_badges(ctx.brand, existing or "", ctx.style)
                  or (existing or "").strip() == template_badge_body(ctx.brand))
     has_license_row = "![License " in (existing or "") or "![AGPL-3.0 or commercial license]" in (existing or "")
     if is_legacy and has_license_row and ctx.public and (ctx.meta.get("license") or "").upper() in ("", "NOASSERTION", "OTHER"):
@@ -257,7 +257,7 @@ def template_badge_body(brand) -> str:
     return f"![Type {category}]({SHIELDS}type-{shield(category)}-{brand.raw['badges']['brand']})"
 
 
-def legacy_profile_badges(brand, body: str) -> bool:
+def legacy_profile_badges(brand, body: str, style: dict | None = None) -> bool:
     """Recognize the old generator's ordered language/license/CI rows without today's metadata.
 
     A type row, custom markup, altered alt/URL pair or duplicate kind makes the block authored.
@@ -267,7 +267,8 @@ def legacy_profile_badges(brand, body: str) -> bool:
     if not 1 <= len(lines) <= 3:
         return False
     kinds = []
-    colors = brand.raw["badges"]
+    colors = dict(brand.raw["badges"])
+    family = {k: (style or {}).get(f"badge_{k}") for k in ("brand", "accent")}
     for line in lines:
         linked = re.fullmatch(r"\[!\[([^\]]+)\]\((.+)\)\]\((.+)\)", line)
         plain = re.fullmatch(r"!\[([^\]]+)\]\((.+)\)", line)
@@ -296,7 +297,7 @@ def legacy_profile_badges(brand, body: str) -> bool:
             suffixes = ["?logo=nodedotjs&logoColor=white"]
         elif alt in ("CI", "Tests"):
             ci = re.fullmatch(r"https://github\.com/([A-Za-z0-9-]+)/(\.github|[A-Za-z0-9-]+)/actions/workflows/([^/?#]+\.ya?ml)/badge\.svg", url)
-            if not ci or link != url.removesuffix("/badge.svg") or ci.group(2) not in (".github", ci.group(1)):
+            if not ci or link != url.removesuffix("/badge.svg") or ci.group(2).lower() not in (".github", ci.group(1).lower()):
                 return False
             name = ci.group(3)
             expected = "Tests" if "test" in name else "CI" if "ci" in name else None
@@ -306,7 +307,8 @@ def legacy_profile_badges(brand, body: str) -> bool:
             continue
         else:
             return False
-        urls = {f"{SHIELDS}{label}-{shield(message)}-{color}{suffix}" for suffix in suffixes}
+        shades = {color, family["accent"]} - {None} if kind == 0 else {color}  # a family palette recolours the language row
+        urls = {f"{SHIELDS}{label}-{shield(message)}-{c}{suffix}" for suffix in suffixes for c in shades}
         slug = re.sub(r"[^a-z0-9]+", "-", f"{label}-{message}".lower()).strip("-")
         urls.add(f"docs/images/badges/{slug}.svg")
         if url not in urls or link not in links:

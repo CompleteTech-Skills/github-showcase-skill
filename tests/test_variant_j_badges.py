@@ -420,3 +420,24 @@ def test_cli_angle_bracketed_shield_destinations_use_palette_tokens(make_ctx, tm
     (tmp_path / "README.md").write_text(text.replace(badge_block(text), bad), encoding="utf-8")
     result = profile_cli(ctx, tmp_path, "lint", "readme", expected_code=1)
     assert any("palette" in failure.lower() for failure in result["fails"])
+
+
+def test_legacy_ci_badge_profile_repository_matches_owner_case_insensitively(make_ctx, tmp_path):
+    ctx = profile_context(make_ctx, tmp_path)
+    url = "https://github.com/Old-Northwind/old-northwind/actions/workflows/ci.yml"
+    authored = f"![License MIT](https://img.shields.io/badge/license-MIT-64748B)\n[![CI]({url}/badge.svg)]({url})"
+    before = readme.wrap("badges", authored) + "\n\nAuthored paragraph to retain.\n"
+    after, removed = readme.upgrade(ctx, before)
+    assert authored not in badge_block(after)
+    assert readme.preservation(before, after, removed) == []
+
+
+def test_legacy_language_badge_with_family_palette_migrates(make_ctx, tmp_path):
+    ctx = profile_context(make_ctx, tmp_path)
+    ctx.style = dict(ctx.style, badge_accent="115E59")
+    authored = ("![Language Python](https://img.shields.io/badge/language-Python-115E59)\n"
+                "![License MIT](https://img.shields.io/badge/license-MIT-64748B)")
+    assert readme.legacy_profile_badges(ctx.brand, authored, ctx.style)
+    assert not readme.legacy_profile_badges(ctx.brand, authored)
+    body = readme.badge_body(ctx, authored)
+    assert body != authored and "type-GitHub%20profile-" in body

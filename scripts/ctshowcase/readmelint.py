@@ -61,7 +61,8 @@ def _outside_code(text: str) -> str:
         replacements.append((key, raw))
         pos = end
     out.append(text[pos:])
-    protected = re.sub(r"<!--.*?-->", "", "".join(out), flags=re.S)
+    # blank comments in place (keep newlines) so offsets stay valid for the original document
+    protected = re.sub(r"<!--.*?-->", lambda m: re.sub(r"[^\n]", " ", m.group(0)), "".join(out), flags=re.S)
     protected = masked(protected)
     for key, raw in replacements:
         protected = protected.replace(key, raw)
@@ -144,7 +145,8 @@ def _markdown_images(text: str, document: str) -> list[tuple[str, str, int, int]
 
     definitions = {}
     for match in REF_DEFINITION.finditer(_outside_code(document)):
-        definitions.setdefault(label(match.group(1)), html.unescape(match.group(2) or match.group(3)))
+        target = html.unescape(re.sub(r"\\([^\w\s])", r"\1", match.group(2) or match.group(3)))
+        definitions.setdefault(label(match.group(1)), target)
     sources = []
     consumed = 0
     for match in re.finditer(r"!\[", text):
