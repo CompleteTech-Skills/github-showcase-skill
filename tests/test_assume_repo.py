@@ -1,0 +1,150 @@
+"""A checkout whose origin is a stale (renamed) slug: refused by default with the fix named; accepted, logged, with
+the explicit global `--assume-repo OWNER/REPO`. The skill never edits the remote and makes no network call."""
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+SHOWCASE = [sys.executable, str(ROOT / "scripts" / "showcase.py")]
+META = json.loads((ROOT / "examples" / "meta" / "northwind-support-triage-agent.json").read_text(encoding="utf-8"))
+OLD = "https://github.com/northwind-synthetic/old-name.git"
+
+
+def _checkout(tmp_path):
+    rd = tmp_path / "co"
+    rd.mkdir()
+    subprocess.run(["git", "init", "-q", str(rd)], check=True)
+    subprocess.run(["git", "-C", str(rd), "remote", "add", "origin", OLD], check=True)
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(dict(META, owner="northwind-synthetic", repo="new-name")), encoding="utf-8")
+    return rd, meta
+
+
+def _run(rd, meta, *flags):
+    return subprocess.run([*SHOWCASE, "--meta", str(meta), "--repo-dir", str(rd), *flags, "describe"], cwd=ROOT,
+                          capture_output=True, text=True, encoding="utf-8")
+
+
+def _origin(rd):
+    return subprocess.run(["git", "-C", str(rd), "remote", "get-url", "origin"], capture_output=True, text=True).stdout.strip()
+
+
+def test_stale_origin_is_refused_by_default_and_names_the_fix(tmp_path):
+    rd, meta = _checkout(tmp_path)
+    r = _run(rd, meta)
+    out = r.stdout + r.stderr
+    assert r.returncode == 2, out
+    assert "git remote set-url origin https://github.com/northwind-synthetic/new-name.git" in out
+    assert "--assume-repo northwind-synthetic/new-name" in out
+
+
+def test_assume_repo_accepts_with_a_logged_note_and_leaves_the_remote_alone(tmp_path):
+    rd, meta = _checkout(tmp_path)
+    r = _run(rd, meta, "--assume-repo", "northwind-synthetic/new-name")
+    assert r.returncode != 2, (r.stdout, r.stderr)
+    assert "assume-repo:northwind-synthetic/new-name" in r.stdout + r.stderr
+    assert _origin(rd) == OLD
+
+
+def test_assume_repo_naming_another_repository_is_still_refused(tmp_path):
+    rd, meta = _checkout(tmp_path)
+    r = _run(rd, meta, "--assume-repo", "northwind-synthetic/other")
+    assert r.returncode == 2, (r.stdout, r.stderr)
+    assert "does not match" in r.stdout + r.stderr
+
+
+def test_assume_repo_must_be_owner_slash_repo(tmp_path):
+    rd, meta = _checkout(tmp_path)
+    # Exit 2 alone is vacuous: an unknown flag also exits 2 on the base. Assert the flag exists (usage text) and that the
+    # failure is this flag's own OWNER/REPO validation message, not argparse's "unrecognized arguments".
+    assert "--assume-repo" in subprocess.run([*SHOWCASE, "--help"], cwd=ROOT, capture_output=True, text=True,
+                                             encoding="utf-8").stdout
+    for bad in ("nonsense", "a/b/c", "/repo", "owner/"):
+        r = _run(rd, meta, "--assume-repo", bad)
+        out = r.stdout + r.stderr
+        assert r.returncode == 2, (bad, out)
+        assert "--assume-repo expects OWNER/REPO" in out, (bad, out)
+        assert "unrecognized arguments" not in out, (bad, out)
+
+
+def _run_cmd(rd, *args, meta=None):
+    pre = ["--meta", str(meta)] if meta else []
+    return subprocess.run([*SHOWCASE, *pre, "--repo-dir", str(rd), *args], cwd=ROOT, capture_output=True, text=True,
+                          encoding="utf-8")
+
+
+def test_fingerprint_and_meta_log_the_override_and_use_the_assumed_identity(tmp_path):
+    rd, meta = _checkout(tmp_path)
+    flag = ("--assume-repo", "northwind-synthetic/new-name")
+    # with --meta: fingerprint exits 0 and carries the note in its logs
+    r = _run_cmd(rd, *flag, "fingerprint", meta=meta)
+    assert r.returncode == 0, (r.stdout, r.stderr)
+    assert any(line.startswith("assume-repo:northwind-synthetic/new-name") for line in json.loads(r.stdout)["logs"])
+    # without --meta: the stale origin slug is replaced for fingerprint and meta alike, and the note is emitted
+    r = _run_cmd(rd, *flag, "--format", "json", "fingerprint")
+    assert json.loads(r.stdout)["repo"] == "new-name", (r.stdout, r.stderr)
+    assert "assume-repo:" in r.stdout
+    r = _run_cmd(rd, *flag, "meta")
+    assert json.loads(r.stdout)["repo"] == "new-name", (r.stdout, r.stderr)
+    assert "assume-repo:northwind-synthetic/new-name" in r.stderr
+    r = _run_cmd(rd, "meta")  # default unchanged: the stale slug stands
+    assert json.loads(r.stdout)["repo"] == "old-name"
+    assert _origin(rd) == OLD
+
+
+def test_assume_repo_does_not_launder_an_excluded_origin_owner(tmp_path):
+    rd, meta = _checkout(tmp_path)
+    excluded = "https://github.com/BunsDev/new-name.git"
+    subprocess.run(["git", "-C", str(rd), "remote", "set-url", "origin", excluded], check=True)
+    base = _run(rd, meta)
+    assert base.returncode == 2, (base.stdout, base.stderr)
+    r = _run(rd, meta, "--assume-repo", "northwind-synthetic/new-name")  # --meta path
+    assert r.returncode == 2 and "excluded owner" in r.stdout + r.stderr, (r.stdout, r.stderr)
+    r = _run_cmd(rd, "--assume-repo", "northwind-synthetic/new-name", "describe")  # no-meta path
+    assert r.returncode == 2 and "excluded owner" in r.stdout + r.stderr, (r.stdout, r.stderr)
+
+
+def test_assume_repo_does_not_launder_a_family_hold(tmp_path):
+    # TouchedByAnAgent is held through its family style (not owners.hold): the origin owner's family hold must still
+    # need --allow-hold, with or without --meta (reviewer B, P1).
+    rd, meta = _checkout(tmp_path)
+    subprocess.run(["git", "-C", str(rd), "remote", "set-url", "origin", "https://github.com/TouchedByAnAgent/old-name.git"],
+                   check=True)
+    flag = ("--assume-repo", "northwind-synthetic/new-name")
+    out_png = str(tmp_path / "card.svg")
+    r = _run_cmd(rd, *flag, "card", "--out", out_png, meta=meta)
+    assert r.returncode == 2 and "family is on hold" in r.stdout + r.stderr, (r.stdout, r.stderr)
+    r = _run_cmd(rd, *flag, "card", "--out", out_png)  # no-meta path
+    assert r.returncode == 2 and "family is on hold" in r.stdout + r.stderr, (r.stdout, r.stderr)
+    assert not Path(out_png).exists()
+
+
+def test_content_links_and_images_log_and_use_the_override(tmp_path):
+    # reviewer A/B: the note must reach content links/images (with and without --meta), and without --meta the assumed
+    # identity (not the stale origin slug) is the one used.
+    rd, meta = _checkout(tmp_path)
+    (rd / "README.md").write_text("# x\n\nSee [home](https://github.com/northwind-synthetic/new-name).\n", encoding="utf-8")
+    flag = ("--assume-repo", "northwind-synthetic/new-name")
+    for act in ("links", "images"):
+        for m in (meta, None):
+            r = _run_cmd(rd, *flag, "content", act, meta=m)
+            assert r.returncode == 0, (act, m, r.stdout, r.stderr)
+            obj = json.loads(r.stdout)
+            assert any(x.startswith("assume-repo:northwind-synthetic/new-name") for x in obj["logs"]), (act, m, obj)
+            assert obj["repo"] == "new-name", (act, m, obj)
+    r = _run_cmd(rd, "content", "links")  # default unchanged: the stale slug stands
+    assert json.loads(r.stdout)["repo"] == "old-name" and json.loads(r.stdout)["logs"] == [], r.stdout
+
+
+def test_text_output_and_stdout_commands_carry_the_note(tmp_path):
+    # readme (diff on stdout, no result object) and a text-format result both surface the note.
+    rd, meta = _checkout(tmp_path)
+    (rd / "README.md").write_text("# x\n\nhello\n", encoding="utf-8")
+    flag = ("--assume-repo", "northwind-synthetic/new-name")
+    r = _run_cmd(rd, *flag, "--format", "text", "content", "links", meta=meta)
+    assert r.returncode == 0 and "assume-repo:northwind-synthetic/new-name" in r.stdout, (r.stdout, r.stderr)
+    r = _run_cmd(rd, *flag, "--format", "text", "readme", meta=meta)
+    assert "assume-repo:northwind-synthetic/new-name" in r.stdout + r.stderr, (r.returncode, r.stdout, r.stderr)

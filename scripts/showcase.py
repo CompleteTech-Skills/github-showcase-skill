@@ -24,7 +24,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from ctshowcase import STANDARD, __version__  # noqa: E402
-from ctshowcase.errors import CHECK_FAILED, NEEDS_INPUT, OK, USAGE, ShowcaseError  # noqa: E402
+from ctshowcase.errors import CHECK_FAILED, NEEDS_INPUT, OK, USAGE, Refused, ShowcaseError  # noqa: E402
 
 GENERATORS = {"banner", "card", "org-tile", "intro", "contact-sheet", "social-preview", "org-banner"}
 # `enterprise` contract names (org/project/enterprise/content groups) that map onto the original action names
@@ -75,6 +75,36 @@ def _same_slug(args, a: str, b: str) -> bool:
         return False
 
 
+def _gate_origin_owner(args, have: str) -> None:
+    """--assume-repo must never launder an excluded/hold/T3 origin owner past the approval gate: the owner the checkout
+    actually belongs to is checked exactly as it would be without the override (Refused, exit 2)."""
+    try:
+        b = brand(args, prefer_lock=True)
+        b.check_owner(have.split("/")[0], allow_t3=getattr(args, "allow_t3", False))
+        # a family-level hold lives in the family style, not owners.hold: the origin owner's family is gated too,
+        # with the same --allow-hold approval the command would need under its original identity
+        if b.resolver().family_hold(have.split("/")[0]) and not getattr(args, "allow_hold", False):
+            raise Refused(f"{have.split('/')[0]} family is on hold; pass --allow-hold (--assume-repo does not lift it)",
+                          log="hold")
+    except Refused:
+        raise
+    except ShowcaseError:  # no brand data to gate against: nothing further to refuse here
+        pass
+
+
+def assume_meta(args, rd, meta: dict) -> dict:
+    """Without --meta, apply --assume-repo to the identity read from a stale origin (only when an origin slug exists),
+    after the origin owner passes the normal owner gate. Shared by context, meta and fingerprint. Read-only."""
+    assumed = getattr(args, "assume_repo", None)
+    have = _origin_slug(rd) if rd else None
+    if assumed and not args.meta and have:
+        _gate_origin_owner(args, have)
+        owner, _, repo = assumed.partition("/")
+        meta = dict(meta, owner=owner, repo=repo)
+        args._assume_note = f"assume-repo:{assumed} (origin names {have}; the remote is unchanged)"
+    return meta
+
+
 def repo_dir(args) -> Path | None:
     """The target checkout. A missing --repo-dir is a usage error (exit 2). With --meta, the checkout must be the
     repository the metadata describes: run from inside it, or pass --repo-dir DIR / --no-repo-dir explicitly; a checkout
@@ -93,13 +123,29 @@ def repo_dir(args) -> Path | None:
         want = f"{m.get('owner')}/{m.get('repo')}"
         have = _origin_slug(rd)
         if have and not _same_slug(args, want, have):
-            raise ShowcaseError(f"metadata describes {want} but {rd.resolve()} is a checkout of {have}; pass the right "
-                                "--repo-dir, or --no-repo-dir to use the metadata alone", log="usage")
+            assumed = getattr(args, "assume_repo", None)
+            if assumed and _same_slug(args, want, assumed):
+                # Explicit operator override for a renamed repository whose origin still has the old slug. Read-only:
+                # the skill never rewrites the remote and makes no network call to follow GitHub's rename redirect.
+                _gate_origin_owner(args, have)
+                args._assume_note = f"assume-repo:{assumed} (origin names {have}; the remote is unchanged)"
+            else:
+                why = (f"--assume-repo {assumed} does not match the metadata's {want}" if assumed else
+                       "the origin may be a renamed repository's old slug")
+                raise ShowcaseError(
+                    f"metadata describes {want} but {rd.resolve()} is a checkout of {have} ({why}); fix the remote with "
+                    f"`git remote set-url origin https://github.com/{want}.git`, or pass `--assume-repo {want}` to accept "
+                    "this checkout as that repository for this run (the skill never edits the remote), or pass the right "
+                    "--repo-dir, or --no-repo-dir to use the metadata alone", log="usage")
         if not explicit and have is None:
             raise ShowcaseError(f"--meta {want} without --repo-dir: run from inside that repository's checkout, or pass "
                                 "--repo-dir DIR or --no-repo-dir", log="usage")
     args._rd_checked = rd
     return rd
+
+
+def _assume_logs(args) -> list:
+    return [args._assume_note] if getattr(args, "_assume_note", None) else []
 
 
 def default_out(args, rel: str) -> Path:
@@ -121,7 +167,11 @@ def context(args, b=None):
     b = b or brand(args)
     rd = repo_dir(args)
     meta = merged(args.meta, str(rd) if rd else None)
-    return RepoContext(b, meta, rd, type_override=getattr(args, "type_override", None))
+    meta = assume_meta(args, rd, meta)
+    ctx = RepoContext(b, meta, rd, type_override=getattr(args, "type_override", None))
+    if getattr(args, "_assume_note", None):
+        ctx.log(args._assume_note)
+    return ctx
 
 
 def base(cmd, ctx=None, **kw) -> dict:
@@ -599,7 +649,7 @@ def cmd_meta(args):
         m = M.from_gh(args.from_gh)
     else:
         rd = repo_dir(args)
-        m = M.merged(args.meta, str(rd) if rd else None)
+        m = assume_meta(args, rd, M.merged(args.meta, str(rd) if rd else None))
     m["detected"] = detect(m, RepoFacts(m, None if args.from_gh else repo_dir(args)))
     try:
         b = brand(args, prefer_lock=True)
@@ -611,7 +661,9 @@ def cmd_meta(args):
     if args.out:
         Path(args.out).write_text(text, encoding="utf-8")
         return {"command": "meta", "owner": m["owner"], "repo": m["repo"], "result": "ok", "out": args.out,
-                "detected": m["detected"], "logs": []}, OK
+                "detected": m["detected"], "logs": _assume_logs(args)}, OK
+    if getattr(args, "_assume_note", None):
+        sys.stderr.write(args._assume_note + "\n")
     sys.stdout.write(text)
     return None, OK
 
@@ -620,7 +672,7 @@ def cmd_fingerprint(args):
     from ctshowcase import fingerprint as fp
     from ctshowcase.meta import merged
     rd = repo_dir(args)
-    m = merged(args.meta, str(rd) if rd else None)
+    m = assume_meta(args, rd, merged(args.meta, str(rd) if rd else None))
     out_dir = (rd or Path(".")) / args.out_dir if not Path(args.out_dir).is_absolute() else Path(args.out_dir)
     inp = fp.inputs(m, rd)
     f = fp.fingerprint(inp, fp.config_sha256())
@@ -630,7 +682,7 @@ def cmd_fingerprint(args):
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
             fh.write(f"changed={'true' if changed else 'false'}\nfingerprint={f}\n")
     return {"command": "fingerprint", "owner": m.get("owner"), "repo": m.get("repo"), "result": "ok", "fingerprint": f,
-            "changed": changed, "logs": []}, OK
+            "changed": changed, "logs": _assume_logs(args)}, OK
 
 
 def cmd_fonts(args):
@@ -684,14 +736,44 @@ def cmd_lint(args):
     return None, CHECK_FAILED if bad else OK
 
 
+def _redact_hit(hit: str, text: str) -> list[str]:
+    """`kind:payload` -> `kind:L<line>` for every line naming the payload (L0 when none does, e.g. a wrapped note)."""
+    kind, _, payload = hit.partition(":")
+    needle = (payload.split("/", 1)[-1] if kind == "private-name" else payload).lower()
+    lines = [n for n, line in enumerate(text.splitlines(), 1) if needle in line.lower()]
+    return [f"{kind}:L{n}" for n in lines or [0]]
+
+
 def lint_public_leak(args) -> list[dict]:
     """OPS-03: no private slug, distinctive private name, members-only pin or internal note in any public file the run
     writes. Wraps the `org profile` leak check with the whole estate's private set (or --org ORG[,ORG]); needs the
     private registry (read only) and the repositories' metadata (--meta-dir) to tell public from private."""
-    from ctshowcase.org import Estate, estate_leak_scope, load_flags, load_metas, public_leaks, _default_decisions
+    from ctshowcase.org import (Estate, denylist_leaks, estate_leak_scope, load_denylist, load_flags, load_metas,
+                                public_leaks, _default_decisions)
     from ctshowcase.resolver import Resolver
     if not args.files:
         raise ShowcaseError("lint public-leak needs FILE...", log="usage")
+    den = None
+    if getattr(args, "denylist", None):
+        den = load_denylist(args.denylist)
+        if not args.registry:  # registry-free: the listed entries only, no estate, no brand, no metadata
+            ignored = [f"ignored-in-denylist-mode:{flag}" for flag, dest in (
+                ("--meta-dir", "meta_dir"), ("--decisions", "decisions"), ("--org", "org"), ("--approved", "approved"),
+                ("--approved-yaml", "approved_yaml"), ("--actions", "actions")) if getattr(args, dest, None)]
+            logs = ["registry-free:denylist-only",
+                    "coverage:denylist-entries-only (not the full estate private set, internal notes or members-only pins)"]
+            logs += ignored
+            out = []
+            for f in args.files:
+                p = Path(f)
+                if not p.is_file():
+                    out.append({"file": f, "result": "fail", "hits": [], "fails": ["file not found"], "logs": logs,
+                                "mode": "denylist"})
+                    continue
+                hits = denylist_leaks(p.read_text(encoding="utf-8", errors="replace"), *den)
+                out.append({"file": f, "result": "fail" if hits else "pass", "hits": hits, "logs": logs,
+                            "mode": "denylist"})
+            return out
     b = brand(args)
     res = Resolver.from_paths(b, args.registry, args.approved, args.approved_yaml, args.actions, require_registry=True)
     estate = Estate(b, res, flags=load_flags(args.decisions or _default_decisions()))
@@ -705,8 +787,19 @@ def lint_public_leak(args) -> list[dict]:
         p = Path(f)
         if not p.is_file():
             out.append({"file": f, "result": "fail", "hits": [], "fails": ["file not found"], "logs": logs})
+            if den:
+                out[-1]["mode"] = "registry+denylist"
             continue
-        hits = public_leaks(p.read_text(encoding="utf-8", errors="replace"), scope)
+        text = p.read_text(encoding="utf-8", errors="replace")
+        hits = public_leaks(text, scope)
+        if den:  # --denylist unions with the registry result; it never narrows an explicit --registry
+            # Registry hits carry slugs and names, which may also be denylist entries: with --denylist active every
+            # payload is redacted to `kind:L<line>`, the same no-echo form the denylist hits use.
+            hits = sorted({r for h in hits for r in _redact_hit(h, text)} | set(denylist_leaks(text, *den)),
+                          key=lambda h: (int(h.rsplit("L", 1)[1]), h))
+            out.append({"file": f, "result": "fail" if hits else "pass", "hits": hits, "logs": logs,
+                        "mode": "registry+denylist"})
+            continue
         out.append({"file": f, "result": "fail" if hits else "pass", "hits": hits, "logs": logs})
     return out
 
@@ -1001,6 +1094,9 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--quiet", action="store_true")
     p.add_argument("--allow-t3", action="store_true",
                    help="treat a T3 (co-owned) owner as signed off for this run: every repository command and generator, not just `meta`; pass only when a t3-metadata or t3-signoff row is approved (default: T3 owners are refused, exit 2)")
+    p.add_argument("--assume-repo", metavar="OWNER/REPO",
+                   help="accept a checkout whose origin names a renamed repository's old slug as OWNER/REPO for this run "
+                        "(logged; the remote is never changed and no network call is made; default: a mismatch is refused, exit 2)")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__} ({STANDARD})")
     sub = p.add_subparsers(dest="command", required=True, metavar="<command>")
 
@@ -1146,6 +1242,9 @@ def parser() -> argparse.ArgumentParser:
     for flag in ("--approved", "--approved-yaml", "--actions"):
         s.add_argument(flag, help="public-leak: approval files for the org resolver (default: the bundle's)")
     s.add_argument("--org", help="public-leak: limit the private set to ORG[,ORG] (default: every registry org)")
+    s.add_argument("--denylist", help="public-leak: text file of private slugs (owner/repo) and bare names, one per line, "
+                                      "# comments; checks FILE... without the private registry (partial coverage, see "
+                                      "references/org.md)")
     s.add_argument("--prose-kind", choices=("text", "description", "tagline"), default="text",
                    help="prose: text (README, org and profile prose), or one description / tagline per FILE or --text")
     s.add_argument("--text", action="append", help="prose: check this text (repeatable)")
@@ -1285,6 +1384,8 @@ def _main(argv=None) -> int:
         cli.error("unrecognized arguments: " + " ".join(remaining))
     from ctshowcase.config import set_t3_signed_off
     set_t3_signed_off(getattr(args, "allow_t3", False))
+    if args.assume_repo and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+", args.assume_repo):
+        cli.error("--assume-repo expects OWNER/REPO")
     if args.format is None:
         args.format = "text" if args.command in GENERATORS else "json"
     try:
@@ -1303,6 +1404,14 @@ def _main(argv=None) -> int:
         if args.format == "text" and not args.quiet:
             print(f"{args.command}: {obj['error']}", file=sys.stderr)
             return code
+    note = getattr(args, "_assume_note", None)
+    if note:  # one shared path: every command that accepted the override logs it, whatever it does with ctx.logs
+        if obj is not None:
+            logs = list(obj.get("logs") or [])
+            if note not in logs:
+                obj["logs"] = logs + [note]
+        elif not getattr(args, "_assume_note_written", False):
+            sys.stderr.write(note + chr(10))
     if obj is not None:
         emit(args, obj)
     return code

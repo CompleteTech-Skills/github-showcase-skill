@@ -633,6 +633,75 @@ def public_leaks(text: str, scope: dict) -> list[str]:
                                  scope["public_texts"])))
 
 
+def load_denylist(path: str) -> tuple[set[str], set[str]]:
+    """`lint public-leak --denylist FILE`: (slugs, bare names) listed by hand, one per line, `#` comments.
+
+    `owner/repo` lines are slugs; lines without a slash are bare names. Entries keep the spelling of their first
+    line; duplicates differ only by case and are dropped. A missing file or an empty list is needs-input (exit 4),
+    so an empty list can never pass as a clean scan."""
+    p = Path(path)
+    if not p.is_file():
+        raise NeedsInput("denylist", f"denylist not found: {path}")
+    slugs: dict[str, str] = {}
+    names: dict[str, str] = {}
+    entries = 0
+    text = p.read_text(encoding="utf-8-sig", errors="replace")
+    for n, raw in enumerate(text.splitlines(), 1):
+        line = re.split(r"\s#", raw.strip(), maxsplit=1)[0].strip()
+        if not line or line.startswith("#"):
+            continue
+        if any(ch.isspace() for ch in line) or line.startswith("/") or line.endswith("/") or line.count("/") > 1:
+            raise ShowcaseError(f"denylist line {n}: invalid entry", log="usage")
+        entries += 1
+        if "/" in line:
+            slugs.setdefault(line.lower(), line)
+        else:
+            names.setdefault(line.lower(), line)
+    if not entries:
+        raise NeedsInput("denylist", "denylist is empty")
+    return set(slugs.values()), set(names.values())
+
+
+_GH_HOST = r"((?:[a-z0-9]+\.)?(?:github\.com|githubusercontent\.com))"
+
+
+def denylist_leaks(text: str, slugs: set[str], names: set[str]) -> list[str]:
+    """`lint public-leak --denylist` for one file. Hits name only the kind and the scanned file's line number
+    (`denied-slug:L3`, `denied-name:L5`, `private-name:L3`): the denylist is private, so its entries are never echoed.
+    Matching is denylist-specific (the legacy leak_check is untouched): a slug needs a whole owner token, a terminal
+    `.git` clone suffix still counts, and bare names have no distinctiveness test (the operator listed them)."""
+    hits: set[str] = set()
+
+    def rx(x: str, lead: str) -> "re.Pattern[str]":
+        return re.compile(rf"(?<!{lead}){re.escape(x.lower())}(?:\.git)?(?![a-z0-9_-])(?!\.+[a-z0-9_-])")
+
+    slug_res = [rx(x, "[a-z0-9_.-]") for x in slugs]
+    name_res = [rx(x, "[a-z0-9._-]") for x in names]
+    # A distinctive repository name of a listed slug is matched on its own (not through the legacy leak_check, whose
+    # substring-slug shortcut would hide a bare `secret-tool-2` next to a look-alike owner) with the same boundaries.
+    repo_res = [rx(x.split("/", 1)[1], "[a-z0-9._-]") for x in slugs
+                if len(x.split("/", 1)[1]) >= 6 and re.search(r"[-_.0-9]", x.split("/", 1)[1])]
+    for n, line in enumerate(text.splitlines(), 1):
+        low = line.lower()
+        # The owner position of a GitHub URL or SCP-style remote (`github.com/<owner>`, `git@github.com:<owner>`) is
+        # not a name; `\1` keeps the matched host so a dotted repository name such as `mirror-github.com` survives; the host must start at a hostname boundary, so
+        # a custom mirror host such as `mirror-github.com/<name>` is not masked,
+        # and `github.com` inside another host's path (`mirror.example/github.com/<name>`) is a path segment, not an authority: only `://` or a bare host start counts.
+        # Scheme URLs may carry userinfo and a port (`https://u@github.com:443/<owner>`); a bare host or SCP remote may
+        # carry `user@` only at a token start, so `@` after a path slash (`mirror.example/@github.com/<name>`) never
+        # makes the host an authority.
+        bare = re.sub(rf"(?<=://)(?:[^\s/@]+@)?{_GH_HOST}(?::\d+)?/[a-z0-9-]+", r"\1/_", low)
+        bare = re.sub(rf"(?<![a-z0-9_./@:-])(?:[a-z0-9_.-]+@)?{_GH_HOST}[/:][a-z0-9-]+", r"\1/_", bare)
+        slug_hit = any(r.search(low) for r in slug_res)
+        if slug_hit:
+            hits.add(f"denied-slug:L{n}")
+        if any(r.search(bare) for r in name_res):
+            hits.add(f"denied-name:L{n}")
+        if not slug_hit and any(r.search(bare) for r in repo_res):  # a full slug hit already names the line
+            hits.add(f"private-name:L{n}")
+    return sorted(hits, key=lambda h: (int(h.rsplit("L", 1)[1]), h))
+
+
 def _badge_colour(brand, style: dict) -> str:
     from .color import contrast
     text = brand.raw["badges"]["local_text"]
