@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import html
 import re
-from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -18,64 +17,69 @@ IMG_HTML = re.compile(r"<img\b([^>]*)>", re.I)
 PALETTE = {"1E3A8A", "005ADD", "067647", "64748B", "E551BA", "F386A1", "1E1E1E"}
 REF_DEFINITION = re.compile(
     r"^ {0,3}\[((?:\\.|[^\]\\\n])+)\]:[ \t]*(?:\n[ \t]*)?(?:<([^<>\n]+)>|(\S+?))"
-    r"(?:[ \t]+(?:\"[^\"\n]*\"|'[^'\n]*'|\([^\)\n]*\)))?[ \t]*$", re.M)
+    r"(?:[ \t]+(?:\"(?:\\.|[^\"\\\n])*\"|'(?:\\.|[^'\\\n])*'|\((?:\\.|[^()\\\n])*\)))?[ \t]*$", re.M)
+# CommonMark raw HTML: an open tag needs a valid tag name, valid attributes and a closing `>`; anything else is text
+_ATTR = r"""\s+[A-Za-z_:][A-Za-z0-9_.:-]*(?:\s*=\s*(?:[^\s"'=<>`]+|'[^']*'|"[^"]*"))?"""
+HTML_OPEN_TAG = re.compile(rf"<([A-Za-z][A-Za-z0-9-]*)((?:{_ATTR})*)\s*/?>")
+HTML_ATTR = re.compile(r"""([A-Za-z_:][A-Za-z0-9_.:-]*)(?:\s*=\s*([^\s"'=<>`]+|'[^']*'|"[^"]*"))?""")
+HTML_COMMENT = re.compile(r"<!--.*?-->", re.S)
 
 
-class _HTMLTokens(HTMLParser):
-    """HTML spans let Markdown parsing respect attribute and destination boundaries."""
+class _HTMLTokens:
+    """Strict CommonMark open tags (never raises): spans let Markdown parsing respect attribute boundaries."""
     def __init__(self, text):
-        super().__init__(convert_charrefs=True)
         self.text = text
         self.tags = []
         self.images = []
-        self.line_starts = [0, *(m.end() for m in re.finditer("\n", text))]
-        self.feed(text)
-        self.close()
-
-    def handle_starttag(self, tag, attrs):
-        line, column = self.getpos()
-        start = self.line_starts[line - 1] + column
-        before = start - 1
-        while before >= 0 and self.text[before] == "\\":
-            before -= 1
-        if (start - before - 1) % 2:
-            return
-        end = start + len(self.get_starttag_text())
-        self.tags.append((start, end))
-        if tag == "img":
-            first = {}
-            for name, value in attrs:
-                first.setdefault(name, value)
-            self.images.append((first.get("alt") or "", first.get("src") or "", start, end))
-
-
-def _blank(text: str, a: int, b: int, fill: str = " ") -> str:
-    return text[:a] + re.sub(r"[^\n]", fill, text[a:b]) + text[b:]
+        for match in HTML_OPEN_TAG.finditer(text):
+            start, end = match.span()
+            before = start - 1
+            while before >= 0 and text[before] == "\\":
+                before -= 1
+            if (start - before - 1) % 2:
+                continue
+            self.tags.append((start, end))
+            if match.group(1).lower() == "img":
+                first = {}
+                for name, value in HTML_ATTR.findall(match.group(2)):
+                    value = value[1:-1] if value[:1] in ("'", '"') and value else value
+                    first.setdefault(name.lower(), html.unescape(value))
+                self.images.append((first.get("alt") or "", first.get("src") or "", start, end))
 
 
 def _outside_code(text: str) -> str:
-    """Mask Markdown code without interpreting literal backticks in HTML attributes as code.
-    The result always has the same length (and newline positions) as `text`."""
-    # fenced code is blanked before HTML tokenizing so an unfinished example tag cannot swallow the closing fence
-    tokenized = text
-    for a, b in code_spans(text):
-        if re.match(r" {0,3}(`{3,}|~{3,})", text[a:a + 8]):
-            tokenized = _blank(tokenized, a, b)
-    protected, replacements = text, []
-    for start, end in _HTMLTokens(tokenized).tags:
-        raw = text[start:end]
-        key = re.sub(r"[^\n]", "\x02", raw)
-        if key[:1] != "\n":
-            key = "\x01" + key[1:]
-        protected = protected[:start] + key + protected[end:]
-        replacements.append((start, end, key, raw))
-    # blank comments in place (keep newlines) so offsets stay valid for the original document
-    protected = re.sub(r"<!--.*?-->", lambda m: re.sub(r"[^\n]", " ", m.group(0)), protected, flags=re.S)
-    protected = masked(protected)
-    for start, end, key, raw in replacements:
-        if protected[start:end] == key:
-            protected = protected[:start] + raw + protected[end:]
-    return protected.replace("\x00", " ")
+    """Mask Markdown code and comments without reading literal backticks in HTML attributes as code.
+    Constructs are taken left to right, so a comment opener inside a code span is code and a code span inside an
+    attribute is attribute text. The result has the same length (and newline positions) as `text`."""
+    spans = sorted(code_spans(text))
+    out, pos, index = list(text), 0, 0
+    tag = comment = None
+
+    def blank(a, b):
+        for i in range(a, b):
+            if out[i] != "\n":
+                out[i] = " "
+
+    while pos < len(text):
+        while index < len(spans) and spans[index][0] < pos:
+            index += 1
+        code = spans[index] if index < len(spans) else None
+        if tag is not False and (tag is None or tag.start() < pos):
+            tag = HTML_OPEN_TAG.search(text, pos) or False
+        if comment is not False and (comment is None or comment.start() < pos):
+            comment = HTML_COMMENT.search(text, pos) or False
+        found = [m for m in (tag, comment) if m]
+        nxt = min(found, key=lambda m: m.start()) if found else None
+        if code and (nxt is None or code[0] <= nxt.start()):
+            blank(*code)
+            pos = code[1]
+        elif nxt is not None:
+            if nxt is comment:
+                blank(*nxt.span())
+            pos = nxt.end()
+        else:
+            break
+    return "".join(out)
 
 
 def _closing_bracket(text: str, start: int) -> int | None:

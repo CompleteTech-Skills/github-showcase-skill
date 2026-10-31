@@ -441,3 +441,13 @@ def test_legacy_language_badge_with_family_palette_migrates(make_ctx, tmp_path):
     assert not readme.legacy_profile_badges(ctx.brand, authored)
     body = readme.badge_body(ctx, authored)
     assert body != authored and "type-GitHub%20profile-" in body
+
+
+def test_local_inherited_template_badge_migrates_like_remote(make_ctx, tmp_path):
+    ctx = profile_context(make_ctx, tmp_path)
+    remote, local = readme.template_badge_bodies(ctx.brand)
+    assert local == "![Type Template](docs/images/badges/type-template.svg)"
+    for existing in (remote, local):
+        body = readme.badge_body(ctx, existing)
+        assert body != existing and readme.generated_badges(body)
+        assert "type-GitHub%20profile-" in body and "license-MIT-" in body

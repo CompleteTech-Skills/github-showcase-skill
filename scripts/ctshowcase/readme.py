@@ -238,7 +238,7 @@ def badge_body(ctx: RepoContext, existing: str | None = None) -> str:
     if ctx.det["variant"] != "J":
         return badges_html(ctx) if ctx.det["variant"] == "F" else badges_md(ctx)
     is_legacy = (legacy_profile_badges(ctx.brand, existing or "", ctx.style)
-                 or (existing or "").strip() == template_badge_body(ctx.brand))
+                 or (existing or "").strip() in template_badge_bodies(ctx.brand))
     has_license_row = "![License " in (existing or "") or "![AGPL-3.0 or commercial license]" in (existing or "")
     if is_legacy and has_license_row and ctx.public and (ctx.meta.get("license") or "").upper() in ("", "NOASSERTION", "OTHER"):
         return existing  # missing metadata cannot disprove an authored license claim
@@ -255,6 +255,13 @@ def template_badge_body(brand) -> str:
     """The exact inherited type row from the repository template, independent of body state."""
     category = standard("types")["types"]["template"]["category"]
     return f"![Type {category}]({SHIELDS}type-{shield(category)}-{brand.raw['badges']['brand']})"
+
+
+def template_badge_bodies(brand) -> tuple[str, str]:
+    """The inherited type row in its remote form and its exact `--badges local` equivalent."""
+    category = standard("types")["types"]["template"]["category"]
+    slug = re.sub(r"[^a-z0-9]+", "-", f"type-{category}".lower()).strip("-")
+    return template_badge_body(brand), f"![Type {category}](docs/images/badges/{slug}.svg)"
 
 
 def legacy_profile_badges(brand, body: str, style: dict | None = None) -> bool:
