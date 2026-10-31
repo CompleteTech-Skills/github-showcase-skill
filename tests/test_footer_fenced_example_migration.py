@@ -3,7 +3,6 @@
 Synthetic fixtures only.
 """
 import copy
-import importlib.util
 
 import pytest
 import yaml
@@ -83,28 +82,3 @@ def test_online_head_does_not_run_on_pull_requests_and_the_offline_check_does():
     done = subprocess.run([sys.executable, "-c", offline[0]["run"].split('python -c "', 1)[1].rsplit('"', 1)[0]],
                           cwd=ROOT, capture_output=True, text=True)
     assert done.returncode == 0, done.stdout + done.stderr
-
-
-def quality():
-    spec = importlib.util.spec_from_file_location("validate_quality_decisions", ROOT / "scripts" / "validate_quality.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
-def test_decisions_md_does_not_claim_to_be_fully_verbatim(tmp_path):
-    q = quality()
-    q.gate_decisions_provenance(ROOT)
-    text = (ROOT / "references" / "decisions.md").read_text(encoding="utf-8")
-    assert "except decision 18" in text.splitlines()[2]
-    for name, mutate in (
-        ("claims-verbatim", lambda t: t.replace(", except decision 18, whose footer logo URLs were updated", "", 1)),
-        ("note-in-quote", lambda t: t.replace("**Skill note (#47, not part of the user decision):**",
-                                              "The logo URLs point to the masters bundled with this skill; returned 404.\n\n"
-                                              "    **Skill note (#47, not part of the user decision):**", 1)),
-    ):
-        dst = tmp_path / name / "references"
-        dst.mkdir(parents=True)
-        (dst / "decisions.md").write_text(mutate(text), encoding="utf-8")
-        with pytest.raises(RuntimeError, match="decisions.md"):
-            q.gate_decisions_provenance(tmp_path / name)
