@@ -1984,7 +1984,6 @@ def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = Non
                                 "(one flat ground, not the avatar night tile)")
         prompt = prompt.replace("same model and version for all 28", "same model and version as the avatar set")
         clause = ground_clause(card)
-        anchored = "Keep the background empty and the glyph inside" in prompt
         prompt = prompt.replace("Keep the background empty and the glyph inside", clause + " Keep the glyph inside")
 
         stated = [clause in prompt]  # the clause appears exactly once, even with an anchor and a BACKGROUND paragraph
@@ -2000,8 +1999,8 @@ def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = Non
         for k, v in slots.items():
             if v is not None:
                 prompt = prompt.replace("{" + k + "}", str(v))
-        if not anchored and "{POOL}" not in tpl and clause not in prompt:  # a template with neither anchor still states the exact ground
-            prompt = prompt.rstrip() + "\n\n" + ground_clause(card)
+        if clause not in prompt:  # the exact ground is appended whenever no paragraph replacement stated it
+            prompt = prompt.rstrip() + "\n\n" + clause
     missing = sorted(set(re.findall(r"\{([A-Z_]+)\}", prompt)))
     ink = colours.get("INK") or []
     return {"prompt": prompt, "missing": missing, "facts": facts, "option": option.upper(),
@@ -2137,12 +2136,14 @@ def normalize_icon(img, ground: str = "auto", card: str | None = None, pixel_art
         # corners (spread 0) but a darker interior, so --ground-tolerance must still widen the key (review B, #52).
         key_de = KEY_DE + (max(spread or 0.0, tol) if tol > GROUND_DE else 0.0)
         mask = Image.new("L", im.size)
-        half = FLATTEN_FEATHER / 2  # soft alpha ramp over the feather band, so a gradient edge does not step to 0/255
+        # The soft alpha ramp is only for an explicitly raised --ground-tolerance; the default keeps the original
+        # 0/255 step (half == 0), so explicit --ground transparent output stays byte-identical at the default.
+        half = FLATTEN_FEATHER / 2 if tol > GROUND_DE else 0.0
 
         def _alpha(d: float) -> int:
             if d <= key_de:
                 return 0
-            if d >= key_de + half:
+            if half <= 0 or d >= key_de + half:
                 return 255
             return round(255 * (d - key_de) / half)
 
