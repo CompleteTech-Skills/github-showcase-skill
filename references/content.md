@@ -37,7 +37,7 @@ Every action also takes `--report FILE` (the JSON result), `--jobs FILE` (append
 
 ### Icon ground rule (`icon normalize`, `--ground auto`)
 
-- Transparent corners: keyed as is. Four opaque corners within `--ground-tolerance` dE of each other (default 3.0) are one ground: a dark one (relative luminance < 0.2) that is not within dE 12 of the card colour is kept full-bleed as a night tile; any other uniform ground, pale or card-coloured, is keyed to transparent (the PNG stays under 300 KB).
+- Transparent corners: keyed as is. Four opaque corners closer than `--ground-tolerance` dE to each other (default 3.0; a finite number >= 0) are one ground: a dark one (relative luminance < 0.2) that is not within dE 12 of the card colour is kept full-bleed as a night tile (unless the kept PNG would exceed 300 KB, then it is keyed: `auto_reason` budget-fallback); any other uniform ground, pale or card-coloured, is keyed to transparent (the PNG stays under 300 KB).
 - A slightly vignetted ground with corner dE above 3.0 fails with `icon-ground` and a message naming the measured dE and `--ground-tolerance`; rerun with e.g. `--ground-tolerance 5` for corner dE 3.1-4.9. Larger spreads still fail, so ask for a flat ground (the option A prompt states the exact `card_fill` hex with no vignette, texture, gradient, shadow or glow).
 - A raised `--ground-tolerance` widens the key threshold only above the default 3.0 (explicit modes stay byte-identical at the default), and a kept night tile with such a vignette is flattened to one ground so `content icon check` passes it.
 - `--ground keep|transparent` behave as before; `--ground-tolerance` also sets how alike the corners must be for them.

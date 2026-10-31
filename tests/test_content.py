@@ -625,17 +625,23 @@ def test_icon_prompt_states_the_flat_ground(brand, icon_ctx):
     """The option-A prompt names the family card colour as one flat ground and forbids vignette and glow."""
     glyph = {"glyph_name": "Inbox Tray", "glyph_description": "An open tray seen front-on.",
              "spark_placement": "held inside the tray", "size_class": "wide"}
-    # the bundled art direction carries the template sentence the ground clause rewrites, so it is the
-    # format asserted here. KNOWN GAP (reproduced, deliberately not fixed): the synthetic estate-format fixture
-    # (tests/fixtures/content/ART_DIRECTION.min.md, passed as ART) has no such sentence, so its prompt gets no flat
-    # ground clause and still asks for "one very soft round pool ... about 880 px across" in its BACKGROUND line.
-    # Changing that needs a decision on estate templates; this test does not cover it.
     p = C.icon_prompt(icon_ctx, resolver(brand), C.load_art_direction(), glyph)["prompt"]
     assert "perfectly flat" in p
     assert brand.style(NW)["tokens"]["card_fill"].upper() in p
     assert "no vignette, texture, gradient, shadow or glow" in p
     assert "Keep the background empty" not in p
     assert "880 px" not in p  # the bundled template has no light pool to conflict with the flat ground
+
+
+def test_icon_prompt_states_the_flat_ground_for_estate_template(brand, icon_ctx):
+    """The estate-format (d) template's soft light pool becomes the flat card ground (review: #53 gap)."""
+    glyph = {"glyph_name": "Inbox Tray", "glyph_description": "An open tray seen front-on.",
+             "spark_placement": "held inside the tray", "size_class": "wide"}
+    art = (Path(__file__).parent / "fixtures" / "content" / "ART_DIRECTION.min.md").read_text(encoding="utf-8")
+    p = C.icon_prompt(icon_ctx, resolver(brand), art, glyph)["prompt"]
+    assert "perfectly flat" in p and brand.style(NW)["tokens"]["card_fill"].upper() in p
+    assert "no vignette, texture, gradient, shadow or glow" in p
+    assert "880 px" not in p and "soft round pool" not in p
 
 
 def test_icon_prompt_parses_the_bundled_art_direction(brand, fixture_meta):
@@ -706,6 +712,55 @@ def test_icon_pale_ground_on_dark_card_keys_to_small_rgba(brand):
     # explicit modes are unchanged
     kept = C.normalize_icon(_candidate("#F8FAFC", size=1024, box=(250, 250, 750, 750)), "keep", "#032530")[0]
     assert kept.mode == "RGB"
+
+
+def _noisy(ground, size=1024, seed=1, amp=2):
+    """A generator-like ground: exact corners, seeded +/-amp per-channel noise elsewhere, one ink outline."""
+    import random
+    from PIL import Image, ImageDraw
+    from ctshowcase.color import rgb
+    g = rgb(ground)
+    rnd = random.Random(seed)
+    im = Image.new("RGB", (size, size))
+    im.putdata([tuple(max(0, min(255, c + rnd.randint(-amp, amp))) for c in g) for _ in range(size * size)])
+    ImageDraw.Draw(im).rounded_rectangle((250, 250, 750, 750), radius=40, outline=(16, 185, 129), width=40)
+    for xy in ((0, 0), (size - 1, 0), (0, size - 1), (size - 1, size - 1)):
+        im.putpixel(xy, g)
+    return im
+
+
+def test_icon_noisy_dark_ground_falls_back_to_keying_inside_the_budget():
+    """A noisy dark ground on a dark card would be kept as a night tile far over 300 KB; auto keys it instead."""
+    from ctshowcase.scene import png_bytes
+    img = _noisy("#0F172A")
+    kept, kinfo = C.normalize_icon(img, "keep", "#032530")
+    assert len(png_bytes(kept)) > 300_000  # the failure the issue reports
+    out, info = C.normalize_icon(img, "auto", "#032530")
+    assert info["mode"] == "transparent" and info["auto_reason"] == "budget-fallback"
+    assert len(C.icon_bytes(out)[0]) <= 300_000
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), -1.0])
+def test_icon_ground_tolerance_rejects_non_finite_and_negative(bad):
+    from ctshowcase.errors import ShowcaseError
+    img = _candidate("#F8FAFC", size=256, box=(60, 60, 190, 190))
+    with pytest.raises(ShowcaseError, match="--ground-tolerance"):
+        C.normalize_icon(img, "auto", "#032530", tolerance=bad)
+
+
+def test_corner_ground_boundary_matches_main_at_default():
+    """Corners exactly GROUND_DE apart are not one ground, as on main (strict comparison)."""
+    from PIL import Image
+    from ctshowcase.iconbox import GROUND_DE, corner_ground, corner_spread
+    im = Image.new("RGB", (8, 8), (200, 200, 200))
+    for v in range(201, 230):
+        im.putpixel((7, 7), (v, v, v))
+        if corner_spread(im) >= GROUND_DE:
+            break
+    s = corner_spread(im)
+    assert corner_ground(im) is None
+    assert corner_ground(im, tolerance=s + 0.01) is not None
+    assert corner_ground(im, tolerance=s) is None
 
 
 def _vignette(top, bottom, size=1024):

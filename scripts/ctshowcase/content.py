@@ -20,6 +20,7 @@ import hashlib
 import html
 import io
 import json
+import math
 import re
 import subprocess
 import time
@@ -1949,9 +1950,10 @@ def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = Non
                                      "48 px (f.3).")
         if slots.get("SPARK_NAME"):
             slots["SPARK_EXCLUSIVITY"] = f" and the only element in {slots['SPARK_NAME']}"
-        if slots.get("GLOW_HEX"):
-            slots["POOL"] = (f"one very soft round pool of {slots['GLOW_HEX']} light at about 10% strength, about 880 px "
-                             "across, centred behind the glyph and fading to nothing well before the edges")
+        card = ctx.style["tokens"]["card_fill"]
+        # a repo icon sits on the family card, so the estate template's soft light pool becomes the flat ground
+        slots["POOL"] = ("there is no pool of light: the whole background is one perfectly flat "
+                         f"{card.upper()} colour, with no vignette, texture, gradient, shadow or glow")
         size = str(glyph.get("SIZE_CLASS") or "").upper()
         if size in SIZE_CLASSES:
             slots["SIZE_CLASS"] = f"{size}: {SIZE_CLASSES[size]}"
@@ -1975,12 +1977,13 @@ def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = Non
                                 "It joins the 28 Neon Night avatars and its sibling repo icons as one matched family")
         prompt = prompt.replace("(identical in all 28 repo icons)", "(identical to the Neon Night avatars)")
         prompt = prompt.replace("same model and version for all 28", "same model and version as the avatar set")
-        card = ctx.style["tokens"]["card_fill"]
         prompt = prompt.replace("Keep the background empty and the glyph inside",
                                 ground_clause(card) + " Keep the glyph inside")
         for k, v in slots.items():
             if v is not None:
                 prompt = prompt.replace("{" + k + "}", str(v))
+        if "perfectly flat" not in prompt:  # a template with neither anchor still states the ground
+            prompt = prompt.rstrip() + "\n\n" + ground_clause(card)
     missing = sorted(set(re.findall(r"\{([A-Z_]+)\}", prompt)))
     ink = colours.get("INK") or []
     return {"prompt": prompt, "missing": missing, "facts": facts, "option": option.upper(),
@@ -2039,6 +2042,8 @@ def normalize_icon(img, ground: str = "auto", card: str | None = None, pixel_art
     from .iconbox import DARK_PLATE, GROUND_DE, corner_ground, corner_spread, native_pixels
     from .color import luminance
     tol = GROUND_DE if tolerance is None else float(tolerance)
+    if not math.isfinite(tol) or tol < 0:
+        raise ShowcaseError(f"--ground-tolerance must be a finite number >= 0 (got {tolerance!r})", log="usage")
     im = img.convert("RGBA")
     info: dict = {"source_px": list(im.size)}
     corners = [im.getpixel(p) for p in ((0, 0), (im.width - 1, 0), (0, im.height - 1), (im.width - 1, im.height - 1))]
@@ -2079,6 +2084,12 @@ def normalize_icon(img, ground: str = "auto", card: str | None = None, pixel_art
         sq = Image.new("RGBA", (side, side), hexrgb(gnd) + (255,))
         sq.paste(im, ((side - im.width) // 2, (side - im.height) // 2))
         out = sq.convert("RGB").resize((ICON_PX, ICON_PX), Image.LANCZOS)
+        if ground == "auto" and info.get("auto_reason") == "night-tile":
+            from .scene import png_bytes
+            if len(png_bytes(out)) > ICON_BUDGET:  # a noisy generator ground cannot be kept inside the budget
+                keyed, kinfo = normalize_icon(img, "transparent", card, pixel_art, tolerance)
+                kinfo["auto_reason"] = "budget-fallback"
+                return keyed, kinfo
         info.update(ground=gnd)
         return out, info
     if not has_alpha:
