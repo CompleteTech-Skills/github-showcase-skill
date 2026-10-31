@@ -256,3 +256,62 @@ def test_a_depth_two_fence_still_opens_and_closes_on_its_own_depth():
     t = "> > ```text\n> > code\n> > ```\n> > ![Shot](docs/images/missing.png)"
     assert mdcode.fence_spans(t) == ((0, t.index("> > ![Shot]")),)
     assert [src for _, src in images(t)] == ["docs/images/missing.png"]
+
+
+# --- raw HTML blocks: literal backticks inside a raw HTML block never open a code span (CommonMark 4.6) -------------
+RAW_IMG = '<img src="docs/images/missing.png" alt="Shot">'
+
+
+def test_literal_backticks_inside_html_block_do_not_hide_the_image():
+    t = '<div>\nUse a literal ` character.\n' + RAW_IMG + '\nAnother ` character.\n</div>\n'
+    assert mdcode.inline_code_spans(t) == ()
+    assert not covers(t, '<img src="docs/images/missing.png"')
+
+
+def test_lint_reads_the_raw_html_image_that_the_backticks_would_hide():
+    t = '<div>\nUse a literal ` character.\n' + RAW_IMG + '\nAnother ` character.\n</div>\n'
+    assert images(t) == [("Shot", "docs/images/missing.png")]
+
+
+def test_nested_raw_html_blocks_keep_the_image_visible():
+    t = "<div>\n<details>\nUse a literal ` character.\n" + RAW_IMG + "\nAnother ` character.\n</details>\n</div>\n"
+    assert mdcode.inline_code_spans(t) == ()
+    assert not covers(t, RAW_IMG)
+
+
+# Types 1-5 (pre, script, style, comment, PI, CDATA) end only at their end condition, so they get a blank line right
+# after the opener: were the block to end at that blank line, the two backtick lines would pair and hide the image.
+RAW_HTML_PAIRS = [
+    pytest.param("<div>", "</div>", False, id="div"),
+    pytest.param("<details>", "</details>", False, id="details"),
+    pytest.param("<table>", "</table>", False, id="table"),
+    pytest.param("<pre>", "</pre>", True, id="pre"),
+    pytest.param("<script>", "</script>", True, id="script"),
+    pytest.param("<style>", "</style>", True, id="style"),
+    pytest.param("<!-- c", "-->", True, id="comment"),
+    pytest.param("<?php", "?>", True, id="pi"),
+    pytest.param("<![CDATA[", "]]>", True, id="cdata"),
+]
+
+
+@pytest.mark.parametrize("opener,closer,blank", RAW_HTML_PAIRS)
+def test_raw_html_block_keeps_the_image_out_of_code(opener, closer, blank):
+    lead = "\n" if blank else ""
+    t = opener + "\n" + lead + "Use a literal ` character.\n" + RAW_IMG + "\nAnother ` character.\n" + closer + "\n"
+    assert not covers(t, RAW_IMG)
+
+
+# --- controls that must keep working ------------------------------------------------------------------------------
+def test_paragraph_after_a_type_6_block_ends_at_a_blank_line_keeps_its_code():
+    t = "<div>\nhtml\n</div>\n\nRun `npx` now\n"
+    assert [t[a:b] for a, b in mdcode.inline_code_spans(t)] == ["`npx`"]
+
+
+def test_type_7_paragraph_still_pairs_its_backticks():
+    t = "<span>a` b</span> and `c` d\n"
+    assert [t[a:b] for a, b in mdcode.inline_code_spans(t)] == ["` b</span> and `"]
+
+
+def test_type_1_block_closed_on_its_own_line_leaves_the_next_line_as_markdown():
+    t = "<pre>x</pre>\nRun `npx` now\n"
+    assert [t[a:b] for a, b in mdcode.inline_code_spans(t)] == ["`npx`"]
