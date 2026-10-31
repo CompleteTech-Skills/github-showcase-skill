@@ -187,3 +187,47 @@ def test_top_level_fence_behaviour_is_unchanged():
     doc = "```\nTODO\n```\n\n> TODO quoted prose\n"
     assert [doc[a:b] for a, b in mdcode.fence_spans(doc)] == ["```\nTODO\n```\n"]
     assert not covers(doc, "TODO quoted prose")
+
+
+# --- list-item fences and paragraph continuation starts -----------------------------------------------------------
+def spans_of(text):
+    return [text[a:b] for a, b in mdcode.fence_spans(text)]
+
+
+def test_item_fence_opens_and_closes_on_the_items_own_lines():
+    t = "1. ```bash\n   npm test\n   ```\n\nafter\n"
+    (a, b), = mdcode.fence_spans(t)
+    assert t[a:b].endswith("   ```\n") and "npm test" in t[a:b]
+    assert "after" not in t[a:b] and t[b:].startswith("\nafter")
+
+
+def test_item_fence_closing_line_is_not_a_new_opener():
+    t = "- ```text\n  TODO\n  ```\n\n![x](docs/images/missing.png)\n"
+    assert len(mdcode.fence_spans(t)) == 1
+    assert images(t) == [("x", "docs/images/missing.png")]
+
+
+def test_unclosed_item_fence_runs_to_the_end_of_the_document():
+    t = "- ```text\n  open\n  still\n"
+    assert mdcode.fence_spans(t)[-1][1] == len(t)
+
+
+def test_dedent_below_the_content_column_ends_an_item_fence():
+    t = "- ```text\n  open\nplain ![x](docs/images/missing.png)\n"
+    (a, b), = mdcode.fence_spans(t)
+    assert b == t.index("plain")
+    assert images(t) == [("x", "docs/images/missing.png")]
+
+
+@pytest.mark.parametrize("t", ["- > ```text\n  > a\n  > ```\n", "> - ```text\n>   a\n>   ```\n"],
+                         ids=["item-quote", "quote-item"])
+def test_composed_item_and_quote_fences_are_one_span(t):
+    assert len(mdcode.fence_spans(t)) == 1 and mdcode.fence_spans(t)[0][1] == len(t)
+
+
+def test_continuation_starts_hold_paragraph_continuation_lines_only():
+    t = "# Head\n\nfirst line\nsecond line\n[a]: x\n\n- item\n\n```\nfenced\n```\n\n## Next\n"
+    starts = mdcode.continuation_starts(t)
+    assert {t.index("second line"), t.index("[a]: x")} <= starts
+    for block_start in ("# Head", "first line", "- item", "fenced", "## Next"):
+        assert t.index(block_start) not in starts

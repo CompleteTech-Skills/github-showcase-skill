@@ -51,6 +51,7 @@ def _search_unescaped(pattern, text: str, pos: int):
 def _span_at(spans, index: int, strict: bool = False):
     """The (a, b) span of a sorted, non-overlapping sequence that holds `index` (a <= index < b; strict: a < index < b),
     found by bisection so membership is a lookup, not a walk from offset 0."""
+    mdcode.WORK['span_checks'] += 1
     n = bisect.bisect_left(spans, (index, -1) if strict else (index + 1, -1)) - 1
     if n >= 0 and (spans[n][0] < index < spans[n][1] if strict else spans[n][0] <= index < spans[n][1]):
         return spans[n]
@@ -69,17 +70,44 @@ def _badge_colour(path: str) -> str:
     """Upper-cased colour of a Shields badge path (the text after `/badge/`): its last single-dash segment, with the
     query and fragment removed. Labels and messages may hold apostrophes, escaped dashes or hex-looking text; only the
     final segment is the colour."""
-    path = unquote(path)
-    path = path.split("#", 1)[0].split("?", 1)[0]
-    return _SHIELDS_SEGMENT_DASH.split(path)[-1].upper()
+    path = path.split("#", 1)[0].split("?", 1)[0]  # literal delimiters only: an encoded %23 or %3F belongs to a label
+    return _SHIELDS_SEGMENT_DASH.split(unquote(path))[-1].upper()
+
+
+def _definition_candidates(document: str) -> str:
+    """The document with fenced blocks and HTML comments blanked (same length), the text in which a definition is read."""
+    out = list(document)
+    for a, b in mdcode.fence_spans(document):
+        for i in range(a, b):
+            if out[i] != "\n":
+                out[i] = " "
+    for m in HTML_COMMENT.finditer(document):
+        for i in range(*m.span()):
+            if out[i] != "\n":
+                out[i] = " "
+    return "".join(out)
+
+
+@functools.lru_cache(maxsize=16)
+def _definitions(document: str) -> tuple:
+    """Live reference definitions, as regex matches over the document-length candidate text. A definition cannot
+    interrupt a paragraph (CommonMark), so a definition-like line that continues a paragraph is text; only a line that
+    starts a block counts, plus a definition directly after another live definition. Definitions are decided before
+    inline code, so a backtick in a definition destination pairs with nothing. Computed once per document."""
+    continuation = mdcode.continuation_starts(document)
+    live: list = []
+    for match in REF_DEFINITION.finditer(_definition_candidates(document)):
+        if match.start() in continuation and not (live and live[-1].end() + 1 == match.start()):
+            continue
+        live.append(match)
+    return tuple(live)
 
 
 @functools.lru_cache(maxsize=16)
 def _definition_spans(document: str) -> tuple[tuple[int, int], ...]:
     """Spans of complete reference definitions (label, destination and title): their text is not Markdown. Computed
     once per document; the spans are sorted and never overlap."""
-    return tuple((m.start(), m.end()) for m in REF_DEFINITION.finditer(_outside_code(document, mask_inline=False))
-                 if not _in_inline_code(document, m.start()))
+    return tuple((m.start(), m.end()) for m in _definitions(document))
 
 
 class _HTMLTokens:
@@ -114,6 +142,7 @@ def _outside_code(text: str, mask_inline: bool = True) -> str:
     `mask_inline=False` still lets inline code win precedence but leaves its characters readable (reference labels).
     The result has the same length (and newline positions) as `text`."""
     fences = _fence_spans(text)
+    definitions = _definition_spans(text)  # decided before inline code: a definition destination's backtick is literal
     out, pos = list(text), 0
     tag = comment = inline = dest = None
 
@@ -153,10 +182,15 @@ def _outside_code(text: str, mask_inline: bool = True) -> str:
             comment = _search_unescaped(HTML_COMMENT, text, pos) or False
         n = bisect.bisect_left(fences, (pos, -1))
         fence = fences[n] if n < len(fences) else None
+        d = bisect.bisect_left(definitions, (pos, -1))
+        definition = definitions[d] if d < len(definitions) else None
         code = min([c for c in ((inline if inline else None), fence) if c], default=None)
         found = [m for m in (tag, comment) if m]
         nxt = min(found, key=lambda m: m.start()) if found else None
-        if dest and all(dest[0] < other for other in [c[0] for c in (code,) if c] + [m.start() for m in found]):
+        if definition and all(definition[0] <= other for other in [c[0] for c in (code, dest) if c]
+                              + [m.start() for m in found]):
+            pos = definition[1]
+        elif dest and all(dest[0] < other for other in [c[0] for c in (code,) if c] + [m.start() for m in found]):
             pos = dest[1]
         elif code and (nxt is None or code[0] <= nxt.start()):
             if mask_inline or code is fence:
@@ -246,9 +280,7 @@ def _markdown_images(text: str, document: str) -> list[tuple[str, str, int, int]
         return " ".join(value.split()).casefold()
 
     definitions = {}
-    for match in REF_DEFINITION.finditer(_outside_code(document, mask_inline=False)):
-        if _in_inline_code(document, match.start()):
-            continue  # a definition written inside a code span is literal text, not a live definition
+    for match in _definitions(document):
         target = html.unescape(re.sub(r"\\([^\w\s])", r"\1", match.group(2) or match.group(3)))
         definitions.setdefault(label(match.group(1)), target)
     spans = _definition_spans(document)  # definition titles are never rendered as images
@@ -268,25 +300,26 @@ def _markdown_images(text: str, document: str) -> list[tuple[str, str, int, int]
         if close is None:
             continue
         alt = text[match.end():close]
-        consumed = close + 1
-        if consumed < len(text) and text[consumed] == "(":
+        after = close + 1  # tentative: `consumed` moves only once the image resolves, so a failed outer keeps its nested images
+        if after < len(text) and text[after] == "(":
             # Destinations are read from the written document: the masked copy blanks literal backticks in filenames.
-            target = _inline_image_target(document if len(document) >= len(text) else text, consumed)
+            target = _inline_image_target(document if len(document) >= len(text) else text, after)
             if target:
                 source, end = target
                 sources.append((alt, source, match.start(), end))
                 consumed = end
                 continue
-            consumed = close + 1  # not an inline destination (for example, a space-containing label): try a shortcut reference
+            # not an inline destination (for example, a space-containing label): try a shortcut reference
         # `text` masks inline code to spaces (a prefix-aligned copy): labels are matched on the written source, literal backticks included
         key = label(document[match.end():close] if len(document) >= len(text) else alt)
-        if consumed < len(text) and text[consumed] == "[":
-            ref_close = _closing_bracket(text, consumed)
+        if after < len(text) and text[after] == "[":
+            ref_close = _closing_bracket(text, after)
             if ref_close is not None:
-                key = label((document if len(document) >= len(text) else text)[consumed + 1:ref_close]) or key
-                consumed = ref_close + 1
+                key = label((document if len(document) >= len(text) else text)[after + 1:ref_close]) or key
+                after = ref_close + 1
         if key in definitions:
-            sources.append((alt, definitions[key], match.start(), consumed))
+            sources.append((alt, definitions[key], match.start(), after))
+            consumed = after
     return sources
 
 
@@ -296,8 +329,14 @@ def _images(text: str, document: str) -> list[tuple[str, str]]:
     markdown = _markdown_images(text, document)
     # Angle-delimited destinations (and HTML in alt text) belong to their Markdown image,
     # while a Markdown-looking string wholly inside a real HTML tag is attribute text.
-    tags = [(start, end) for start, end in parser.tags
-            if not any(mstart <= start and end <= mend for _, _, mstart, mend in markdown)]
+    # Both comparisons are interval lookups over sorted, non-overlapping spans (bisection), never a cross product.
+    image_spans = [(mstart, mend) for _, _, mstart, mend in markdown]
+
+    def inside(spans, start, end):
+        span = _span_at(spans, start)
+        return span is not None and end <= span[1]
+
+    tags = [(start, end) for start, end in parser.tags if not inside(image_spans, start, end)]
     def written_alt(alt, start):
         # `text` has Markdown code masked to spaces (same length): read code-formatted alt text from the document
         begin = start + 2
@@ -307,9 +346,10 @@ def _images(text: str, document: str) -> list[tuple[str, str]]:
     def in_definition(start):
         return _span_at(spans, start) is not None
     result = [(written_alt(alt, start), source) for alt, source, start, end in markdown
-              if not in_definition(start) and not any(tstart <= start and end <= tend for tstart, tend in tags)]
+              if not in_definition(start) and not inside(tags, start, end)]
+    kept = set(tags)
     result += [(alt, source) for alt, source, start, end in parser.images
-               if (start, end) in tags and not in_definition(start)]
+               if (start, end) in kept and not in_definition(start)]
     return result
 
 

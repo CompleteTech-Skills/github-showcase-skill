@@ -177,3 +177,103 @@ def test_genuinely_off_palette_colour_still_fails(make_ctx, tmp_path, brand, bod
 def test_hex_shaped_message_is_not_taken_for_the_colour():
     assert readmelint._badge_colour("type-DEADBE's-005ADD") == "005ADD"
     assert readmelint._badge_colour("a--b-c__d-64748B?logo=x#frag") == "64748B"
+
+
+# --- round-7 container, definition-context, encoded-badge and nested-image regressions ----------------------------
+MISSING = "R7 local image does not resolve: docs/images/missing.png"
+OFF_ABC = "R7 off-palette badge colour ABCDEF"
+
+
+def _usage_fails(make_ctx, tmp_path, brand, snippet):
+    ctx = good_readme(make_ctx, tmp_path, brand)
+    return readmelint.lint(ctx, _insert_usage(tmp_path, snippet))["fails"]
+
+
+@pytest.mark.parametrize("snippet", [
+    "See the screenshot below.\n[shot]: ![Screenshot](docs/images/missing.png)",
+    "Text\n[a]: https://example.test/a\nmore text\n[shot]: ![Screenshot](docs/images/missing.png)",
+], ids=["probe", "after-a-definition-and-text"])
+def test_definition_like_line_inside_a_paragraph_is_text(make_ctx, tmp_path, brand, snippet):
+    assert MISSING in _usage_fails(make_ctx, tmp_path, brand, snippet)
+
+
+@pytest.mark.parametrize("snippet", [
+    "[shot]: ![Screenshot](docs/images/missing.png)",
+    "Intro.\n\n[shot]: ![Screenshot](docs/images/missing.png)",
+    "[a]: https://example.test/a\n[shot]: ![Screenshot](docs/images/missing.png)",
+], ids=["block-start", "after-blank-line", "after-another-definition"])
+def test_real_block_start_definition_is_not_an_image(make_ctx, tmp_path, brand, snippet):
+    assert MISSING not in _usage_fails(make_ctx, tmp_path, brand, snippet)
+
+
+@pytest.mark.parametrize("label", ["C%23", "C%3F", "C%23%3F"])
+def test_encoded_hash_and_question_mark_in_a_label_do_not_hide_the_colour(make_ctx, tmp_path, brand, label):
+    body = f"![L](https://img.shields.io/badge/language-{label}-FF0000)"
+    assert "R7 off-palette badge colour FF0000" in _badge_fails(make_ctx, tmp_path, brand, body)
+
+
+def test_literal_query_after_the_colour_still_fails(make_ctx, tmp_path, brand):
+    bad = "![L](https://img.shields.io/badge/language-C-FF0000?style=flat)"
+    assert "R7 off-palette badge colour FF0000" in _badge_fails(make_ctx, tmp_path, brand, bad)
+
+
+def test_encoded_label_with_on_palette_colour_passes(make_ctx, tmp_path, brand):
+    good = "![L](https://img.shields.io/badge/language-C%23-005ADD)"
+    assert not any("off-palette" in f for f in _badge_fails(make_ctx, tmp_path, brand, good))
+
+
+def test_badge_colour_decodes_only_after_removing_literal_delimiters():
+    assert readmelint._badge_colour("language-C%23-FF0000?x=1#f") == "FF0000"
+    assert readmelint._badge_colour("language-C%3F-005ADD") == "005ADD"
+
+
+def test_backtick_in_a_definition_destination_does_not_hide_the_next_image(make_ctx, tmp_path, brand):
+    snippet = "[unused]: https://example.test/a`b.png\n![Shot](<docs/images/missing.png>) `tail`"
+    assert MISSING in _usage_fails(make_ctx, tmp_path, brand, snippet)
+
+
+def test_definition_in_fence_stays_literal(make_ctx, tmp_path, brand):
+    fenced = "```text\n[unused]: https://example.test/a`b.png\n```\n\n`tail` ![Shot](docs/images/missing.png)"
+    assert MISSING in _usage_fails(make_ctx, tmp_path, brand, fenced)
+
+
+def test_definition_like_line_in_a_code_span_stays_literal(make_ctx, tmp_path, brand):
+    spanned = "Use `a\n[x]: ![S](docs/images/missing.png)` end"
+    assert MISSING not in _usage_fails(make_ctx, tmp_path, brand, spanned)
+
+
+def test_failed_outer_image_leaves_its_nested_image(make_ctx, tmp_path, brand):
+    assert MISSING in _usage_fails(make_ctx, tmp_path, brand, "![outer ![inner](docs/images/missing.png)]")
+
+
+def test_resolved_outer_reference_image_still_consumes_its_nested_text(make_ctx, tmp_path, brand):
+    doc = "![outer ![inner](docs/images/missing.png)][ref]\n\n[ref]: https://example.test/ok.png\n"
+    found = readmelint._images(readmelint._outside_code(doc), doc)
+    assert [src for _, src in found] == ["https://example.test/ok.png"]
+
+
+FENCE_TAIL = ["![x](docs/images/missing.png)", "![x](https://img.shields.io/badge/a-b-ABCDEF)"]
+
+
+@pytest.mark.parametrize("opener,body,closer", [
+    ("1. ```bash", "   npm test", "   ```"), ("- ```text", "  npm test", "  ```"),
+    ("1. ~~~bash", "   npm test", "   ~~~"), ("- ~~~text", "  npm test", "  ~~~"),
+    ("- - ```text", "    npm test", "    ```"), ("10. ```text", "    npm test", "    ```"),
+], ids=["ordered", "bullet", "ordered-tilde", "bullet-tilde", "nested-item", "wide-marker"])
+@pytest.mark.parametrize("tail", FENCE_TAIL, ids=["missing-image", "off-palette-badge"])
+def test_item_fence_does_not_hide_what_follows(make_ctx, tmp_path, brand, opener, body, closer, tail):
+    fails = _usage_fails(make_ctx, tmp_path, brand, f"{opener}\n{body}\n{closer}\n\n{tail}")
+    assert MISSING in fails or OFF_ABC in fails
+
+
+@pytest.mark.parametrize("snippet", [
+    "- ```text\n  TODO\n  ```", "1. ```text\n   TODO\n   ```", "- > ```text\n  > TODO\n  > ```",
+    "> - ```text\n>   TODO\n>   ```", "- ~~~text\n  TODO\n  ~~~", "- - ```text\n    TODO\n    ```",
+], ids=["bullet", "ordered", "item-quote", "quote-item", "tilde", "nested-item"])
+def test_placeholder_inside_an_item_fence_is_code(make_ctx, tmp_path, brand, snippet):
+    assert not any("placeholder" in f for f in _usage_fails(make_ctx, tmp_path, brand, snippet))
+
+
+def test_genuine_placeholder_outside_code_still_fails(make_ctx, tmp_path, brand):
+    snippet = "- ```text\n  fine\n  ```\n\nTODO"
+    assert any("placeholder" in f for f in _usage_fails(make_ctx, tmp_path, brand, snippet))
