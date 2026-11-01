@@ -69,11 +69,15 @@ def test_workflow_runs_on_push_to_main_with_the_pull_request_path_filter():
     assert triggers["schedule"] and "workflow_dispatch" in triggers
 
 
-def test_online_head_does_not_run_on_pull_requests_and_the_offline_check_does():
+def test_online_head_runs_on_every_trigger_and_the_offline_file_check_also_runs_on_pull_requests():
     wf, _ = workflow()
     steps = [s for job in wf["jobs"].values() for s in job["steps"]]
     online = [s for s in steps if "--online" in s.get("run", "")]
-    assert len(online) == 1 and online[0]["if"] == "github.event_name != 'pull_request'"
+    # the refreshed #47 acceptance requires the real HEAD on footer-touching PRs too (it overrides the older
+    # r2-authoritative-ci-criteria adjudication); the step must carry no condition that excludes pull_request
+    assert len(online) == 1 and "if" not in online[0]
+    assert "continue-on-error" not in online[0] and "continue-on-error" not in wf["jobs"]["footer-online"]
+    assert wf["permissions"] == {"contents": "read"}
     offline = [s for s in steps if "assets" not in s.get("run", "") and "brand.yaml" in s.get("run", "")]
     assert len(offline) == 1 and offline[0]["if"] == "github.event_name == 'pull_request'"
     # the offline step's command really passes against this checkout
