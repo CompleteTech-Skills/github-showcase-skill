@@ -287,6 +287,31 @@ def _repos_malformed(rec: dict) -> bool:
     return True
 
 
+_REPO_PART_RE = re.compile(r"[A-Za-z0-9._-]+")
+
+
+def canonical_repo(value) -> str | None:
+    """The canonical spelling of a repository (`NAME` or `OWNER/NAME`), or None when it is invalid. Surrounding
+    whitespace, trailing `/` and one trailing `.git` are stripped, so `site/`, ` site`, `site.git` and `site/.git` all
+    name `site`. The name, and the owner when given, must match [A-Za-z0-9._-]+ (`.` and `..` are not names). Empty,
+    `/`, `.git` and `a b` are None, so a caller fails closed. Case is kept."""
+    if not isinstance(value, str):
+        return None
+    v = value.strip().rstrip("/")
+    if v[-4:].lower() == ".git":
+        v = v[:-4].rstrip("/")
+    v = v.strip()
+    owner, sep, name = v.rpartition("/")
+    if name in (".", "..") or not _REPO_PART_RE.fullmatch(name):
+        return None
+    if not sep:
+        return name
+    owner = owner.strip()
+    if not _REPO_PART_RE.fullmatch(owner):
+        return None
+    return f"{owner}/{name}"
+
+
 def _scope_key(entry: str, logins: list[str] | None) -> str:
     """A canonical key for one `repos` entry, so equivalent scopes compare equal. `*` stays `*`. A bare NAME is its
     lowercased name. OWNER/NAME for one of LOGINS (the owner's own logins, aliases included) is the bare name, the same
@@ -365,6 +390,8 @@ def evaluate(owners: list[str], repo: str | None = None, today: _dt.date | None 
     coerced to a grant or a withdrawal) could cover REPO, no record is returned and the result is
     'invalid:<id>: <problem>'. A malformed withdrawal clearly for another repository does not block. Only owners in
     the logins are considered.
+    A non-empty REPO is canonicalized first (canonical_repo): `site/`, ` site`, `site.git` and `site/.git` are `site`,
+    and an empty or invalid name is 'invalid:repo: ...' (fail closed, never a grant). None or '' is owner-wide.
     `today` (a date) is kept for callers that only care about date expiries; `now` is an aware instant."""
     if now is None:
         now = _dt.datetime.now(_dt.timezone.utc)
@@ -377,6 +404,11 @@ def evaluate(owners: list[str], repo: str | None = None, today: _dt.date | None 
         if not path.is_file():
             return None, f"no-file:{path}"
         records = load_records()
+    if isinstance(repo, str) and repo:
+        c = canonical_repo(repo)
+        if c is None:
+            return None, "invalid:repo: requested repository name is empty or not [A-Za-z0-9._-]+ (fail closed)"
+        repo = c
     logins = set(_expand([o for o in owners if o]))
     seen: set[str] = set()
     for r in records:  # signoff_id is the audit key carried onto jobs, so an id must name exactly one record
@@ -425,15 +457,20 @@ def evaluate(owners: list[str], repo: str | None = None, today: _dt.date | None 
 def _covers(rec: dict, repo: str | None, logins: list[str] | None = None) -> bool:
     """`*` covers everything; a bare name covers that repository; OWNER/NAME needs the owner to be one of `logins`
     (the requested owner and its org aliases) as well as the name. A repository given as OWNER/NAME is covered only
-    when that owner is one of `logins` too (only `*` covers another account's repository). A malformed `repos` (not a string or a list of
-    strings) covers nothing; evaluate() reports such a record as t3-signoff:invalid through problems(), not as
-    t3-signoff:scope."""
+    when that owner is one of `logins` too (only `*` covers another account's repository). A non-empty REPO is
+    canonicalized (canonical_repo) before the `*` shortcut, so an invalid name is covered by nothing, not even `*`.
+    A malformed `repos` (not a string or a list of strings) covers nothing; evaluate() reports such a record as
+    t3-signoff:invalid through problems(), not as t3-signoff:scope."""
     repos = rec.get("repos")
     if isinstance(repos, str):
         repos = [repos]
     if not isinstance(repos, list) or not all(isinstance(x, str) for x in repos):
         return False
     repos = [x.strip() for x in repos]  # same normalisation as _scope_key: padding never hides a scope
+    if isinstance(repo, str) and repo:
+        repo = canonical_repo(repo)
+        if repo is None:
+            return False
     if "*" in repos:
         return True
     name = (repo or "").split("/")[-1].lower()
