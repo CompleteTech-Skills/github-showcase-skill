@@ -1,8 +1,8 @@
 {
- "config_sha256": "4cd0caf82fc10496ecbad005894e93d2d009d3b8fc1785fea9c7ecd4d0bdbd4c",
- "fingerprint": "1930f6c18169868cf0c62d6c0eeb612fad09664f33be876cf13702dfafa22b68",
+ "config_sha256": "dc74956cdd1fec80148d97ba93ebbe148f0c659aeda2ccf070a28c37e6897023",
+ "fingerprint": "268b5e360b681be473d23fb9ae4fb610bf829740503920606e32eaa9b5d0e573",
  "inputs": {
-  "description": "Generate CompleteTech LLC README banners, repo cards and profile art, and check repositories against the standard.",
+  "description": "Generate CompleteTech LLC GitHub banners, cards, icons and READMEs, with repository checks and metadata plans.",
   "icon_sha256": null,
   "language": "Python",
   "license": "MIT",
@@ -15,6 +15,7 @@
    "claude-skill",
    "codex-skill",
    "completetech",
+   "content-creation",
    "python"
   ],
   "type": "agent-skills",
@@ -63,12 +64,14 @@
     2560,
     720
    ],
+   "repository_id": 1433830462,
    "scale": 2,
    "sha256": "e6c80860e630c78025fe69421ed039efc1366b6945850f77da27882e5763f6b7"
   },
   "card.svg": {
-   "bytes": 21724,
-   "sha256": "dac24905e4fdddce62dac0f20071ddf2fe304874e0088f7ad9e256f82e29eff6"
+   "bytes": 21554,
+   "repository_id": 1433830462,
+   "sha256": "949e6c541cf8cd1167be4789d15efc3712fc5624c043383460f06be061954fd2"
   }
  },
  "schema": 1,

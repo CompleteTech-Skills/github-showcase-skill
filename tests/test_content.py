@@ -621,6 +621,72 @@ def test_icon_prompt_needs_writer_then_ok(brand, icon_ctx):
     assert md.startswith("# Repo icon prompt: Northwind-Trading-Co/support-triage-agent") and "```text" in md
 
 
+def test_icon_prompt_states_the_flat_ground(brand, icon_ctx):
+    """The option-A prompt names the family card colour as one flat ground and forbids vignette and glow."""
+    glyph = {"glyph_name": "Inbox Tray", "glyph_description": "An open tray seen front-on.",
+             "spark_placement": "held inside the tray", "size_class": "wide"}
+    p = C.icon_prompt(icon_ctx, resolver(brand), C.load_art_direction(), glyph)["prompt"]
+    assert "perfectly flat" in p
+    assert brand.style(NW)["tokens"]["card_fill"].upper() in p
+    assert "no vignette, texture, gradient, shadow or glow" in p
+    assert "Keep the background empty" not in p
+    assert "880 px" not in p  # the bundled template has no light pool to conflict with the flat ground
+
+
+def test_icon_prompt_states_the_flat_ground_for_estate_template(brand, icon_ctx):
+    """The estate-format (d) template's soft light pool becomes the flat card ground (review: #53 gap)."""
+    glyph = {"glyph_name": "Inbox Tray", "glyph_description": "An open tray seen front-on.",
+             "spark_placement": "held inside the tray", "size_class": "wide"}
+    art = (Path(__file__).parent / "fixtures" / "content" / "ART_DIRECTION.min.md").read_text(encoding="utf-8")
+    p = C.icon_prompt(icon_ctx, resolver(brand), art, glyph)["prompt"]
+    assert "perfectly flat" in p and brand.style(NW)["tokens"]["card_fill"].upper() in p
+    assert "no vignette, texture, gradient, shadow or glow" in p
+    assert "880 px" not in p and "soft round pool" not in p
+    # the heading no longer claims the avatars' night ground, which contradicts the flat card ground
+    assert "identical to the Neon Night avatars" not in p
+    assert "28 avatars" not in p and "28 repo icons" not in p
+    bg = next(line for line in p.splitlines() if "BACKGROUND" in line)
+    assert "one flat ground, not the avatar night tile" in bg
+
+
+def test_icon_prompt_custom_template_states_the_exact_ground_clause(brand, icon_ctx):
+    """An option-A template without {POOL} or the 'Keep the background empty' anchor, whose glyph text happens to
+    contain 'perfectly flat', still gets the ground clause (review: the fallback must not key on loose text)."""
+    glyph = {"glyph_name": "Inbox Tray", "glyph_description": "An open tray seen front-on.",
+             "spark_placement": "held inside the tray", "size_class": "wide"}
+    art = C.load_art_direction()
+    anchor = "Keep the background empty and the glyph inside"
+    assert anchor in art
+    art = art.replace(anchor, "Draw a perfectly flat glyph. Keep the background empty.")
+    assert anchor not in art
+    card = brand.style(NW)["tokens"]["card_fill"]
+    p = C.icon_prompt(icon_ctx, resolver(brand), art, glyph)["prompt"]
+    assert C.ground_clause(card) in p
+    assert card.upper() in p
+
+
+def test_corner_ground_zero_tolerance_accepts_identical_corners():
+    from ctshowcase.iconbox import corner_ground
+    flat = _candidate("#F8FAFC", size=64, box=(16, 16, 48, 48))
+    assert corner_ground(flat, 0) is not None
+    off = flat.copy()
+    off.putpixel((63, 63), (240, 240, 240))
+    assert corner_ground(off, 0) is None
+
+
+@pytest.mark.parametrize("mode", ["auto", "keep", "transparent"])
+def test_icon_zero_tolerance_normalizes_a_flat_ground(mode):
+    img = _candidate("#F8FAFC", size=64, box=(16, 16, 48, 48))
+    out, info = C.normalize_icon(img, mode, "#0F172A", tolerance=0)
+    assert out.size == (1024, 1024)
+
+
+def test_icon_zero_tolerance_still_rejects_unequal_corners():
+    img = _vignette("#F8FAFC", "#EEF0F2")
+    with pytest.raises(ArtFail, match="icon-ground"):
+        C.normalize_icon(img, "auto", "#0F172A", tolerance=0)
+
+
 def test_icon_prompt_parses_the_bundled_art_direction(brand, fixture_meta):
     from ctshowcase.context import RepoContext
     from ctshowcase.meta import normalize
@@ -665,6 +731,265 @@ def test_icon_keep_ground_and_failures(brand):
         C.normalize_icon(noisy, "auto", card)
 
 
+@pytest.mark.parametrize("ground,card,mode,reason", [
+    ("#F8FAFC", "#0F172A", "transparent", "uniform-ground"),  # pale tile on a dark card: keyed out (#52)
+    ("#E6EDF5", "#0F172A", "transparent", "uniform-ground"),
+    ("#171D28", "#F8FAFC", "keep", "night-tile"),
+    ("#0F172A", "#0F172A", "transparent", "near-card"),
+    # Measured dE(#000000, #0F172A) is 16.5 > CONTENT_DE 12, so pure black on that card is a night tile.
+    ("#000000", "#0F172A", "keep", "night-tile"),
+    ("#171D28", None, "keep", "night-tile"),  # no card colour: the luminance rule decides
+])
+def test_icon_auto_ground_rule(ground, card, mode, reason):
+    img = _candidate(ground, ink=(70, 184, 255), size=1000, box=(250, 250, 750, 750))
+    info = C.normalize_icon(img, "auto", card)[1]
+    assert info["mode"] == mode
+    assert info["auto_reason"] == reason
+
+
+def test_icon_pale_ground_on_dark_card_keys_to_small_rgba(brand):
+    img, info = C.normalize_icon(_candidate("#F8FAFC", ink=(16, 185, 129), size=1024, box=(250, 250, 750, 750)),
+                                 "auto", "#032530")
+    assert info["mode"] == "transparent" and img.mode == "RGBA" and img.getpixel((0, 0))[3] == 0
+    assert len(C.icon_bytes(img)[0]) <= 300_000
+    # explicit modes are unchanged
+    kept = C.normalize_icon(_candidate("#F8FAFC", size=1024, box=(250, 250, 750, 750)), "keep", "#032530")[0]
+    assert kept.mode == "RGB"
+
+
+def _noisy(ground, size=1024, seed=1, amp=2):
+    """A generator-like ground: exact corners, seeded +/-amp per-channel noise elsewhere, one ink outline."""
+    import random
+    from PIL import Image, ImageDraw
+    from ctshowcase.color import rgb
+    g = rgb(ground)
+    rnd = random.Random(seed)
+    im = Image.new("RGB", (size, size))
+    im.putdata([tuple(max(0, min(255, c + rnd.randint(-amp, amp))) for c in g) for _ in range(size * size)])
+    ImageDraw.Draw(im).rounded_rectangle((250, 250, 750, 750), radius=40, outline=(16, 185, 129), width=40)
+    for xy in ((0, 0), (size - 1, 0), (0, size - 1), (size - 1, size - 1)):
+        im.putpixel(xy, g)
+    return im
+
+
+def test_icon_noisy_dark_ground_falls_back_to_keying_inside_the_budget():
+    """A noisy dark ground on a dark card would be kept as a night tile far over 300 KB; auto keys it instead."""
+    from ctshowcase.scene import png_bytes
+    img = _noisy("#0F172A")
+    kept, kinfo = C.normalize_icon(img, "keep", "#032530")
+    assert len(png_bytes(kept)) > 300_000  # the failure the issue reports
+    out, info = C.normalize_icon(img, "auto", "#032530")
+    assert info["mode"] == "transparent" and info["auto_reason"] == "budget-fallback"
+    assert len(C.icon_bytes(out)[0]) <= 300_000
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), -1.0])
+def test_icon_ground_tolerance_rejects_non_finite_and_negative(bad):
+    from ctshowcase.errors import ShowcaseError
+    img = _candidate("#F8FAFC", size=256, box=(60, 60, 190, 190))
+    with pytest.raises(ShowcaseError, match="--ground-tolerance"):
+        C.normalize_icon(img, "auto", "#032530", tolerance=bad)
+
+
+def test_corner_ground_boundary_matches_main_at_default():
+    """Corners exactly GROUND_DE apart are not one ground, as on main (strict comparison)."""
+    from PIL import Image
+    from ctshowcase.iconbox import GROUND_DE, corner_ground, corner_spread
+    im = Image.new("RGB", (8, 8), (200, 200, 200))
+    for v in range(201, 230):
+        im.putpixel((7, 7), (v, v, v))
+        if corner_spread(im) >= GROUND_DE:
+            break
+    s = corner_spread(im)
+    assert corner_ground(im) is None
+    assert corner_ground(im, tolerance=s + 0.01) is not None
+    assert corner_ground(im, tolerance=s) is None
+
+
+def _vignette(top, bottom, size=1024):
+    from PIL import Image, ImageDraw
+    from ctshowcase.color import rgb
+    t, b = rgb(top), rgb(bottom)
+    im = Image.new("RGB", (size, size))
+    d = ImageDraw.Draw(im)
+    for y in range(size):
+        k = y / (size - 1)
+        d.line([(0, y), (size, y)], fill=tuple(round(t[i] + (b[i] - t[i]) * k) for i in range(3)))
+    d.rounded_rectangle((250, 250, 750, 750), radius=40, outline=(16, 185, 129), width=40)
+    return im
+
+
+def test_icon_ground_tolerance_boundaries():
+    from ctshowcase.iconbox import corner_spread
+    img = _vignette("#F8FAFC", "#EEF0F2")  # measured corner dE 3.48, above the default 3.0
+    assert 3.1 < corner_spread(img) < 4.9
+    with pytest.raises(ArtFail) as e:
+        C.normalize_icon(img, "auto", "#032530")
+    msg = str(e.value)
+    assert "3.4" in msg and "--ground-tolerance 3" in msg
+    out, info = C.normalize_icon(img, "auto", "#032530", tolerance=5)
+    assert info["mode"] == "transparent" and out.getpixel((0, 0))[3] == 0 and out.getpixel((512, 100))[3] == 0
+    far = _vignette("#F8FAFC", "#B0B8C4")  # corner dE far above 5
+    with pytest.raises(ArtFail, match="--ground-tolerance 5"):
+        C.normalize_icon(far, "auto", "#032530", tolerance=5)
+
+
+def _radial(corner, centre, size=1024):
+    from PIL import Image, ImageDraw
+    from ctshowcase.color import rgb
+    c, m = rgb(corner), rgb(centre)
+    im = Image.new("RGB", (size, size))
+    px = im.load()
+    far = 2 * (size / 2) ** 2
+    for y in range(size):
+        for x in range(size):
+            k = 1 - ((x - size / 2) ** 2 + (y - size / 2) ** 2) / far * 2
+            k = max(0.0, k)
+            px[x, y] = tuple(round(c[i] + (m[i] - c[i]) * k) for i in range(3))
+    ImageDraw.Draw(im).rounded_rectangle((250, 250, 750, 750), radius=40, outline=(16, 185, 129), width=40)
+    return im
+
+
+def test_icon_radial_vignette_with_matching_corners_keys_at_raised_tolerance():
+    """Review B: corners agree (dE 0) but the interior is darker; raising --ground-tolerance must widen the key
+    so interior ground becomes transparent, while the default tolerance keeps the base key."""
+    img = _radial("#EEF0F2", "#D8E0EA")
+    base = C.normalize_icon(img, "auto", "#032530")[0]
+    out, info = C.normalize_icon(img, "auto", "#032530", tolerance=5)
+    assert info["mode"] == "transparent"
+    assert out.getpixel((512, 512))[3] == 0  # empty interior of the outline
+    assert base.getpixel((512, 512))[3] != 0  # default tolerance unchanged
+
+
+def test_icon_vignetted_night_tile_passes_qa_after_flattening():
+    """Review A/B: a kept (night-tile) ground vignetted past the default tolerance is flattened, so icon_qa and the
+    banner/card tile code (default tolerance) accept what `normalize --ground-tolerance 5` accepted."""
+    from ctshowcase.iconbox import corner_ground, corner_spread
+    img = _vignette("#171D28", "#1F2530")
+    assert 3.1 < corner_spread(img) < 4.9
+    out, info = C.normalize_icon(img, "auto", "#F8FAFC", tolerance=5)
+    assert info["mode"] == "keep" and info["auto_reason"] == "night-tile"
+    assert corner_ground(out) is not None
+    qa = C.icon_qa(C.icon_bytes(out)[0], card="#F8FAFC")
+    assert not [c for c in qa["checks"] if c["check"] == "opaque-ground" and c["result"] != "pass"]
+
+
+def test_icon_explicit_transparent_keeps_base_key_threshold():
+    """Review A/B: within the default tolerance the key stays KEY_DE (6) in explicit modes; it only widens when
+    --ground-tolerance is raised above the default."""
+    from PIL import ImageDraw
+    im = _vignette("#FFFFFF", "#F9F9F9")
+    d = ImageDraw.Draw(im)
+    d.rectangle((250, 250, 750, 750), fill=(234, 234, 234))
+    out, info = C.normalize_icon(im, "transparent", "#032530")
+    assert info["mode"] == "transparent" and out.getbbox() is not None
+
+
+def _ringed(base, ground, glyph=(0, 90, 221), box=(250, 250, 750, 750), ring=40):
+    """Overdraw `base` with a solid glyph whose edge is a `ring`-px gradient from `ground` to the glyph colour, so the
+    edge passes through every dE between the ground and the glyph (a smooth edge, not a hard step)."""
+    from PIL import ImageDraw
+    from ctshowcase.color import rgb
+    g = rgb(ground)
+    d = ImageDraw.Draw(base)
+    x0, y0, x1, y1 = box
+    for k in range(ring, 0, -1):  # outer rings first, so each pixel keeps the colour of its own distance k
+        t = 1 - k / (ring + 1)  # 1 at the glyph edge, falling towards the ground
+        d.rectangle((x0 - k, y0 - k, x1 + k, y1 + k), fill=tuple(round(g[i] + (glyph[i] - g[i]) * t) for i in range(3)))
+    d.rectangle(box, fill=glyph)
+    return base
+
+
+def _flat(im):
+    """Pixels in raster order without the deprecated Image.getdata on Pillow 13."""
+    get = getattr(im, "get_flattened_data", None)
+    return list(get() if get else im.getdata())
+
+
+def _reference_alpha(im, ground):
+    """Independent reference for the default transparent key: a binary dE mask at KEY_DE, the 2 px blur-min the code
+    applies, then the same trim, LANCZOS fit to the live area and centring. Returns the 1024 px alpha canvas."""
+    from PIL import Image, ImageChops, ImageFilter
+    from ctshowcase.color import rgb
+    lab = C._lab_cache()
+    g = lab(rgb(ground))
+    mask = Image.new("L", im.size)
+    mask.putdata([0 if C._de(lab(p), g) <= C.KEY_DE else 255 for p in _flat(im.convert("RGB"))])
+    alpha = ImageChops.darker(mask, mask.filter(ImageFilter.GaussianBlur(2)))
+    cropped = alpha.crop(alpha.point(lambda v: 255 if v > 8 else 0).getbbox())
+    k = C.LIVE / max(cropped.size)
+    small = cropped.resize((max(1, round(cropped.width * k)), max(1, round(cropped.height * k))), Image.LANCZOS)
+    canvas = Image.new("L", (C.ICON_PX, C.ICON_PX), 0)
+    canvas.paste(small, ((C.ICON_PX - small.width) // 2, (C.ICON_PX - small.height) // 2))
+    return canvas
+
+
+def test_icon_default_transparent_key_is_binary():
+    """Default explicit transparent keying is the original binary KEY_DE step (plus the 2 px blur-min), not a soft
+    ramp: a gradient edge with pixels 6-9 dE from the ground keys exactly as the reference does. A raised tolerance
+    still gets the soft ramp (review, #52 default-compatibility adjudication)."""
+    from PIL import Image, ImageChops
+    from ctshowcase.color import rgb
+    ground = "#F8FAFC"
+    im = _ringed(Image.new("RGB", (1024, 1024), rgb(ground)), ground)
+    lab = C._lab_cache()
+    g = lab(rgb(ground))
+    band = [p for p in _flat(im) if 6 < C._de(lab(p), g) <= 9]
+    assert len(band) >= 4  # the gradient really passes through the 6-9 dE band
+    out, info = C.normalize_icon(im, "transparent", "#032530")
+    assert info["mode"] == "transparent"
+    got = out.getchannel("A")
+    assert ImageChops.difference(got, _reference_alpha(im, ground)).getextrema()[1] <= 1
+    # raised tolerance: the widened key keeps a soft ramp along the gradient edge
+    vig = _ringed(_vignette("#F8FAFC", "#EEF0F2"), ground)
+    out, info = C.normalize_icon(vig, "transparent", "#032530", tolerance=5)
+    alpha = out.getchannel("A")
+    assert sum(alpha.histogram()[1:255]) > 0
+    assert alpha.getpixel((512, 512)) == 255
+
+
+# sha256 of the decoded RGBA pixels the pre-change (origin/main f9ec72a) CLI wrote for the fixture below.
+_BASE_DEFAULT_KEY_SHA256 = "a9c81f60a8fcf24ab3707c86d4f7dd42e3625025c552c207291064de2045d493"
+
+
+@pytest.mark.parametrize("ground", ["auto", "transparent"])
+def test_icon_cli_default_ground_output_matches_pre_change_binary_key(capsys, tmp_path, ground):
+    """CLI-level guard: at the default --ground-tolerance a 40 px gradient edge on a pale ground (pixels 6-9 dE from
+    the ground) is keyed exactly as before #52, i.e. the pixel hash equals the one the base commit produced (the
+    documented 'explicit modes stay byte-identical at the default'; a soft ramp would change it)."""
+    import hashlib
+    from PIL import Image
+    src = tmp_path / "ring.png"
+    _ringed(Image.new("RGB", (1024, 1024), (248, 250, 252)), "#F8FAFC").save(src)
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    out = tmp_path / "out.png"
+    code, res = run_content(capsys, "--meta", meta, "--no-repo-dir", "content", "icon", "normalize", "--in", src,
+                            "--out", out, "--art-direction", FIX / "ART_DIRECTION.min.md", "--ground", ground,
+                            *NO_ESTATE)
+    assert code == 0 and out.is_file(), res
+    with Image.open(out) as im:
+        assert hashlib.sha256(im.convert("RGBA").tobytes()).hexdigest() == _BASE_DEFAULT_KEY_SHA256
+
+
+def test_icon_default_transparent_keeps_pale_opaque_glyph_for_qa():
+    """A pale opaque glyph (#EAEAEA, about dE 7.3 from white) keys as opaque at the default tolerance, so its interior
+    keeps alpha 255 and icon_qa finds ink on the dark card. Regression: a soft ramp dropped it to ~111 and failed
+    'no opaque ink' (review, #52 default-compatibility adjudication)."""
+    from PIL import Image, ImageDraw
+    card = "#032530"
+    im = Image.new("RGB", (1024, 1024), (255, 255, 255))
+    ImageDraw.Draw(im).rectangle((312, 312, 711, 711), fill=(234, 234, 234))  # 400 x 400 inside the live area
+    out, info = C.normalize_icon(im, "transparent", card)
+    assert info["mode"] == "transparent"
+    alpha = out.getchannel("A")
+    assert alpha.getpixel((512, 512)) == 255
+    assert alpha.crop((462, 462, 562, 562)).getextrema() == (255, 255)
+    qa = C.icon_qa(C.icon_bytes(out)[0], card=card)
+    assert not any(c["detail"] == "no opaque ink" for c in qa["checks"])
+    assert qa["result"] != "fail", qa
+
+
 def test_icon_not_the_org_glyph(brand, tmp_path):
     card = brand.style(NW)["tokens"]["card_fill"]
     img = C.normalize_icon(_candidate(card), "auto", card)[0]
@@ -691,6 +1016,188 @@ def test_icon_cli_normalize_and_check(capsys, tmp_path, brand):
     code, res = run_content(capsys, "--meta", meta, "--no-repo-dir", "content", "icon", "prompt",
                             "--art-direction", FIX / "ART_DIRECTION.min.md", "--out", tmp_path / "icon.md", *NO_ESTATE)
     assert code == 1 and res["result"] == "needs-writer" and res["out"] is None and not (tmp_path / "icon.md").exists()
+
+
+def test_icon_prompt_replaces_estate_background_paragraph(brand, icon_ctx):
+    """An estate template whose BACKGROUND paragraph states its own colours and light pool (several lines long) is
+    replaced by the flat ground, so the prompt never contradicts the card ground (review r3 finding 2, #52)."""
+    glyph = {"glyph_name": "Inbox Tray", "glyph_description": "An open tray seen front-on.",
+             "spark_placement": "held inside the tray", "size_class": "wide"}
+    old = "2 BACKGROUND (identical in all 28 avatars). On it, {POOL}."
+    art = (FIX / "ART_DIRECTION.min.md").read_text(encoding="utf-8")
+    assert old in art
+    art = art.replace(old, "2 BACKGROUND (identical in all 28 avatars). A #0B0F16 tile fading radially to #1C2333 with "
+                           "a soft light pool of 880 px at the top left.\nOn it, {POOL}.")
+    res = C.icon_prompt(icon_ctx, resolver(brand), art, glyph)
+    p = res["prompt"]
+    for stale in ("#0B0F16", "#1C2333", "radially", "soft light pool", "880 px"):
+        assert stale not in p
+    card = brand.style(NW)["tokens"]["card_fill"]
+    assert p.count(C.ground_clause(card)) == 1
+    assert "4 LIGHT" in p
+    bg = next(line for line in p.splitlines() if "BACKGROUND" in line)
+    assert "one flat ground, not the avatar night tile" in bg
+    assert res["missing"] == []
+
+
+def test_icon_prompt_estate_anchor_inside_background_paragraph_keeps_exact_clause(brand, icon_ctx):
+    """The 'Keep the background empty and the glyph inside' anchor sits inside the numbered BACKGROUND paragraph of an
+    estate template with no {POOL}. The exact ground clause must still appear exactly once, with the flat-ground
+    prohibitions, even though the paragraph replacement rewrites the anchor's own line (review r3, #52)."""
+    glyph = {"glyph_name": "Inbox Tray", "glyph_description": "An open tray seen front-on.",
+             "spark_placement": "held inside the tray", "size_class": "wide"}
+    old = "2 BACKGROUND (identical in all 28 avatars). On it, {POOL}."
+    art = (FIX / "ART_DIRECTION.min.md").read_text(encoding="utf-8")
+    assert old in art
+    art = art.replace(old, "2 BACKGROUND. Keep the background empty and the glyph inside the central 688 x 688 px square.")
+    res = C.icon_prompt(icon_ctx, resolver(brand), art, glyph)
+    p = res["prompt"]
+    card = brand.style(NW)["tokens"]["card_fill"]
+    assert p.count(C.ground_clause(card)) == 1
+    assert "no vignette, texture, gradient, shadow or glow" in p and "perfectly flat" in p
+    assert "{POOL}" not in p and res["missing"] == []
+
+
+def _collapse_template_blank_lines(art: str) -> str:
+    """Collapse the blank lines of the (d) prompt template block only, so its numbered sections sit on adjacent lines
+    (the other fenced blocks of the art-direction file are left as they are)."""
+    old = "2 BACKGROUND (identical in all 28 avatars). On it, {POOL}."
+
+    def collapse(m):
+        body = m.group(1)
+        if old not in body:
+            return m.group(0)
+        return "```text\n" + re.sub(r"\n{2,}", "\n", body) + "\n```"
+
+    return re.sub(r"```text\n(.*?)\n```", collapse, art, flags=re.S)
+
+
+def test_icon_prompt_single_newline_template_keeps_following_sections_and_needs_writer(brand, icon_ctx):
+    """With no blank line after the BACKGROUND paragraph, the paragraph replacement must stop before the next numbered
+    section, so the glyph sections survive and the writer's fields stay required (review P2, #52)."""
+    old = "2 BACKGROUND (identical in all 28 avatars). On it, {POOL}."
+    art = _collapse_template_blank_lines((FIX / "ART_DIRECTION.min.md").read_text(encoding="utf-8"))
+    assert old in art and "\n4 LIGHT." in art
+    res = C.icon_prompt(icon_ctx, resolver(brand), art, None)
+    assert res["missing"] == ["GLYPH_DESCRIPTION", "GLYPH_NAME", "SIZE_CLASS", "SPARK_PLACEMENT"]
+
+
+def test_icon_prompt_single_newline_template_with_glyph_keeps_adjacent_sections(brand, icon_ctx):
+    """The collapsed template with a full glyph: the sections after BACKGROUND (light, spark, composition, glyph,
+    exclusions) all survive, and the flat ground is stated exactly once (review P2, #52)."""
+    glyph = {"glyph_name": "Inbox Tray", "glyph_description": "An open tray seen front-on.",
+             "spark_placement": "held inside the tray", "size_class": "wide"}
+    art = _collapse_template_blank_lines((FIX / "ART_DIRECTION.min.md").read_text(encoding="utf-8"))
+    card = brand.style(NW)["tokens"]["card_fill"]
+    res = C.icon_prompt(icon_ctx, resolver(brand), art, glyph)
+    p = res["prompt"]
+    assert res["missing"] == []
+    assert "Inbox Tray" in p and "An open tray seen front-on." in p
+    assert "4 LIGHT" in p
+    assert "Inside the central 688 × 688 px square" in p  # composition section
+    assert "Any text, letters, numbers or words; borders." in p  # exclusions section
+    assert p.count(C.ground_clause(card)) == 1
+    bg = next(line for line in p.splitlines() if "BACKGROUND" in line)
+    assert "one flat ground, not the avatar night tile" in bg
+
+
+def test_icon_cli_ground_tolerance_flag_wired(capsys, tmp_path, brand):
+    """--ground-tolerance reaches normalize_icon through the CLI: a vignette 3.48 dE apart in its corners is refused
+    at the default tolerance (nothing written) and keyed to a transparent corner at --ground-tolerance 5."""
+    from PIL import Image, ImageDraw
+    src = tmp_path / "v.png"
+    img = _vignette("#F8FAFC", "#EEF0F2")  # same corners and outline geometry, with a card-contrasting ink
+    ImageDraw.Draw(img).rounded_rectangle((250, 250, 750, 750), radius=40, outline=(0, 90, 221), width=40)
+    img.save(src)
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    out = tmp_path / "out.png"
+    args = ("--meta", meta, "--no-repo-dir", "content", "icon", "normalize", "--in", src, "--out", out,
+            "--art-direction", FIX / "ART_DIRECTION.min.md", *NO_ESTATE)
+    code, res = run_content(capsys, *args, "--ground-tolerance", "5")
+    assert code == 0 and res["result"] == "pass" and out.is_file()
+    with Image.open(out) as im:
+        assert im.convert("RGBA").getpixel((0, 0))[3] == 0
+    out.unlink()
+    code, res = run_content(capsys, *args)
+    assert code != 0 and res["result"] == "art-fail" and "icon-ground" in res["error"]
+    assert not out.exists()
+
+
+@pytest.mark.parametrize("bad", ["nan", "-1", "inf"])
+def test_icon_cli_ground_tolerance_rejects_bad_values(capsys, tmp_path, brand, bad):
+    """A non-finite or negative --ground-tolerance is a usage error (exit 2, log 'usage'); nothing is written."""
+    card = brand.style(NW)["tokens"]["card_fill"]
+    src = tmp_path / "cand.png"
+    _candidate(card).save(src)
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    out = tmp_path / "icon.png"
+    code, res = run_content(capsys, "--meta", meta, "--no-repo-dir", "content", "icon", "normalize", "--in", src,
+                            "--out", out, "--art-direction", FIX / "ART_DIRECTION.min.md", *NO_ESTATE,
+                            f"--ground-tolerance={bad}")
+    assert code == 2 and res["result"] == "usage" and "--ground-tolerance" in res["error"]
+    assert not out.exists()
+
+
+def _glow_scene(size=512, core=60):
+    """Synthetic night tile: a vertical vignette #171D28 -> #1F2530, a smooth cyan radial bloom and a near-white core.
+    The core radius is 60 px: at 40 px the icon fails the contrast-on-card gate, so the disc must dominate
+    the ink count."""
+    from PIL import Image, ImageDraw
+    from ctshowcase.color import rgb
+    top, bottom, cyan = rgb("#171D28"), rgb("#1F2530"), (0, 229, 255)
+    im = Image.new("RGB", (size, size))
+    px = im.load()
+    c = size / 2
+    for y in range(size):
+        k = y / (size - 1)
+        g = [top[i] + (bottom[i] - top[i]) * k for i in range(3)]
+        for x in range(size):
+            r = ((x - c) ** 2 + (y - c) ** 2) ** 0.5
+            t = max(0.0, 1 - r / 200) ** 2
+            px[x, y] = tuple(round(g[i] + (cyan[i] - g[i]) * 0.85 * t) for i in range(3))
+    ImageDraw.Draw(im).ellipse((c - core, c - core, c + core, c + core), fill=(246, 248, 250))
+    return im
+
+
+def _max_channel_steps(im, points):
+    vals = [im.getpixel(p)[:3] for p in points]
+    return [max(abs(a[i] - b[i]) for i in range(3)) for a, b in zip(vals, vals[1:])]
+
+
+def test_icon_cli_glow_stays_smooth_while_glyph_edge_stays_hard(capsys, tmp_path, brand):
+    """The CLI keeps a smooth glow smooth (no ring at the key threshold) and the glyph edge hard, along a row and a
+    column through the centre of a vignetted night tile normalised with --ground-tolerance 5 (review, #52)."""
+    import statistics
+    from PIL import Image
+    src = tmp_path / "glow.png"
+    _glow_scene(512, 60).save(src)
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    out = tmp_path / "icon.png"
+    code, res = run_content(capsys, "--meta", meta, "--no-repo-dir", "content", "icon", "normalize", "--in", src,
+                            "--out", out, "--art-direction", FIX / "ART_DIRECTION.min.md", *NO_ESTATE,
+                            "--ground-tolerance", "5")
+    assert code == 0 and res["result"] in ("pass", "warn") and out.is_file()
+    with Image.open(out) as o:
+        out_img = o.convert("RGB")
+    in_up = _glow_scene(512, 60).resize((1024, 1024), Image.LANCZOS)
+    core_out = 2 * 60
+    band = range(core_out + 6, int(0.4 * 1024) + 1)
+    for name, step_pts in (
+            ("row", lambda r: [(512 + r, 512), (512 + r + 1, 512)]),
+            ("column", lambda r: [(512, 512 + r), (512, 512 + r + 1)])):
+        def steps(img, radii):
+            return [max(_max_channel_steps(img, step_pts(r))) for r in radii]
+        out_steps = steps(out_img, band)
+        in_steps = steps(in_up, band)
+        glyph = steps(out_img, range(core_out - 6, core_out + 6))
+        assert max(out_steps) <= max(max(in_steps), 0) + 3, name
+        assert max(out_steps) <= 8, name
+        median = statistics.median(out_steps)
+        assert max(out_steps) <= 3 * median + 2, name
+        assert max(glyph) >= 40, name
 
 
 def test_icon_watching_org_is_exempt(capsys, tmp_path):
@@ -1030,9 +1537,249 @@ def test_icon_ocr_cli_logs(capsys, tmp_path, brand, monkeypatch):
     assert "needs-input:ocr-unavailable" in res["logs"], res
 
 
+# real-engine controls: these call the installed tesseract binary (no monkeypatching of _tesseract, _ocr_words
+# or subprocess.run). They are skipped with an explicit reason when tesseract is not on PATH.
+def _real_tesseract():
+    return C._tesseract()
+
+
+needs_tesseract = pytest.mark.skipif(
+    C._tesseract() is None,
+    reason="tesseract not installed: real-OCR controls skipped (they run where it is installed, e.g. the VM)")
+
+
+def _font(size):
+    from PIL import ImageFont
+    for name in ("DejaVuSans-Bold.ttf", "arialbd.ttf", "Arial Bold.ttf"):
+        try:
+            return ImageFont.truetype(name, size)
+        except OSError:
+            continue
+    return ImageFont.load_default(size=size)
+
+
+def _text_icon(text, fg, bg=None):
+    from PIL import Image
+    from PIL import ImageDraw
+    img = Image.new("RGBA", (1024, 1024), bg if bg is not None else (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    font = _font(220)
+    left, top, right, bottom = draw.textbbox((0, 0), text, font=font)
+    draw.text(((1024 - (right - left)) / 2 - left, (1024 - (bottom - top)) / 2 - top), text, fill=fg, font=font)
+    return img
+
+
+def _ellipse_icon():
+    from PIL import Image
+    from PIL import ImageDraw
+    img = Image.new("RGBA", (1024, 1024), (0, 0, 0, 0))
+    ImageDraw.Draw(img).ellipse((180, 180, 844, 844), fill=(0, 90, 221, 255))
+    return img
+
+
+@needs_tesseract
+def test_real_tesseract_reads_dark_text_on_light():
+    img = _text_icon("HELLO", (0, 0, 0, 255), (255, 255, 255, 255))
+    exe = _real_tesseract()
+    words = C._ocr_words(_png(img), exe)
+    assert words is not None and any("HELLO" in w.upper() for w in words), words
+
+
+@needs_tesseract
+def test_real_tesseract_text_free_control_finds_nothing():
+    exe = _real_tesseract()
+    words = C._ocr_words(_png(_ellipse_icon()), exe)
+    assert words == [], words
+
+
+@needs_tesseract
+def test_real_tesseract_icon_qa_warns_on_white_lettering_on_dark_card():
+    # white text on a transparent canvas is only seen if the icon is flattened on the card colour, not on white
+    card = "#0B1020"
+    img = _text_icon("HELLO", (255, 255, 255, 255))
+    qa = C.icon_qa(_png(img), card=card, ocr=True)
+    no_text = _no_text(qa)
+    assert no_text["result"] == "warn" and no_text["detail"].startswith("OCR found text:") \
+        and "HELLO" in no_text["detail"].upper(), qa
+    assert "logs" not in qa or ("needs-input:ocr-unavailable" not in qa["logs"]
+                                and "needs-input:ocr-failed" not in qa["logs"]), qa
+    strict = C.icon_qa(_png(img), card=card, ocr=True, strict=True)
+    assert _no_text(strict)["result"] == "fail", strict
+
+
+@needs_tesseract
+def test_real_tesseract_icon_qa_text_free_icon_passes():
+    card = "#0B1020"
+    qa = C.icon_qa(_png(_ellipse_icon()), card=card, ocr=True)
+    assert _no_text(qa) == {"check": "no-text", "result": "pass", "detail": "OCR found no text"}, qa
+
+
+@needs_tesseract
+def test_real_tesseract_cli_icon_check_finds_text(capsys, tmp_path):
+    # the CLI takes the card colour from the meta family, so the text icon is flattened on the real card fill
+    out = write(tmp_path, {"repo/assets/icon.png": _png(_text_icon("HELLO", (255, 255, 255, 255)))}) \
+        / "repo" / "assets" / "icon.png"
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    check = ("--meta", meta, "--no-repo-dir", "content", "icon", "check", "--out", out,
+             "--art-direction", FIX / "ART_DIRECTION.min.md", *NO_ESTATE)
+    code, res = run_content(capsys, *check, "--ocr")
+    no_text = next(c for c in res["qa"]["checks"] if c["check"] == "no-text")
+    assert no_text["result"] == "warn", res
+    assert "needs-input:ocr-unavailable" not in res.get("logs", []), res
+
+
 def test_icon_ocr_malformed_png_keeps_logs_key(monkeypatch):
-    # an unreadable PNG returns before the OCR step; with ocr=True the shape still carries `logs` (empty)
+    # an unreadable PNG returns before the OCR step; `logs` names the image with and without ocr
     monkeypatch.setattr(C, "_tesseract", lambda: None)
-    qa = C.icon_qa(b"bad", card="#0B1020", ocr=True)
-    assert qa["result"] == "fail" and qa["logs"] == [], qa
-    assert "logs" not in C.icon_qa(b"bad", card="#0B1020")
+    qa = C.icon_qa(b"bad", card="#0B1020", ocr=True, source="x/icon.png")
+    assert qa["result"] == "fail" and qa["logs"] == ["unreadable-image:x/icon.png"], qa
+    assert C.icon_qa(b"bad", card="#0B1020", source="x/icon.png")["logs"] == ["unreadable-image:x/icon.png"]
+    assert C.icon_qa(b"bad", card="#0B1020")["logs"] == ["unreadable-image:<bytes>"]
+
+
+def test_icon_ocr_undecodable_idat_is_structured_failure(monkeypatch):
+    # valid signature, IHDR, chunk CRCs and IEND, but IDAT is not a zlib stream: validate_png accepts it and Pillow's
+    # load() made the icon_qa API raise OSError('broken data stream'); the CLI already caught that globally (JSON
+    # result=usage, logs=['usage'], exit 2), so the fix is the structured QA failure from the API
+    import struct
+    import zlib
+    from ctshowcase.pnglint import validate_png
+
+    def chunk(kind, body):
+        return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body) & 0xFFFFFFFF)
+    data = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 1024, 1024, 8, 6, 0, 0, 0))
+            + chunk(b"IDAT", b"this is not a zlib stream") + chunk(b"IEND", b""))
+    validate_png(data)  # structurally accepted, so the failure comes from decoding
+    monkeypatch.setattr(C, "_tesseract", lambda: None)
+    qa = C.icon_qa(data, card="#0B1020", ocr=True, source="s.png")
+    assert qa["result"] == "fail" and qa["logs"] == ["unreadable-image:s.png"], qa
+    assert any(c["check"] == "png" and c["result"] == "fail" and "undecodable" in c["detail"] for c in qa["checks"]), qa
+    plain = C.icon_qa(data, card="#0B1020", source="s.png")
+    assert plain["result"] == "fail" and plain["logs"] == ["unreadable-image:s.png"], plain
+
+
+def test_icon_check_cli_undecodable_idat_exits_1_with_logs_and_bad_args_exit_2(tmp_path, capsys, monkeypatch):
+    # valid arguments plus a structurally valid PNG with corrupt IDAT: a QA failure (exit 1, JSON with a `logs` list),
+    # distinct from bad arguments, which stay a usage error (exit 2)
+    import struct
+    import zlib
+
+    def chunk(kind, body):
+        return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body) & 0xFFFFFFFF)
+    data = (bytes.fromhex("89504e470d0a1a0a") + chunk(b"IHDR", struct.pack(">IIBBBBB", 1024, 1024, 8, 6, 0, 0, 0))
+            + chunk(b"IDAT", b"this is not a zlib stream") + chunk(b"IEND", b""))
+    monkeypatch.setattr(C, "_tesseract", lambda: None)
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    bad = tmp_path / "repo" / "assets" / "icon.png"
+    bad.parent.mkdir(parents=True)
+    bad.write_bytes(data)
+    check = ("--meta", meta, "--no-repo-dir", "content", "icon", "check")
+    art = ("--art-direction", FIX / "ART_DIRECTION.min.md")
+    for extra in ((), ("--ocr",)):
+        code, res = run_content(capsys, *check, "--out", bad, *extra, *art, *NO_ESTATE)
+        assert code == 1 and res["result"] == "fail" and f"unreadable-image:{bad}" in res["logs"], (extra, res)
+        assert any(c["check"] == "png" and c["result"] == "fail" and "undecodable" in c["detail"]
+                   for c in res["qa"]["checks"]), res
+    code, res = run_content(capsys, *check, "--out", bad, "--min-contrast", "0.5", *art, *NO_ESTATE)
+    assert code == 2, res
+
+
+def test_icon_normalize_cli_undecodable_idat_exits_1_with_logs_and_missing_input_exit_2(tmp_path, capsys, monkeypatch):
+    # normalize with a structurally valid PNG whose IDAT cannot decode: a structured QA failure (exit 1, JSON with a
+    # `logs` list, no output file written; a pre-existing destination is left byte-identical), while a nonexistent or
+    # omitted --in stays a usage error (exit 2)
+    import struct
+    import zlib
+
+    def chunk(kind, body):
+        return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body) & 0xFFFFFFFF)
+    data = (bytes.fromhex("89504e470d0a1a0a") + chunk(b"IHDR", struct.pack(">IIBBBBB", 1024, 1024, 8, 6, 0, 0, 0))
+            + chunk(b"IDAT", b"this is not a zlib stream") + chunk(b"IEND", b""))
+    monkeypatch.setattr(C, "_tesseract", lambda: None)
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    bad = tmp_path / "bad.png"
+    bad.write_bytes(data)
+    out = tmp_path / "out" / "icon.png"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    sentinel = b"PRE-EXISTING-DEST-BYTES\x00\x01\xff"
+    out.write_bytes(sentinel)
+    norm = ("--meta", meta, "--no-repo-dir", "content", "icon", "normalize")
+    art = ("--art-direction", FIX / "ART_DIRECTION.min.md")
+    for extra in ((), ("--ocr",)):
+        code, res = run_content(capsys, *norm, "--in", bad, "--out", out, *extra, *art, *NO_ESTATE)
+        assert code == 1 and res["result"] == "fail" and res["out"] is None, (extra, res)
+        assert res["logs"].count(f"unreadable-image:{bad}") == 1 and "art-fail:icon-qa" in res["logs"], (extra, res)
+        assert any(c["check"] == "png" and c["result"] == "fail" for c in res["qa"]["checks"]), res
+        assert out.read_bytes() == sentinel, extra
+    code, res = run_content(capsys, *norm, "--in", tmp_path / "missing.png", "--out", out, *art, *NO_ESTATE)
+    assert code == 2, res
+    code, res = run_content(capsys, *norm, "--out", out, *art, *NO_ESTATE)
+    assert code == 2, res
+    assert out.read_bytes() == sentinel
+
+
+def test_icon_trailing_empty_iccp_is_structured_failure_in_api_check_and_normalize(tmp_path, capsys, monkeypatch, brand):
+    # validate_png accepts the sequence, but Pillow raises IndexError while loading the trailing empty iCCP chunk:
+    # icon_qa, `icon check` and `icon normalize` (with and without --ocr) must report the structured PNG failure
+    from ctshowcase.pnglint import validate_png
+    import binascii
+    import struct
+    card = brand.style(NW)["tokens"]["card_fill"]
+    good_data = C.icon_bytes(C.normalize_icon(_candidate(card, ink=(0, 90, 221)), "transparent", card)[0])[0]
+
+    def chunk(kind, body):
+        return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", binascii.crc32(kind + body) & 0xFFFFFFFF)
+    # the last 12 bytes of a PNG are the IEND chunk: insert a zero-length, CRC-valid iCCP just before it, so the
+    # pixel payload is byte-identical to the valid control
+    assert good_data[-12:] == chunk(b"IEND", b"")
+    data = good_data[:-12] + chunk(b"iCCP", b"") + good_data[-12:]
+    assert data != good_data and len(data) == len(good_data) + 12
+    validate_png(good_data)
+    validate_png(data)
+    monkeypatch.setattr(C, "_tesseract", lambda: None)
+    for ocr in (False, True):
+        qa = C.icon_qa(data, card=card, ocr=ocr, source="s.png")
+        assert qa["result"] == "fail" and qa["logs"] == ["unreadable-image:s.png"], qa
+        assert any(c["check"] == "png" and c["result"] == "fail" for c in qa["checks"]), qa
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    bad = tmp_path / "bad.png"
+    bad.write_bytes(data)
+    art = ("--art-direction", FIX / "ART_DIRECTION.min.md")
+    base = ("--meta", meta, "--no-repo-dir", "content", "icon")
+    for extra in ((), ("--ocr",)):
+        code, res = run_content(capsys, *base, "check", "--out", bad, *extra, *art, *NO_ESTATE)
+        assert code == 1 and res["result"] == "fail" and f"unreadable-image:{bad}" in res["logs"], (extra, res)
+        assert any(c["check"] == "png" and c["result"] == "fail" for c in res["qa"]["checks"]), res
+    out = tmp_path / "out" / "icon.png"
+    out.parent.mkdir()
+    sentinel = b"PRE-EXISTING-DEST-BYTES\x00\x01\xff"
+    out.write_bytes(sentinel)
+    for extra in ((), ("--ocr",)):
+        code, res = run_content(capsys, *base, "normalize", "--in", bad, "--out", out, *extra, *art, *NO_ESTATE)
+        assert code == 1 and res["result"] == "fail" and res["out"] is None, (extra, res)
+        assert isinstance(res["logs"], list) and res["logs"].count(f"unreadable-image:{bad}") == 1, (extra, res)
+        assert out.read_bytes() == sentinel, extra
+        assert [p.name for p in out.parent.iterdir()] == ["icon.png"], extra
+    code, res = run_content(capsys, *base, "normalize", "--in", tmp_path / "missing.png", "--out", out, *art, *NO_ESTATE)
+    assert code == 2, res
+    assert out.read_bytes() == sentinel
+    # valid control: the SAME bytes without the inserted iCCP chunk pass the API and every CLI path with exit 0
+    for ocr in (False, True):
+        qa = C.icon_qa(good_data, card=card, ocr=ocr, source="g.png")
+        assert qa["result"] in ("pass", "warn") and not any(log.startswith("unreadable-image") for log in qa.get("logs", [])), qa
+        assert not any(c["result"] == "fail" for c in qa["checks"]), qa
+    good = tmp_path / "good.png"
+    good.write_bytes(good_data)
+    for extra in ((), ("--ocr",)):
+        code, res = run_content(capsys, *base, "check", "--out", good, *extra, *art, *NO_ESTATE)
+        assert code == 0 and res["result"] in ("pass", "warn"), (extra, res)
+        assert not any(c["result"] == "fail" for c in res["qa"]["checks"]), res
+    good_out = out.parent / "good-norm.png"
+    for extra in ((), ("--ocr",)):
+        good_out.unlink(missing_ok=True)
+        code, res = run_content(capsys, *base, "normalize", "--in", good, "--out", good_out, *extra, *art, *NO_ESTATE)
+        assert code == 0 and res["result"] in ("pass", "warn") and good_out.is_file(), (extra, res)
