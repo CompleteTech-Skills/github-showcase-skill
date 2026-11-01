@@ -326,13 +326,18 @@ def _active_openers(text: str) -> frozenset[int]:
     which is literal (a backtick in it opens no code span). A blank line clears the stack, and so does a block
     boundary: a heading, list item, thematic break, fence or blockquote start (see `_block_boundary`), and the line
     after a heading or thematic break. A quote line continues an open quote, so a `[` and its `](` in one blockquote
-    still pair. Inert regions are found by cached lookups as in `_outside_code`, so the pass is linear. Offsets are the
-    source offsets. It never calls `_outside_code`."""
+    still pair. Raw HTML blocks (`mdcode.html_block_spans`) are inert and are block boundaries: no `[` inside one opens
+    a link, and the stack is cleared entering and leaving it. Completing an inline link deactivates every earlier LINK
+    opener in the stack (CommonMark: links may not contain links), while earlier IMAGE openers stay active; a `barrier`
+    marks the stack depth below which link openers are inactive, so that deactivation is O(1). Inert regions are found
+    by cached lookups as in `_outside_code`, so the pass is linear. Offsets are the source offsets. It never calls
+    `_outside_code`."""
     global _OPENER_STEPS
     fences = _fence_spans(text)
     html_spans = mdcode.html_block_spans(text)
     opened: set[int] = set()
-    stack: list[int] = []
+    stack: list[tuple[int, bool]] = []  # (index of `[`, whether it opens an image `![`)
+    barrier = 0  # stack positions below this hold inactive link openers (a link was completed after them)
     inline = tag = comment = None  # cached next starts: None = not searched yet, False = none left
     n, pos = len(text), 0
 
@@ -352,6 +357,14 @@ def _active_openers(text: str) -> frozenset[int]:
             _OPENER_STEPS += 1
             pos = fence[1]
             stack.clear()
+            barrier = 0
+            continue
+        html_block = _span_at(html_spans, pos)
+        if html_block is not None:  # a raw HTML block is inert text and a block boundary, like fenced code
+            _OPENER_STEPS += 1
+            pos = html_block[1]
+            stack.clear()
+            barrier = 0
             continue
         if inline is not False and (inline is None or inline[0] < pos):
             inline = next_inline(pos)
@@ -369,6 +382,9 @@ def _active_openers(text: str) -> frozenset[int]:
             regions.append(comment.span())
         if k < len(fences):
             regions.append(fences[k])
+        h = bisect.bisect_left(html_spans, (pos, -1))
+        if h < len(html_spans):
+            regions.append(html_spans[h])
         region = min(regions) if regions else None  # the next inert region at or after `pos`
         limit = region[0] if region else n
         jump = None
@@ -377,21 +393,30 @@ def _active_openers(text: str) -> frozenset[int]:
             _OPENER_STEPS += 1
             char = text[i]
             if char == "[" and not _escaped(text, i):
-                stack.append(i)
+                stack.append((i, i > 0 and text[i - 1] == "!" and not _escaped(text, i - 1)))
             elif char == "]" and stack and not _escaped(text, i):
-                stack.pop()
-                opened.add(i)
-                if text[i + 1:i + 2] == "(" and (target := _inline_image_target(text, i + 1)):
-                    jump = target[1]  # the destination of a link is literal text
-                    break
+                # the top opener is active unless a link was completed after it (images stay active)
+                active = stack[-1][1] or len(stack) - 1 >= barrier
+                _, is_image = stack.pop()
+                if len(stack) < barrier:
+                    barrier = len(stack)
+                if active:
+                    opened.add(i)
+                    if text[i + 1:i + 2] == "(" and (target := _inline_image_target(text, i + 1)):
+                        jump = target[1]  # the destination of a completed link is literal text
+                        if not is_image:  # completing a link deactivates every earlier link opener
+                            barrier = len(stack)
+                        break
             elif char == "\n":
                 j = i + 1
                 while j < n and text[j] in " \t\r":
                     j += 1
                 if j < n and text[j] == "\n":  # a blank line is a paragraph boundary
                     stack.clear()
+                    barrier = 0
                 elif _block_boundary(text, i, fences):  # so is the start of a block without a blank line
                     stack.clear()
+                    barrier = 0
             i += 1
         if jump is not None:
             pos = jump
@@ -401,6 +426,10 @@ def _active_openers(text: str) -> frozenset[int]:
             _OPENER_STEPS += 1
             if k < len(fences) and region == fences[k]:  # a fence skipped as a region is a block boundary too
                 stack.clear()
+                barrier = 0
+            elif h < len(html_spans) and region == html_spans[h]:  # so is a raw HTML block skipped as a region
+                stack.clear()
+                barrier = 0
             pos = region[1]
     return frozenset(opened)
 
