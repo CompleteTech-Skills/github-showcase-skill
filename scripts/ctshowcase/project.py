@@ -1027,7 +1027,8 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
     text_job = _job(f"{pid}-{num}-text-{_digest(edit)}", "project", edit, owner,
                     "§13.2 short description" + (" and §13.7 README" if text is not None else " (README after re-capture)"))
     if text is not None:
-        # the granting records of the repositories the README names (a retained authorized one carries its own)
+        # the board owner's own grant is merged first (owner passed), then the granting records of the repositories
+        # the README names (a retained authorized one carries its own)
         ids: list[str] = []
         for r in readme_repos:
             if "/" in r:
@@ -1036,7 +1037,7 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
                     ids.append(str(rec["id"]))
         if ids:
             from . import signoff
-            signoff.stamp_associations(text_job, list(dict.fromkeys(ids)))
+            signoff.stamp_associations(text_job, list(dict.fromkeys(ids)), owner)
     if text is not None and retained_t3:
         # the shared emission path stamps the captured Org options, so direct `copy-plan --role estate` and estate_plan agree
         orgs_for_stamp = list(retained_t3)
