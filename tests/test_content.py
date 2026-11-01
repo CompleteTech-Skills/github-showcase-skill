@@ -1627,3 +1627,52 @@ def test_icon_normalize_cli_undecodable_idat_exits_1_with_logs_and_missing_input
     code, res = run_content(capsys, *norm, "--out", out, *art, *NO_ESTATE)
     assert code == 2, res
     assert out.read_bytes() == sentinel
+
+
+def _png_trailing_empty_iccp() -> bytes:
+    # synthetic pixels: valid IHDR, zlib-compressed valid IDAT, then a zero-length iCCP chunk (correct CRC), then IEND
+    import binascii
+    import struct
+    import zlib
+
+    def chunk(kind, body):
+        return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", binascii.crc32(kind + body) & 0xFFFFFFFF)
+    raw = (b"\x00" + bytes((0x20, 0x30, 0x40, 0xFF)) * 1024) * 1024
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 1024, 1024, 8, 6, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"iCCP", b"") + chunk(b"IEND", b""))
+
+
+def test_icon_trailing_empty_iccp_is_structured_failure_in_api_check_and_normalize(tmp_path, capsys, monkeypatch):
+    # validate_png accepts the sequence, but Pillow raises IndexError while loading the trailing empty iCCP chunk:
+    # icon_qa, `icon check` and `icon normalize` (with and without --ocr) must report the structured PNG failure
+    from ctshowcase.pnglint import validate_png
+    data = _png_trailing_empty_iccp()
+    validate_png(data)
+    monkeypatch.setattr(C, "_tesseract", lambda: None)
+    for ocr in (False, True):
+        qa = C.icon_qa(data, card="#0B1020", ocr=ocr, source="s.png")
+        assert qa["result"] == "fail" and qa["logs"] == ["unreadable-image:s.png"], qa
+        assert any(c["check"] == "png" and c["result"] == "fail" for c in qa["checks"]), qa
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    bad = tmp_path / "bad.png"
+    bad.write_bytes(data)
+    art = ("--art-direction", FIX / "ART_DIRECTION.min.md")
+    base = ("--meta", meta, "--no-repo-dir", "content", "icon")
+    for extra in ((), ("--ocr",)):
+        code, res = run_content(capsys, *base, "check", "--out", bad, *extra, *art, *NO_ESTATE)
+        assert code == 1 and res["result"] == "fail" and f"unreadable-image:{bad}" in res["logs"], (extra, res)
+        assert any(c["check"] == "png" and c["result"] == "fail" for c in res["qa"]["checks"]), res
+    out = tmp_path / "out" / "icon.png"
+    out.parent.mkdir()
+    sentinel = b"PRE-EXISTING-DEST-BYTES\x00\x01\xff"
+    out.write_bytes(sentinel)
+    for extra in ((), ("--ocr",)):
+        code, res = run_content(capsys, *base, "normalize", "--in", bad, "--out", out, *extra, *art, *NO_ESTATE)
+        assert code == 1 and res["result"] == "fail" and res["out"] is None, (extra, res)
+        assert isinstance(res["logs"], list) and res["logs"].count(f"unreadable-image:{bad}") == 1, (extra, res)
+        assert out.read_bytes() == sentinel, extra
+        assert [p.name for p in out.parent.iterdir()] == ["icon.png"], extra
+    code, res = run_content(capsys, *base, "normalize", "--in", tmp_path / "missing.png", "--out", out, *art, *NO_ESTATE)
+    assert code == 2, res
+    assert out.read_bytes() == sentinel

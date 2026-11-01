@@ -2301,7 +2301,7 @@ def icon_qa(data: bytes, *, card: str, ink: list[str] | None = None, org_mark: P
         im = Image.open(io.BytesIO(data))
         im.load()
         rgba = im.convert("RGBA")
-    except (OSError, ValueError, SyntaxError, Image.DecompressionBombError) as exc:
+    except (OSError, ValueError, SyntaxError, IndexError, Image.DecompressionBombError) as exc:
         # structurally valid PNG whose compressed IDAT data cannot be decoded: a structured failure, never a traceback
         add("png", False, f"undecodable image data: {str(exc)[:80]}")
         return {"result": "fail", "checks": checks, **unreadable}
@@ -2778,7 +2778,7 @@ def _cmd_icon(args, cli, resolver, head):
         try:
             src = Image.open(io.BytesIO(raw))
             src.load()
-        except (OSError, ValueError, SyntaxError, Image.DecompressionBombError):
+        except (OSError, ValueError, SyntaxError, IndexError, Image.DecompressionBombError):
             # readable but undecodable source: the structured png failure from icon_qa, nothing written
             qa = icon_qa(raw, card=card, ink=ink, org_mark=mark, siblings=siblings, strict=strict,
                          min_contrast=floor, ocr=ocr, source=str(args.src))
