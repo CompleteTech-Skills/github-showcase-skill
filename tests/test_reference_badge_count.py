@@ -251,6 +251,14 @@ def test_unbalanced_license_definition_does_not_count_as_a_badge(make_ctx, tmp_p
     assert "R7 2-4 header badges required (found 1)" in result["fails"], result
 
 
+def test_balanced_parenthesised_image_destination_is_reported_missing(make_ctx, tmp_path):
+    # valid_balanced_reference control from the 585191 adjudication: a balanced `(foo)` in a
+    # bare reference destination is a live definition, so the rendered image is checked (R7).
+    result = lint_reference(make_ctx, tmp_path, "![CI][ci]",
+                            f"[ci]: {URL}\n\n![Shot][ref]\n\n[ref]: docs/images/missing(foo).png")
+    assert "R7 local image does not resolve: docs/images/missing(foo).png" in result["fails"], result
+
+
 def test_balanced_license_definition_counts_as_a_badge(make_ctx, tmp_path):
     result = lint_reference(make_ctx, tmp_path, "![License][lic]", LIC)
     assert not any("header badges" in failure for failure in result["fails"]), result
