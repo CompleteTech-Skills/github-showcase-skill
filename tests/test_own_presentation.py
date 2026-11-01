@@ -118,10 +118,7 @@ def test_code_of_conduct_pledge_has_canonical_tokens():
     """
     text = CODE_OF_CONDUCT.read_text(encoding="utf-8")
     normalized = _normalized(text)
-    assert (
-        "personal appearance, race, caste, color, religion, or sexual identity and orientation."
-        in normalized
-    )
+    assert "personal appearance, race, caste, color, religion, or sexual identity and orientation." in normalized
     assert "race, religion" not in normalized
 
 
