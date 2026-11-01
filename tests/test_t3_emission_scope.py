@@ -339,3 +339,154 @@ def test_copy_plan_malformed_repository_entry_is_dropped_with_a_log(tmp_path, mo
         plan = _copy_private(brand, [f"{OWNER}/kept-y", "a b"])
     assert any(str(x).startswith("repos-malformed:") for x in plan["logs"]), plan["logs"]
     assert "a b" not in json.dumps(plan["jobs"])
+
+
+# ---------------------------------------------------------------------------------------------- org profile destination
+GH_WITHDRAWN = [{"id": "t3s-all"}, {"id": "t3s-drop-gh", "repos": [".github"], "approved": False,
+                                    "approved_on": "2026-10-01"}]
+
+
+def _profile_checkout(tmp_path):
+    """A `.github` checkout holding a generated README (ours to refresh) and a data.json."""
+    from ctshowcase import org as O
+    prof = tmp_path / "gh" / "profile"
+    prof.mkdir(parents=True)
+    (prof / "README.md").write_text(O.GENERATED_MARK + " (synthetic prior output) -->\nprior readme\n", encoding="utf-8")
+    (prof / "data.json").write_text('{"prior": true}\n', encoding="utf-8")
+    return tmp_path / "gh", prof
+
+
+def _profile_estate(brand):
+    from test_t3_signoff_require import _pya_estate
+    return _pya_estate(brand)[0]
+
+
+def _snapshot(prof):
+    return (prof / "README.md").read_bytes(), (prof / "data.json").read_bytes()
+
+
+def test_profile_holds_a_github_scoped_withdrawal(tmp_path, monkeypatch, brand):
+    """public_slice excludes `.github`, so the repository checks never saw the profile's own destination: a wildcard
+    grant followed by a `.github` withdrawal still overwrote profile/README.md and profile/data.json."""
+    from ctshowcase import org as O
+    from ctshowcase.errors import Refused
+    out, prof = _profile_checkout(tmp_path)
+    before = _snapshot(prof)
+    with _Strict(monkeypatch, _file(tmp_path, GH_WITHDRAWN)):
+        with pytest.raises(Refused) as e:
+            O.profile(_profile_estate(brand), OWNER, out_dir=out, allow_t3=True)
+    assert str(e.value.log).startswith("t3-signoff:revoked:") and str(e.value.log).endswith("/.github"), e.value.log
+    assert _snapshot(prof) == before, "a held profile must leave the generated files untouched"
+
+
+def test_profile_regrant_after_the_github_withdrawal_restores_generation(tmp_path, monkeypatch, brand):
+    from ctshowcase import org as O
+    recs = [*GH_WITHDRAWN, {"id": "t3s-regrant-gh", "repos": [".github"], "approved_on": "2026-10-02"}]
+    out, prof = _profile_checkout(tmp_path)
+    with _Strict(monkeypatch, _file(tmp_path, recs)):
+        res, code = O.profile(_profile_estate(brand), OWNER, out_dir=out, allow_t3=True)
+    assert not any(str(x).startswith("t3-signoff:") for x in res["logs"]), res["logs"]
+    assert (prof / "README.md").read_bytes() != b"" and b"prior readme" not in (prof / "README.md").read_bytes(), code
+
+
+def test_profile_wildcard_grant_alone_writes_normally(tmp_path, monkeypatch, brand):
+    from ctshowcase import org as O
+    out, prof = _profile_checkout(tmp_path)
+    with _Strict(monkeypatch, _file(tmp_path, [{"id": "t3s-all"}])):
+        O.profile(_profile_estate(brand), OWNER, out_dir=out, allow_t3=True)
+    assert b"prior readme" not in (prof / "README.md").read_bytes()
+    assert b'"prior"' not in (prof / "data.json").read_bytes()
+
+
+def test_profile_other_repository_withdrawal_still_writes_and_holds_only_that_repository(tmp_path, monkeypatch, brand):
+    from ctshowcase import org as O
+    recs = [{"id": "t3s-all"}, {"id": "t3s-drop-x", "repos": ["withdrawn-x"], "approved": False,
+                                "approved_on": "2026-10-01"}]
+    out, prof = _profile_checkout(tmp_path)
+    with _Strict(monkeypatch, _file(tmp_path, recs)):
+        res, _ = O.profile(_profile_estate(brand), OWNER, out_dir=out, allow_t3=True)
+    assert b"prior readme" not in (prof / "README.md").read_bytes()
+    assert "withdrawn-x" not in json.dumps(res["data"]) and "kept-y" in json.dumps(res["data"]), res["data"]
+    assert f"t3-signoff:revoked:{OWNER}/withdrawn-x" in res["logs"], res["logs"]
+    assert not any(str(x).endswith("/.github") for x in res["logs"]), res["logs"]
+
+
+def test_profile_without_the_flag_ignores_a_github_withdrawal(tmp_path, monkeypatch, brand):
+    """Control: a T3 owner without --allow-t3 is refused by the existing gate, and a non-T3 owner never consults the
+    sign-off file for its `.github` repository."""
+    from ctshowcase import org as O
+    from ctshowcase.errors import Refused
+    out, prof = _profile_checkout(tmp_path)
+    before = _snapshot(prof)
+    with _Strict(monkeypatch, _file(tmp_path, GH_WITHDRAWN)):
+        with pytest.raises(Refused) as e:
+            O.profile(_profile_estate(brand), OWNER, out_dir=out, allow_t3=False)
+    assert str(e.value.log) != "" and "/.github" not in str(e.value.log), e.value.log
+    assert _snapshot(prof) == before
+
+
+# ---------------------------------------------------------------------------------------------- captured option ids
+def _former_login_capture():
+    """A complete Estate capture whose Org option is described `T3: Pick-Your-AI` under another captured label."""
+    from test_t3_signoff_require import _complete_estate_capture
+    cap = _complete_estate_capture()
+    opt = cap["data"]["user"]["projectV2"]["fields"]["nodes"][-1]["options"][0]
+    opt["name"], opt["description"] = "Former Synthetic Name", f"T3: {OWNER}"
+    return cap
+
+
+def _renamed_resolver(brand):
+    res = _resolver(brand, _registry(False), extra=[{"action": "org-rename", "owner": OWNER,
+                                                     "new_name": "Pick-Your-Stack"}])
+    assert res.canonical(OWNER) == "Pick-Your-Stack"
+    return res
+
+
+def _ids(job):
+    return {job.get("signoff_id"), *(job.get("signoff_ids") or [])} - {None}
+
+
+def test_captured_org_option_under_former_login_and_other_label_carries_signoff_id(tmp_path, monkeypatch, brand):
+    """The job targets @me, so estate_plan's target-based stamp cannot recover the grant: copy_plan must put the
+    granting id of every retained captured Org option on the README job itself, not rediscover it from rendered text."""
+    from ctshowcase import project as PJ
+    with _Strict(monkeypatch, _file(tmp_path, [{"id": "t3s-all"}])):
+        plan = PJ.copy_plan("@me", role="estate", copied=_former_login_capture(), resolver=_renamed_resolver(brand),
+                            user_id=100, allow_t3=True, reviewed="2026-10-25")
+    readme = _readme_jobs(plan)
+    assert readme, [j["id"] for j in plan["jobs"]]
+    assert all("t3s-all" in _ids(j) for j in readme), readme
+    assert "Former Synthetic Name" in json.dumps(readme, ensure_ascii=False), readme
+
+
+def test_captured_org_option_under_former_login_is_held_when_withdrawn(tmp_path, monkeypatch, brand):
+    from ctshowcase import project as PJ
+    with _Strict(monkeypatch, _file(tmp_path, WITHDRAWN)):
+        plan = PJ.copy_plan("@me", role="estate", copied=_former_login_capture(), resolver=_renamed_resolver(brand),
+                            user_id=100, allow_t3=True, reviewed="2026-10-25")
+    assert any(str(x).startswith("t3-signoff:") for x in plan["logs"]), plan["logs"]
+    blob = json.dumps([j for j in plan["jobs"] if "--readme" in j.get("argv", [])], ensure_ascii=False)
+    assert "Former Synthetic Name" not in blob and OWNER not in blob, blob
+    assert "t3s-g" not in json.dumps(plan["jobs"]), plan["jobs"]
+
+
+def _private_board_with_org_option():
+    c = _private_board()
+    c["data"]["organization"]["projectV2"]["fields"]["nodes"].append({
+        "__typename": "ProjectV2SingleSelectField", "id": "PVTF_org", "databaseId": 1099, "name": "Org",
+        "dataType": "SINGLE_SELECT", "isIssueField": False,
+        "options": [{"id": "optorg1", "name": "Former Synthetic Name", "color": "YELLOW", "description": f"T3: {OWNER}"}]})
+    return c
+
+
+def test_captured_org_option_ids_merge_with_a_repository_regrant_on_the_readme_job(tmp_path, monkeypatch, brand):
+    """Control: a repository-scoped regrant id already stamped on the README job is kept beside the option's id."""
+    from ctshowcase import project as PJ
+    recs = [{"id": "t3s-all"}, {"id": "t3s-drop-x", "repos": ["withdrawn-x"], "approved": False,
+                                "approved_on": "2026-10-01"},
+            {"id": "t3s-regrant", "repos": ["withdrawn-x"], "approved_on": "2026-10-02"}]
+    with _Strict(monkeypatch, _file(tmp_path, recs)):
+        plan = PJ.copy_plan(OWNER, role="org", copied=_private_board_with_org_option(), resolver=_resolver(brand),
+                            repositories=[f"{OWNER}/withdrawn-x", f"{OWNER}/ok-y"], allow_t3=True, reviewed="2026-10-25")
+    readme = _readme_jobs(plan)
+    assert readme and all({"t3s-all", "t3s-regrant"} <= _ids(j) for j in readme), readme
