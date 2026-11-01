@@ -1128,17 +1128,13 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
             from . import signoff
             signoff.stamp_associations(text_job, list(dict.fromkeys(ids)), owner)
     if text is not None and retained_t3:
-        # the shared emission path stamps the captured Org options, so direct `copy-plan --role estate` and estate_plan agree
-        orgs_for_stamp = list(retained_t3)
-        known = {x.lower() for o in retained_t3 for x in (o["login"], o["name"])}
-        for o in (_field(spec, "Org") or {}).get("options") or []:
-            name = str(o.get("name") or "")
-            desc = str(o.get("description") or "")
-            ident = re.sub(r"^T[0-9]:\s*", "", desc).strip() or name
-            if not ident or ident.lower() in known or name.lower() in known:
-                continue
-            orgs_for_stamp.append({"login": ident, "name": name})  # name-only: marks a shared display name as ambiguous
-        _stamp_estate_orgs([text_job], orgs_for_stamp)
+        # the README documents every retained captured Org option, so the job carries the granting ids of retained_t3
+        # directly instead of rediscovering them from the rendered text (a former login with a different captured label
+        # has no match in the text) (tests/test_t3_emission_scope.py::test_captured_org_option_under_former_login_and_other_label_carries_signoff_id)
+        ids = [str(o["signoff_id"]) for o in retained_t3 if o.get("signoff_id")]
+        if ids:
+            from . import signoff
+            signoff.stamp_associations(text_job, list(dict.fromkeys(ids)), owner)
     jobs.append(text_job)
     # 5. repository links (org boards: same owner only), decided in step 0 and emitted here, before the browser steps
     jobs.extend(link_jobs)
