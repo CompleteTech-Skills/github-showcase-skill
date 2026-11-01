@@ -913,32 +913,15 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
         if ui:
             want = dict(want, ui=list(want.get("ui") or []) + ui)
         vlist[i] = want
-    # 4. text: short description and README (README needs every view number)
-    nums = view_numbers(spec)
-    edit = ["gh", "project", "edit", num, "--owner", own_flag, "--description", short]
-    text = readme_text
+    # 0. repository sign-off (org boards), decided before the README and the browser steps: the links, the README text,
+    # the default repository and auto-add all take their repositories from this one filtered set, so a withdrawn one is
+    # named by none of them
+    authorized: list[tuple[str, dict | None]] = []  # (repo, sign-off record or None): the only repos the settings job may name
+    link_jobs: list[dict] = []  # repository-link jobs, emitted right after the text job
+    held_lower: set[str] = set()  # lowercase owner/repo names held for lack of a valid sign-off
+    grants: dict[str, dict | None] = {}  # lowercase owner/repo -> the sign-off record that covers it
     readme_repos, lg = _readme_repos(spec, owner, role, resolver, repositories)
     logs += lg
-    if held_t3:
-        text = None
-        pending.append({"why": "README held: the Org field names a T3 org with no valid sign-off record",
-                        "needs": "a valid record in the sign-off file, or remove the option on the board"})
-    elif text is None:
-        try:
-            text, lg = readme(owner, name, number, nums, repositories=readme_repos,
-                              out_of_scope=out_of_scope, reviewed=reviewed, views=vlist, estate=role == "estate",
-                              fields=doc_fields(spec, planned, estate=role == "estate"))
-            logs += lg
-        except NeedsInput:
-            pending.append({"why": "README needs every view number: re-capture after the view jobs run"})
-    if text is not None:
-        edit += ["--readme", text]
-    # ids carry a content hash: the README-bearing re-plan (after the view jobs ran) is a new job, never the earlier id
-    # with other content, which the writer refuses together with its whole batch
-    jobs.append(_job(f"{pid}-{num}-text-{_digest(edit)}", "project", edit, owner,
-                     "§13.2 short description" + (" and §13.7 README" if text is not None else " (README after re-capture)")))
-    # 5. repository links (org boards: same owner only), then R5 re-run
-    authorized: list[tuple[str, dict | None]] = []  # (repo, sign-off record or None): the only repos the settings job may name
     if role == "org":
         linked = set()
         for r in repositories or []:
@@ -956,16 +939,71 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
                 if rec is None:
                     logs.append(f"t3-signoff:{(why or 'missing').partition(':')[0]}:{r}")
                     logs.append(f"link-held:{r} (no valid T3 sign-off covers this repository)")
+                    held_lower.add(r.lower())
                     continue
             linked.add(r.lower())
             authorized.append((r, rec))
+            grants[r.lower()] = rec
             link = _job(f"{pid}-{num}-link-{_repo_key(r.split('/', 1)[1])}", "project",
                         ["gh", "project", "link", num, "--owner", owner, "--repo", r], owner,
                         "Link before the §10.1 settings pass, or re-run R5 afterwards (§13.11).")
             if rec is not None and rec.get("id"):  # the repository's own granting id; approval_id is never touched
                 signoff.stamp_associations(link, [str(rec["id"])])
-            jobs.append(link)
+            link_jobs.append(link)
+        if allow_t3 and resolver is not None and resolver.owner_status(owner) == "t3":
+            # captured repositories that the README names (and --repos does not) face the same check: a withdrawn one is held
+            from . import signoff
+            for r0 in readme_repos:
+                if "/" not in r0 or not resolver_same(resolver, r0.split("/", 1)[0], owner):
+                    continue
+                r = f"{owner}/{r0.split('/', 1)[1]}"
+                if r.lower() in grants or r.lower() in held_lower:
+                    continue
+                rec, why = signoff.evaluate([owner, *resolver.aliases(owner)], r.split("/", 1)[1])
+                if rec is None:
+                    logs.append(f"t3-signoff:{(why or 'missing').partition(':')[0]}:{r}")
+                    held_lower.add(r.lower())
+                else:
+                    grants[r.lower()] = rec
         reads.append({"name": "org-projects-setting", "argv": ["gh", "api", f"orgs/{owner}", "--jq", ".has_organization_projects"]})
+    # 4. text: short description and README (README needs every view number)
+    nums = view_numbers(spec)
+    edit = ["gh", "project", "edit", num, "--owner", own_flag, "--description", short]
+    text = readme_text
+    if role == "org":  # a repository held for lack of a valid sign-off is named by no README link
+        readme_repos = [r for r in readme_repos if "/" not in r or f"{owner}/{r.split('/', 1)[1]}".lower() not in held_lower]
+    if held_t3:
+        text = None
+        pending.append({"why": "README held: the Org field names a T3 org with no valid sign-off record",
+                        "needs": "a valid record in the sign-off file, or remove the option on the board"})
+    elif text is None:
+        try:
+            text, lg = readme(owner, name, number, nums, repositories=readme_repos,
+                              out_of_scope=out_of_scope, reviewed=reviewed, views=vlist, estate=role == "estate",
+                              fields=doc_fields(spec, planned, estate=role == "estate"))
+            logs += lg
+        except NeedsInput:
+            pending.append({"why": "README needs every view number: re-capture after the view jobs run"})
+    if text is not None:
+        edit += ["--readme", text]
+    # ids carry a content hash: the README-bearing re-plan (after the view jobs ran) is a new job, never the earlier id
+    # with other content, which the writer refuses together with its whole batch
+    text_job = _job(f"{pid}-{num}-text-{_digest(edit)}", "project", edit, owner,
+                    "§13.2 short description" + (" and §13.7 README" if text is not None else " (README after re-capture)"))
+    if role == "org" and text is not None:
+        # the granting records of the repositories the README names (a retained authorized one carries its own)
+        ids: list[str] = []
+        for r in readme_repos:
+            if "/" in r and resolver_same(resolver, r.split("/", 1)[0], owner):
+                rec = grants.get(f"{owner}/{r.split('/', 1)[1]}".lower())
+                if rec and rec.get("id"):
+                    ids.append(str(rec["id"]))
+        if ids:
+            from . import signoff
+            signoff.stamp_associations(text_job, list(dict.fromkeys(ids)))
+    jobs.append(text_job)
+    # 5. repository links (org boards: same owner only), decided in step 0 and emitted here, before the browser steps
+    jobs.extend(link_jobs)
     # 6. browser: UI-only view settings, workflows, insights, default repo, auto-add, recommended template
     url = project_url(owner, number)
     for v in vlist:
@@ -983,15 +1021,26 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
         on = on_tpl if role == "template" else on_org
         if words == "auto-add" and role == "estate":
             continue
+        if words == "auto-add" and role == "org" and repositories and not authorized:
+            # no repository may be chosen for the auto-add rule: the step names none, so it is held rather than emitted
+            logs.append("workflows-held:auto-add (no authorized repository remains to choose; links held or skipped)")
+            continue
         have = next((w for w in spec.get("workflows") or [] if words.split()[-1] in (w.get("name") or "").lower()), None)
         label = have.get("name") if have else words.title()
-        if on:
+        if on and words == "auto-add" and role == "org" and authorized:
+            wf_steps.append(f"Select '{label}', click 'Edit', choose {authorized[0][0]}, set {WORKFLOW_UI[words]} "
+                            "Click 'Save and turn on workflow'.")
+        elif on:
             wf_steps.append(f"Select '{label}', click 'Edit', set {WORKFLOW_UI[words]} Click 'Save and turn on workflow'.")
         else:
             wf_steps.append(f"Leave '{label}' off on the template (auto-add is set per org after the copy).")
     wf_steps.append(f"Screenshot the workflows list into state/screens/projects/{sid}/workflows.png.")
-    jobs.append(_browser(f"{pid}-{num}-workflows", owner, f"{url}/workflows", wf_steps, "project-workflows",
-                         "§13.6 built-in workflows: UI only; never delete a workflow (no API can recreate it)."))
+    wf_job = _browser(f"{pid}-{num}-workflows", owner, f"{url}/workflows", wf_steps, "project-workflows",
+                      "§13.6 built-in workflows: UI only; never delete a workflow (no API can recreate it).")
+    if authorized and authorized[0][1] and authorized[0][1].get("id"):  # the granting record of the repository auto-add names
+        from . import signoff
+        signoff.stamp_associations(wf_job, [str(authorized[0][1]["id"])])
+    jobs.append(wf_job)
     if role == "template":
         jobs.append(_browser(f"{pid}-{num}-insights", owner, f"{url}/insights",
                              [f"Open {url}/insights.", "Keep the default 'Burn up' chart.",
