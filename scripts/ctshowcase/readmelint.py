@@ -378,7 +378,8 @@ def _active_openers(text: str) -> frozenset[int]:
     opener in the stack (CommonMark: links may not contain links), while earlier IMAGE openers stay active; a `barrier`
     marks the stack depth below which link openers are inactive, so that deactivation is O(1). Reference-style links
     `[x][ref]`, `[x][]` and `[x]` deactivate earlier link openers too when the label resolves to a live definition
-    (`_reference_form`); an inline `(dest)` is tried first. Inert regions are found
+    (`_reference_form`); an inline `(dest)` is tried first. The label of a full reference is read up to the next
+    non-inline inert region, so a backtick in a resolved label is literal and an unresolved label is not consumed. Inert regions are found
     by cached lookups as in `_outside_code`, so the pass is linear. Offsets are the source offsets. It never calls
     `_outside_code`."""
     global _OPENER_STEPS
@@ -437,6 +438,17 @@ def _active_openers(text: str) -> frozenset[int]:
             regions.append(html_spans[h])
         region = min(regions) if regions else None  # the next inert region at or after `pos`
         limit = region[0] if region else n
+        # the next inert region other than inline code: a backtick inside a reference label is literal, so the start of
+        # an inline code span must not truncate the label scan of `_reference_form`
+        ref_limit = n
+        if tag:
+            ref_limit = min(ref_limit, tag.start())
+        if comment:
+            ref_limit = min(ref_limit, comment.start())
+        if k < len(fences):
+            ref_limit = min(ref_limit, fences[k][0])
+        if h < len(html_spans):
+            ref_limit = min(ref_limit, html_spans[h][0])
         jump = None
         i = pos
         while i < limit:  # plain text between inert regions: brackets are read one position at a time
@@ -457,7 +469,8 @@ def _active_openers(text: str) -> frozenset[int]:
                         if not is_image:  # completing a link deactivates every earlier link opener
                             barrier = len(stack)
                         break
-                    form = _reference_form(text, open_idx, i, limit, keys)
+                    # a backtick inside a reference label is literal, so the inline-code start must not truncate the label scan
+                    form = _reference_form(text, open_idx, i, ref_limit, keys)
                     if form is not None:  # a reference-style link completes like an inline one
                         jump_to, label_close = form
                         if label_close is not None:  # the label's `]` is marked as the scan marks any active `]`
