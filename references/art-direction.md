@@ -9,10 +9,10 @@ Condensed from `ct-std-v1` §9 with decisions 12, 13, 19 and 21 applied. It cove
 1. **The image model draws only illustration layers.** Never text, letters, numbers, logos or brand marks.
 2. **Marks come only from committed files.** Never crop, mask, recolour or redraw a mark. The only crops ever made are the one-time `mark-dark.png`, `bulb-dark.png` and `jev-reference.png`, made by the estate planner on the chosen master (decision 19: re-measure on the new master; never reuse old pixel coordinates).
 3. **All text is typeset by the compositor** with real fonts: Poppins and JetBrains Mono for CompleteTech (both OFL); T2 families use their own fonts.
-4. **One style lock per family**, verbatim. Use the same model and version for a family run; record the seed if the tool supports seeds (CompleteTech `1025`, Jev-Engineering `3001`, jevplay-games `3101`, LibreEvolve `4001`, TouchedByAnAgent `5001`, romgenie `6001`).
+4. **One style lock per family**, verbatim. Use the same model and version for a family run; record a seed only when one was requested (`content icon prompt --seed N`; otherwise "not supported"). Family seeds, for runs that choose to request one: CompleteTech `1025`, Jev-Engineering `3001`, jevplay-games `3101`, LibreEvolve `4001`, TouchedByAnAgent `5001`, romgenie `6001`.
 5. **Pilot first, per family.** The user approves the first banner and card of each family before the rest are generated; they become the family's golden references.
 6. **Every in-scope repository gets its own icon** (decision 12), `assets/icon.png`; watching-org forks are the only exception. T3 art waits for co-owner sign-off.
-7. **Selection:** generate 4 candidates, reject any that fails the QA checklist, select the first remaining one in generation order with a one-line reason. If none passes, generate 4 more once; then log `art-fail`.
+7. **Selection:** run the one-image prompt as four single-image invocations (each invocation is one candidate), reject any that fails the QA checklist, select the first remaining one in generation order with a one-line reason. If none passes, run four more single-image invocations once; then log `art-fail`.
 8. **Mascot:** every jevplay-games prompt uses exactly `jevplay-games/.github/profile/assets/jev-reference.png`.
 9. **No third-party IP:** no Pokémon creatures or Poké Balls, Among Us crewmates, Discord, Zoho or NetScaler logos, Hasbro board designs, real people, or anything sexual or suggestive.
 10. **One dark design** (decision 21): banners, cards, tiles and intros ship one dark file used on both GitHub themes.
@@ -90,6 +90,8 @@ codex exec --skip-git-repo-check --json "$(cat art/prompts/ORG/REPO/icon.md)" > 
 - `--sandbox MODE` selects the sandbox policy for model-generated shell commands.
 - `--output-last-message FILE` also writes the final message to FILE.
 - A prompt of `-` is read from standard input.
+- Each invocation runs one single-image prompt (`content icon prompt` asks for one image) and fills at most one candidate slot, but its output may report more than one path (for example an unreadable sandbox copy and a readable `generated_images` file). The candidate for the slot is the first readable path the run reported, see item 5 below.
+- `codex exec --help` and CLI help only document flags; they do not prove that an image is generated. Only a returned readable image path proves a generation.
 
 Use the same model and version for a whole family run (pipeline rule 4). Record the tool, model id and version in `PROMPTS.md` exactly as the run reports them; if the run does not expose a model id, write `not exposed` in the `TOOL / MODEL ID AND VERSION` field. Never invent a model id. Flag names follow codex-cli 0.166.0 at the time of writing; if one is rejected, run `codex exec --help` and change nothing else in the recipe.
 
@@ -97,18 +99,17 @@ This recipe does not rely on a documented image path: OpenAI documentation cover
 
 ### Read the image path from the run output
 
-1. After the run, search the `run.jsonl` events (or the final message) for every image file path Codex reports for the generated images, and use exactly those paths (see item 5).
+1. After the run, search the `run.jsonl` events (or the final message) for the image file path Codex reports for the generated image, and use exactly that path (see item 5).
 2. Never pick the newest file in the generated-images folder. Parallel sessions write into the same place, so the newest file can belong to another run and the wrong image gets normalized.
 3. If the run output names no readable image path, treat the attempt as an empty run (see Retry and attempt limits). Do not fall back to the newest file or to a directory listing.
 4. Copy the chosen image to scratch (see Sandbox (d)) and pass that copy to content icon normalize --in PATH, not the generated_images path. In the `PROMPTS.md` provenance block, record the Codex session id and only the image file name, or the path written relative to `$CODEX_HOME` (for example `$CODEX_HOME/generated_images/<file>`), in the prose beside the record. Never record the absolute path: it contains the local user name. The Provenance record fenced template itself does not change.
-5. One invocation may report between zero and four image paths. Every DISTINCT path the run output reports is one candidate; use exactly the reported paths, never a directory listing or the newest file. A run that reports no readable path is an empty run: either it reports no path, or every path it reports is unreadable (unreadable-only output). An unreadable path fills no slot, and readable paths in the same run still fill their slots. Parallel sessions write into the same place, so do not run candidates for several repositories in the same working directory at once unless you can tell their outputs apart.
+5. Each invocation asks for ONE image and fills ONE slot, but its output may report more than one path (for example an unreadable sandbox copy and a readable `generated_images` file). Use only paths reported by that same invocation, never a directory listing or the newest file. Select the first readable path in the order the run reported them: that single path is the candidate for the slot (one accepted candidate per slot, even when several paths are reported), and the remaining reported paths are ignored. A run that reports no readable path is an empty run: either it reports no path, or every reported path is unreadable (unreadable-only output). An unreadable path fills no slot and does not stop the run from using another readable path it reported. Parallel sessions write into the same place, so do not run candidates for several repositories in the same working directory at once unless you can tell their outputs apart.
 
 ### Retry and attempt limits
 
-- The limit applies per candidate, not per candidate set. Pipeline rule 7 asks for four candidates (the option A template also says so), so there are four candidate slots, and the cap applies to each slot. A run that returns k distinct readable paths fills k slots (up to the unfilled ones); make further runs, with the same unchanged prompt, only for unfilled slots.
-- An empty run (no path, or unreadable-only output) is retried as a NEW run with the same unchanged prompt, at most 2 retries (3 attempts total) for each slot that is still unfilled. Each empty run counts as one attempt against every slot that is still unfilled. Parallel runs can finish without a path, which is why a retry is allowed. Retries never alter the prompt.
-- Successful candidates never count toward the cap, so the four-candidate round of pipeline rule 7 (then 4 more once, then log `art-fail`) is still reachable. Only empty runs count toward the 3 attempts, and they are not candidates. An unreadable path is not a successful candidate, so unreadable-only output is counted as an empty run and cannot loop forever.
-- The second round of rule 7 ("4 more once") opens four new slots with the same per-slot cap of 3 attempts (2 retries each); slots from the first round do not carry over their attempt counts.
+- The limit applies per candidate slot. Pipeline rule 7 asks for four single-image invocations (the option A template asks for one image each), so there are four candidate slots and the cap applies to each slot. The first readable path an invocation reports fills the slot that invocation was for; an empty run (no reported path is readable) is retried as a NEW run with the same unchanged prompt, at most 2 retries (3 attempts total) for that slot. Retries never alter the prompt. Each slot is an independent invocation, so one slot's empty run does not count against another slot.
+- Successful candidates never count toward the cap, so the four-invocation round of pipeline rule 7 (then four more once, then log `art-fail`) is still reachable. Only empty runs count toward the 3 attempts, and they are not candidates. An unreadable path is not a successful candidate, so unreadable-only output is counted as an empty run and cannot loop forever. A run that reports one unreadable path and one readable path is NOT unreadable-only: it fills the slot with the readable path and is not an empty run.
+- The second round of rule 7 (four more single-image invocations once) opens four new slots with the same per-slot cap of 3 attempts (2 retries each); slots from the first round do not carry over their attempt counts.
 - After 3 empty attempts for any one slot, including attempts that returned only unreadable paths, stop and log `art-fail` with a one-line reason. Do not loop.
 
 ### Privacy: only public facts go into prompts
@@ -125,7 +126,7 @@ These are OBSERVED runtime notes from issue #64 and the Pick Your AI evidence, n
 
 - (a) Observed: Codex stored generated images in its `generated_images` folder inside `$CODEX_HOME` (default: the `.codex` folder in the user's home, `~`). Read the image from the path named in the run output, which points there.
 - (b) Observed: files that Codex writes into its own sandbox, for example a copy it saves into the working directory it was given, can be locked against the user account (access denied). Do not rely on them, and do not try to chmod or take ownership of them.
-- (c) If a path is unreadable, copy nothing from the sandbox and do not retry the same path. Treat that path as returning nothing: if the same run reports another readable path in the generated-images folder, use that; otherwise the run is an empty run and counts as one attempt under the retry limit above, ending in `art-fail` after 3 empty attempts for the slot.
+- (c) If a path is unreadable, copy nothing from the sandbox and do not retry the same path. Skip it and use the first other readable path the same run reported, if there is one. Only when no reported path is readable does the run return nothing: it is then an empty run and counts as one attempt under the retry limit above, ending in `art-fail` after 3 empty attempts for the slot.
 - (d) Copy the chosen image to a scratch location outside the repository before `content icon normalize --in`, and commit only the normalized `assets/icon.png`. Never commit the raw candidate. Do not write any real absolute local path or user name; use `$CODEX_HOME` and `~` only.
 
 ## Repository glyph prompt template
@@ -134,9 +135,13 @@ These are OBSERVED runtime notes from issue #64 and the Pick Your AI evidence, n
 palette slots and flat render inks come from the selected family's `icon_ink`
 and `icon_spark` tokens in `brand.yaml`. Both are chosen to meet the icon QA's
 3:1 contrast threshold on that family's card, with a distinct outline and spark.
-The writer supplies the four glyph fields with `--glyph`. Documented family seeds
-above are used when available; otherwise the prompt explicitly uses the tool's
-default seed. It does
+The writer supplies the four glyph fields with `--glyph`. `size_class` accepts
+WIDE (the glyph spans close to the full 688 px width and is about 430 to 560 px tall),
+TALL (it spans close to the full 688 px height and is about 400 to 600 px wide),
+SQUARE (a squarish glyph about 600 to 660 px on each side) and DIAGONAL (the mass runs
+corner to corner inside a 656 × 656 px box). The prompt asks for one image and asserts
+no seed; pass `--seed N` to request one, which the prompt and its provenance block then
+record (otherwise the seed is recorded as "not supported"). It does
 not require the estate's avatar tables or reference images. An explicit
 `--art-direction FILE` may instead supply the estate-format `(b) Family palette`
 and `(d) Shared prompt template` sections.
@@ -157,7 +162,7 @@ glyph outline in {LINE_HEX} so the spark remains distinct at small sizes.
 
 No text, letters, numbers, words, logos, brand marks, human figures or third-party IP.
 {EXTRA_NEGATIVES}
-Produce four candidates. {SEED_INSTRUCTION}
+Produce one image.{SEED_INSTRUCTION}
 The lock pass renders assets/icon.png as a flat glyph in the family's light-surface
 inks, without a tile or glow. Do not render the repository name in the image.
 ```
@@ -209,7 +214,7 @@ No text, letters, numbers, symbols, words, labels, signatures, watermarks, logos
 - Seed: SEED or "not supported"
 - Reference images: golden reference path, jev-reference.png, or "none"
 - Prompt: (verbatim, fenced)
-- Candidates: 4 or 8; selected: N (reason: one line)
+- Images requested: as asked in the prompt (`content icon prompt` asks for 1); selected: N (reason: one line)
 - Post-processing: showcase.py VERSION; output sha256 HASH; size KB
 ```
 
