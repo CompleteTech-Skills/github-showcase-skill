@@ -1,6 +1,8 @@
 # User decisions this skill implements
 
-Verbatim excerpt from `decisions/USER_DECISIONS.md` (Timothy Wayne Gregg, 2026-10-25) in the estate hand-off bundle. These decisions outrank the estate standard `ct-std-v1` (`STANDARD.md`), the art direction and every audit proposal. Where this skill's references paraphrase the standard, the decisions below have already been applied.
+Verbatim excerpt from `decisions/USER_DECISIONS.md` (Timothy Wayne Gregg, 2026-10-25) in the estate hand-off bundle, except that the skill note under decision 18 is skill maintenance and not part of the user decision. These decisions outrank the estate standard `ct-std-v1` (`STANDARD.md`), the art direction and every audit proposal. Where this skill's references paraphrase the standard, the decisions below have already been applied.
+
+Skill maintenance (#47): the footer logo URLs configured in `references/brand.yaml` were repaired because the former URLs returned 404. Layout, credit and artwork are unchanged. The user decisions below are unmodified.
 
 | Decision | Where the skill applies it |
 |---|---|
@@ -76,6 +78,9 @@ Verbatim excerpt from `decisions/USER_DECISIONS.md` (Timothy Wayne Gregg, 2026-1
       Built by <a href="https://www.complete.tech">CompleteTech LLC</a> · Innovation at Every Integration
     </p>
     ```
+
+    **Skill note (#47, not part of the user decision):** The footer URLs this skill currently emits are configured in `references/brand.yaml` (`footer.logo_light_url` and `footer.logo_dark_url`) and point to this repository's published masters: https://raw.githubusercontent.com/CompleteTech-Skills/github-showcase-skill/main/assets/brand/logo.png and .../logo-dark.png (same sha256 as listed in `assets/brand/README.md`). The former `CompleteTech-LLC/.github/main/brand/` URLs shown in the decision above returned 404. Layout, credit text, theme selection and artwork are unchanged.
+
     - Scope: all in-scope repos, T2 families included ("all of them").
     - Exceptions: watching-org forks (not the user's work), and T3 orgs until their co-owners sign off.
     - TouchedByAnAgent is included on this instruction. `STANDARD.md` §12.5 #4 had left it open; confirm on the review page.

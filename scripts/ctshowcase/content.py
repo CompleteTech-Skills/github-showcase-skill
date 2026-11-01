@@ -20,6 +20,7 @@ import hashlib
 import html
 import io
 import json
+import math
 import re
 import subprocess
 import time
@@ -1748,6 +1749,7 @@ ICON_PX, ICON_BUDGET = 1024, 300_000
 LIVE_MARGIN = round(82 * ICON_PX / 500)  # 168: the avatar live area (a.3) at 1024 px
 LIVE = ICON_PX - 2 * LIVE_MARGIN          # 688
 KEY_DE, CONTENT_DE = 6.0, 12.0
+FLATTEN_FEATHER = KEY_DE  # width of the soft ramp, in dE (flatten and transparent key)
 ART_FAMILY = {"completetech": "CompleteTech core", "ai-ascension": "AI-Ascension", "jev-engineering": "Jev",
               "jevplay-games": "Jev", "libreevolve": "LibreEvolve", "touchedbyanagent": "TouchedByAnAgent",
               "romgenie": "romgenie utility"}
@@ -1867,6 +1869,16 @@ def _template(text: str, section: str) -> str | None:
     return m.group(1) if m else None
 
 
+def ground_clause(card: str) -> str:
+    return (f"Fill the entire background with one perfectly flat {card.upper()} colour: no vignette, texture, "
+            "gradient, shadow or glow in the background.")
+
+
+# a numbered estate BACKGROUND paragraph = its heading line plus following non-blank lines, stopping at a blank
+# line or at the next numbered section heading (digits, space, capital letter)
+_BACKGROUND_PARAGRAPH = re.compile(r"(?m)^(\d+)\s+BACKGROUND\b.*(?:\n(?=[ \t]*\S)(?![ \t]*\d+\s+[A-Z])[^\n]*)*")
+
+
 def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = None, option: str = "A",
                 language: str | None = None, skill_art: str | None = None) -> dict:
     """The Codex prompt for a repository icon (f.3 option A: the (d) template with "repo icon" for "avatar"; option
@@ -1944,9 +1956,10 @@ def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = Non
                                      "48 px (f.3).")
         if slots.get("SPARK_NAME"):
             slots["SPARK_EXCLUSIVITY"] = f" and the only element in {slots['SPARK_NAME']}"
-        if slots.get("GLOW_HEX"):
-            slots["POOL"] = (f"one very soft round pool of {slots['GLOW_HEX']} light at about 10% strength, about 880 px "
-                             "across, centred behind the glyph and fading to nothing well before the edges")
+        card = ctx.style["tokens"]["card_fill"]
+        # a repo icon sits on the family card, so the estate template's soft light pool becomes the flat ground
+        slots["POOL"] = ("there is no pool of light: the whole background is one perfectly flat "
+                         f"{card.upper()} colour, with no vignette, texture, gradient, shadow or glow")
         size = str(glyph.get("SIZE_CLASS") or "").upper()
         if size in SIZE_CLASSES:
             slots["SIZE_CLASS"] = f"{size}: {SIZE_CLASSES[size]}"
@@ -1968,11 +1981,27 @@ def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = Non
         prompt = re.sub(r"\bavatar\b", "repo icon", prompt)
         prompt = prompt.replace("It is one of 28 repo icons in a single matched family",
                                 "It joins the 28 Neon Night avatars and its sibling repo icons as one matched family")
-        prompt = prompt.replace("(identical in all 28 repo icons)", "(identical to the Neon Night avatars)")
+        prompt = prompt.replace("(identical in all 28 repo icons)",
+                                "(one flat ground, not the avatar night tile)")
         prompt = prompt.replace("same model and version for all 28", "same model and version as the avatar set")
+        clause = ground_clause(card)
+        prompt = prompt.replace("Keep the background empty and the glyph inside", clause + " Keep the glyph inside")
+
+        stated = [clause in prompt]  # the clause appears exactly once, even with an anchor and a BACKGROUND paragraph
+
+        def _ground_paragraph(m):  # the whole numbered BACKGROUND paragraph, up to the next blank line
+            body = f"{m.group(1)} BACKGROUND (one flat ground, not the avatar night tile). "
+            if stated[0]:
+                return body.rstrip()
+            stated[0] = True
+            return body + clause
+
+        prompt = _BACKGROUND_PARAGRAPH.sub(_ground_paragraph, prompt)
         for k, v in slots.items():
             if v is not None:
                 prompt = prompt.replace("{" + k + "}", str(v))
+        if clause not in prompt:  # the exact ground is appended whenever no paragraph replacement stated it
+            prompt = prompt.rstrip() + "\n\n" + clause
     missing = sorted(set(re.findall(r"\{([A-Z_]+)\}", prompt)))
     ink = colours.get("INK") or []
     return {"prompt": prompt, "missing": missing, "facts": facts, "option": option.upper(),
@@ -2019,46 +2048,107 @@ def _de(a, b) -> float:
     return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2) ** 0.5
 
 
-def normalize_icon(img, ground: str = "auto", card: str | None = None, pixel_art: bool = False):
+def normalize_icon(img, ground: str = "auto", card: str | None = None, pixel_art: bool = False,
+                   tolerance: float | None = None):
     """(1024 px RGBA or RGB image, info). Transparent icons are keyed (ΔE ≤ 6 from the ground, 2 px feather),
     trimmed to their alpha box and fitted to the 688 px live area; an icon with its own opaque ground (an avatar-style
-    night tile) is kept full-bleed (`ground="keep"`)."""
+    night tile) is kept full-bleed (`ground="keep"`). In auto mode only a dark ground (relative luminance < 0.2) that is
+    not within dE 12 of the card colour is kept as a night tile; every other uniform ground is keyed out. The four
+    corners count as one ground when they are within `tolerance` dE (default 3.0, `--ground-tolerance`). A raised
+    tolerance flattens a kept vignetted tile with a feathered ramp (FLATTEN_FEATHER dE) and the transparent key uses a
+    soft alpha ramp, so a glow around the glyph stays continuous while the glyph edge stays hard."""
     from PIL import Image, ImageFilter
     from .color import rgb as hexrgb
-    from .iconbox import corner_ground, native_pixels
+    from .iconbox import DARK_PLATE, GROUND_DE, corner_ground, corner_spread, native_pixels
+    from .color import luminance
+    tol = GROUND_DE if tolerance is None else float(tolerance)
+    if not math.isfinite(tol) or tol < 0:
+        raise ShowcaseError(f"--ground-tolerance must be a finite number >= 0 (got {tolerance!r})", log="usage")
     im = img.convert("RGBA")
     info: dict = {"source_px": list(im.size)}
     corners = [im.getpixel(p) for p in ((0, 0), (im.width - 1, 0), (0, im.height - 1), (im.width - 1, im.height - 1))]
     has_alpha = any(c[3] < 255 for c in corners)
-    gnd = None if has_alpha else corner_ground(im)
+    gnd = None if has_alpha else corner_ground(im, tol)
+    spread = None if has_alpha else corner_spread(im)
     mode = ground
     if mode == "auto":
         if has_alpha:
             mode = "transparent"
         elif gnd is None:
-            raise ArtFail("icon-ground", "corners are neither transparent nor one opaque ground")
+            raise ArtFail("icon-ground", f"corners are neither transparent nor one opaque ground: measured corner dE "
+                                         f"{spread:.2f} exceeds --ground-tolerance {tol:g}; raise --ground-tolerance "
+                                         "(e.g. 5) for a slightly vignetted ground, or ask for a flat one")
         else:
             lab = _lab_cache()
+            # Measured: pure black versus the dark card colour is dE 16.5 (> CONTENT_DE 12), so it is NOT
+            # near-card and stays a night tile (kept). Pale grounds are keyed out by luminance (> DARK_PLATE).
             near_card = card is not None and _de(lab(hexrgb(gnd)), lab(hexrgb(card))) <= CONTENT_DE
-            mode = "transparent" if near_card else "keep"
+            night_tile = (not near_card) and luminance(gnd) < DARK_PLATE
+            mode = "keep" if night_tile else "transparent"
+            info["auto_reason"] = "near-card" if near_card else ("night-tile" if night_tile else "uniform-ground")
     info["mode"] = mode
     if mode == "keep":
         if gnd is None:
-            raise ArtFail("icon-ground", "--ground keep needs four opaque corners of one colour")
+            raise ArtFail("icon-ground", "--ground keep needs four opaque corners of one colour"
+                          + ("" if spread is None else f" (measured corner dE {spread:.2f} exceeds --ground-tolerance {tol:g})"))
+        if spread and spread > GROUND_DE:
+            # Tolerance was raised above the default: flatten the vignette to one ground so the kept tile's corners
+            # agree at the default tolerance that icon_qa, tile.py and iconbox.py use (issue #52 review).
+            # The ramp is feathered to keep glow continuous: a hard threshold would ring a smooth bloom.
+            lab = _lab_cache()
+            g = lab(hexrgb(gnd))
+            flat_rgb = hexrgb(gnd)
+            px = _px(im)
+            im = im.copy()
+            flattened = []
+            for p in px:
+                d = _de(lab(p[:3]), g)
+                if d <= spread:
+                    w = 1.0
+                elif d >= spread + FLATTEN_FEATHER:
+                    flattened.append(p)
+                    continue
+                else:
+                    w = 1 - (d - spread) / FLATTEN_FEATHER
+                flattened.append(tuple(round(flat_rgb[i] * w + p[i] * (1 - w)) for i in range(3)) + (255,))
+            im.putdata(flattened)
         side = max(im.size)
         sq = Image.new("RGBA", (side, side), hexrgb(gnd) + (255,))
         sq.paste(im, ((side - im.width) // 2, (side - im.height) // 2))
         out = sq.convert("RGB").resize((ICON_PX, ICON_PX), Image.LANCZOS)
+        if ground == "auto" and info.get("auto_reason") == "night-tile":
+            from .scene import png_bytes
+            if len(png_bytes(out)) > ICON_BUDGET:  # a noisy generator ground cannot be kept inside the budget
+                keyed, kinfo = normalize_icon(img, "transparent", card, pixel_art, tolerance)
+                kinfo["auto_reason"] = "budget-fallback"
+                return keyed, kinfo
         info.update(ground=gnd)
         return out, info
     if not has_alpha:
         if gnd is None:
-            raise ArtFail("icon-ground", "no transparent or uniform ground to key out")
+            raise ArtFail("icon-ground", "no transparent or uniform ground to key out"
+                          + ("" if spread is None else f" (measured corner dE {spread:.2f} exceeds --ground-tolerance {tol:g})"))
         lab = _lab_cache()
         g = lab(hexrgb(gnd))
         src = _px(im)
+        # Widen the key only when --ground-tolerance was raised above the default, so explicit modes and
+        # in-tolerance grounds key exactly as before (KEY_DE); a vignetted ground drifts up to the spread from its mean.
+        # The widening follows the requested tolerance (not the corner spread): a radial vignette has matching
+        # corners (spread 0) but a darker interior, so --ground-tolerance must still widen the key (review B, #52).
+        key_de = KEY_DE + (max(spread or 0.0, tol) if tol > GROUND_DE else 0.0)
         mask = Image.new("L", im.size)
-        mask.putdata([0 if _de(lab(p[:3]), g) <= KEY_DE else 255 for p in src])
+        # The soft alpha ramp is only for an explicitly raised --ground-tolerance; the default keeps the original
+        # 0/255 step (half == 0), so explicit --ground transparent output stays byte-identical at the default.
+        half = FLATTEN_FEATHER / 2 if tol > GROUND_DE else 0.0
+
+        def _alpha(d: float) -> int:
+            if d <= key_de:
+                return 0
+            if half <= 0 or d >= key_de + half:
+                return 255
+            return round(255 * (d - key_de) / half)
+
+        mask.putdata([_alpha(_de(lab(p[:3]), g)) for p in src])
         alpha = _min(mask, mask.filter(ImageFilter.GaussianBlur(2)))  # 2 px feather inside the edge, no ground halo
         gr, gg, gb = hexrgb(gnd)
         rgba = []
@@ -2252,6 +2342,8 @@ def add_parser(sub, cli=None):
     a.add_argument("--art-direction", help="art direction file (default: the skill's references/art-direction.md)")
     a.add_argument("--in", dest="src", help="normalize: the returned candidate PNG")
     a.add_argument("--ground", choices=("auto", "transparent", "keep"), default="auto")
+    a.add_argument("--ground-tolerance", type=float, default=3.0, metavar="DE",
+                   help="normalize: corners within this dE are one ground (default 3.0; try 5 for a vignetted ground)")
     a.add_argument("--out", help="prompt: the prompt file (art/prompts/<org>/<repo>/icon.md); normalize: the icon "
                                  "(default assets/icon.png in the checkout); check: the icon to check")
     a.add_argument("--preview", help="normalize: also write a 48 px preview on the card colour")
@@ -2586,7 +2678,8 @@ def _cmd_icon(args, cli, resolver, head):
             raise ShowcaseError("content icon normalize needs --in CANDIDATE.png", log="usage")
         src = Image.open(args.src)
         src.load()
-        img, info = normalize_icon(src, args.ground, card, pixel_art=bool(ctx.style.get("icon_pixel_art")))
+        img, info = normalize_icon(src, args.ground, card, pixel_art=bool(ctx.style.get("icon_pixel_art")),
+                                  tolerance=args.ground_tolerance)
         data, qlogs = icon_bytes(img)
         qa = icon_qa(data, card=card, ink=ink, org_mark=mark, siblings=siblings)
         out = Path(args.out) if args.out else cli.default_out(args, "assets/icon.png")
