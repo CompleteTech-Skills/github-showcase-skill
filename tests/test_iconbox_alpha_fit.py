@@ -186,6 +186,41 @@ def test_pixel_art_sizing_unchanged(tmp_path, make_ctx, fonts):
     assert fit is None
 
 
+def test_pixel_art_unrecognized_grid_keeps_size_no_alpha_fit(tmp_path, make_ctx, fonts):
+    """Unrecognized pixel grid with icon_pixel_art keeps the retained image and placement of main (#130 adjudication);
+    flag off still fits by alpha bounds."""
+    from ctshowcase import iconbox
+    ctx = make_ctx(repo_dir=EX / "repos" / "jev-minesweeper", owner="jevplay-games", repo="jev-minesweeper",
+                   description="Two-board Minesweeper race against Jev.")
+    assert ctx.style.get("icon_pixel_art")
+
+    # Opaque art with transparent margins: alpha_fit would crop it, but no pixel grid matches a 257 px canvas.
+    im = Image.new("RGBA", (257, 257), (0, 0, 0, 0))
+    ImageDraw.Draw(im).rectangle((60, 90, 200, 200), fill=(250, 200, 40, 255))
+    path = tmp_path / "odd-grid-icon.png"
+    im = save_and_reopen(im, path)
+    assert iconbox.native_pixels(im) is None
+
+    nodes, _, fit = render(ctx, fonts, path)
+    found = pics(nodes)
+    assert len(found) == 1
+    pic = found[0]
+    assert pic.image.size == (257, 257)
+    assert pic.resample == "lanczos"
+    k = min(INNER_W / 257, INNER_H / 257)
+    assert pic.w == pytest.approx(257 * k, abs=0.01)
+    assert pic.h == pytest.approx(257 * k, abs=0.01)
+    assert pic.w == pytest.approx(pic.h, abs=0.01)
+    assert fit == pytest.approx(k)
+
+    # Flag-off contrast: the same file is cropped to its alpha bounds, proving the flag prevents the crop.
+    ctx.style["icon_pixel_art"] = False
+    nodes, _, _ = render(ctx, fonts, path)
+    found = pics(nodes)
+    assert len(found) == 1
+    assert found[0].image.width < 257
+
+
 def test_bundled_brand_marks_and_logos_untouched(make_ctx, fonts):
     from ctshowcase import iconbox
     assert iconbox.CUSTOM_ICON_SOURCES == {"cli", "override", "repo"}
