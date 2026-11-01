@@ -87,8 +87,13 @@ codex exec --skip-git-repo-check --json "$(cat art/prompts/ORG/REPO/icon.md)" > 
 - `exec` runs one non-interactive turn.
 - `--skip-git-repo-check` lets it run from a scratch directory.
 - `--json` prints one JSON event per line, so the run output can be parsed (the image path is read from it, see below).
+- `--sandbox MODE` selects the sandbox policy for model-generated shell commands.
+- `--output-last-message FILE` also writes the final message to FILE.
+- A prompt of `-` is read from standard input.
 
-Use the same model and version for a whole family run (pipeline rule 4) and record it in `PROMPTS.md`. Flag names follow the Codex CLI at the time of writing; if one is rejected, run `codex exec --help` and change nothing else in the recipe.
+Use the same model and version for a whole family run (pipeline rule 4). Record the tool, model id and version in `PROMPTS.md` exactly as the run reports them; if the run does not expose a model id, write `not exposed` in the `TOOL / MODEL ID AND VERSION` field. Never invent a model id. Flag names follow codex-cli 0.166.0 at the time of writing; if one is rejected, run `codex exec --help` and change nothing else in the recipe.
+
+This recipe does not rely on a documented image path: OpenAI documentation covers non-interactive `codex exec` and its JSON events, not where generated images are stored, so always use the exact path returned by the run output.
 
 ### Read the image path from the run output
 
@@ -96,14 +101,14 @@ Use the same model and version for a whole family run (pipeline rule 4) and reco
 2. Never pick the newest file in the generated-images folder. Parallel sessions write into the same place, so the newest file can belong to another run and the wrong image gets normalized.
 3. If the run output names no image path, treat the attempt as failed. Do not fall back to the newest file or to a directory listing.
 4. Pass the chosen path to `content icon normalize --in PATH`. In the `PROMPTS.md` provenance block, record the Codex session id and only the image file name, or the path written relative to `$CODEX_HOME` (for example `$CODEX_HOME/generated_images/<file>`), in the prose beside the record. Never record the absolute path: it contains the local user name. The Provenance record fenced template itself does not change.
-5. Use one run per candidate. Do not run candidates for several repositories in the same working directory at once unless you can tell their outputs apart.
+5. One invocation may report between zero and four image paths. Every DISTINCT path the run output reports is one candidate; use exactly the reported paths, never a directory listing or the newest file. A run that reports no path is an empty run. To tell outputs apart, do not run candidates for several repositories in the same working directory at once unless you can tell their outputs apart.
 
 ### Retry and attempt limits
 
-- The limit applies per candidate, not per candidate set. A run that finishes with no image path is retried as a NEW run with the same prompt, at most 2 retries (3 attempts total) for that candidate. Parallel runs can finish without a path, which is why a retry is allowed.
-- Retries never alter the prompt.
-- A run that returns a path produces one candidate and ends that candidate's attempts. Successful candidates never count toward the cap, so the four-candidate round of pipeline rule 7 (then 4 more once, then log `art-fail`) is still reachable. Only empty runs count toward the 3 attempts, and they are not candidates.
-- After the cap for any one candidate, stop and log `art-fail` with a one-line reason. Do not loop.
+- The limit applies per candidate, not per candidate set. The fixed prompt asks for four candidates, so there are four candidate slots, and the cap applies to each slot. A run that returns k distinct paths fills k slots (up to the unfilled ones); make further runs, with the same unchanged prompt, only for unfilled slots.
+- A run that finishes with no image path is an empty run. Retry it as a NEW run with the same prompt, at most 2 retries (3 attempts total) for that slot. Parallel runs can finish without a path, which is why a retry is allowed. Retries never alter the prompt.
+- Successful candidates never count toward the cap, so the four-candidate round of pipeline rule 7 (then 4 more once, then log `art-fail`) is still reachable. Only empty runs count toward the 3 attempts, and they are not candidates.
+- After 3 empty attempts for any one slot, stop and log `art-fail` with a one-line reason. Do not loop.
 
 ### Privacy: only public facts go into prompts
 
@@ -115,8 +120,10 @@ Use the same model and version for a whole family run (pipeline rule 4) and reco
 
 ### Sandbox: read from the generated-images folder
 
-- (a) Codex stores generated images in its `generated_images` folder inside `$CODEX_HOME` (default: the `.codex` folder in the user's home, `~`). Read the image from the path named in the run output, which points there.
-- (b) Files that Codex writes into its own sandbox, for example a copy it saves into the working directory it was given, can be locked against the user account (access denied). Do not rely on them, and do not try to chmod or take ownership of them.
+These are OBSERVED runtime notes from issue #64 and the Pick Your AI evidence, not behaviour documented by OpenAI. Do not cite OpenAI documentation for them; the rule that holds regardless is: use the exact path returned by the run output.
+
+- (a) Observed: Codex stored generated images in its `generated_images` folder inside `$CODEX_HOME` (default: the `.codex` folder in the user's home, `~`). Read the image from the path named in the run output, which points there.
+- (b) Observed: files that Codex writes into its own sandbox, for example a copy it saves into the working directory it was given, can be locked against the user account (access denied). Do not rely on them, and do not try to chmod or take ownership of them.
 - (c) If a path is unreadable, copy nothing from the sandbox. Re-take the image from the generated-images folder path in the run output, or retry the run under the retry limit above.
 - (d) Copy the chosen image to a scratch location outside the repository before `content icon normalize --in`, and commit only the normalized `assets/icon.png`. Never commit the raw candidate. Do not write any real absolute local path or user name; use `$CODEX_HOME` and `~` only.
 
