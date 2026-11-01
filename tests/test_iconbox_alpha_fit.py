@@ -265,3 +265,97 @@ def test_source_png_not_modified(tmp_path, make_ctx, fonts):
 
     assert path.read_bytes() == before
     assert Image.open(path).mode == "P"
+
+
+def _assert_bundled_both_routes(tmp_path, monkeypatch, make_ctx, fonts, name, im):
+    """A synthetic transparent-padded file under <root>/assets/brand/ is drawn uncropped via cli_icon and via override."""
+    from ctshowcase import iconbox
+    skill = tmp_path / "skill"
+    path = skill / "assets" / "brand" / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    save_and_reopen(im, path)
+    ctx = make_ctx()
+    monkeypatch.setattr(ctx.brand, "root", skill)
+    assert iconbox.is_bundled_brand_asset(path, ctx.brand.root)
+
+    # CLI route: the bundled file handed in directly as the icon argument.
+    nodes, info, _ = iconbox.plate(ctx, fonts, CARD, RADIUS, INSET, cli_icon=str(path))
+    assert info["source"] == "cli"
+    found = pics(nodes)
+    assert len(found) == 1
+    assert found[0].image.size == (1024, 1024)
+    assert found[0].h <= INNER_H + 1
+
+    # Override route: repo dir is skill/assets and the override icon names brand/<name> inside it.
+    ov = make_ctx(repo_dir=skill / "assets")
+    ov.override = {"icon": f"brand/{name}"}
+    nodes, info, _ = iconbox.plate(ov, fonts, CARD, RADIUS, INSET)
+    assert info["source"] == "override"
+    found = pics(nodes)
+    assert len(found) == 1
+    assert found[0].image.size == (1024, 1024)
+    assert found[0].h <= INNER_H + 1
+
+
+def test_synthetic_bundled_brand_png_not_fitted_via_cli_and_override(tmp_path, make_ctx, fonts, monkeypatch):
+    _assert_bundled_both_routes(tmp_path, monkeypatch, make_ctx, fonts, "synthetic-logo.png", rgba_art())
+    _assert_bundled_both_routes(tmp_path, monkeypatch, make_ctx, fonts, "synthetic-palette-logo.png", palette_art())
+
+
+def test_same_art_outside_bundled_dir_is_still_fitted(tmp_path, make_ctx, fonts):
+    from ctshowcase import iconbox
+    path = tmp_path / "custom" / "icon.png"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    save_and_reopen(rgba_art(), path)
+    ctx = make_ctx()
+    # The guard is path-based: identical art outside <root>/assets/brand/ is still alpha-fitted.
+    assert not iconbox.is_bundled_brand_asset(path, ctx.brand.root)
+
+    nodes, info, _ = iconbox.plate(ctx, fonts, CARD, RADIUS, INSET, cli_icon=str(path))
+    assert info["source"] == "cli"
+    found = pics(nodes)
+    assert len(found) == 1
+    assert found[0].image.size == BBOX_SIZE
+    assert_fits_inner_box(found[0])
+
+
+def test_every_real_bundled_brand_png_untouched_both_routes(make_ctx, fonts):
+    from ctshowcase import iconbox
+    ctx = make_ctx()
+    # Read-only: the real assets/brand PNGs are only opened, never written.
+    pngs = sorted((ctx.brand.root / "assets" / "brand").glob("*.png"))
+    assert len(pngs) == 4
+    names = {p.name for p in pngs}
+    assert {"logo.png", "mark-light.png", "logo-dark.png", "logo-dark-full.png"} <= names
+
+    for p in pngs:
+        with Image.open(p) as src:
+            expected = src.size
+        assert iconbox.is_bundled_brand_asset(p, ctx.brand.root)
+
+        # CLI route. Pixel-art or full-bleed cases would be Clip-wrapped; pics() flattens Clip children.
+        nodes, info, _ = iconbox.plate(ctx, fonts, CARD, RADIUS, INSET, cli_icon=str(p))
+        assert info["source"] == "cli"
+        found = pics(nodes)
+        assert len(found) == 1, p.name
+        assert found[0].image.size == expected, p.name
+
+        # Override route: the repo dir is the real assets/ folder and the override icon is brand/<name>.
+        ov = make_ctx(repo_dir=p.parent.parent)
+        ov.override = {"icon": f"brand/{p.name}"}
+        nodes, info, _ = iconbox.plate(ov, fonts, CARD, RADIUS, INSET)
+        assert info["source"] == "override"
+        found = pics(nodes)
+        assert len(found) == 1, p.name
+        assert found[0].image.size == expected, p.name
+
+
+def test_is_bundled_brand_asset_paths(tmp_path):
+    from ctshowcase import iconbox
+    root = tmp_path / "root"
+    assert iconbox.is_bundled_brand_asset(root / "assets" / "brand" / "a.png", root) is True
+    assert iconbox.is_bundled_brand_asset(root / "assets" / "icon.png", root) is False
+    assert iconbox.is_bundled_brand_asset(root / "assets" / "brand-x" / "a.png", root) is False
+    assert iconbox.is_bundled_brand_asset(tmp_path / "outside" / "assets" / "brand" / "a.png", root) is False
+    # A traversal that leaves the brand folder resolves to assets/icon.png and is not bundled.
+    assert iconbox.is_bundled_brand_asset(root / "assets" / "brand" / ".." / "icon.png", root) is False
