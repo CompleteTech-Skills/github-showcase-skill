@@ -91,9 +91,11 @@ def test_own_site_host_is_derived_from_brand_data(brand, tmp_path):
     raw = copy.deepcopy(brand.raw)
     raw["brand_strings"]["website"] = DERIVED_HOST
     raw["footer"]["href"] = DERIVED_HOST
+    own = DERIVED_HOST + "/wp-content/uploads/logo.png"
+    # the own-site logo is configured data (footer.legacy_logo_urls), never a path table in Python
+    raw["footer"]["legacy_logo_urls"] = [u for u in raw["footer"]["legacy_logo_urls"] if "wp-content" not in u] + [own]
     derived = Brand(raw, brand.path)
     ctx = RepoContext(derived, normalize(meta_dict()), tmp_path)
-    own = DERIVED_HOST + "/wp-content/uploads/logo.png"
     before = readme.scaffold(ctx).replace(footer.block(derived), unmarked(own, href=DERIVED_HOST))
     assert own in before
     after, removed = readme.upgrade(ctx, before)
@@ -131,3 +133,56 @@ def test_helper_accepts_own_site_legacy_logos_with_own_site_flag(brand, src):
 def test_strict_default_drop_old_footer_keeps_company_alt_svg(brand):
     text = "# A\n\n" + unmarked("docs/images/logo.svg")
     assert readme.drop_old_footer(text, brand) == (text, [])
+
+
+def _with_legacy(brand, legacy):
+    raw = copy.deepcopy(brand.raw)
+    if legacy is None:
+        raw["footer"].pop("legacy_logo_urls", None)
+    else:
+        raw["footer"]["legacy_logo_urls"] = legacy
+    return Brand(raw, brand.path)
+
+
+def test_no_brand_logo_path_in_python_source():
+    import pathlib
+    src = pathlib.Path(readme.__file__).read_text(encoding="utf-8")
+    assert "OWN_SITE_LOGO_PATHS" not in src and "wp-content" not in src
+
+
+@pytest.mark.parametrize("url,expected", [
+    ("https://www.complete.tech/wp-content/uploads/logo.png", True),
+    ("https://WWW.Complete.Tech/wp-content/uploads/logo.png", True),
+    ("https://www.complete.tech/wp-content/uploads/logo.png?ver=2", True),
+    ("http://www.complete.tech/wp-content/uploads/logo.png", False),
+    ("https://www.complete.tech/wp-content/uploads/team-photo.png", False),
+    ("https://www.complete.tech.evil.test/wp-content/uploads/logo.png", False),
+    ("https://user@www.complete.tech/wp-content/uploads/logo.png", False),
+    ("https://www.complete.tech:8443/wp-content/uploads/logo.png", False),
+    ("docs/images/logo.svg", True),
+])
+def test_own_site_logo_is_derived_from_legacy_logo_urls(brand, url, expected):
+    assert readme._own_site_logo(url, brand) is expected
+
+
+@pytest.mark.parametrize("legacy", [None, [], ["not a url", 7, None, {"a": 1}]])
+def test_own_site_logo_without_usable_legacy_urls(brand, legacy):
+    b = _with_legacy(brand, legacy)
+    assert readme._own_site_logo("https://www.complete.tech/wp-content/uploads/logo.png", b) is False
+    assert readme._own_site_logo("docs/images/logo.svg", b) is True
+
+
+def test_own_site_logo_duplicate_legacy_entries(brand):
+    url = "https://www.complete.tech/wp-content/uploads/logo.png"
+    assert readme._own_site_logo(url, _with_legacy(brand, [url, url])) is True
+
+
+def test_schema_accepts_website_legacy_logo_and_rejects_bad_entries(brand):
+    from ctshowcase.config import schema_errors
+    assert "https://www.complete.tech/wp-content/uploads/logo.png" in brand.raw["footer"]["legacy_logo_urls"]
+    assert schema_errors(brand.raw) == []
+    assert schema_errors(_with_legacy(brand, None).raw) == []  # omitted is valid
+    url = brand.raw["footer"]["legacy_logo_urls"][0]
+    assert schema_errors(_with_legacy(brand, [url, url]).raw) != []  # duplicates
+    assert schema_errors(_with_legacy(brand, [7]).raw) != []  # invalid entry type
+    assert schema_errors(_with_legacy(brand, ["http://www.complete.tech/logo.png"]).raw) != []  # not https

@@ -608,32 +608,37 @@ def _old_local_logo(url: str) -> bool:
     return path in OLD_LOCAL_LOGOS
 
 
+# A file CONVENTION (the logo a former own-site README layout kept beside the docs), not brand data.
 OWN_SITE_LOCAL_LOGOS = {"docs/images/logo.svg"}
-OWN_SITE_LOGO_PATHS = {"/wp-content/uploads/logo.png"}
 
 
 def _own_site_logo(url: str, brand) -> bool:
-    """`url` is a configured historical logo source of this brand: one of the exact paths in `OWN_SITE_LOGO_PATHS`
-    on the configured company website host (`brand_strings.website`, never hardcoded) over http(s), or the
-    conventional local `docs/images/logo.svg`. Any other file on that host (a team photo, a screenshot) is authored
-    content and is kept."""
+    """`url` is a configured historical logo source of this brand: it equals, exactly, an http(s) entry of
+    `footer.legacy_logo_urls` in references/brand.yaml (scheme, host case-insensitively, port, path; query and
+    fragment ignored; no userinfo), so no brand host or path lives in Python. The generic local `docs/images/logo.svg`
+    (`OWN_SITE_LOCAL_LOGOS`) is a file convention, distinct from that configured data. Any other file on the same host
+    (a team photo, a screenshot) is authored content and is kept."""
     from urllib.parse import urlsplit
     url = url.strip()
     if "://" not in url:
         path = url.split("#", 1)[0].split("?", 1)[0]
         return (path[2:] if path.startswith("./") else path) in OWN_SITE_LOCAL_LOGOS
+    legacy = brand.raw.get("footer", {}).get("legacy_logo_urls") or []
     try:
-        got, want = urlsplit(url), urlsplit(brand.strings["website"])
-        return (
-            bool(want.hostname)
-            and got.scheme in ("http", "https")
-            and got.hostname == want.hostname
-            and got.port in (None, want.port)
-            and got.username is None
-            and got.path in OWN_SITE_LOGO_PATHS
-        )
+        got = urlsplit(url)
+        if got.username is not None or got.password is not None or not got.hostname:
+            return False
+        for entry in legacy:
+            if not isinstance(entry, str):
+                continue
+            want = urlsplit(entry.strip())
+            if (want.scheme in ("http", "https") and got.scheme == want.scheme and want.hostname
+                    and got.hostname == want.hostname and got.port == want.port
+                    and got.path == want.path):
+                return True
     except ValueError:
         return False
+    return False
 
 
 def _footer_href_ok(href: str, brand) -> bool:
@@ -668,7 +673,10 @@ def _footer_logo_url(url: str, brand) -> bool:
     url = url.strip().split("#", 1)[0].split("?", 1)[0]
     footer = brand.raw["footer"]
     urls = [footer[key] for key in ("logo_light_url", "logo_dark_url")]
-    urls.extend(footer.get("legacy_logo_urls", []))
+    # Legacy publication copies of the footer logo (GitHub raw/blob) are recognized on their own; any other legacy
+    # entry (a company-website logo) is an own-site source that only `_own_site_logo` accepts, under a vouching alt.
+    urls.extend(u for u in footer.get("legacy_logo_urls") or []
+                if isinstance(u, str) and u.startswith("https://raw.githubusercontent.com/"))
     for want in urls:
         if url == want:
             return True
@@ -691,8 +699,8 @@ def is_footer_copy(block: str, brand, loose_src: bool = False, own_site: bool = 
     rule that an alt exactly the company vouches for an image whatever its src (no caller in `upgrade()`: a generic
     alt is not provenance). `own_site=True` (`upgrade()`, for an unmarked trailing block that also passes
     `is_footer_like`) additionally recognizes, under an alt exactly the company or the footer alt, only the brand's
-    own-site historical logo sources (`_own_site_logo`: the exact paths in `OWN_SITE_LOGO_PATHS` on the company
-    website host, plus the local `docs/images/logo.svg`; "historical logo sources" means those exact paths, not every
+    own-site historical logo sources (`_own_site_logo`: the exact `footer.legacy_logo_urls` entries, plus the generic local
+    `docs/images/logo.svg` convention; "historical logo sources" means those exact paths, not every
     file on the host); partner, foreign and look-alike hosts, and other files on the company host, stay authored. The
     default is strict."""
     import html

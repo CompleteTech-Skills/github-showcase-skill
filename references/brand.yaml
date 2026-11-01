@@ -39,6 +39,8 @@ footer:
   legacy_logo_urls:
     - https://raw.githubusercontent.com/CompleteTech-LLC/.github/main/brand/logo.png
     - https://raw.githubusercontent.com/CompleteTech-LLC/.github/main/brand/logo-dark.png
+    # Historical company-website logo (an own-site README layout); recognized only to migrate such footers.
+    - https://www.complete.tech/wp-content/uploads/logo.png
   alt: CompleteTech LLC
   width: 200
   line_prefix: Built by

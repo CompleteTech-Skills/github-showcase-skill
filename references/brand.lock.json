@@ -462,7 +462,8 @@
   "href": "https://www.complete.tech",
   "legacy_logo_urls": [
    "https://raw.githubusercontent.com/CompleteTech-LLC/.github/main/brand/logo.png",
-   "https://raw.githubusercontent.com/CompleteTech-LLC/.github/main/brand/logo-dark.png"
+   "https://raw.githubusercontent.com/CompleteTech-LLC/.github/main/brand/logo-dark.png",
+   "https://www.complete.tech/wp-content/uploads/logo.png"
   ],
   "line_prefix": "Built by",
   "line_suffix": "· Innovation at Every Integration",
