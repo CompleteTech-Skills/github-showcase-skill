@@ -128,7 +128,7 @@ def test_profile_writes_and_renders(make_estate, tmp_path):
 
 @pytest.mark.parametrize("owners", [None, "t3", "watching"])
 @pytest.mark.parametrize("cfg", [None, "type: cli\n"])
-def test_profile_lists_a_pinned_slug_fork_without_a_card(labs_brand, cfg, owners):
+def test_profile_lists_a_pinned_slug_fork_without_a_card(labs_brand, cfg, owners, t3_record):
     """A `-fork` copy (type rule 1) has no card in `card`, `lint all` or doctor, so the profile shows it as a line,
     also in a co-owned org after sign-off (`--allow-t3`) and in the watching org."""
     brand = labs_brand

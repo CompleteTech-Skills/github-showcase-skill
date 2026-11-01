@@ -47,7 +47,7 @@ def _stub_gh(monkeypatch, owner, repo):
     return requests
 
 
-def test_meta_from_gh_t3_needs_allow_t3_and_records_recency(tmp_path, monkeypatch, capsys):
+def test_meta_from_gh_t3_needs_allow_t3_and_records_recency(tmp_path, monkeypatch, capsys, t3_record):
     requests = _stub_gh(monkeypatch, "Pick-Your-AI", "core")
     cmd = ["meta", "--from-gh", "Pick-Your-AI/core"]
     assert showcase.main(cmd) == 2

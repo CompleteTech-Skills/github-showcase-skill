@@ -188,6 +188,9 @@ def _gate_target(resolver: Resolver | None, owner: str, *, allow_t3: bool = Fals
     if st == "t3" and not allow_t3:
         raise Refused(f"{owner} is T3: reading its project is fine, changing anything needs co-owner sign-off",
                       log="t3-signoff")
+    if st == "t3":  # registers the grant so writer jobs carry signoff_id; refuses t3-signoff:<why>
+        from . import signoff
+        signoff.require(owner, None, resolver.aliases(owner))
     return resolver.canonical(owner)
 
 
@@ -622,6 +625,49 @@ def rename_filter_values(flt: str, renames: dict) -> str:
     return _FILTER_TOKEN.sub(token, flt)
 
 
+_REPO_QUALIFIER = re.compile(r"^repo:(.+)$", re.I)
+
+
+def _strip_filter_groups(flt: str) -> str:
+    """Replace grouping parentheses outside double-quoted values with a space, so `(repo:A/x) workstream:Research`
+    tokenizes like `repo:A/x workstream:Research`. Parentheses inside quotes are copied unchanged."""
+    if not flt:
+        return ""
+    out: list[str] = []
+    in_quotes = False
+    for ch in flt:
+        if ch == '"':
+            in_quotes = not in_quotes
+            out.append(ch)
+        elif not in_quotes and ch in "()":
+            out.append(" ")
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def _filter_repo_refs(flt: str) -> list[str]:
+    """Repository references named by the POSITIVE `repo:` qualifiers of a Projects view filter, in order and
+    de-duplicated case-insensitively. Grouping parentheses outside quoted values are ignored for tokenizing, so a
+    grouped qualifier such as `(repo:A/x OR repo:B/y)` is still found. A comma list is split (`repo:A/x,B/y`) and
+    quotes and whitespace are stripped from each part. An empty part or one with a `*` wildcard names no single
+    repository, so it is skipped. A negative `-repo:` token is ignored: an exclusion names no association."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for tok in _FILTER_TOKEN.findall(_strip_filter_groups(flt or "")):
+        m = _REPO_QUALIFIER.match(tok)
+        if not m:
+            continue
+        for part in re.findall(r'"[^"]*"|[^,]+', m.group(1)):
+            for piece in part.split(","):  # a quoted part may still hold a comma list: "A/x,A/y"
+                p = piece.strip().strip('"').strip()
+                if not p or "*" in p or p.lower() in seen:
+                    continue
+                seen.add(p.lower())
+                out.append(p)
+    return out
+
+
 def view_body(want: dict, spec: dict) -> tuple[dict, list[str]]:
     """REST view body with integer field ids (databaseId); a field without an id becomes a browser step."""
     ids = {(f.get("name") or "").lower(): f.get("databaseId") for f in spec.get("fields") or []}
@@ -678,6 +724,196 @@ def _readme_repos(spec: dict, owner: str, role: str, resolver, repos) -> tuple[l
     return repos, []
 
 
+def _grant_key(resolver, ro: str, rn: str) -> str:
+    """The lowercase RESOLVED `<canonical owner>/<repo>` key of grants and held_lower: a former login of an org keys
+    the same as its current one, so a same-owner reference matches the link loop's key."""
+    owner_key = resolver.canonical(ro) if resolver is not None else ro
+    return f"{owner_key}/{rn}".lower()
+
+
+def _normalize_repo_entries(entries, board_owner: str | None, role: str, resolver, logs: list) -> list[str]:
+    """Each repository entry in canonical form, once: `NAME` or `OWNER/NAME`, stripped, with no trailing `/` and no
+    `.git` (signoff.canonical_repo). A malformed entry is dropped and logged (`repos-malformed:`). On an org board a bare
+    NAME means <board owner>/<NAME>; on any other board it stays bare, which no sign-off can authorise. Duplicates fold
+    case-insensitively, keeping the first spelling and the order."""
+    from . import signoff
+    out: list[str] = []
+    seen: set[str] = set()
+    for entry in entries or []:
+        c = signoff.canonical_repo(entry)
+        if c is None:
+            logs.append(f"repos-malformed:{entry!r}")
+            continue
+        if "/" not in c:
+            if role == "org" and board_owner and board_owner != "@me":
+                c = f"{board_owner}/{c}"
+        else:
+            owner, name = c.split("/", 1)
+            c = f"{owner.strip()}/{name}"
+        if c.lower() in seen:
+            continue
+        seen.add(c.lower())
+        out.append(c)
+    return out
+
+
+def _authorize_readme_repos(readme_repos, resolver, allow_t3: bool, grants: dict, held_lower: set,
+                            logs: list, *, board_owner: str | None = None, role: str = "org") -> list[str]:
+    """Keep the README repositories this copy may name. Every entry is normalised once first (_normalize_repo_entries).
+    An entry whose owner cannot be resolved (a bare name off an org board, no resolver, or an unknown status) is held.
+    A T3 owner's repository is dropped with `t3-signoff:readme:<owner>/<repo>` when --allow-t3 is not passed; with it,
+    the repository needs a valid sign-off record that covers it on its own owner and name (checked on its own owner and
+    name, whatever the board owner is). A denied one is logged and dropped, a granted one is recorded in grants for the
+    README job's sign-off ids. Other owners' references are kept unchanged."""
+    from . import signoff
+    kept: list[str] = []
+    for r0 in _normalize_repo_entries(readme_repos, board_owner, role, resolver, logs):
+        if "/" not in r0 or resolver is None:
+            logs.append(f"readme-held:{r0} (owner cannot be resolved)")
+            continue
+        ro, rn = r0.split("/", 1)
+        ro = resolver.canonical(ro)
+        status = resolver.owner_status(ro)
+        if status not in (None, "excluded", "hold", "t3", "watching"):
+            logs.append(f"readme-held:{r0} (owner cannot be resolved)")
+            continue
+        if status != "t3":
+            kept.append(r0)
+            continue
+        if not allow_t3:
+            logs.append(f"t3-signoff:readme:{ro}/{rn}")
+            continue
+        key = _grant_key(resolver, ro, rn)
+        if key in grants:  # already authorized by the link loop or an earlier reference
+            kept.append(r0)
+            continue
+        if key in held_lower:
+            continue
+        rec, why = signoff.evaluate([ro, *resolver.aliases(ro)], rn)
+        if rec is None:
+            logs.append(f"t3-signoff:{(why or 'missing').partition(':')[0]}:{ro}/{rn}")
+            logs.append(f"readme-held:{ro}/{rn} (no valid T3 sign-off covers this repository)")
+            held_lower.add(key)
+            continue
+        grants[key] = rec
+        kept.append(r0)
+    return kept
+
+
+def _is_t3(row: dict) -> bool:
+    """A brand or registry org row whose tier starts with T3 (a row with no tier is never T3)."""
+    words = str(row.get("tier") or "").split()
+    return bool(words) and words[0] == "T3"
+
+
+def _captured_spec(copied: dict | None) -> dict | None:
+    """The normalized spec of a captured board; copy_plan and estate_plan derive it the same way."""
+    if copied is None:
+        return None
+    return copied if "fields" in copied and "views" in copied and "std" in copied else normalize(copied)
+
+
+def captured_t3(resolver: Resolver | None, spec: dict | None, allow_t3: bool) -> tuple[list[str], list[dict]]:
+    """Sign-off check of the T3 orgs that the CAPTURED Estate Org field names (an option whose description is
+    `T3: <login>`, or whose name is a T3 org's display name) while --allow-t3 is passed. Returns (refusals, retained):
+    refusals are `t3-signoff:<code>:<login>` for each such org with no valid sign-off record, and retained are
+    {login, name, tier, signoff_id, labels} for each such org whose record is valid. The description remainder and the
+    option name are resolved independently: the remainder is tried first, and the option name only when the remainder
+    does not resolve (an empty remainder yields no candidate), so a T3 name is still checked when its description is
+    unresolved or obsolete. labels are the lowercased, stripped option name and description (empties omitted, duplicates
+    removed); an org retained from two options gets one entry whose labels are merged. Identities resolve through
+    references/brand.yaml (current logins, former slugs, approved renames) as well as the registry, so an org that is
+    no longer in registry.orgs is still checked. copy_plan keeps every captured option (ids are never dropped) and the
+    README documents them, so a withdrawn association would otherwise survive into the option-update job and the README
+    (tests/test_t3_signoff_require.py::test_estate_replan_holds_a_captured_t3_org_after_withdrawal). This only reads.
+    Empty without --allow-t3 or without a resolver."""
+    if not allow_t3 or resolver is None:
+        return [], []
+    have = _field(spec or {}, "Org")
+    if not have:
+        return [], []
+    from . import signoff
+    t3, rows = {}, {}
+
+    def _index(key: str, row: dict) -> None:
+        rows[key] = row
+        for alias in resolver.aliases(key):  # a description written under a former login still names this org
+            t3[alias.lower()] = key
+        t3[resolver.canonical(key).lower()] = key
+        t3[str(row.get("display_name") or key).lower()] = key
+
+    sources = [list(resolver.registry.get("orgs") or {})]
+    if resolver.brand is not None:
+        sources.append(list((resolver.brand.raw.get("orgs") or {}).keys()))
+    for keys in sources:
+        for key in keys:
+            try:
+                row = resolver.brand_org(key)
+            except NeedsInput:
+                continue
+            if _is_t3(row):
+                _index(key, row)
+    def _resolve(ident: str) -> str | None:
+        """The T3 org key that one captured identifier names (a login, rename, display name or former slug), or None."""
+        ident = ident.strip().lower()
+        if not ident:
+            return None
+        key = t3.get(ident)
+        if key is None:  # an approved rename: resolve the identifier to its current login
+            try:
+                key = t3.get(resolver.canonical(ident).lower())
+            except NeedsInput:
+                key = None
+        if key is None:  # a former login: brand former_slugs resolve it without registry membership
+            bk = resolver.brand_key(ident)
+            if bk is not None:
+                try:
+                    row = resolver.brand_org(bk)
+                except NeedsInput:
+                    row = {}
+                if _is_t3(row):
+                    key = bk
+                    rows[bk] = row
+        return key
+
+    refusals, retained, seen = [], [], set()
+    for o in have.get("options") or []:
+        desc = str(o.get("description") or "")
+        name = str(o.get("name") or "")
+        # the description remainder and the option name are resolved independently: the remainder first (only with the
+        # T3 prefix), the option name when the remainder does not resolve
+        candidates = [desc[len(TIER_PREFIX_T3):]] if desc.startswith(TIER_PREFIX_T3) else []
+        candidates.append(name)
+        key = None
+        for ident in candidates:
+            key = _resolve(ident)
+            if key is not None:
+                break
+        if key is None:
+            continue
+        labels = list(dict.fromkeys(x for x in (name.strip().lower(), desc.strip().lower()) if x))
+        login = resolver.canonical(key)
+        rec, why = signoff.evaluate([key, *resolver.aliases(key)])
+        if rec is None:
+            refusals.append(f"t3-signoff:{(why or 'missing').partition(':')[0]}:{login}")
+            continue
+        if login.lower() in seen:  # the same org under another captured option: its labels join the one entry
+            entry = next(r for r in retained if r["login"].lower() == login.lower())
+            entry["labels"] = list(dict.fromkeys([*entry["labels"], *labels]))
+            continue
+        seen.add(login.lower())
+        retained.append({"login": login, "name": (rows.get(key) or {}).get("display_name") or key, "tier": "T3",
+                         "signoff_id": str(rec["id"]), "labels": labels})
+    return list(dict.fromkeys(refusals)), retained
+
+
+def held_captured_t3(resolver: Resolver | None, spec: dict | None, allow_t3: bool) -> list[str]:
+    """The refusals (`t3-signoff:<code>:<login>`) for the captured T3 orgs that have no valid sign-off record while
+    --allow-t3 is passed. Identities resolve through references/brand.yaml as well as the registry; see captured_t3,
+    whose refusals this returns. Empty without --allow-t3 or without a resolver."""
+    return captured_t3(resolver, spec, allow_t3)[0]
+
+
 def copy_plan(target: str, *, role: str = "org", source: str | None = None, title: str | None = None,
               display_name: str | None = None, copied: dict | None = None, workstreams: list[dict] | None = None,
               repositories: list[str] | None = None, approval_id: str | None = None, resolver: Resolver | None = None,
@@ -731,7 +967,7 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
         return {"command": "project", "action": "copy-plan", "owner": owner, "role": role, "stage": 1, "title": title,
                 "short_description": short, "result": "ok", "jobs": jobs, "reads": reads, "pending": pending,
                 "files": files, "logs": logs}
-    spec = copied if "fields" in copied and "views" in copied and "std" in copied else normalize(copied)
+    spec = _captured_spec(copied)
     number, project_id = spec.get("number"), spec.get("id")
     if not number or not project_id:
         raise ShowcaseError("the --copied capture has no project number or id", log="usage")
@@ -741,8 +977,16 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
     # 1. fields: create what is missing, fix standard options keeping ids
     std_fields = list(FIELDS) + list(extra_fields or [])
     planned: dict[str, list] = {}  # the options each field will have once these jobs run (for the README)
+    held_t3, retained_t3 = captured_t3(resolver, spec, allow_t3) if role == "estate" else ([], [])
+    logs += held_t3
     for f in std_fields:
         have = _field(spec, f["name"])
+        if held_t3 and f["name"] == "Org" and have is not None:
+            # a captured T3 association lost its sign-off: leave the option list as captured (no ids dropped) and plan
+            # no option write or README that would carry it on
+            logs.append("hold:org-options (a captured T3 org option has no valid sign-off)")
+            planned[f["name"]] = have.get("options") or []
+            continue
         if have is None:
             if not f.get("required") and f["dataType"] == "MULTI_SELECT":
                 logs.append(f"optional-field-skipped:{f['name']}")
@@ -786,6 +1030,7 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
     vlist = [dict(v) for v in (views or (ESTATE_VIEWS if role == "estate" else VIEWS))]
     base = (f"users/{user_id}/projectsV2/{num}/views" if owner == "@me" and user_id else
             f"orgs/{owner}/projectsV2/{num}/views")
+    filter_jobs: list[tuple[dict, str]] = []  # (view-filter job, its new filter): authorized after the README repos
     for i, want in enumerate(vlist):
         have = _view(spec, want["name"])
         if have is not None:
@@ -794,8 +1039,10 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
             if i > 0 and flt != want["filter"] and role != "org":
                 new = want["filter"]
             if new != flt and have.get("id"):
-                jobs.append(_gql_job(f"{pid}-{num}-view-{have.get('number')}-filter", owner, m_view_filter(have["id"], new),
-                                     f"View '{want['name']}' filter (§13.5{'; renamed options' if renames else ''})."))
+                fj = _gql_job(f"{pid}-{num}-view-{have.get('number')}-filter", owner, m_view_filter(have["id"], new),
+                              f"View '{want['name']}' filter (§13.5{'; renamed options' if renames else ''}).")
+                jobs.append(fj)
+                filter_jobs.append((fj, new))
             continue
         if owner == "@me" and not user_id:
             pending.append({"view": want["name"], "why": "numeric user id (gh api user --jq .id) for the user views path"})
@@ -810,13 +1057,92 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
         if ui:
             want = dict(want, ui=list(want.get("ui") or []) + ui)
         vlist[i] = want
+    # 0. repository sign-off (org boards), decided before the README and the browser steps: the links, the README text,
+    # the default repository and auto-add all take their repositories from this one filtered set, so a withdrawn one is
+    # named by none of them
+    authorized: list[tuple[str, dict | None]] = []  # (repo, sign-off record or None): the only repos the settings job may name
+    link_jobs: list[dict] = []  # repository-link jobs, emitted right after the text job
+    held_lower: set[str] = set()  # lowercase owner/repo names held for lack of a valid sign-off
+    captured_populated = False  # a populated captured repository list with no explicit --repos
+    grants: dict[str, dict | None] = {}  # lowercase owner/repo -> the sign-off record that covers it
+    if repositories:  # the explicit list, normalised once: canonical OWNER/NAME entries for the link loop and the README
+        repositories = _normalize_repo_entries(repositories, owner, role, resolver, logs)
+    readme_repos, lg = _readme_repos(spec, owner, role, resolver, repositories)
+    logs += lg
+    if role == "org":
+        linked = set()
+        for r in repositories or []:
+            if "/" not in r or not resolver_same(resolver, r.split("/", 1)[0], owner):
+                logs.append(f"link-skipped:{r} (links need the same owner)")
+                continue
+            r = f"{owner}/{r.split('/', 1)[1]}"  # a former login of the org links under its current one (CQ-03)
+            if r.lower() in linked:
+                continue  # listed twice: one link job
+            rec = None
+            if allow_t3 and resolver is not None and resolver.owner_status(owner) == "t3":
+                # the owner-wide grant does not settle a repository that a later withdrawal names: check each link
+                from . import signoff
+                rec, why = signoff.evaluate([owner, *resolver.aliases(owner)], r.split("/", 1)[1])
+                if rec is None:
+                    logs.append(f"t3-signoff:{(why or 'missing').partition(':')[0]}:{r}")
+                    logs.append(f"link-held:{r} (no valid T3 sign-off covers this repository)")
+                    held_lower.add(r.lower())
+                    continue
+            linked.add(r.lower())
+            authorized.append((r, rec))
+            grants[r.lower()] = rec
+            link = _job(f"{pid}-{num}-link-{_repo_key(r.split('/', 1)[1])}", "project",
+                        ["gh", "project", "link", num, "--owner", owner, "--repo", r], owner,
+                        "Link before the §10.1 settings pass, or re-run R5 afterwards (§13.11).")
+            if rec is not None and rec.get("id"):  # the repository's own granting id; approval_id is never touched
+                signoff.stamp_associations(link, [str(rec["id"])])
+            link_jobs.append(link)
+        reads.append({"name": "org-projects-setting", "argv": ["gh", "api", f"orgs/{owner}", "--jq", ".has_organization_projects"]})
+        if not repositories:
+            # no explicit list: the captured same-owner repositories feed the default repository and auto-add, each
+            # authorized on its own resolved owner and name. They never create a link job (no new association).
+            captured_repos = [str(x) for x in (spec.get("repositories") or [])]
+            captured_populated = bool(captured_repos)
+            same = [x for x in captured_repos if "/" in x and resolver_same(resolver, x.split("/", 1)[0], owner)]
+            for r in _authorize_readme_repos([f"{owner}/{x.split('/', 1)[1]}" for x in same], resolver, allow_t3,
+                                             grants, held_lower, logs, board_owner=owner, role=role):
+                if r.lower() not in {a.lower() for a, _ in authorized}:
+                    authorized.append((r, grants.get(_grant_key(resolver, *r.split("/", 1)))))
+    # every README repository (explicit or captured) is authorized on its own resolved owner and name, for every role
+    readme_repos = _authorize_readme_repos(readme_repos, resolver, allow_t3, grants, held_lower, logs,
+                                           board_owner=owner, role=role)
+    # view filters: every repository a proposed filter names by a positive repo: qualifier is authorized like a README
+    # repository before the filter mutation goes out. A filter that names a denied repository is held (its job is
+    # removed); a permitted one carries the sign-off ids of the repositories it names. Bare names that do not resolve
+    # to an owner/name pair are left alone.
+    for fj, flt in (filter_jobs if resolver is not None else []):  # no resolver: nothing to authorize against, unchanged
+        refs = [r for r in _normalize_repo_entries(_filter_repo_refs(flt), owner, role, resolver, []) if "/" in r]
+        if not refs:
+            continue
+        kept = _authorize_readme_repos(refs, resolver, allow_t3, grants, held_lower, logs, board_owner=owner, role=role)
+        kept_keys = {_grant_key(resolver, *r.split("/", 1)) for r in kept if "/" in r}
+        if any(_grant_key(resolver, *r.split("/", 1)) not in kept_keys for r in refs):
+            jobs[:] = [j for j in jobs if j is not fj]
+            logs.append(f"view-filter-held:{fj['id']} (a repository in the proposed filter has no valid T3 sign-off or "
+                        "is not authorized)")
+            pending.append({"why": "view filter held: it names a repository without a valid T3 sign-off",
+                            "needs": "a valid record covering that repository, or remove it from the filter"})
+            continue
+        ids = [str(g["id"]) for r in kept if "/" in r
+               and (g := grants.get(_grant_key(resolver, *r.split("/", 1))))
+               and g.get("id")]
+        if ids:
+            from . import signoff
+            signoff.stamp_associations(fj, list(dict.fromkeys(ids)), owner)
     # 4. text: short description and README (README needs every view number)
     nums = view_numbers(spec)
     edit = ["gh", "project", "edit", num, "--owner", own_flag, "--description", short]
     text = readme_text
-    readme_repos, lg = _readme_repos(spec, owner, role, resolver, repositories)
-    logs += lg
-    if text is None:
+    if held_t3:
+        text = None
+        pending.append({"why": "README held: the Org field names a T3 org with no valid sign-off record",
+                        "needs": "a valid record in the sign-off file, or remove the option on the board"})
+    elif text is None:
         try:
             text, lg = readme(owner, name, number, nums, repositories=readme_repos,
                               out_of_scope=out_of_scope, reviewed=reviewed, views=vlist, estate=role == "estate",
@@ -828,23 +1154,31 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
         edit += ["--readme", text]
     # ids carry a content hash: the README-bearing re-plan (after the view jobs ran) is a new job, never the earlier id
     # with other content, which the writer refuses together with its whole batch
-    jobs.append(_job(f"{pid}-{num}-text-{_digest(edit)}", "project", edit, owner,
-                     "§13.2 short description" + (" and §13.7 README" if text is not None else " (README after re-capture)")))
-    # 5. repository links (org boards: same owner only), then R5 re-run
-    if role == "org":
-        linked = set()
-        for r in repositories or []:
-            if "/" not in r or not resolver_same(resolver, r.split("/", 1)[0], owner):
-                logs.append(f"link-skipped:{r} (links need the same owner)")
-                continue
-            r = f"{owner}/{r.split('/', 1)[1]}"  # a former login of the org links under its current one (CQ-03)
-            if r.lower() in linked:
-                continue  # listed twice: one link job
-            linked.add(r.lower())
-            jobs.append(_job(f"{pid}-{num}-link-{_repo_key(r.split('/', 1)[1])}", "project",
-                             ["gh", "project", "link", num, "--owner", owner, "--repo", r], owner,
-                             "Link before the §10.1 settings pass, or re-run R5 afterwards (§13.11)."))
-        reads.append({"name": "org-projects-setting", "argv": ["gh", "api", f"orgs/{owner}", "--jq", ".has_organization_projects"]})
+    text_job = _job(f"{pid}-{num}-text-{_digest(edit)}", "project", edit, owner,
+                    "§13.2 short description" + (" and §13.7 README" if text is not None else " (README after re-capture)"))
+    if text is not None:
+        # the board owner's own grant is merged first (owner passed), then the granting records of the repositories
+        # the README names (a retained authorized one carries its own)
+        ids: list[str] = []
+        for r in readme_repos:
+            if "/" in r:
+                rec = grants.get(_grant_key(resolver, *r.split("/", 1)))
+                if rec and rec.get("id"):
+                    ids.append(str(rec["id"]))
+        if ids:
+            from . import signoff
+            signoff.stamp_associations(text_job, list(dict.fromkeys(ids)), owner)
+    if text is not None and retained_t3:
+        # the README documents every retained captured Org option, so the job carries the granting ids of retained_t3
+        # directly instead of rediscovering them from the rendered text (a former login with a different captured label
+        # has no match in the text) (tests/test_t3_emission_scope.py::test_captured_org_option_under_former_login_and_other_label_carries_signoff_id)
+        ids = [str(o["signoff_id"]) for o in retained_t3 if o.get("signoff_id")]
+        if ids:
+            from . import signoff
+            signoff.stamp_associations(text_job, list(dict.fromkeys(ids)), owner)
+    jobs.append(text_job)
+    # 5. repository links (org boards: same owner only), decided in step 0 and emitted here, before the browser steps
+    jobs.extend(link_jobs)
     # 6. browser: UI-only view settings, workflows, insights, default repo, auto-add, recommended template
     url = project_url(owner, number)
     for v in vlist:
@@ -862,15 +1196,26 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
         on = on_tpl if role == "template" else on_org
         if words == "auto-add" and role == "estate":
             continue
+        if words == "auto-add" and role == "org" and (repositories or captured_populated) and not authorized:
+            # no repository may be chosen for the auto-add rule: the step names none, so it is held rather than emitted
+            logs.append("workflows-held:auto-add (no authorized repository remains to choose; links held or skipped)")
+            continue
         have = next((w for w in spec.get("workflows") or [] if words.split()[-1] in (w.get("name") or "").lower()), None)
         label = have.get("name") if have else words.title()
-        if on:
+        if on and words == "auto-add" and role == "org" and authorized:
+            wf_steps.append(f"Select '{label}', click 'Edit', choose {authorized[0][0]}, set {WORKFLOW_UI[words]} "
+                            "Click 'Save and turn on workflow'.")
+        elif on:
             wf_steps.append(f"Select '{label}', click 'Edit', set {WORKFLOW_UI[words]} Click 'Save and turn on workflow'.")
         else:
             wf_steps.append(f"Leave '{label}' off on the template (auto-add is set per org after the copy).")
     wf_steps.append(f"Screenshot the workflows list into state/screens/projects/{sid}/workflows.png.")
-    jobs.append(_browser(f"{pid}-{num}-workflows", owner, f"{url}/workflows", wf_steps, "project-workflows",
-                         "§13.6 built-in workflows: UI only; never delete a workflow (no API can recreate it)."))
+    wf_job = _browser(f"{pid}-{num}-workflows", owner, f"{url}/workflows", wf_steps, "project-workflows",
+                      "§13.6 built-in workflows: UI only; never delete a workflow (no API can recreate it).")
+    if authorized and authorized[0][1] and authorized[0][1].get("id"):  # the granting record of the repository auto-add names
+        from . import signoff
+        signoff.stamp_associations(wf_job, [str(authorized[0][1]["id"])])
+    jobs.append(wf_job)
     if role == "template":
         jobs.append(_browser(f"{pid}-{num}-insights", owner, f"{url}/insights",
                              [f"Open {url}/insights.", "Keep the default 'Burn up' chart.",
@@ -886,15 +1231,24 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
                               f"templates', tick '{title}' and save.", "Screenshot the setting."],
                              "project-recommended-template", "§13.9 step 6: offer the template in the org's dialog."))
     if role == "org":
-        main = (repositories or [None])[0]
-        steps = [f"Open {url}/settings.",
-                 f"Under 'Default repository', choose {main}." if main else "Under 'Default repository', choose the org's main repository.",
-                 f"Open {url}/workflows, select 'Auto-add to project', click 'Edit', choose {main or 'the main repository'} "
-                 "and the filter is:issue,pr is:open, then click 'Save and turn on workflow'.",
-                 "Check every view against the template screenshots and fix any UI-only setting that differs.",
-                 f"Screenshot every view into state/screens/projects/{sid}/."]
-        jobs.append(_browser(f"{pid}-{num}-settings", owner, f"{url}/settings", steps, "project-settings",
-                             "§13.9 step 7: default repository, auto-add and view checks (UI only)."))
+        if (repositories or captured_populated) and not authorized:
+            # every listed repository is withdrawn, unauthorized or on another owner: the default-repository and
+            # auto-add steps would name one of them, so the settings job is held instead of emitted
+            logs.append("settings-held:default-repository-and-auto-add (no authorized repository remains to choose; links held or skipped)")
+        else:
+            main, main_rec = authorized[0] if authorized else (None, None)
+            steps = [f"Open {url}/settings.",
+                     f"Under 'Default repository', choose {main}." if main else "Under 'Default repository', choose the org's main repository.",
+                     f"Open {url}/workflows, select 'Auto-add to project', click 'Edit', choose {main or 'the main repository'} "
+                     "and the filter is:issue,pr is:open, then click 'Save and turn on workflow'.",
+                     "Check every view against the template screenshots and fix any UI-only setting that differs.",
+                     f"Screenshot every view into state/screens/projects/{sid}/."]
+            settings_job = _browser(f"{pid}-{num}-settings", owner, f"{url}/settings", steps, "project-settings",
+                                    "§13.9 step 7: default repository, auto-add and view checks (UI only).")
+            if main_rec is not None and main_rec.get("id"):  # the granting record of the repository the job names
+                from . import signoff
+                signoff.stamp_associations(settings_job, [str(main_rec["id"])])
+            jobs.append(settings_job)
         if status_update and spec.get("status_updates"):
             # createProjectV2StatusUpdate is not idempotent: a board that already has an update never gets another "first"
             logs.append("status-update:exists")
@@ -1078,8 +1432,13 @@ def lint(capture: dict, *, role: str = "org", owner: str | None = None, display_
 # =====================================================================================================
 # estate-plan (§13.10): the cross-org personal Estate project on CompleteDotTech
 # =====================================================================================================
-def estate_orgs(resolver: Resolver, *, allow_t3: bool = False) -> list[dict]:
-    """In-scope orgs for the Estate's Org field: T1, T2, T2-R (T3 only after sign-off; never HOLD or excluded)."""
+def estate_orgs(resolver: Resolver, *, allow_t3: bool = False, refusals: list[str] | None = None) -> list[dict]:
+    """In-scope orgs for the Estate's Org field: T1, T2, T2-R (T3 only after sign-off; never HOLD or excluded).
+    A T3 org also needs a valid record, and its entry keeps that record's id as
+    `signoff_id` so estate_plan can carry it onto the jobs that bring the org into the personal board.
+    A T3 org without a valid record is omitted; when `refusals` is a list, each such org is reported there as
+    `t3-signoff:<code>:<login>`."""
+    from . import signoff
     out = []
     groups = (resolver.registry.get("profile") or {}).get("org_directory") or []
     keys = [o for g in groups for o in (g or {}).get("orgs") or []] or list(resolver.registry.get("orgs") or {})
@@ -1092,16 +1451,108 @@ def estate_orgs(resolver: Resolver, *, allow_t3: bool = False) -> list[dict]:
         except NeedsInput:
             continue
         tier = str(row.get("tier") or "").split()[0]
-        if tier == "T3" and not allow_t3:
-            continue
+        rec = None
+        if tier == "T3":
+            if not allow_t3:
+                continue
+            rec, why = signoff.evaluate([key, *resolver.aliases(key)])
+            if rec is None:
+                code = (why or "missing").partition(":")[0]
+                if refusals is not None:
+                    refusals.append(f"t3-signoff:{code}:{resolver.canonical(key)}")
+                continue
         if tier in TIER_COLOR:
-            out.append({"login": resolver.canonical(key), "name": row.get("display_name") or key, "tier": tier})
+            entry = {"login": resolver.canonical(key), "name": row.get("display_name") or key, "tier": tier}
+            if rec is not None and rec.get("id"):
+                entry["signoff_id"] = str(rec["id"])
+            out.append(entry)
     return out
+
+
+TIER_PREFIX_T3 = "T3: "  # the Org-field option description is "{tier}: {login}" (estate_plan)
+_QUOTED = re.compile(r'"((?:[^"\\]|\\.)*)"')
+
+
+def _job_tokens(job: dict) -> set[str]:
+    """Whole values a job names, lowercased: every string in it, the value of a `key=value` argv element and every
+    double-quoted literal inside a GraphQL string. An org matches only a whole token, never a substring, so a job
+    for `Acme-Tools` or `Acme Tools` is not credited to a T3 org named `Acme`
+    (tests/test_t3_signoff_require.py::test_estate_plan_stamping_matches_whole_names_not_substrings)."""
+    out: set[str] = set()
+
+    def walk(v):
+        if isinstance(v, str):
+            out.add(v.lower())
+            out.add(v.partition("=")[2].lower())
+            for m in _QUOTED.finditer(v):
+                try:
+                    out.add(json.loads(m.group(0)).lower())
+                except ValueError:
+                    out.add(m.group(1).lower())
+        elif isinstance(v, dict):
+            for x in v.values():
+                walk(x)
+        elif isinstance(v, (list, tuple)):
+            for x in v:
+                walk(x)
+    walk(job)
+    out.discard("")
+    return out
+
+
+def _readme_signoff_ids(orgs: list[dict], text: str, others: tuple[str, ...] = ()) -> list[str]:
+    """The signoff_id of every org in ORGS that carries one and whose login or display name appears in TEXT
+    (a README Markdown table, say). Case-insensitive, on word boundaries: a name inside a longer word or a
+    hyphenated name (`Acme` in `Acme-Tools`) does not match. OTHERS are the names of non-T3 orgs: they are blanked out of
+    TEXT first, so `Acme` does not match inside the longer `Acme Tools`. An empty name matches nothing."""
+    out: list[str] = []
+    for x in sorted((x for x in others if x), key=len, reverse=True):
+        text = re.sub(r"(?<![\w-])" + re.escape(str(x)) + r"(?![\w-])", " ", text, flags=re.IGNORECASE)
+    for o in orgs:
+        if not o.get("signoff_id"):
+            continue
+        for name in (o.get("login"), o.get("name")):
+            if not name:
+                continue
+            if re.search(r"(?<![\w-])" + re.escape(str(name)) + r"(?![\w-])", text, re.IGNORECASE):
+                out.append(str(o["signoff_id"]))
+                break
+    return out
+
+
+def _stamp_estate_orgs(jobs: list[dict], orgs: list[dict]) -> None:
+    """Each job that names a signed-off T3 org (its Org-field option, its login) carries
+    that org's record. The jobs target @me, so stamping by target owner never finds the T3 grant; several T3 orgs on
+    one job give `signoff_ids` (signoff.stamp_associations). A `--readme` Markdown value names orgs inside its text,
+    so it is also searched by name. An org's `labels` (its captured option names and descriptions, see captured_t3)
+    credit a job that quotes one of them as a whole token. No-op when no org carries a signoff_id.
+    (tests/test_t3_signoff_require.py::test_estate_plan_jobs_carry_the_t3_orgs_signoff)"""
+    from . import signoff
+    t3 = [o for o in orgs if o.get("signoff_id")]
+    if not t3:
+        return
+    # a name that is also another org's login or display name is ambiguous: only that org's login or its
+    # `T3: login` description credits the job (exact identity, never a shared label)
+    others = {x.lower() for o in orgs if not o.get("signoff_id") for x in (o["login"], o["name"])}
+    # for README text the display name counts only when it is not ambiguous; the login always may
+    readme_orgs = [o if o["name"].lower() not in others else {**o, "name": ""} for o in t3]
+    for j in jobs:
+        tokens = _job_tokens(j)
+        ids = [o["signoff_id"] for o in t3
+               if o["login"].lower() in tokens or f"{TIER_PREFIX_T3}{o['login']}".lower() in tokens
+               or (o["name"].lower() in tokens and o["name"].lower() not in others)
+               or any(lab in tokens and lab not in others for lab in o.get("labels", []))]
+        argv = j.get("argv") if isinstance(j.get("argv"), list) else []
+        for i, arg in enumerate(argv[:-1]):
+            if arg == "--readme" and isinstance(argv[i + 1], str):
+                ids += _readme_signoff_ids(readme_orgs, argv[i + 1], tuple(others))
+        signoff.stamp_associations(j, list(dict.fromkeys(ids)))
 
 
 def estate_plan(resolver: Resolver, *, source: str | None = None, copied: dict | None = None, user_id: int | None = None,
                 approval_id: str | None = None, allow_t3: bool = False, reviewed: str | None = None) -> dict:
-    orgs = estate_orgs(resolver, allow_t3=allow_t3)
+    t3_refusals: list[str] = []
+    orgs = estate_orgs(resolver, allow_t3=allow_t3, refusals=t3_refusals)
     if len(orgs) > 50:
         raise ShowcaseError("more than 50 orgs for the Org single-select", log="usage")
     org_field = dict(ESTATE_FIELDS[0], options=[(o["name"], TIER_COLOR[o["tier"]], f"{o['tier']}: {o['login']}") for o in orgs])
@@ -1111,7 +1562,8 @@ def estate_plan(resolver: Resolver, *, source: str | None = None, copied: dict |
                      display_name="CompleteTech Estate", status_update=False, allow_t3=allow_t3)
     plan["action"] = "estate-plan"
     plan["orgs"] = orgs
-    plan["reads"] += [{"name": f"estate-items:{o['login']}",
+    plan["logs"] = list(dict.fromkeys([*plan.get("logs", []), *t3_refusals]))
+    plan["reads"] +=[{"name": f"estate-items:{o['login']}",
                        "argv": ["gh", "search", "issues", "--owner", o["login"], "--label", "estate", "--state", "open",
                                 "--json", "url", "--limit", "200"]} for o in orgs]
     plan["pending"].append({"why": "add each labelled Initiative or Feature with `gh project item-add N --owner @me --url URL` "
@@ -1122,6 +1574,13 @@ def estate_plan(resolver: Resolver, *, source: str | None = None, copied: dict |
                                      [f"Open {url}/settings.", "Check that 'Visibility' reads Private; change nothing.",
                                       "Screenshot it into state/screens/projects/me/."], "project-check",
                                      "§13.2: the Estate stays private."))
+    _, retained = captured_t3(resolver, _captured_spec(copied), allow_t3)
+    listed = {o["login"].lower() for o in orgs}
+    # an org both listed and retained is stamped with its captured labels; copies keep plan["orgs"] unchanged
+    retained_labels = {r["login"].lower(): r["labels"] for r in retained}
+    stamp_orgs = [{**o, "labels": list(dict.fromkeys([*o.get("labels", []), *retained_labels[o["login"].lower()]]))}
+                  if o["login"].lower() in retained_labels else o for o in orgs]
+    _stamp_estate_orgs(plan["jobs"], stamp_orgs + [o for o in retained if o["login"].lower() not in listed])
     return plan
 
 
@@ -1184,6 +1643,22 @@ def _resolver(args) -> Resolver:
                                getattr(args, "approved_yaml", None), getattr(args, "actions", None))
 
 
+def _parse_repos_arg(raw: str | None) -> list[str]:
+    """The --repos list: split on ',', every entry stripped, empty entries skipped (a trailing comma is fine), each one
+    canonicalised (signoff.canonical_repo). A malformed entry refuses the whole command (usage), so nothing is planned."""
+    from . import signoff
+    out: list[str] = []
+    for piece in (raw or "").split(","):
+        entry = piece.strip()
+        if not entry:
+            continue
+        canon = signoff.canonical_repo(entry)
+        if canon is None:
+            raise ShowcaseError(f"--repos entry {entry!r} is not a valid [OWNER/]REPO name", log="usage")
+        out.append(canon)
+    return out
+
+
 def cmd_project(args):
     from .org import append_jobs
     act = args.action
@@ -1227,8 +1702,7 @@ def cmd_project(args):
             raise NeedsInput("display-name", f"{owner} has no display_name in references/brand.yaml (pass --display-name)")
         canon = r.canonical(owner) if not estate else "@me"
         # the same privacy gate as copy-plan: a board that is public or may go public names no repository
-        repos, gate = _readme_repos(spec, canon, "estate" if estate else "org", r,
-                                    [x for x in (args.repos or "").split(",") if x])
+        repos, gate = _readme_repos(spec, canon, "estate" if estate else "org", r, _parse_repos_arg(args.repos))
         text, logs = readme(canon, name, spec.get("number"), view_numbers(spec),
                             fields=doc_fields(spec, estate=estate), repositories=repos,
                             out_of_scope=args.out_of_scope, reviewed=args.reviewed, estate=estate)
@@ -1246,7 +1720,7 @@ def cmd_project(args):
             raise ShowcaseError("copy-plan needs --target ORG (or @me)", log="usage")
         ws = _load(args.workstreams)
         res = copy_plan(args.target, role=args.role, source=args.source, title=args.title, display_name=args.display_name,
-                        copied=copied, workstreams=ws, repositories=[x for x in (args.repos or "").split(",") if x] or None,
+                        copied=copied, workstreams=ws, repositories=_parse_repos_arg(args.repos) or None,
                         approval_id=args.approval_id, resolver=r, user_id=args.user_id, out_of_scope=args.out_of_scope,
                         reviewed=args.reviewed, status_update=not args.no_status_update, allow_t3=getattr(args, "allow_t3", False))
     if args.jobs and res.get("files") and not args.files_dir:

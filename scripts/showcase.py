@@ -137,7 +137,7 @@ def base(cmd, ctx=None, **kw) -> dict:
 
 def gate_owner(ctx, allow_hold=False) -> str | None:
     """Refuse excluded/hold/T3 (exit 2); return 'watching' for the watching org."""
-    status = ctx.brand.check_owner(ctx.owner)
+    status = ctx.brand.check_owner(ctx.owner, repo=ctx.repo)
     if ctx.style.get("hold") and not allow_hold:
         raise ShowcaseError(f"{ctx.owner} family is on hold; pass --allow-hold", log="hold")
     return status
@@ -498,6 +498,14 @@ def cmd_describe(args):
         CHECK_FAILED if failed else OK
 
 
+def _stamp_signoff_ids(rec: dict, association_ids, ctx) -> None:
+    """The topics change record names every record that authorized it, the target owner's
+    own grant first (a T3 target) and then each T3 `also_in` association's (topics.merge `signoff_ids`).
+    `signoff_id` is the first; `signoff_ids` lists all of them only when there is more than one."""
+    from ctshowcase import signoff
+    signoff.stamp_associations(rec, association_ids, ctx.owner, ctx.repo)  # shared with intake.adopt
+
+
 def cmd_topics(args):
     from ctshowcase import records, topics
     ctx = context(args)
@@ -511,8 +519,9 @@ def cmd_topics(args):
         also_in = topics.registry_also_in(res, ctx.owner, ctx.repo)
     r = topics.merge(ctx, also_in)
     if args.records and not r["equal_as_set"]:
-        records.append(args.records, [records.record(ctx.owner, ctx.repo, "topics", "topics", r["current"], r["proposed"],
-                                                     "§5.6 merge")])
+        rec = records.record(ctx.owner, ctx.repo, "topics", "topics", r["current"], r["proposed"], "§5.6 merge")
+        _stamp_signoff_ids(rec, r.get("signoff_ids"), ctx)
+        records.append(args.records, [rec])
     out = base("topics", ctx, result="pass" if r["equal_as_set"] else "fail", **{k: v for k, v in r.items() if k != "logs"},
                logs=ctx.logs + r["logs"])
     if args.gh and not r["equal_as_set"]:
@@ -529,7 +538,7 @@ def cmd_labels(args):
         sys.stdout.write(labels.emit_yml())
         return None, OK
     ctx = context(args)
-    ctx.brand.check_owner(ctx.owner)
+    ctx.brand.check_owner(ctx.owner, repo=ctx.repo)
     # the gates `org labels` applies (labels.md Scope): a family on hold is refused like banner and card
     if (ctx.style.get("hold") or ctx.brand.resolver().family_hold(ctx.owner)) and not args.allow_hold:
         raise ShowcaseError(f"{ctx.owner} family is on hold: labels are not applied; pass --allow-hold", log="hold")
@@ -617,7 +626,7 @@ def cmd_meta(args):
         status = brand(args, prefer_lock=True).owner_status(owner)
         if status in ("excluded", "hold", "t3"):
             # raises Refused (exit 2); --allow-t3 only after an approved t3-metadata or t3-signoff row
-            brand(args, prefer_lock=True).check_owner(owner, allow_t3=args.allow_t3)
+            brand(args, prefer_lock=True).check_owner(owner, allow_t3=args.allow_t3, repo=args.from_gh.split("/")[1] if "/" in args.from_gh else None)
         m = M.from_gh(args.from_gh)
     else:
         rd = repo_dir(args)
@@ -813,7 +822,7 @@ def cmd_adopt(args):
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+", args.slug or ""):
         raise ShowcaseError("adopt needs OWNER/REPO", log="usage")
     b = brand(args)
-    b.check_owner(args.slug.split("/")[0])
+    b.check_owner(args.slug.split("/")[0], repo=args.slug.split("/")[1] if "/" in args.slug else None)
     if args.meta:
         m = M.load_file(args.meta)
         if not _same_slug(args, f"{m.get('owner')}/{m.get('repo')}", args.slug):
@@ -864,7 +873,7 @@ def cmd_doctor(args):
                                    template_dir=args.template_dir, checkouts=args.checkouts, out=args.out)
         return res, OK
     ctx = context(args)
-    ctx.brand.check_owner(ctx.owner, allow_t3=True)
+    ctx.brand.check_owner(ctx.owner, allow_t3=True, repo=ctx.repo, verify_signoff=False)  # read-only: doctor.row shows R7 hold
     r = doctor.row(ctx)
     fmt = args.doctor_format
     if fmt == "tsv":
@@ -971,7 +980,11 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--format", choices=("json", "text"), default=None, help="output style")
     p.add_argument("--quiet", action="store_true")
     p.add_argument("--allow-t3", action="store_true",
-                   help="treat a T3 (co-owned) owner as signed off for this run: every repository command and generator, not just `meta`; pass only when a t3-metadata or t3-signoff row is approved (default: T3 owners are refused, exit 2)")
+                   help="treat a T3 (co-owned) owner as signed off for this run: every repository command and generator, not just `meta`; pass only when a t3-metadata or t3-signoff row is approved (default: T3 owners are refused, exit 2). It also needs a valid sign-off record, by default in <estate root>/decisions/t3-signoffs.yaml (see --t3-signoff-file and references/t3-signoff.md); there is no opt-out")
+    p.add_argument("--t3-signoff-file", metavar="PATH",
+                   help="the sign-off record file to read instead of the default <estate root>/decisions/t3-signoffs.yaml "
+                        "(env SHOWCASE_T3_SIGNOFF_FILE; format: references/t3-signoff.md). Order: this flag, the env, the default. "
+                        "The file is read, never created")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__} ({STANDARD})")
     sub = p.add_subparsers(dest="command", required=True, metavar="<command>")
 
@@ -1213,13 +1226,19 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main(argv=None) -> int:
-    """Run one invocation. `--allow-t3` holds only for this call: the previous value is restored on every exit."""
-    from ctshowcase.config import set_t3_signed_off, t3_signed_off
-    previous = t3_signed_off()
+    """Run one invocation. `--allow-t3` and the sign-off record file hold only for this call (and this context): the prior
+    values, and the sign-off grants of any enclosing run, are restored on every exit."""
+    from ctshowcase.config import reset_t3_signed_off, set_t3_signed_off, t3_signed_off
+    from ctshowcase import signoff
+    token = set_t3_signed_off(t3_signed_off())
+    file_token = signoff.set_file(signoff._FILE.get())
+    run_token = signoff.reset()
     try:
         return _main(argv)
     finally:
-        set_t3_signed_off(previous)
+        signoff.restore(run_token)
+        signoff.reset_file(file_token)
+        reset_t3_signed_off(token)
 
 
 def _main(argv=None) -> int:
@@ -1244,12 +1263,14 @@ def _main(argv=None) -> int:
         cli.error("unrecognized arguments: " + " ".join(remaining))
     from ctshowcase.config import set_t3_signed_off
     set_t3_signed_off(getattr(args, "allow_t3", False))
+    from ctshowcase import signoff
+    signoff.set_file(getattr(args, "t3_signoff_file", None))
     if args.format is None:
         args.format = "text" if args.command in GENERATORS else "json"
     try:
         obj, code = args.func(args)
     except ShowcaseError as exc:
-        obj = {"command": args.command, "result": "refused" if exc.code == USAGE and exc.log in ("hold", "t3-signoff", "exempt")
+        obj = {"command": args.command, "result": "refused" if exc.code == USAGE and (exc.log in ("hold", "t3-signoff", "exempt") or exc.log.startswith("t3-signoff:"))
                else exc.log.split(":")[0], "error": str(exc), "logs": [exc.log]}
         code = exc.code
         if args.format == "text" and not args.quiet:
@@ -1263,6 +1284,9 @@ def _main(argv=None) -> int:
             print(f"{args.command}: {obj['error']}", file=sys.stderr)
             return code
     if obj is not None:
+        for key in ("jobs", "records", "proposals"):  # writer jobs, change records, writer-shaped proposals
+            if isinstance(obj.get(key), list):
+                signoff.stamp(obj[key])  # the granting record
         emit(args, obj)
     return code
 

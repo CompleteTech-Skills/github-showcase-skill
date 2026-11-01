@@ -1,0 +1,23 @@
+# Synthetic sign-off records (tests only; never real approvals). Owner Pick-Your-AI is the brand.yaml T3 owner.
+signoffs:
+  - id: t3s-fixture-all
+    owner: Pick-Your-AI
+    repos: ["*"]
+    approved: true
+    approver: synthetic-co-owner
+    approved_on: 2026-01-15
+    expires: 2099-12-31
+    note: "synthetic fixture"
+  - id: t3s-fixture-one
+    owner: Pick-Your-AI
+    repos: northwind-withdrawn
+    approved: false
+    approver: synthetic-co-owner
+    approved_on: 2026-01-15
+    expires: "2099-12-31T23:59:59+00:00"
+  - id: t3s-fixture-open
+    owner: Pick-Your-AI
+    repos: ["*"]
+    approved: true
+    approver: synthetic-co-owner
+    approved_on: 2026-01-15
