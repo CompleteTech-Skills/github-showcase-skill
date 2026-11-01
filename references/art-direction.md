@@ -99,7 +99,7 @@ This recipe does not rely on a documented image path: OpenAI documentation cover
 
 ### Read the image path from the run output
 
-1. After the run, search the `run.jsonl` events (or the final message) for every image file path Codex reports for the generated images, and use exactly those paths (see item 5).
+1. After the run, search the `run.jsonl` events (or the final message) for the image file path Codex reports for the generated image, and use exactly that path (see item 5).
 2. Never pick the newest file in the generated-images folder. Parallel sessions write into the same place, so the newest file can belong to another run and the wrong image gets normalized.
 3. If the run output names no readable image path, treat the attempt as an empty run (see Retry and attempt limits). Do not fall back to the newest file or to a directory listing.
 4. Copy the chosen image to scratch (see Sandbox (d)) and pass that copy to content icon normalize --in PATH, not the generated_images path. In the `PROMPTS.md` provenance block, record the Codex session id and only the image file name, or the path written relative to `$CODEX_HOME` (for example `$CODEX_HOME/generated_images/<file>`), in the prose beside the record. Never record the absolute path: it contains the local user name. The Provenance record fenced template itself does not change.

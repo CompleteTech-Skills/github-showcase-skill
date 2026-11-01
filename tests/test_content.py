@@ -612,9 +612,10 @@ def test_icon_prompt_needs_writer_then_ok(brand, icon_ctx):
     p = res["prompt"]
     assert res["missing"] == [] and p.startswith("NEON NIGHT REPO ICON · STYLE LOCK v1.2 · Northwind-Trading-Co/")
     assert "#46B8FF" in p and "#CBEBFF" in p and "#0081ED" in p and "Bulb Gold #FFC300" in p
-    assert "Size class WIDE:" in p and "seed 1025" in p and "GitHub avatar" not in p and "28 avatars in" not in p
+    assert "Size class WIDE:" in p and "1025" not in p and "seed: not supported" in p and "GitHub avatar" not in p and "28 avatars in" not in p
     assert "art/reference/avatars/Northwind-Trading-Co.png" not in p.split("(b) Style")[0]
-    assert "art/out/icons/Northwind-Trading-Co/support-triage-agent-1024-c{1..4}.png" in p
+    assert "art/out/icons/Northwind-Trading-Co/support-triage-agent-1024.png" in p
+    assert "-c{1..4}" not in p and "candidates" not in p.lower()
     assert "Do not draw the Northwind-Trading-Co org glyph (Compass rose" in p
     assert res["render"]["ink"] == "#005ADD" and res["render"]["live_area"] == [168, 168, 856, 856]
     md = C.prompt_markdown(res)
@@ -1783,3 +1784,174 @@ def test_icon_trailing_empty_iccp_is_structured_failure_in_api_check_and_normali
         good_out.unlink(missing_ok=True)
         code, res = run_content(capsys, *base, "normalize", "--in", good, "--out", good_out, *extra, *art, *NO_ESTATE)
         assert code == 0 and res["result"] in ("pass", "warn") and good_out.is_file(), (extra, res)
+
+
+# ---------------------------------------------------------------------------------------------------
+# icon prompt: unrecognised size_class names the allowed values (#62); one image and honest seed (#63)
+# ---------------------------------------------------------------------------------------------------
+MEANINGS = {"WIDE": "full 688 px width", "TALL": "full 688 px height", "SQUARE": "squarish glyph",
+            "DIAGONAL": "corner to corner"}
+
+
+def _glyph_with_size(size):
+    return {"glyph_name": "Inbox Tray", "glyph_description": "An open tray seen front-on.",
+            "spark_placement": "held inside the tray", "size_class": size}
+
+
+def test_icon_prompt_invalid_size_class_lists_allowed_values_and_meanings(brand, icon_ctx):
+    res = C.icon_prompt(icon_ctx, resolver(brand), ART, _glyph_with_size("medium"))
+    assert res["missing"] == ["SIZE_CLASS"]
+    text = res["invalid"]["SIZE_CLASS"]
+    assert "'medium'" in text
+    for key, meaning in MEANINGS.items():
+        assert key in text and meaning in text
+
+
+def test_icon_prompt_valid_size_class_has_no_invalid_and_is_case_insensitive(brand, icon_ctx):
+    for size in ("wide", "Tall", "SQUARE", "diagonal"):
+        res = C.icon_prompt(icon_ctx, resolver(brand), ART, _glyph_with_size(size))
+        assert res["invalid"] == {} and res["missing"] == [], size
+        assert f"Size class {size.upper()}:" in res["prompt"]
+
+
+def test_size_class_help_lists_every_key_with_its_meaning():
+    text = C.size_class_help()
+    assert text.startswith("size_class must be one of: ") and text.endswith("Names are case-insensitive.")
+    assert set(C.SIZE_CLASSES) == set(MEANINGS)
+    for key, meaning in MEANINGS.items():
+        assert f"{key} (" in text and meaning in text
+
+
+def _cli_prompt(monkeypatch, tmp_path, capsys, glyph_data, art_text=None, extra=()):
+    monkeypatch.chdir(tmp_path)
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    glyph = tmp_path / "glyph.json"
+    glyph.write_text(json.dumps(glyph_data), encoding="utf-8")
+    out = tmp_path / "prompt.md"
+    args = ["--meta", str(meta), "--no-repo-dir", "content", "icon", "prompt", "--option", "A",
+            "--glyph", str(glyph), "--out", str(out)]
+    if art_text is not None:
+        art_file = tmp_path / "art.md"
+        art_file.write_text(art_text, encoding="utf-8")
+        args += ["--art-direction", str(art_file)]
+    code = C.main(args + list(extra))
+    return code, json.loads(capsys.readouterr().out), out
+
+
+_NO_SIZE = {"glyph_name": "Inbox", "glyph_description": "An open tray.", "spark_placement": "inside the tray"}
+
+
+def test_icon_prompt_cli_invalid_size_class_is_needs_writer_with_the_values(monkeypatch, tmp_path, capsys):
+    code, result, out = _cli_prompt(monkeypatch, tmp_path, capsys, dict(_NO_SIZE, size_class="medium"))
+    assert code == 1 and result["result"] == "needs-writer"
+    assert "SIZE_CLASS" in result["invalid"] and "needs-writer:SIZE_CLASS:invalid" in result["logs"]
+    for key in MEANINGS:
+        assert key in result["note"]
+    assert not out.exists()
+
+
+def test_icon_prompt_cli_invalid_size_class_blocks_out_with_a_literal_size_template(monkeypatch, tmp_path, capsys):
+    art = C.load_art_direction().replace("{SIZE_CLASS}", "WIDE")
+    code, result, out = _cli_prompt(monkeypatch, tmp_path, capsys, dict(_NO_SIZE, size_class="medium"), art_text=art)
+    assert code == 1 and result["result"] == "needs-writer" and "SIZE_CLASS" in result["invalid"]
+    assert not out.exists()
+
+
+def test_icon_prompt_cli_missing_size_class_names_allowed_values(monkeypatch, tmp_path, capsys):
+    code, result, out = _cli_prompt(monkeypatch, tmp_path, capsys, _NO_SIZE)
+    assert code == 1 and result["result"] == "needs-writer"
+    assert result["missing"] == ["SIZE_CLASS"] and result["invalid"] == {}
+    for key in MEANINGS:
+        assert key in result["note"]
+    assert not out.exists()
+
+
+def test_icon_prompt_cli_missing_size_class_with_literal_size_template(monkeypatch, tmp_path, capsys):
+    art = C.load_art_direction().replace("{SIZE_CLASS}", "WIDE")
+    code, result, out = _cli_prompt(monkeypatch, tmp_path, capsys, _NO_SIZE, art_text=art)
+    assert code == 1 and result["result"] == "needs-writer" and "SIZE_CLASS" in result["missing"]
+    for key in MEANINGS:
+        assert key in result["note"]
+    assert not out.exists()
+
+
+CUSTOM_TEMPLATE = """## Repository glyph prompt template
+
+```text
+Draw {GLYPH_NAME}: {GLYPH_DESCRIPTION}. Size class {SIZE_CLASS}. Spark {SPARK_PLACEMENT}.
+output art/out/avatars/x.png
+```
+"""
+
+
+@pytest.mark.parametrize("option", ["A", "B"])
+def test_icon_prompt_has_no_candidate_wording_for_bundled_options(brand, icon_ctx, option):
+    glyph = dict(_glyph_with_size("wide"), subject="an inbox tray", objects="a tray and a card")
+    skill_art = C.SKILL_ART_DIRECTION.read_text(encoding="utf-8") if option == "B" else None
+    res = C.icon_prompt(icon_ctx, resolver(brand), ART, glyph, option, skill_art=skill_art)
+    low = res["prompt"].lower()
+    assert "candidates" not in low and "four" not in low and "-c{1..4}" not in low
+    assert res["requested"] == {"images": 1, "seed": "not supported"}
+
+
+def test_icon_prompt_has_no_candidate_wording_for_a_custom_template(brand, icon_ctx):
+    custom = CUSTOM_TEMPLATE.replace("output art", "Produce four candidates. 4 candidates.\noutput art")
+    res = C.icon_prompt(icon_ctx, resolver(brand), custom, _glyph_with_size("wide"))
+    low = res["prompt"].lower()
+    assert "candidates" not in low and "four" not in low
+    assert "Produce one image." in res["prompt"]
+
+
+def test_icon_prompt_without_seed_asserts_none_and_records_not_supported(brand, icon_ctx):
+    res = C.icon_prompt(icon_ctx, resolver(brand), ART, _glyph_with_size("wide"))
+    # the estate-format fixture states the run setting; it never asserts a seed or "Use seed"
+    assert "seed: not supported" in res["prompt"] and "use seed" not in res["prompt"].lower()
+    assert not re.search(r"seed:? *[0-9]", res["prompt"], re.I)
+    assert res["requested"]["seed"] == "not supported"
+    assert "- Requested: 1 image; seed: not supported." in C.prompt_markdown(res)
+
+
+def test_icon_prompt_family_seed_is_never_inferred(brand, icon_ctx):
+    res = C.icon_prompt(icon_ctx, resolver(brand), ART, _glyph_with_size("wide"))
+    assert "1025" not in res["prompt"]
+
+
+def test_icon_prompt_seed_is_in_prompt_and_provenance(brand, icon_ctx):
+    res = C.icon_prompt(icon_ctx, resolver(brand), ART, _glyph_with_size("wide"), seed=1234)
+    assert "seed: 1234" in res["prompt"] and "not supported" not in res["prompt"]
+    assert res["requested"] == {"images": 1, "seed": "1234"}
+    assert "- Requested: 1 image; seed: 1234." in C.prompt_markdown(res)
+
+
+def test_icon_prompt_legacy_seed_placeholder_is_rewritten(brand, icon_ctx):
+    art = ART.replace("seed {SEED} if the tool supports seeds", "Use seed {SEED} when supported.")
+    assert "Use seed {SEED} when supported." in art
+    plain = C.icon_prompt(icon_ctx, resolver(brand), art, _glyph_with_size("wide"))
+    assert "when supported" not in plain["prompt"] and "not supported" not in plain["prompt"]
+    assert "use seed" not in plain["prompt"].lower()
+    seeded = C.icon_prompt(icon_ctx, resolver(brand), art, _glyph_with_size("wide"), seed=1234)
+    assert "Use seed 1234." in seeded["prompt"] and "when supported" not in seeded["prompt"]
+
+
+def test_icon_prompt_custom_template_without_seed_placeholder_still_gets_the_seed(brand, icon_ctx):
+    res = C.icon_prompt(icon_ctx, resolver(brand), CUSTOM_TEMPLATE, _glyph_with_size("wide"), seed=1234)
+    assert res["prompt"].lower().count("seed 1234") == 1
+
+
+def test_icon_prompt_output_path_has_no_candidate_suffix(brand, icon_ctx):
+    res = C.icon_prompt(icon_ctx, resolver(brand), ART, _glyph_with_size("wide"))
+    assert "support-triage-agent-1024.png" in res["prompt"] and "-c{1..4}" not in res["prompt"]
+
+
+def test_icon_prompt_cli_parses_seed(monkeypatch, tmp_path, capsys):
+    data = dict(_NO_SIZE, size_class="wide")
+    code, result, out = _cli_prompt(monkeypatch, tmp_path, capsys, data, extra=["--seed", "1234"])
+    assert code == 0 and result["result"] == "ok"
+    assert "Use seed 1234." in result["prompt"]
+    assert "seed: 1234." in out.read_text(encoding="utf-8")
+    code, result, out = _cli_prompt(monkeypatch, tmp_path, capsys, data)
+    assert "seed: not supported." in out.read_text(encoding="utf-8")
+    assert "seed" not in result["prompt"].lower()
+    with pytest.raises(SystemExit):
+        _cli_prompt(monkeypatch, tmp_path, capsys, data, extra=["--seed", "abc"])
