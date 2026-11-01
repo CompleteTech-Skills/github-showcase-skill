@@ -1221,15 +1221,15 @@ COMPLETED_LINK = '[Docs](https://example.test) ](x "<!--")'
 LIC_DEFINITION = "[lic]: https://img.shields.io/badge/license-MIT-64748B"
 
 
-def _header_with(make_ctx, tmp_path, middle):
-    """Variant J whose header holds one real type badge followed by `middle`, then `![License][lic]` after a comment close."""
+def _header_with(make_ctx, tmp_path, middle, type_line=BADGE_TYPE_LINE):
+    """Variant J whose header holds `type_line` (the type badge by default) followed by `middle`, then `![License][lic]` after a comment close."""
     (tmp_path / "docs/images").mkdir(parents=True)
     (tmp_path / "docs/images/banner.png").write_bytes(b"banner")
     ctx = make_ctx(repo_dir=tmp_path, repo=".github", language=None,
                    description="Community health files for Northwind Trading Co.")
     text = readme.scaffold(ctx)
     original = next(m.group(2) for m in readme.MARK.finditer(text) if m.group(1) == "badges")
-    body = BADGE_TYPE_LINE + "\n" + middle + "\n\n" + LIC_DEFINITION + "\n\n-->\n\n" + BADGE_LICENSE_LINE + "\n"
+    body = type_line + "\n" + middle + "\n\n" + LIC_DEFINITION + "\n\n-->\n\n" + BADGE_LICENSE_LINE + "\n"
     path = tmp_path / "README.md"
     path.write_text(text.replace(original, body), encoding="utf-8")
     return readmelint.lint(ctx, path)["fails"]
@@ -1256,6 +1256,59 @@ def test_orphan_comment_opener_does_not_hide_a_missing_local_image(make_ctx, tmp
     # GitHub GFM (gfm-f774-orphan_comment_local.html) renders one local image, so the missing file must be reported.
     doc = COMPLETED_LINK + '\n\n![Shot](docs/images/missing.png)\n\n-->'
     assert MISSING in _usage_fails(make_ctx, tmp_path, brand, doc)
+
+
+# --- parenthesized link titles and ordered-list paragraph interruption (#7 f774 static findings) ---------------------
+
+def test_unescaped_paren_in_a_parenthesized_title_does_not_hide_a_missing_image(make_ctx, tmp_path, brand):
+    # The unescaped `(` in `](docs/...` makes the parenthesized title invalid, so GFM renders the Shot image and its missing file must be reported.
+    doc = '[Docs](https://example.test (see ![Shot](docs/images/missing.png)))'
+    assert MISSING in _usage_fails(make_ctx, tmp_path, brand, doc)
+
+
+def test_unescaped_paren_in_a_parenthesized_title_does_not_hide_an_off_palette_badge(make_ctx, tmp_path, brand):
+    # Same invalid title shape: the off-palette badge renders, so its colour must be reported.
+    doc = '[Docs](https://example.test (see ![Type](https://img.shields.io/badge/type-x-ABCDEF)))'
+    assert OFF_ABC in _usage_fails(make_ctx, tmp_path, brand, doc)
+
+
+def test_escaped_parens_in_a_parenthesized_title_keep_the_image_inert(make_ctx, tmp_path, brand):
+    # Every paren inside the title is backslash-escaped, so the title is valid and the text inside it renders no image.
+    doc = '[Docs](https://example.test (see ![Shot]\\(docs/images/missing.png\\)))'
+    assert MISSING not in _usage_fails(make_ctx, tmp_path, brand, doc)
+
+
+def test_plain_parenthesized_title_still_reports_a_later_missing_image(make_ctx, tmp_path, brand):
+    # A valid title closes on its own line, and the image on the following paragraph renders, so it must be reported.
+    doc = '[Docs](https://example.test (just a title))\n\n![Shot](docs/images/missing.png)'
+    assert MISSING in _usage_fails(make_ctx, tmp_path, brand, doc)
+
+
+GITHUB_PROFILE_BADGE = "https://img.shields.io/badge/type-GitHub%20profile-005ADD"
+
+
+def test_ordered_marker_two_cannot_interrupt_a_multiline_badge_alt(make_ctx, tmp_path):
+    # `2.` cannot interrupt a paragraph, so the multiline badge is one valid image and the header holds two badges.
+    fails = _header_with(make_ctx, tmp_path, "", type_line=f"![Type\n2. GitHub profile]({GITHUB_PROFILE_BADGE})")
+    assert not any("2-4 header badges required" in f for f in fails), fails
+
+
+def test_ordered_marker_one_interrupts_a_multiline_badge_alt(make_ctx, tmp_path):
+    # `1.` interrupts the paragraph, so the badge is not an image and the header holds only one.
+    fails = _header_with(make_ctx, tmp_path, "", type_line=f"![Type\n1. GitHub profile]({GITHUB_PROFILE_BADGE})")
+    assert any("2-4 header badges required" in f for f in fails), fails
+
+
+def test_bullet_marker_interrupts_a_multiline_badge_alt(make_ctx, tmp_path):
+    # A bullet always interrupts the paragraph, so the badge is not an image and the header holds only one.
+    fails = _header_with(make_ctx, tmp_path, "", type_line=f"![Type\n- GitHub profile]({GITHUB_PROFILE_BADGE})")
+    assert any("2-4 header badges required" in f for f in fails), fails
+
+
+def test_ordered_marker_two_inside_a_list_item_does_not_render_a_badge(make_ctx, tmp_path):
+    # Control: the `2.` at indent 0 starts a new ordered list outside the bullet item and cannot interrupt the item's paragraph, so no badge renders.
+    fails = _header_with(make_ctx, tmp_path, "", type_line=f"- ![Type\n2. GitHub profile]({GITHUB_PROFILE_BADGE})")
+    assert any("2-4 header badges required" in f for f in fails), fails
 
 
 def test_block_comment_across_a_blank_line_still_hides_an_image(make_ctx, tmp_path, brand):
