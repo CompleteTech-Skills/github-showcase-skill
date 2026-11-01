@@ -207,3 +207,62 @@ def test_cli_copy_plan_permitted_filter_carries_the_signoff_id(tmp_path):
     assert r.returncode == 0, r.stdout + r.stderr
     got = _backlog(jobs)
     assert len(got) == 1 and got[0].get("signoff_id") == "grant", [j["id"] for j in jobs]
+
+
+# Grouping parentheses (issue 23, P1): a parenthesized positive qualifier authorizes and stamps like a bare one.
+def test_filter_repo_refs_ignores_grouping_parentheses():
+    from ctshowcase.project import _filter_repo_refs as refs
+    assert refs("(repo:A/x) workstream:Research") == ["A/x"]
+    assert refs("(repo:A/x OR repo:B/y)") == ["A/x", "B/y"]
+    assert refs("((repo:A/x))") == ["A/x"]
+    assert refs("(-repo:C/z)") == []
+    assert refs("-(repo:A/x)") == ["A/x"]  # fail closed: a negated group still names the repository
+    assert refs('repo:"A/(x)"') == ["A/(x)"]  # parentheses inside a quoted value are part of the name
+
+
+GROUPED_WITHDRAWN = [
+    f"(repo:{OWNER}/withdrawn-x) workstream:Research",
+    f"(repo:{OWNER}/kept-y repo:{OWNER}/withdrawn-x) workstream:Research",
+    f"workstream:Research (repo:{OWNER}/withdrawn-x)",
+]
+
+
+@pytest.mark.parametrize("flt", GROUPED_WITHDRAWN)
+def test_grouped_withdrawn_repo_holds_the_job_with_parity(tmp_path, monkeypatch, brand, flt):
+    bare = flt.replace("(", "").replace(")", "")
+    with _Strict(monkeypatch, _file(tmp_path, WILD)):
+        plan = _plan(brand, flt)
+        ungrouped = _plan(brand, bare)
+    assert not _backlog(plan), [j["id"] for j in plan["jobs"]]
+    assert _held(plan), plan["logs"]
+    assert _t3_codes(plan), plan["logs"]
+    assert not _backlog(ungrouped) and _held(ungrouped) and _t3_codes(ungrouped), ungrouped["logs"]
+
+
+@pytest.mark.parametrize("flt", GROUPED_WITHDRAWN)
+def test_grouped_withdrawn_repo_without_a_record_holds_the_job(tmp_path, monkeypatch, brand, flt):
+    with _Strict(monkeypatch, _file(tmp_path, [])):
+        plan = _plan(brand, flt)
+    assert not _backlog(plan), [j["id"] for j in plan["jobs"]]
+    assert _held(plan), plan["logs"]
+    assert _t3_codes(plan), plan["logs"]
+
+
+def test_grouped_permitted_repo_keeps_the_job_and_carries_the_signoff_id(tmp_path, monkeypatch, brand):
+    flt = f"(repo:{OWNER}/kept-y) workstream:Research"
+    with _Strict(monkeypatch, _file(tmp_path, WILD)):
+        plan = _plan(brand, flt)
+    jobs = _backlog(plan)
+    assert len(jobs) == 1, [j["id"] for j in plan["jobs"]]
+    assert jobs[0].get("signoff_id") == "t3s-all", jobs[0]
+    assert not _held(plan) and not _t3_codes(plan), plan["logs"]
+
+
+def test_grouped_t1_only_repo_emits_one_unstamped_job(tmp_path, monkeypatch, brand):
+    flt = f"(repo:{T1}/some-repo) workstream:Research"
+    with _Strict(monkeypatch, _file(tmp_path, WILD)):
+        plan = _plan(brand, flt)
+    jobs = _backlog(plan)
+    assert len(jobs) == 1, [j["id"] for j in plan["jobs"]]
+    assert "signoff_id" not in jobs[0], jobs[0]
+    assert not _held(plan), plan["logs"]
