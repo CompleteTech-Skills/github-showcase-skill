@@ -1,8 +1,5 @@
 blank_issues_enabled: false
 contact_links:
-  - name: Ask a question or start a discussion
-    url: https://github.com/CompleteTech-Skills/github-showcase-skill/discussions
-    about: Use Discussions for questions and ideas that are not bugs or feature requests.
-  - name: Report a security vulnerability
-    url: https://github.com/CompleteTech-Skills/github-showcase-skill/security/advisories/new
-    about: Report vulnerabilities privately through a GitHub security advisory, never in a public issue.
+  - name: Read the onboarding guide
+    url: https://github.com/CompleteTech-Skills/github-showcase-skill/blob/main/ONBOARDING.md
+    about: Setup and usage questions are usually answered in the onboarding guide. Never report a vulnerability in a public issue.

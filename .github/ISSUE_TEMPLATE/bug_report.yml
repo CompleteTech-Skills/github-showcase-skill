@@ -11,7 +11,7 @@ body:
 
         Do not include tokens, secrets, private repository names or email addresses in this issue. Replace them with placeholders.
 
-        Security vulnerabilities must not be reported in public issues. Report them privately through the security policy of this repository instead.
+        Security vulnerabilities must not be reported in public issues. Contact the maintainers privately instead.
   - type: input
     id: command
     attributes:
