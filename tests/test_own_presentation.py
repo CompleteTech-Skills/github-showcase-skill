@@ -30,10 +30,15 @@ EXPECTED_FORM_LABELS = {
 }
 CONTACT = "Timothy.Gregg@complete.tech"
 EMAIL_PATTERN = r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+"
+COC_NORMALIZED_SHA256 = "89ac6173cceeb68d6217e3d745f12e6552cadbb48b9e88435a8d4ee8a0418816"
 
 
 def _load_yaml(path):
     return yaml.safe_load(path.read_text(encoding="utf-8"))
+
+
+def _normalized(text):
+    return " ".join(text.split())
 
 
 def _documented_label_names():
@@ -103,3 +108,27 @@ def test_code_of_conduct_names_documented_contact():
     assert "version 2.1" in text
     assert CONTACT in text
     assert set(re.findall(EMAIL_PATTERN, text)) == {CONTACT}
+
+
+def test_code_of_conduct_pledge_has_canonical_tokens():
+    """The pledge must match the Contributor Covenant 2.1 canonical text (#134).
+
+    The official pledge lists "caste, color," after "race," and before "religion,".
+    The earlier omission of those tokens must fail this test.
+    """
+    text = CODE_OF_CONDUCT.read_text(encoding="utf-8")
+    normalized = _normalized(text)
+    assert (
+        "personal appearance, race, caste, color, religion, or sexual identity and orientation."
+        in normalized
+    )
+    assert "race, religion" not in normalized
+
+
+def test_code_of_conduct_matches_canonical_text_digest():
+    text = CODE_OF_CONDUCT.read_text(encoding="utf-8")
+    digest = hashlib.sha256(_normalized(text).encode("utf-8")).hexdigest()
+    assert digest == COC_NORMALIZED_SHA256, (
+        "CODE_OF_CONDUCT.md must equal the canonical Contributor Covenant 2.1 text "
+        "(whitespace-normalized) with only the documented contact substituted"
+    )
