@@ -248,7 +248,7 @@ def badge_body(ctx: RepoContext, existing: str | None = None) -> str:
     previous = GENERATED_BADGES.fullmatch(existing or "")
     replaced_digest = body_sha(existing) if is_legacy else previous.group(2) if previous else None
     replaces = f" replaces={replaced_digest}" if replaced_digest else ""
-    return f"<!-- showcase:badges:generated sha256={body_sha(body)}{replaces} -->\n{body}"
+    return f"<!-- showcase:badges:generated sha256={badge_sha(body)}{replaces} -->\n{body}"
 
 
 def template_badge_body(brand) -> str:
@@ -327,7 +327,7 @@ def legacy_profile_badges(brand, body: str, style: dict | None = None) -> bool:
 def generated_badges(body: str) -> bool:
     """The digest proves that the generated badge rows have not been edited."""
     match = GENERATED_BADGES.fullmatch(body)
-    return bool(match and match.group(1) == body_sha(match.group(3)))
+    return bool(match and match.group(1) == badge_sha(match.group(3)))
 
 
 def nav_first(ctx: RepoContext) -> bool:
@@ -1179,6 +1179,14 @@ TEMPLATE_BODY = re.compile(re.escape(start("template-body")) + r"\n?(.*?)\n?" + 
 def body_sha(body: str) -> str:
     import hashlib
     return hashlib.sha256(body.replace("\r\n", "\n").strip().encode("utf-8")).hexdigest()
+
+
+def badge_sha(body: str) -> str:
+    """Digest of generated badge rows. Preserves Markdown-significant leading and trailing whitespace on rows
+    (four leading spaces make an indented code block) and normalises only line endings and the marker's
+    separator newlines."""
+    import hashlib
+    return hashlib.sha256(body.replace("\r\n", "\n").strip("\n").encode("utf-8")).hexdigest()
 
 
 def pristine_block(body: str) -> str:
