@@ -53,6 +53,21 @@ def _search_unescaped(pattern, text: str, pos: int, html_spans=None):
     return match
 
 
+def _search_comment(text: str, pos: int, html_spans):
+    """First valid HTML comment match at or after `pos` whose opener is not backslash-escaped.
+
+    An inline (mid-line) HTML comment cannot span a paragraph boundary (CommonMark/GFM), while a comment opening at the
+    start of an HTML block (inside `html_spans`) may span blank lines. An invalid match leaves `<!--` as literal text
+    and the search resumes one character on, so each iteration advances and the loop stays linear."""
+    while True:
+        match = _search_unescaped(HTML_COMMENT, text, pos, html_spans)
+        if match is None:
+            return None
+        if _span_at(html_spans, match.start()) is not None or re.search(r'\n[ \t\x00\r]*\n', match.group()) is None:
+            return match
+        pos = match.start() + 1
+
+
 def _span_at(spans, index: int, strict: bool = False):
     """The (a, b) span of a sorted, non-overlapping sequence that holds `index` (a <= index < b; strict: a < index < b),
     found by bisection so membership is a lookup, not a walk from offset 0."""
@@ -121,7 +136,7 @@ def _definition_candidates(document: str) -> str:
         if tag is not False and (tag is None or tag.start() < pos):
             tag = _search_unescaped(HTML_OPEN_TAG, document, pos, html_spans) or False
         if comment is not False and (comment is None or comment.start() < pos):
-            comment = _search_unescaped(HTML_COMMENT, document, pos, html_spans) or False
+            comment = _search_comment(document, pos, html_spans) or False
         found = [m for m in (tag, comment) if m]
         if not found:
             break
@@ -344,7 +359,7 @@ def _outside_code(text: str, mask_inline: bool = True) -> str:
         if tag is not False and (tag is None or tag.start() < pos):
             tag = _search_unescaped(HTML_OPEN_TAG, text, pos, html_spans) or False
         if comment is not False and (comment is None or comment.start() < pos):
-            comment = _search_unescaped(HTML_COMMENT, text, pos, html_spans) or False
+            comment = _search_comment(text, pos, html_spans) or False
         n = bisect.bisect_left(fences, (pos, -1))
         fence = fences[n] if n < len(fences) else None
         d = bisect.bisect_left(definitions, (pos, -1))
@@ -566,7 +581,7 @@ def _active_openers(text: str) -> frozenset[int]:
         if tag is not False and (tag is None or tag.start() < pos):
             tag = _search_unescaped(HTML_OPEN_TAG, text, pos, html_spans) or False
         if comment is not False and (comment is None or comment.start() < pos):
-            comment = _search_unescaped(HTML_COMMENT, text, pos, html_spans) or False
+            comment = _search_comment(text, pos, html_spans) or False
         k = bisect.bisect_left(fences, (pos, -1))
         regions = []
         if inline:
