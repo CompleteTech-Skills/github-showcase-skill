@@ -335,33 +335,22 @@ def test_bootstrap_write_fallback_still_works_for_a_plain_old_footer_copy(brand,
 
 
 # ---------------------------------------------------------------- G/H historical own-site sources (copied context)
-PARENT = {"full_name": "someone/upstream", "default_branch": "main"}
-UPSTREAM = "# Upstream project\n\nAuthored upstream text, kept as written.\n\n## Usage\n\nRun it.\n"
-GH_VARIANTS = {"G": dict(fork=True, parent=PARENT), "H": dict(repo="host-backup-20260914")}
-
-
-def gh_ctx(brand, variant, tmp_path):
-    ctx = RepoContext(brand, normalize(meta_dict(**GH_VARIANTS[variant])), tmp_path)
-    assert ctx.det["variant"] == variant
-    return ctx
-
-
 @pytest.mark.parametrize("variant", ["G", "H"])
 @pytest.mark.parametrize("src", POSITIVE_SRCS, ids=["website-logo", "docs-svg"])
 def test_gh_callout_only_migrates_an_unmarked_own_site_footer(brand, tmp_path, variant, src):
-    before = UPSTREAM + "\n" + unmarked(src) + "\n"
+    before = GH_UPSTREAM + "\n" + unmarked(src) + "\n"
     assert footer.check(brand, before)[0] != "pass"
     after, removed = readme.upgrade(gh_ctx(brand, variant, tmp_path), before)
     assert src not in after and after.count("Built by") == 1
     assert footer.check(brand, after)[0] == "pass"
-    assert UPSTREAM.strip() in after
+    assert GH_UPSTREAM.strip() in after
     assert readme.preservation(before, after, removed) == []
 
 
 @pytest.mark.parametrize("variant", ["G", "H"])
 @pytest.mark.parametrize("src", NEGATIVE_SRCS)
 def test_gh_callout_only_keeps_partner_and_foreign_footer_images(brand, tmp_path, variant, src):
-    before = UPSTREAM + "\n" + unmarked(src) + "\n"
+    before = GH_UPSTREAM + "\n" + unmarked(src) + "\n"
     after, removed = readme.upgrade(gh_ctx(brand, variant, tmp_path), before)
     assert image_lines(after, src) == image_lines(before, src) >= 1
     assert not [ln for ln in removed if src in ln], "preservation must report no allowance for the partner image"
