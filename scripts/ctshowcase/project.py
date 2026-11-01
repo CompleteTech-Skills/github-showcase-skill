@@ -938,6 +938,7 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
     jobs.append(_job(f"{pid}-{num}-text-{_digest(edit)}", "project", edit, owner,
                      "§13.2 short description" + (" and §13.7 README" if text is not None else " (README after re-capture)")))
     # 5. repository links (org boards: same owner only), then R5 re-run
+    authorized: list[tuple[str, dict | None]] = []  # (repo, sign-off record or None): the only repos the settings job may name
     if role == "org":
         linked = set()
         for r in repositories or []:
@@ -957,6 +958,7 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
                     logs.append(f"link-held:{r} (no valid T3 sign-off covers this repository)")
                     continue
             linked.add(r.lower())
+            authorized.append((r, rec))
             link = _job(f"{pid}-{num}-link-{_repo_key(r.split('/', 1)[1])}", "project",
                         ["gh", "project", "link", num, "--owner", owner, "--repo", r], owner,
                         "Link before the §10.1 settings pass, or re-run R5 afterwards (§13.11).")
@@ -1005,15 +1007,24 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
                               f"templates', tick '{title}' and save.", "Screenshot the setting."],
                              "project-recommended-template", "§13.9 step 6: offer the template in the org's dialog."))
     if role == "org":
-        main = (repositories or [None])[0]
-        steps = [f"Open {url}/settings.",
-                 f"Under 'Default repository', choose {main}." if main else "Under 'Default repository', choose the org's main repository.",
-                 f"Open {url}/workflows, select 'Auto-add to project', click 'Edit', choose {main or 'the main repository'} "
-                 "and the filter is:issue,pr is:open, then click 'Save and turn on workflow'.",
-                 "Check every view against the template screenshots and fix any UI-only setting that differs.",
-                 f"Screenshot every view into state/screens/projects/{sid}/."]
-        jobs.append(_browser(f"{pid}-{num}-settings", owner, f"{url}/settings", steps, "project-settings",
-                             "§13.9 step 7: default repository, auto-add and view checks (UI only)."))
+        if repositories and not authorized:
+            # every listed repository is withdrawn, unauthorized or on another owner: the default-repository and
+            # auto-add steps would name one of them, so the settings job is held instead of emitted
+            logs.append("settings-held:default-repository-and-auto-add (no authorized repository remains to choose; links held or skipped)")
+        else:
+            main, main_rec = authorized[0] if authorized else (None, None)
+            steps = [f"Open {url}/settings.",
+                     f"Under 'Default repository', choose {main}." if main else "Under 'Default repository', choose the org's main repository.",
+                     f"Open {url}/workflows, select 'Auto-add to project', click 'Edit', choose {main or 'the main repository'} "
+                     "and the filter is:issue,pr is:open, then click 'Save and turn on workflow'.",
+                     "Check every view against the template screenshots and fix any UI-only setting that differs.",
+                     f"Screenshot every view into state/screens/projects/{sid}/."]
+            settings_job = _browser(f"{pid}-{num}-settings", owner, f"{url}/settings", steps, "project-settings",
+                                    "§13.9 step 7: default repository, auto-add and view checks (UI only).")
+            if main_rec is not None and main_rec.get("id"):  # the granting record of the repository the job names
+                from . import signoff
+                signoff.stamp_associations(settings_job, [str(main_rec["id"])])
+            jobs.append(settings_job)
         if status_update and spec.get("status_updates"):
             # createProjectV2StatusUpdate is not idempotent: a board that already has an update never gets another "first"
             logs.append("status-update:exists")
