@@ -1,12 +1,12 @@
 {
  "config_sha256": "dc74956cdd1fec80148d97ba93ebbe148f0c659aeda2ccf070a28c37e6897023",
- "fingerprint": "268b5e360b681be473d23fb9ae4fb610bf829740503920606e32eaa9b5d0e573",
+ "fingerprint": "d95eaf1ad2b14d73419466b9c3d6dcea99ad79c9499601cf58aaf0bef7bb15a1",
  "inputs": {
   "description": "Generate CompleteTech LLC GitHub banners, cards, icons and READMEs, with repository checks and metadata plans.",
-  "icon_sha256": null,
+  "icon_sha256": "a1bbf17b8f066ec7e8442a323d4b1a21656a8f8788a1e54ece6f83e76dde7bf5",
   "language": "Python",
   "license": "MIT",
-  "override_sha256": "f9af3c1586bb0da3a83c465ba8c7b560324d8532fb4c7b685e111a76136230d3",
+  "override_sha256": "750ad1a2898d2dedf41d61b6bbcd8304834e661a8c98eac2e5ca5251b4dc310d",
   "owner": "CompleteTech-Skills",
   "repo": "github-showcase-skill",
   "topics": [
@@ -23,55 +23,55 @@
  },
  "outputs": {
   "banner.png": {
-   "bytes": 254246,
+   "bytes": 211705,
    "chips": [
     {
      "box": [
       520,
       241.5,
-      170.0,
+      177.3,
       38
      ],
-     "kind": "attr",
-     "source": "topics",
-     "text": "Claude · Codex"
+     "kind": "key",
+     "source": "override",
+     "text": "Claude + Codex"
     },
     {
      "box": [
-      702.0,
+      709.3,
       241.5,
       96.1,
       38
      ],
      "kind": "attr",
-     "source": "meta",
+     "source": "override",
      "text": "Python"
     },
     {
      "box": [
-      810.1,
+      817.4,
       241.5,
       91.6,
       38
      ],
      "kind": "attr",
-     "source": "readme",
+     "source": "override",
      "text": "Offline"
     }
    ],
-   "icon_source": "org-mark",
+   "icon_source": "repo",
    "px": [
     2560,
     720
    ],
    "repository_id": 1433830462,
    "scale": 2,
-   "sha256": "e6c80860e630c78025fe69421ed039efc1366b6945850f77da27882e5763f6b7"
+   "sha256": "f6dcc89cc0159d1d458c26960f13a830f0a2d3636b1258dffd6e72a0f9bd3b46"
   },
   "card.svg": {
-   "bytes": 21554,
+   "bytes": 27727,
    "repository_id": 1433830462,
-   "sha256": "949e6c541cf8cd1167be4789d15efc3712fc5624c043383460f06be061954fd2"
+   "sha256": "c44a9db0388202a334a2cf032cb8d27c562aa3bd4aee726d0351671d36d1b092"
   }
  },
  "schema": 1,
