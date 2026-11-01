@@ -319,6 +319,10 @@ def test_recipe_candidate_contract_is_single_image():
     assert "one accepted candidate per slot, even when several paths are reported" in lowered
     assert "the remaining reported paths are ignored" in lowered
     assert "asks for one image, so a run reports at most one image path" not in lowered
+    assert "at most one image path" not in lowered
+    assert "one run reports at most one" not in lowered
+    assert "fills at most one candidate slot, but its output may report more than one path" in lowered
+    assert "first readable path the run reported" in lowered
     assert "an extra path, if a run ever reports one" not in lowered
     assert "empty run" in lowered
     assert "four candidate slots" in lowered
