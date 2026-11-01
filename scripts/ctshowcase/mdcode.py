@@ -176,6 +176,8 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
     seg: list[tuple[int, str]] = []
     # an open fence: (fence run, block-quote depth, list-item content column (0 outside an item), item-before-quote flag)
     fence, fstart, table, para_depth, base, pos = None, 0, False, 0, 0, 0
+    # content columns of the open depth-0 list items; they persist across blank lines (see the list update below)
+    lists: list[int] = []
     # an open raw HTML block: (end regex, or None for a block that ends at a blank line; the same container fields)
     html = None
 
@@ -263,9 +265,22 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
             flush(seg)
             seg, base = [], 0
         # the opener may sit behind quote and list-item markers in any order, e.g. `- ```x` or `> - ```x`
+        # CommonMark list items: a blank line keeps the item open and a dedented non-blank line ends it. A depth-0 line
+        # pops the items it is dedented out of and an item marker pushes its content column; quoted lines leave `lists`.
         cdepth, col, crest = _containers(body)
+        lead = len(body) - len(body.lstrip(" "))
+        if cdepth == 0:
+            while lists and lead < lists[-1]:
+                lists.pop()
+            if col:
+                lists.append(col)
         opener = FENCE_OPEN.match(crest)
-        if opener:
+        # an unmarked line indented into an open item may open a fence at that item's content column
+        in_item = cdepth == 0 and col == 0 and bool(lists) and lead >= lists[-1]
+        item_opener = FENCE_OPEN.match(body[lists[-1]:]) if in_item else None
+        if item_opener:
+            fence, fstart = (item_opener.group(1), 0, lists[-1], True), at
+        elif opener:
             fence, fstart = (opener.group(1), cdepth, col, bool(col) and not _QUOTE.match(body)), at
         elif _ATX_HEADING.match(rest):
             regions.append((at, pos))
