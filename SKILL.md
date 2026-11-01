@@ -225,6 +225,7 @@ project estate-plan [--copied FILE] [--user-id ID] [--source OWNER/N] [--jobs FI
 content social [--out PATH] [--title TEXT] [--icon PATH] [--job] [--allow-unmeasured] [--allow-hold]
 content icon prompt|normalize|check [--option A|B] [--glyph FILE] [--art-direction FILE] [--in PNG]
     [--ground auto|transparent|keep] [--ground-tolerance DE] [--out PATH] [--preview PATH]
+    [--strict] [--min-contrast RATIO] [--ocr]
 content links [FILE...] [--readme-path PATH] [--base-ref REF] [--online] [--cache FILE] [--strict] [--diff]
 content linguist [--min-share 0.02] [--language NAME]
 content actions [--runs FILE] [--workflows FILE] [--pages FILE] [--changed PATH...] [--approval WORKFLOW=ID]
