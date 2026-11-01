@@ -374,12 +374,13 @@ def _markdown_images(text: str, document: str) -> list[tuple[str, str, int, int]
         target = html.unescape(re.sub(r"\\([^\w\s])", r"\1", match.group(2) or match.group(3)))
         definitions.setdefault(label(match.group(1)), target)
     spans = _definition_spans(document)  # definition titles are never rendered as images
+    html_spans = mdcode.html_block_spans(document)  # raw HTML blocks are literal: Markdown image syntax there is text
     sources = []
     consumed = 0
     for match in re.finditer(r"!\[", text):
         if match.start() < consumed:
             continue
-        if _span_at(spans, match.start()):
+        if _span_at(spans, match.start()) or _span_at(html_spans, match.start()):
             continue
         pos = match.start() - 1
         while pos >= 0 and text[pos] == "\\":

@@ -62,11 +62,18 @@ def test_new_quote_breaks_a_paragraph(first, second):
     assert images(first + "\n" + second + "\n") == [("x", "y.png")]
 
 
+RAW_BLOCK_OPENERS = {"<div>", "</div>", '<p align="center">', "<pre>", "<?php", "<![CDATA[", "<details>"}
+
+
 @pytest.mark.parametrize("boundary", ["***", "---", "___", "- - -", "<div>", "</div>", "<p align=\"center\">", "<!-- note -->",
                                       "<pre>", "<?php", "<![CDATA[", "<details>", "## Heading", "===", "-"])
 def test_boundary_lines_stop_the_span(boundary):
     t = "a ` b\n" + boundary + "\nc " + IMAGE + " `z`\n"
-    assert images(t) == [("x", "docs/images/missing.png")]
+    # An opener of a raw HTML block (CommonMark 4.6 types 1-6) keeps the next line inside that block, where Markdown
+    # image syntax is literal text; every other boundary leaves the line to the paragraph, so the image renders.
+    in_raw_block = any(a <= t.index("![x]") < b for a, b in mdcode.html_block_spans(t))
+    assert in_raw_block == (boundary in RAW_BLOCK_OPENERS)
+    assert images(t) == ([] if in_raw_block else [("x", "docs/images/missing.png")])
     assert not covers(t, "![x]")
 
 
@@ -127,7 +134,8 @@ def test_matrix_marker_block_survives(kind, above):
 @pytest.mark.parametrize("above,tail", [("Price is 5` per unit", " `z`"), ("Run `make", " done`")])
 def test_matrix_image_stays_rendered(kind, above, tail):
     t = _stack(kind, above, IMAGE + tail)
-    assert images(t) == [("x", "docs/images/missing.png")], kind
+    # after a type 6 opener (`html6`) the payload line is inside the raw HTML block and its image syntax is literal text
+    assert images(t) == ([] if kind == "html6" else [("x", "docs/images/missing.png")]), kind
 
 
 @pytest.mark.parametrize("above,tail", [("Price is 5` per unit", " `z`"), ("Run `make", " done`")])

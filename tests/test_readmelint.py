@@ -486,3 +486,55 @@ def test_dedented_quote_badges_after_a_list_item_fence_are_counted(make_ctx, tmp
     p.write_text(chr(10).join(lines), encoding="utf-8")
     fails = readmelint.lint(ctx, p)["fails"]
     assert not any(f.startswith("R7 2-4 header badges") for f in fails), fails
+
+
+# CommonMark 4.6 / GFM: the content of a raw HTML block is literal HTML, so Markdown image syntax there is plain text.
+def _image_fails(make_ctx, tmp_path, brand, snippet):
+    return [f for f in _usage_fails(make_ctx, tmp_path, brand, snippet) if "local image" in f]
+
+
+@pytest.mark.parametrize("snippet", [
+    "<pre>\n![Example][shot]\n</pre>\n\n[shot]: docs/images/missing.png",
+    "<pre>\n![Example](docs/images/missing.png)\n</pre>",
+    "<div>\n![Example](docs/images/missing.png)\n</div>",
+    "<div>\n![Example][shot]\n</div>\n\n[shot]: docs/images/missing.png",
+    "<table>\n<tr><td>\n![Example](<docs/images/missing.png>)\n</td></tr>\n</table>",
+], ids=["pre-reference", "pre-inline", "div-inline", "div-reference", "table-angle"])
+def test_markdown_image_syntax_inside_a_raw_html_block_is_literal_text(make_ctx, tmp_path, brand, snippet):
+    assert _image_fails(make_ctx, tmp_path, brand, snippet) == []
+
+
+@pytest.mark.parametrize("snippet", [
+    "<pre>\n" + RAW_HTML_IMG + "\n</pre>",
+    "<div>\n" + RAW_HTML_IMG + "\n</div>",
+], ids=["pre", "div"])
+def test_a_real_html_img_inside_a_raw_html_block_is_still_reported(make_ctx, tmp_path, brand, snippet):
+    assert _image_fails(make_ctx, tmp_path, brand, snippet) == [MISSING]
+
+
+@pytest.mark.parametrize("snippet", [
+    "<div>\nraw\n\n![Example](docs/images/missing.png)",
+    "<div>\nraw\n</div>\n\n![Example][shot]\n\n[shot]: docs/images/missing.png",
+    "<pre>\nraw\n</pre>\n![Example](docs/images/missing.png)",
+    "<pre>\nraw </pre>\n\n![Example](docs/images/missing.png)",
+], ids=["after-blank-in-div", "reference-after-div", "line-after-pre-end", "after-pre-end-line"])
+def test_markdown_image_after_a_raw_html_block_ends_is_still_reported(make_ctx, tmp_path, brand, snippet):
+    assert _image_fails(make_ctx, tmp_path, brand, snippet) == [MISSING]
+
+
+def test_markdown_image_inside_a_fence_stays_literal(make_ctx, tmp_path, brand):
+    assert _image_fails(make_ctx, tmp_path, brand, "```text\n![Example](docs/images/missing.png)\n```") == []
+
+
+def test_many_images_and_html_blocks_are_scanned_in_linear_work():
+    from ctshowcase import mdcode
+
+    def work(n):
+        doc = "".join(f"<div>\n![a{i}](docs/images/x{i}.png)\n</div>\n\n![b{i}](docs/images/y{i}.png)\n\n" for i in range(n))
+        before = mdcode.WORK["span_checks"]
+        found = readmelint._images(doc, doc)
+        assert [src for _, src in found] == [f"docs/images/y{i}.png" for i in range(n)]
+        return mdcode.WORK["span_checks"] - before
+
+    small, large = work(200), work(1600)
+    assert large <= small * 8 * 2, (small, large)
