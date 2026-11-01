@@ -564,11 +564,19 @@ def fork_callout(ctx: RepoContext) -> str | None:
 BANNER_BLOCK = re.compile(re.escape(start("banner")) + r".*?" + re.escape(end("banner")) + r"\n*", re.S)
 
 
-def callout_only(ctx: RepoContext, text: str) -> str:
+def callout_only(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
     """Variants G and H (§7.4): the hero banner block, then the callout (unless one is already there), then the body
     unchanged, then the decision 18 footer. Nothing else changes. Watching-org forks never reach here (`readme`
     exempts them). Review q27 "Full CompleteTech treatment" (brand.yaml readme.fork_readme: full) means the fork
-    follows its §5.4 variant instead: pass that variant with `readme --variant`."""
+    follows its §5.4 variant instead: pass that variant with `readme --variant`.
+    Returns (text, removed lines): a recognized old footer (marked or unmarked, `is_footer_copy`: for example one with
+    the former logo URLs) is replaced by the current one, and only the removed footer lines that the replacement footer
+    does not carry again are reported (multiset difference), so the preservation check accepts them. A re-emitted
+    line is not reported, so it cannot weaken the never-drop-a-line guard. A marked footer that is not a footer copy
+    (a partner image) is left as it is. The trailing unmarked footer additionally accepts the brand's own-site historical
+    logo sources (`footer.legacy_logo_urls` entries and `docs/images/logo.svg`) under a vouching alt, while partner,
+    foreign and look-alike images stay authored. A removed recognized footer is always replaced, even when fenced
+    example text makes check() report drift."""
     if ctx.det["variant"] == "G" and ctx.brand.readme_opts.get("fork_readme") == "full":
         ctx.log("needs-input:fork-variant (q27 full treatment: pass readme --variant for the §5.4 variant)")
     body = text
@@ -591,9 +599,35 @@ def callout_only(ctx: RepoContext, text: str) -> str:
     elif m:
         lead_banner = text.lstrip("\n")[:m.end()].rstrip("\n") + "\n\n"
     out = lead_banner + out.lstrip("\n")
-    if footer_wanted(ctx) and footermod.check(ctx.brand, out)[0] == "fail:missing":
-        out = out.rstrip("\n") + "\n\n" + footermod.block(ctx.brand) + "\n"
-    return out
+    removed: list[str] = []
+    if footer_wanted(ctx):
+        had_footer = False
+        if footermod.check(ctx.brand, out)[0] != "pass":
+            pos, kept = 0, []
+            for fm in find_blocks(MARK, out):
+                if fm.group(1) == "footer" and is_footer_copy(fm.group(2), ctx.brand):
+                    kept.append(out[pos:fm.start()])
+                    removed += [ln for ln in fm.group(2).splitlines() if ln.strip()]
+                    had_footer = True
+                    pos = fm.end()
+            out = "".join(kept) + out[pos:]
+            out, old_footer = drop_old_footer(out, ctx.brand, own_site=True)
+            removed += old_footer
+            if old_footer:
+                had_footer = True
+        if had_footer or footermod.check(ctx.brand, out)[0] == "fail:missing":
+            out = out.rstrip("\n") + "\n\n" + footermod.block(ctx.brand) + "\n"
+            # Report only the removed footer lines that the replacement footer does not carry again (multiset
+            # difference), so a re-emitted line never counts as lost content in the preservation check.
+            kept = Counter(ln.strip() for ln in footermod.block(ctx.brand).splitlines() if ln.strip())
+            rest = []
+            for ln in removed:
+                if kept[ln.strip()] > 0:
+                    kept[ln.strip()] -= 1
+                else:
+                    rest.append(ln)
+            removed = rest
+    return out, removed
 
 
 def preserved(ctx: RepoContext, text: str) -> bool:
@@ -612,10 +646,20 @@ def preserved(ctx: RepoContext, text: str) -> bool:
 CENTRED_OPEN = re.compile(r'(?m)^[ \t]*<(p|div) align="center">')
 
 
-def is_footer_like(block: str) -> bool:
-    """A centred block that credits the company with a complete.tech link: the decision 18 footer, exact or drifted."""
-    return bool(re.match(r'\s*<(p|div) align="center">', block)) and "built by" in block.lower() \
-        and "complete.tech" in block.lower()
+def is_footer_like(block: str, brand=None) -> bool:
+    """A centred block that credits the company with a complete.tech link (or, given `brand`, a link to the configured
+    footer host): the decision 18 footer, exact or drifted. A cheap pre-filter; `is_footer_copy` decides what is removed."""
+    low = block.lower()
+    hosts = ["complete.tech"]
+    if brand is not None:
+        from urllib.parse import urlsplit
+        try:
+            h = (urlsplit(brand.raw["footer"]["href"]).hostname or "").lower()
+        except (KeyError, TypeError, ValueError):
+            h = ""
+        if h:
+            hosts.append(h[4:] if h.startswith("www.") else h)
+    return bool(re.match(r'\s*<(p|div) align="center">', block)) and "built by" in low and any(h in low for h in hosts)
 
 
 FOOTER_TAG = re.compile(r"</?(p|div|a|picture|source|img|br|sub|sup|b|strong|em)\b([^>]*)>", re.I)
@@ -623,13 +667,121 @@ FOOTER_TAG = re.compile(r"</?(p|div|a|picture|source|img|br|sub|sup|b|strong|em)
 
 FOOTER_ATTR = re.compile(r"""\b(src|srcset|alt)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""", re.I)
 
+FOOTER_HREF = re.compile(r"""\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""", re.I)
+
+# one whole attribute (name plus optional quoted or bare value), so a name or value inside another attribute's quotes
+# (title="href=...") is never read as an attribute of its own
+FOOTER_ATTR_TOKEN = re.compile(r"""\s*([^\s"'=>/]+)(\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))?""")
+
+FOOTER_IMG_ATTRS = ("alt", "src", "srcset")
+
+
+def _footer_attrs(attrs: str) -> dict[str, str]:
+    """The `alt`, `src` and `srcset` attributes of one tag's attribute text, parsed as whole attributes: exact
+    (case-insensitive) names only, so `data-alt`, `xalt` or text inside another attribute's quoted value never count;
+    the first occurrence of a name wins, as a browser reads it; the value is returned with its quotes removed. A
+    recognised attribute with no value is recorded as an empty string, so a later duplicate cannot override it."""
+    got: dict[str, str] = {}
+    for tok in FOOTER_ATTR_TOKEN.finditer(attrs):
+        name = tok.group(1).lower()
+        if name not in FOOTER_IMG_ATTRS or name in got:
+            continue
+        if tok.group(2) is None:
+            got[name] = ""
+            continue
+        val = tok.group(2).split("=", 1)[1].strip()
+        if len(val) >= 2 and val[0] in "\"'" and val[-1] == val[0]:
+            val = val[1:-1]
+        got[name] = val
+    return got
+
+
+OLD_LOCAL_LOGOS = {'assets/logo.png', 'logo.png', 'assets/logo-dark.png', 'logo-dark.png'}
+
+
+def _old_local_logo(url: str) -> bool:
+    """`url` is a former local footer logo file (`OLD_LOCAL_LOGOS`), relative and without a scheme, host or data URI."""
+    url = url.strip()
+    if "://" in url or url.startswith("//") or url.startswith("data:"):
+        return False
+    path = url.split("#", 1)[0].split("?", 1)[0]
+    if path.startswith("./"):
+        path = path[2:]
+    elif path.startswith("/"):
+        path = path[1:]
+    return path in OLD_LOCAL_LOGOS
+
+
+# A file CONVENTION (the logo a former own-site README layout kept beside the docs), not brand data.
+OWN_SITE_LOCAL_LOGOS = {"docs/images/logo.svg"}
+
+
+def _own_site_logo(url: str, brand) -> bool:
+    """`url` is a configured historical logo source of this brand: it equals, exactly, an http(s) entry of
+    `footer.legacy_logo_urls` in references/brand.yaml (scheme, host case-insensitively, port, path; query and
+    fragment ignored; no userinfo), so no brand host or path lives in Python. The generic local `docs/images/logo.svg`
+    (`OWN_SITE_LOCAL_LOGOS`) is a file convention, distinct from that configured data. Any other file on the same host
+    (a team photo, a screenshot) is authored content and is kept."""
+    from urllib.parse import urlsplit
+    url = url.strip()
+    if "://" not in url:
+        path = url.split("#", 1)[0].split("?", 1)[0]
+        return (path[2:] if path.startswith("./") else path) in OWN_SITE_LOCAL_LOGOS
+    legacy = brand.raw.get("footer", {}).get("legacy_logo_urls") or []
+    try:
+        got = urlsplit(url)
+        if got.username is not None or got.password is not None or not got.hostname:
+            return False
+        for entry in legacy:
+            if not isinstance(entry, str):
+                continue
+            want = urlsplit(entry.strip())
+            if (want.scheme in ("http", "https") and got.scheme == want.scheme and want.hostname
+                    and got.hostname == want.hostname and got.port == want.port
+                    and got.path == want.path):
+                return True
+    except ValueError:
+        return False
+    return False
+
+
+def _footer_href_ok(href: str, brand) -> bool:
+    """`href` is an http(s) link to the configured footer link host (`footer.href`, never hardcoded): the same hostname,
+    case-insensitively, with a leading `www.` equivalent on either side; no userinfo, port or other host. Path, query
+    and fragment are ignored. A suffix, look-alike or partner host, or a complete.tech mention outside the host, is not."""
+    import html
+    from urllib.parse import urlsplit
+    try:
+        got = urlsplit(html.unescape(href).strip())
+        want = urlsplit(brand.raw["footer"]["href"])
+        if got.scheme not in ("http", "https") or got.hostname is None:
+            return False
+        if got.username is not None or got.password is not None or got.port is not None:
+            return False
+        if want.hostname is None:
+            return False
+
+        def _norm(host: str) -> str:
+            host = host.lower()
+            return host[4:] if host.startswith("www.") else host
+
+        return _norm(got.hostname) == _norm(want.hostname)
+    except ValueError:
+        return False
+
 
 def _footer_logo_url(url: str, brand) -> bool:
     """`url` is one of the decision 18 footer's own logo files (brand footer `logo_light_url` or `logo_dark_url`),
-    as configured or drifted only in scheme, branch, query or the github.com blob/raw form of the same file."""
+    including explicitly configured legacy URLs, or drifted only in scheme, branch, query or the github.com
+    blob/raw form of the same file."""
     url = url.strip().split("#", 1)[0].split("?", 1)[0]
-    for key in ("logo_light_url", "logo_dark_url"):
-        want = brand.raw["footer"][key]
+    footer = brand.raw["footer"]
+    urls = [footer[key] for key in ("logo_light_url", "logo_dark_url")]
+    # Legacy publication copies of the footer logo (GitHub raw/blob) are recognized on their own; any other legacy
+    # entry (a company-website logo) is an own-site source that only `_own_site_logo` accepts, under a vouching alt.
+    urls.extend(u for u in footer.get("legacy_logo_urls") or []
+                if isinstance(u, str) and u.startswith("https://raw.githubusercontent.com/"))
+    for want in urls:
         if url == want:
             return True
         m = re.match(r"^https://raw\.githubusercontent\.com/([^/]+)/([^/]+)/[^/]+/(.+)$", want)
@@ -642,31 +794,59 @@ def _footer_logo_url(url: str, brand) -> bool:
     return False
 
 
-def is_footer_copy(block: str, brand) -> bool:
+def is_footer_copy(block: str, brand, loose_src: bool = False, own_site: bool = False) -> bool:
     """Every line of `block` is a line of the decision 18 footer or a drifted copy of one: only centring, link, logo,
-    `<br>`/`<sub>` markup, with complete.tech links, the footer's own logo image (its src or srcset is the brand footer
-    logo URL or a drifted form of it, or its alt is exactly the company) and as text only the credit line ("Built by
-    <company>", optionally with the suffix). A sponsor or partner image (whatever its file name), a thanks line or
-    any other authored text makes it not a footer copy, so it is never removed."""
+    `<br>`/`<sub>` markup, with anchors that target the configured footer link host (`footer.href`), the footer's own logo image (its src or srcset is the brand footer
+    logo URL or a drifted form of it; an image without src/srcset passes on an alt that is exactly the company) and as text only the credit line ("Built by
+    <company>", optionally with the suffix). The former local logo files (assets/logo.png and the other `OLD_LOCAL_LOGOS`) are also recognized when the image's alt is exactly the company or the footer alt. A sponsor or partner image (whatever its file name), a thanks line or
+    any other authored text makes it not a footer copy, so it is never removed. `loose_src=True` keeps the original
+    rule that an alt exactly the company vouches for an image whatever its src (no caller in `upgrade()`: a generic
+    alt is not provenance). `own_site=True` (`upgrade()`, for an unmarked trailing block that also passes
+    `is_footer_like`) additionally recognizes, under an alt exactly the company or the footer alt, only the brand's
+    own-site historical logo sources (`_own_site_logo`: the exact `footer.legacy_logo_urls` entries, plus the generic local
+    `docs/images/logo.svg` convention; "historical logo sources" means those exact paths, not every
+    file on the host); partner, foreign and look-alike hosts, and other files on the company host, stay authored. The
+    default is strict."""
     import html
     f, company = brand.raw["footer"], brand.strings["company"]
     credit = {f"{f['line_prefix']} {company}", f"{f['line_prefix']} {company} {f['line_suffix']}"}
+
+    def _alts(attrs: str) -> list[str]:
+        alt = _footer_attrs(attrs).get("alt")
+        return [] if alt is None else [html.unescape(alt).strip()]
+
+    # a <source> carries no alt: the block's own <img> alt vouches for its former local logo files
+    block_alt_ok = any(v in (company, f["alt"]) for m in FOOTER_TAG.finditer(block)
+                       if m.group(1).lower() == "img" and not m.group(0).startswith("</") for v in _alts(m.group(2)))
 
     def tag_ok(m: re.Match) -> bool:
         name, attrs = m.group(1).lower(), m.group(2)
         if m.group(0).startswith("</") or name not in ("a", "img", "source"):
             return True
         if name == "a":
-            return "complete.tech" in attrs.lower()
-        for a in FOOTER_ATTR.finditer(attrs):  # never a file name that merely contains "logo"
-            key = a.group(1).lower()
-            val = html.unescape(next(g for g in a.groups()[1:] if g is not None)).strip()
-            if key == "alt" and val in (company, f["alt"]):
+            href = None
+            for tok in FOOTER_ATTR_TOKEN.finditer(attrs):  # first href attribute, as a browser reads it
+                if tok.group(1).lower() == "href":
+                    hm = FOOTER_HREF.search(tok.group(0))
+                    href = next((g for g in hm.groups() if g is not None), None) if hm else None
+                    break
+            return href is not None and _footer_href_ok(href, brand)
+        alt_ok, urls = False, []
+        for key, raw in _footer_attrs(attrs).items():  # whole attributes, exact names; never a file name that merely contains "logo"
+            val = html.unescape(raw).strip()
+            if key == "alt":
+                alt_ok = alt_ok or val in (company, f["alt"])
+            else:
+                urls.append([p.split()[0] for p in val.split(",") if p.split()])
+        if name == "source":
+            alt_ok = block_alt_ok
+        if urls:  # a matching alt never vouches for another image (unless loose_src): every src/srcset must be a footer logo URL
+            if loose_src and alt_ok and name == "img":
                 return True
-            parts = [p.split()[0] for p in val.split(",") if p.split()]
-            if key in ("src", "srcset") and parts and all(_footer_logo_url(u, brand) for u in parts):
-                return True
-        return False
+            return all(parts and all(_footer_logo_url(u, brand) or (alt_ok and (_old_local_logo(u) or (
+                own_site and name == "img" and _own_site_logo(u, brand)))) for u in parts)
+                       for parts in urls)
+        return alt_ok
 
     for line in block.splitlines():
         if not line.strip():
@@ -679,20 +859,35 @@ def is_footer_copy(block: str, brand) -> bool:
     return True
 
 
-def drop_old_footer(text: str, brand) -> tuple[str, list[str]]:
+def drop_old_footer(text: str, brand, loose_src: bool = False, own_site: bool = False) -> tuple[str, list[str]]:
     """(text, removed lines) with a trailing old footer (an unmarked or drifted decision 18 footer: every line a
     footer line, `is_footer_copy`) taken off the end, so the marked footer replaces it instead of following it. Any
     other block, a centred credits block with authored lines included, is left as it is (lint reports a second
-    footer-like block as `fail:duplicate`)."""
+    footer-like block as `fail:duplicate`). `loose_src` and `own_site` are passed through to `is_footer_copy` (strict by default)."""
     body = text.rstrip()
     opens = [m for m in CENTRED_OPEN.finditer(masked(body))]
     if not opens:
         return text, []
     m = opens[-1]
     tail = body[m.start():]
-    if not tail.rstrip().endswith(f"</{m.group(1)}>") or not is_footer_like(tail) or not is_footer_copy(tail, brand):
+    if not tail.rstrip().endswith(f"</{m.group(1)}>") or not is_footer_like(tail, brand) or not is_footer_copy(tail, brand, loose_src, own_site):
         return text, []
     return body[:m.start()].rstrip() + "\n", [ln for ln in tail.splitlines() if ln.strip()]
+
+
+def _unreemitted(lines: list[str], kept: Counter) -> list[str]:
+    """`lines` minus the lines the emitted footer carries again: each non-empty line matched in the multiset `kept`
+    (stripped text) is dropped and decrements `kept`; the others are returned with their original text."""
+    out: list[str] = []
+    for ln in lines:
+        s = ln.strip()
+        if not s:
+            continue
+        if kept[s] > 0:
+            kept[s] -= 1
+        else:
+            out.append(ln)
+    return out
 
 
 def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
@@ -700,14 +895,29 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
     variant = ctx.det["variant"]
     rv = standard("readme-variants")
     if variant in ("G", "H"):
-        return callout_only(ctx, normalize_text(text)), []
+        return callout_only(ctx, normalize_text(text))
     text = normalize_text(text)
     body, blocks = _strip_markers(text)
     want_footer = footer_wanted(ctx)
     removed: list[str] = []
+    # One multiset of the footer lines the emitted footer carries again, shared by the marked and the unmarked branch
+    # because only one new footer is emitted. A compliant footer is re-emitted unchanged and must not weaken the
+    # never-drop-a-line guard, so only the old lines it does not carry again are reported as removed.
+    kept: Counter = Counter()
+    if want_footer:
+        kept = Counter(ln.strip() for ln in footermod.block(ctx.brand).splitlines() if ln.strip())
+    if want_footer and blocks.get("footer") and is_footer_copy(blocks["footer"], ctx.brand):
+        # A configured publication-path change replaces only our recognized footer, not authored credits or partner
+        # images inside a similarly named block.
+        for ln in blocks["footer"].splitlines():
+            if ln.strip():
+                if kept[ln.strip()] > 0:
+                    kept[ln.strip()] -= 1
+                else:
+                    removed.append(ln)
     if want_footer:  # an unmarked or drifted footer at the end is replaced by the marked one, never kept beside it
-        body, old_footer = drop_old_footer(body, ctx.brand)
-        removed += old_footer
+        body, old_footer = drop_old_footer(body, ctx.brand, own_site=True)
+        removed += _unreemitted(old_footer, kept)
     # preserve list / existing third-party banner
     preserve = ctx.repo in (ctx.org.get("readme_preserve") or []) or len(text.encode()) > 15000
     pre, sections = split_sections(body)
@@ -731,7 +941,7 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
             keep["badges"] = badge_body(ctx, blocks["badges"])
         body, _ = _strip_markers(text, keep=keep)
         if want_footer:
-            body, _ = drop_old_footer(body, ctx.brand)  # its lines are already in `removed`
+            body, _ = drop_old_footer(body, ctx.brand, own_site=True)  # its lines are already in `removed`
         pre, sections = split_sections(body)
         lines = pre.splitlines()
     # an unmarked bold line opening the preamble is an old tagline. With a description it is replaced; without one it
