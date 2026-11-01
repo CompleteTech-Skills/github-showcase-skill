@@ -421,3 +421,39 @@ def test_dedented_deeper_quote_after_quoted_item_html_block_ends_the_block():
 def test_indented_quote_inside_item_html_block_stays_block_content(t):
     (a, b), = mdcode.html_block_spans(t)
     assert b == t.index("\n\n") + 1
+
+
+# --- fences opened on a list continuation line keep their list item (#7 r4) -----------------------------------------
+# GFM oracle: gfm-77004-list_continuation_fence.html (1 image rendered) and gfm-77004-list_fence_inert_control.html
+# (0 images). The unclosed fence ends with its list item at the dedented paragraph, so the image is outside code.
+SHOT = "![Shot](<docs/images/missing.png>)"
+
+
+@pytest.mark.parametrize("text", [
+    "- Example\n\n  ```text\n  code\n\n" + SHOT,
+    "1. x\n\n   ```text\n   code\n\n" + SHOT,
+    "- a\n  - b\n\n    ```text\n    code\n\n" + SHOT,
+], ids=["bullet", "ordered", "nested"])
+def test_list_continuation_fence_ends_before_the_dedented_image(text):
+    (start, end), = mdcode.fence_spans(text)
+    assert end <= text.index(SHOT)
+    assert [found[1] for found in images(text)] == ["docs/images/missing.png"]
+
+
+def test_fence_at_column_zero_after_a_list_still_runs_to_the_end():
+    text = "- Example\n\n```text\ncode\n\n" + SHOT
+    (start, end), = mdcode.fence_spans(text)
+    assert end == len(text)
+    assert not images(text)
+
+
+def test_blank_line_inside_a_list_fence_stays_code():
+    text = "- Example\n\n  ```text\n  code\n\n  " + SHOT + "\n  ```\n"
+    (start, end), = mdcode.fence_spans(text)
+    assert start < text.index(SHOT) < end
+    assert not images(text)
+
+
+def test_four_spaces_beyond_the_item_column_is_indented_code_not_a_fence():
+    text = "- Example\n\n      ```text\n      code\n\n" + SHOT
+    assert mdcode.fence_spans(text) == ()

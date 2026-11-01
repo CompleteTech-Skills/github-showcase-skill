@@ -902,3 +902,77 @@ def test_e90_gfm_oracle_cases(make_ctx, tmp_path, brand, body, expect_missing):
     readmelint._active_openers.cache_clear()
     fails = _usage_fails(make_ctx, tmp_path, brand, body)
     assert (MISSING in fails) is expect_missing, fails
+
+
+# --- r4: list-continuation fences, setext boundaries, failed-destination work (#7) ---------------------------------------
+# GFM oracle: gfm-77004-list_continuation_fence.html, gfm-77004-setext_boundary.html (each renders 1 image) and
+# gfm-77004-list_fence_inert_control.html (0 images). Adjudication: t7-adjudication-blocks-failed-target-77004e6.md.
+@pytest.mark.parametrize("snippet", [
+    "- Example\n\n  ```text\n  code\n\n![Shot](<docs/images/missing.png>)",
+    "1. x\n\n   ```text\n   code\n\n![Shot](<docs/images/missing.png>)",
+    "[open\n--\n](a`b) `![Shot](<docs/images/missing.png>)`",
+    "[open\n==\n](a`b) `![Shot](<docs/images/missing.png>)`",
+], ids=["list-fence", "ordered-list-fence", "setext-dashes", "setext-equals"])
+def test_r4_missing_image_is_reported(make_ctx, tmp_path, brand, snippet):
+    assert MISSING in _usage_fails(make_ctx, tmp_path, brand, snippet)
+
+
+def test_r4_list_fence_inert_control_reports_nothing(make_ctx, tmp_path, brand):
+    snippet = "- Example\n\n  ```text\n  ![Shot](<docs/images/missing.png>)\n  ```"
+    assert MISSING not in _usage_fails(make_ctx, tmp_path, brand, snippet)
+
+
+@pytest.mark.parametrize("underline", ["--", "=="])
+def test_r4_setext_underline_leaves_no_opener_for_the_orphan_bracket(underline):
+    text = f"[open\n{underline}\n](a`b) `![Shot](<docs/images/missing.png>)`"
+    readmelint._active_openers.cache_clear()
+    assert text.index("]") not in readmelint._active_openers(text)
+
+
+def test_r4_dashes_after_a_blank_line_are_not_a_setext_underline():
+    text = "[open\n\n--\n[x](y)"
+    assert readmelint._block_boundary(text, text.index("\n--"), ()) is False
+
+
+def _failed_destination_steps(n, unit):
+    text = unit * n
+    readmelint._active_openers.cache_clear()
+    readmelint._outside_code.cache_clear()
+    readmelint._title_ends.cache_clear()
+    readmelint._DEST_STEPS = 0
+    readmelint._active_openers(text)
+    openers = readmelint._DEST_STEPS
+    readmelint._active_openers.cache_clear()
+    readmelint._outside_code.cache_clear()
+    readmelint._DEST_STEPS = 0
+    readmelint._outside_code(text)
+    return openers, readmelint._DEST_STEPS
+
+
+@pytest.mark.parametrize("unit", ["[x](", "[x](a ("], ids=["unmatched-destination", "title-scan"])
+def test_r4_failed_destination_work_per_candidate_is_constant(unit):
+    steps = {n: _failed_destination_steps(n, unit) for n in (50, 100, 200, 400)}
+    for index in (0, 1):  # _active_openers, then _outside_code (the next_destination path)
+        assert steps[400][index] <= 2.5 * steps[200][index], steps
+        assert steps[200][index] <= 2.5 * steps[100][index], steps
+        assert steps[400][index] <= 300 * 400, steps  # a bounded number of reads per candidate (nesting limit 32)
+
+
+def test_r4_opener_steps_stay_linear_for_unmatched_candidates():
+    seen = []
+    for n in (50, 100, 200):
+        readmelint._active_openers.cache_clear()
+        readmelint._outside_code.cache_clear()
+        readmelint._OPENER_STEPS = 0
+        readmelint._outside_code("[x](" * n + "x")
+        seen.append(readmelint._OPENER_STEPS)
+    assert seen == [251, 501, 1001], seen
+
+
+def test_r4_destination_nesting_deeper_than_32_is_no_link():
+    def target(depth):
+        text = "x(" + "(" * depth + "a" + ")" * depth + ")"
+        return readmelint._inline_image_target(text, 1)
+
+    assert target(32) is not None  # 32 nested parentheses still form a destination
+    assert target(33) is None  # 33 is beyond CommonMark's nesting limit: not a link
