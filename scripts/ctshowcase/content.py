@@ -2769,8 +2769,23 @@ def _cmd_icon(args, cli, resolver, head):
     if args.icon_action == "normalize":
         if not args.src:
             raise ShowcaseError("content icon normalize needs --in CANDIDATE.png", log="usage")
-        src = Image.open(args.src)
-        src.load()
+        try:
+            raw = Path(args.src).read_bytes()
+        except OSError as exc:
+            raise ShowcaseError(f"cannot read --in {args.src}: {exc}", log="usage")
+        try:
+            src = Image.open(io.BytesIO(raw))
+            src.load()
+        except (OSError, ValueError, SyntaxError, Image.DecompressionBombError):
+            # readable but undecodable source: the structured png failure from icon_qa, nothing written
+            qa = icon_qa(raw, card=card, ink=ink, org_mark=mark, siblings=siblings, strict=strict,
+                         min_contrast=floor, ocr=ocr)
+            if qa["result"] != "fail":
+                qa["result"] = "fail"
+                qa["checks"].append({"check": "png", "result": "fail", "detail": "undecodable image data"})
+            return dict(head, result="fail", out=None, info=None, qa=qa,
+                        logs=ctx.logs + qa.get("logs", []) + ["art-fail:icon-qa"],
+                        note="nothing written"), CHECK_FAILED
         img, info = normalize_icon(src, args.ground, card, pixel_art=bool(ctx.style.get("icon_pixel_art")),
                                   tolerance=args.ground_tolerance)
         data, qlogs = icon_bytes(img)
