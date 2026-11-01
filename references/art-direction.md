@@ -101,7 +101,7 @@ This recipe does not rely on a documented image path: OpenAI documentation cover
 2. Never pick the newest file in the generated-images folder. Parallel sessions write into the same place, so the newest file can belong to another run and the wrong image gets normalized.
 3. If the run output names no image path, treat the attempt as failed. Do not fall back to the newest file or to a directory listing.
 4. Pass the chosen path to `content icon normalize --in PATH`. In the `PROMPTS.md` provenance block, record the Codex session id and only the image file name, or the path written relative to `$CODEX_HOME` (for example `$CODEX_HOME/generated_images/<file>`), in the prose beside the record. Never record the absolute path: it contains the local user name. The Provenance record fenced template itself does not change.
-5. One invocation may report between zero and four image paths. Every DISTINCT path the run output reports is one candidate; use exactly the reported paths, never a directory listing or the newest file. A run that reports no path is an empty run. To tell outputs apart, do not run candidates for several repositories in the same working directory at once unless you can tell their outputs apart.
+5. One invocation may report between zero and four image paths. Every DISTINCT path the run output reports is one candidate; use exactly the reported paths, never a directory listing or the newest file. A run that reports no path is an empty run. Parallel sessions write into the same place, so do not run candidates for several repositories in the same working directory at once unless you can tell their outputs apart.
 
 ### Retry and attempt limits
 
