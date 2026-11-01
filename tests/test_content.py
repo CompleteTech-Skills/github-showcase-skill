@@ -1595,7 +1595,8 @@ def test_icon_check_cli_undecodable_idat_exits_1_with_logs_and_bad_args_exit_2(t
 
 def test_icon_normalize_cli_undecodable_idat_exits_1_with_logs_and_missing_input_exit_2(tmp_path, capsys, monkeypatch):
     # normalize with a structurally valid PNG whose IDAT cannot decode: a structured QA failure (exit 1, JSON with a
-    # `logs` list, no output file), while a nonexistent or omitted --in stays a usage error (exit 2)
+    # `logs` list, no output file written; a pre-existing destination is left byte-identical), while a nonexistent or
+    # omitted --in stays a usage error (exit 2)
     import struct
     import zlib
 
@@ -1609,6 +1610,9 @@ def test_icon_normalize_cli_undecodable_idat_exits_1_with_logs_and_missing_input
     bad = tmp_path / "bad.png"
     bad.write_bytes(data)
     out = tmp_path / "out" / "icon.png"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    sentinel = b"PRE-EXISTING-DEST-BYTES\x00\x01\xff"
+    out.write_bytes(sentinel)
     norm = ("--meta", meta, "--no-repo-dir", "content", "icon", "normalize")
     art = ("--art-direction", FIX / "ART_DIRECTION.min.md")
     for extra in ((), ("--ocr",)):
@@ -1616,8 +1620,9 @@ def test_icon_normalize_cli_undecodable_idat_exits_1_with_logs_and_missing_input
         assert code == 1 and res["result"] == "fail" and res["out"] is None, (extra, res)
         assert isinstance(res["logs"], list) and "art-fail:icon-qa" in res["logs"], (extra, res)
         assert any(c["check"] == "png" and c["result"] == "fail" for c in res["qa"]["checks"]), res
-        assert not out.exists()
+        assert out.read_bytes() == sentinel, extra
     code, res = run_content(capsys, *norm, "--in", tmp_path / "missing.png", "--out", out, *art, *NO_ESTATE)
     assert code == 2, res
     code, res = run_content(capsys, *norm, "--out", out, *art, *NO_ESTATE)
     assert code == 2, res
+    assert out.read_bytes() == sentinel
