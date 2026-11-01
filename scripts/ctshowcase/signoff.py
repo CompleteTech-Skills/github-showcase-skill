@@ -222,10 +222,9 @@ def problems(rec: dict, today: _dt.date | None = None) -> list[str]:
     for key in ("id", "owner", "approver"):
         if not isinstance(rec.get(key), str) or not rec[key].strip():
             out.append(f"{key}: needs a non-empty string")
-    repos = rec.get("repos")
-    if not (isinstance(repos, str) and repos.strip()) and not (
-            isinstance(repos, list) and repos and all(isinstance(x, str) and x.strip() for x in repos)):
-        out.append("repos: needs '*', a repository name or a non-empty list of them")
+    if _canon_entries(rec.get("repos")) is None:
+        out.append("repos: needs '*' or repository names ([A-Za-z0-9._-]+, optionally OWNER/NAME) or a "
+                   "non-empty list of them")
     if not isinstance(rec.get("approved"), bool):
         out.append("approved: needs true or false (a boolean, not a string)")
     approved_on = _parse_when(rec.get("approved_on"))
@@ -277,14 +276,9 @@ def _repo_list(repos) -> list[str] | None:
 
 
 def _repos_malformed(rec: dict) -> bool:
-    """True when problems() reports the `repos:` break: `repos` is neither a non-empty string nor a non-empty list of
-    non-empty strings."""
-    repos = rec.get("repos")
-    if isinstance(repos, str) and repos.strip():
-        return False
-    if isinstance(repos, list) and repos and all(isinstance(x, str) and x.strip() for x in repos):
-        return False
-    return True
+    """True when problems() reports the `repos:` break: `repos` has no canonical form (_canon_entries is None), so it is
+    not a non-empty string or list of non-empty strings, or an entry is neither `*` nor a valid repository name."""
+    return _canon_entries(rec.get("repos")) is None
 
 
 _REPO_PART_RE = re.compile(r"[A-Za-z0-9._-]+")
@@ -312,13 +306,41 @@ def canonical_repo(value) -> str | None:
     return f"{owner}/{name}"
 
 
+def _canon_entries(repos) -> list[str] | None:
+    """The canonical entries of a `repos` value (a string, or a list of strings; a bare string is one entry): each `*`
+    entry stays `*`, every other entry is canonical_repo() (case kept). None when `repos` is not a string or a list of
+    strings, is empty, or any non-`*` entry cannot be canonicalized. Stored scopes are read through this, so a malformed
+    scope is never half-honoured (fail closed)."""
+    if isinstance(repos, str):
+        items = [repos]
+    elif isinstance(repos, list) and repos and all(isinstance(x, str) for x in repos):
+        items = repos
+    else:
+        return None
+    out: list[str] = []
+    for x in items:
+        if x.strip() == "*":
+            out.append("*")
+            continue
+        c = canonical_repo(x)
+        if c is None:
+            return None
+        out.append(c)
+    return out
+
+
 def _scope_key(entry: str, logins: list[str] | None) -> str:
-    """A canonical key for one `repos` entry, so equivalent scopes compare equal. `*` stays `*`. A bare NAME is its
-    lowercased name. OWNER/NAME for one of LOGINS (the owner's own logins, aliases included) is the bare name, the same
-    repository. OWNER/NAME for another account keeps its full lowercased form. With logins None, the lowercased entry."""
-    e = entry.strip().lower()
+    """A canonical key for one `repos` entry, so equivalent scopes compare equal. Stored entries are canonicalized the
+    same way as the requested repository (canonical_repo), so `site/`, ` site` and `site.git` are `site`; `*` stays `*`.
+    A bare NAME is its lowercased name. OWNER/NAME for one of LOGINS (the owner's own logins, aliases included) is the
+    bare name, the same repository. OWNER/NAME for another account keeps its full lowercased form. An entry that cannot
+    be canonicalized keeps its lowercased raw form here; _canon_entries() rejects such a record before it is compared
+    (fail closed)."""
+    e = entry.strip()
     if e == "*":
         return "*"
+    c = canonical_repo(e)
+    e = (c if c is not None else e).lower()
     head, sep, tail = e.rpartition("/")
     if not sep:
         return e
@@ -336,9 +358,12 @@ def _withdrawn(grant: dict, withdrawals: list[dict], logins: list[str] | None = 
     withdrawn for [a] is refused for a and still grants b. Without REPO the whole-grant rule applies: the withdrawal
     has `*`, or every scope of the grant appears among its own. Scopes are compared owner- and alias-aware: a bare
     name equals OWNER/NAME when OWNER is one of the owner's own LOGINS, so the two forms revoke each other, and another
-    account's OWNER/NAME stays distinct."""
+    account's OWNER/NAME stays distinct. Stored scopes are canonicalized the same way as the requested repository
+    (_canon_entries, `*` preserved), so `site/`, ` site` and `site.git` name `site`. An entry that cannot be
+    canonicalized is malformed (fail closed): a grant with one is never withdrawn here, and a withdrawal with one never
+    withdraws."""
     g_on = _parse_when(grant.get("approved_on"))
-    g_repos = _repo_list(grant.get("repos"))
+    g_repos = _canon_entries(grant.get("repos"))
     if g_on is None or g_repos is None or isinstance(g_on, _dt.datetime):
         return False
     owners = {_owner_key(x) for x in logins} if logins is not None else None
@@ -347,7 +372,7 @@ def _withdrawn(grant: dict, withdrawals: list[dict], logins: list[str] | None = 
         if owners is not None and _owner_key(f.get("owner")) not in owners:
             continue
         f_on = _parse_when(f.get("approved_on"))
-        f_repos = _repo_list(f.get("repos"))
+        f_repos = _canon_entries(f.get("repos"))
         if f_on is None or f_repos is None or isinstance(f_on, _dt.datetime) or f_on < g_on:
             continue
         if repo:
@@ -459,14 +484,12 @@ def _covers(rec: dict, repo: str | None, logins: list[str] | None = None) -> boo
     (the requested owner and its org aliases) as well as the name. A repository given as OWNER/NAME is covered only
     when that owner is one of `logins` too (only `*` covers another account's repository). A non-empty REPO is
     canonicalized (canonical_repo) before the `*` shortcut, so an invalid name is covered by nothing, not even `*`.
-    A malformed `repos` (not a string or a list of strings) covers nothing; evaluate() reports such a record as
-    t3-signoff:invalid through problems(), not as t3-signoff:scope."""
-    repos = rec.get("repos")
-    if isinstance(repos, str):
-        repos = [repos]
-    if not isinstance(repos, list) or not all(isinstance(x, str) for x in repos):
+    Stored `repos` are canonicalized the same way (_canon_entries, `*` preserved), so `site/` and `site.git` cover
+    `site`. A malformed `repos` (not a string or a list of strings, or an entry that cannot be canonicalized) covers
+    nothing; evaluate() reports such a record as t3-signoff:invalid through problems(), not as t3-signoff:scope."""
+    repos = _canon_entries(rec.get("repos"))
+    if repos is None:
         return False
-    repos = [x.strip() for x in repos]  # same normalisation as _scope_key: padding never hides a scope
     if isinstance(repo, str) and repo:
         repo = canonical_repo(repo)
         if repo is None:
