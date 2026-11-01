@@ -104,6 +104,23 @@ def test_footer_attrs_empty_input_has_no_attributes():
     assert readme._footer_attrs("") == {}
 
 
+def test_footer_attrs_valueless_first_alt_wins(brand):
+    # a valueless attribute is still the first occurrence: a later duplicate never overrides it
+    company = brand.strings["company"]
+    got = readme._footer_attrs(f'src="{LOCAL}" alt alt="{company}"')
+    assert got["alt"] == ""
+    assert got["src"] == LOCAL
+    # `alt= alt=...`: an unquoted value runs to the next whitespace, as a browser reads it, so the value is
+    # `alt="<company>` and not the company name; the first alt never vouches for the image
+    got = readme._footer_attrs(f'src="{LOCAL}" alt= alt="{company}"')
+    assert got.get("alt") != company
+    assert got["src"] == LOCAL
+    # a valueless src followed by a duplicate src
+    got = readme._footer_attrs(f'src alt="{PARTNER}" src="{LOCAL}"')
+    assert got["src"] == ""
+    assert got["alt"] == PARTNER
+
+
 # (e) marked footer regression through the scaffold, G/H callout and upgrade paths
 
 
@@ -137,3 +154,39 @@ def test_marked_data_alt_partner_footer_is_kept_through_callout_upgrade(brand, t
     assert image_lines(after, LOCAL) == image_lines(before, LOCAL)
     assert image_lines(after, LOCAL) >= 1
     assert readme.preservation(before, after, removed) == []
+
+
+# (f) a valueless alt before a company alt never vouches for an image: the first alt is the one a browser reads
+
+
+@pytest.mark.parametrize("src", [LOCAL, "assets/custom-mark.png"], ids=["former-local-logo", "custom-local-image"])
+def test_is_footer_copy_valueless_alt_local_image_not_footer(brand, src):
+    company = brand.strings["company"]
+    block = block_with(brand, f'src="{src}" alt alt="{company}"')
+    assert readme.is_footer_copy(block, brand) is False
+
+
+def test_company_alt_on_former_local_logo_is_footer_copy_control(brand):
+    # control for the valueless-alt case: the same former local logo with a real company alt is footer copy
+    block = block_with(brand, f'src="{LOCAL}" alt="{brand.strings["company"]}"')
+    assert readme.is_footer_copy(block, brand) is True
+
+
+def test_company_alt_on_custom_local_image_is_not_footer_copy_control(brand):
+    # control: a custom local image is never footer copy on the alt alone, so the valueless-alt case cannot change it
+    block = block_with(brand, f'src="assets/custom-mark.png" alt="{brand.strings["company"]}"')
+    assert readme.is_footer_copy(block, brand) is False
+
+
+@pytest.mark.parametrize("src", [LOCAL, "assets/custom-mark.png"], ids=["former-local-logo", "custom-local-image"])
+def test_marked_valueless_alt_local_image_footer_is_not_removed_in_upgrade(brand, tmp_path, src):
+    # the authored image in a marked footer is not reported as removed; the replacement is refused by the
+    # preservation guard or the image line survives in the output
+    ctx = ctx_for(brand, tmp_path)
+    body = block_with(brand, f'src="{src}" alt alt="{brand.strings["company"]}"')
+    before = readme.scaffold(ctx).replace(footer.block(brand), f"{footer.START}\n{body}\n{footer.END}")
+    assert src in before and footer.block(brand) not in before
+    after, removed = readme.upgrade(ctx, before)
+    assert not [ln for ln in removed if src in ln], "the authored image was reported as removed"
+    problems = readme.preservation(before, after, removed)
+    assert problems or image_lines(after, src) >= 1, problems
