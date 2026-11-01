@@ -876,7 +876,7 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
     # 1. fields: create what is missing, fix standard options keeping ids
     std_fields = list(FIELDS) + list(extra_fields or [])
     planned: dict[str, list] = {}  # the options each field will have once these jobs run (for the README)
-    held_t3 = held_captured_t3(resolver, spec, allow_t3) if role == "estate" else []
+    held_t3, retained_t3 = captured_t3(resolver, spec, allow_t3) if role == "estate" else ([], [])
     logs += held_t3
     for f in std_fields:
         have = _field(spec, f["name"])
@@ -1026,6 +1026,18 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
         if ids:
             from . import signoff
             signoff.stamp_associations(text_job, list(dict.fromkeys(ids)))
+    if text is not None and retained_t3:
+        # the shared emission path stamps the captured Org options, so direct `copy-plan --role estate` and estate_plan agree
+        orgs_for_stamp = list(retained_t3)
+        known = {x.lower() for o in retained_t3 for x in (o["login"], o["name"])}
+        for o in (_field(spec, "Org") or {}).get("options") or []:
+            name = str(o.get("name") or "")
+            desc = str(o.get("description") or "")
+            ident = re.sub(r"^T[0-9]:\s*", "", desc).strip() or name
+            if not ident or ident.lower() in known or name.lower() in known:
+                continue
+            orgs_for_stamp.append({"login": ident, "name": name})  # name-only: marks a shared display name as ambiguous
+        _stamp_estate_orgs([text_job], orgs_for_stamp)
     jobs.append(text_job)
     # 5. repository links (org boards: same owner only), decided in step 0 and emitted here, before the browser steps
     jobs.extend(link_jobs)
