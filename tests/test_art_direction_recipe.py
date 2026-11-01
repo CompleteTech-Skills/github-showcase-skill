@@ -315,3 +315,28 @@ def test_recipe_candidate_contract_is_consistent_with_four_candidate_template():
     assert "2 retries" in lowered and "3 attempts" in lowered
     assert "after 3 empty attempts for any one slot" in lowered
     assert "art-fail" in lowered
+
+
+def test_recipe_unreadable_only_output_counts_against_slot_budget():
+    # Static wording test (mock evidence, not an image-generation run): a run whose only
+    # reported paths are unreadable must fill no slot and count as an empty run, so the
+    # per-slot budget of 3 attempts still terminates with art-fail.
+    section = _recipe(_text())
+    lowered = section.lower()
+    assert "a run that reports no readable path is an empty run" in lowered
+    assert "unreadable-only" in lowered
+    assert "an unreadable path fills no slot" in lowered
+    assert "counts as one attempt against every slot that is still unfilled" in lowered
+    assert "unreadable-only output is counted as an empty run" in lowered
+    assert "after 3 empty attempts for any one slot, including attempts that returned only unreadable paths" in lowered
+    assert "art-fail" in lowered
+    sandbox_c = [
+        line.strip().lower()
+        for line in section.splitlines()
+        if line.strip().lower().startswith("- (c) if a path is unreadable")
+    ]
+    assert len(sandbox_c) == 1, "sandbox item (c) must appear exactly once"
+    assert "empty run" in sandbox_c[0]
+    assert "one attempt" in sandbox_c[0]
+    assert "art-fail" in sandbox_c[0]
+    assert "retry the run under the retry limit" not in sandbox_c[0]
