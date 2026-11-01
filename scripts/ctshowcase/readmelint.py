@@ -284,6 +284,9 @@ def _closing_bracket(text: str, start: int) -> int | None:
 # work counter of the opener pass: one per position advanced (an inert-region skip counts one) and one per call of
 # `_has_link_opener`; the regression test reads and resets it
 _OPENER_STEPS = 0
+# work counter of destination parsing (`_inline_image_target`): one per raw or angle destination character read, per
+# whitespace character skipped and per title lookup; the regression test reads and resets it
+_DEST_STEPS = 0
 
 # block starts at a line start after up to three spaces of indent (CommonMark 4.1 ATX headings, 4.2 thematic breaks,
 # 5.2 list items, which may interrupt a paragraph); blockquotes are tested apart because a quote line continues a quote
@@ -294,17 +297,23 @@ _BLOCK_START_LINE = re.compile(
 _ATX_OR_THEMATIC_LINE = re.compile(
     r" {0,3}(?:#{1,6}(?:[ \t]|$)|(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})$)", re.M)
 _BLOCKQUOTE_LINE = re.compile(r" {0,3}>")
+# the underline of a setext heading: `===` or `---` after paragraph text (a bare `---` line is a thematic break above)
+_SETEXT_UNDERLINE = re.compile(r" {0,3}(?:=+|-+)[ \t]*$", re.M)
 
 
 def _block_boundary(text: str, newline: int, fences: tuple[tuple[int, int], ...]) -> bool:
     """True when the newline at `newline` (plain text, outside every inert region) ends a link-opener span even though
-    no blank line follows: the line that just ended is a heading or thematic break, or the next line starts a heading,
-    list item, thematic break, fence, or a blockquote that does not continue a blockquote line. Each check reads at most
-    the two adjacent lines (the previous line is found backwards only as far as its own start), so the cost is linear
-    in the length of the lines involved."""
+    no blank line follows: the line that just ended is a heading, a thematic break or the underline of a setext heading,
+    or the next line starts a heading, list item, thematic break, fence, or a blockquote that does not continue a
+    blockquote line. Each check reads at most the two adjacent lines (the previous line is found backwards only as far
+    as its own start), so the cost is linear in the length of the lines involved."""
     ended = text.rfind("\n", 0, newline) + 1  # start of the line that just ended
     if _ATX_OR_THEMATIC_LINE.match(text, ended):
         return True
+    if ended > 0 and _SETEXT_UNDERLINE.match(text, ended):  # an underline makes a heading only after paragraph text
+        previous = text.rfind("\n", 0, ended - 1) + 1
+        if text[previous:ended - 1].strip():
+            return True
     nxt = newline + 1
     if _BLOCK_START_LINE.match(text, nxt):
         return True
@@ -363,8 +372,8 @@ def _active_openers(text: str) -> frozenset[int]:
     An unescaped `]` that pops an opener and is directly followed by a destination `(...)` skips that destination,
     which is literal (a backtick in it opens no code span). A blank line clears the stack, and so does a block
     boundary: a heading, list item, thematic break, fence or blockquote start (see `_block_boundary`), and the line
-    after a heading or thematic break. A quote line continues an open quote, so a `[` and its `](` in one blockquote
-    still pair. Raw HTML blocks (`mdcode.html_block_spans`) are inert and are block boundaries: no `[` inside one opens
+    after a heading or thematic break, and the underline of a setext heading. A quote line continues an open quote,
+    so a `[` and its `](` in one blockquote still pair. Raw HTML blocks (`mdcode.html_block_spans`) are inert and are block boundaries: no `[` inside one opens
     a link, and the stack is cleared entering and leaving it. Completing an inline link deactivates every earlier LINK
     opener in the stack (CommonMark: links may not contain links), while earlier IMAGE openers stay active; a `barrier`
     marks the stack depth below which link openers are inactive, so that deactivation is O(1). Reference-style links
@@ -528,15 +537,35 @@ def _reference_label_spans(document: str) -> tuple[tuple[int, int], ...]:
     return tuple(spans)
 
 
+@functools.lru_cache(maxsize=16)
+def _title_ends(text: str) -> dict[str, tuple[int, ...]]:
+    """Sorted positions of the unescaped `"`, `'` and `)` in `text`, from one linear pass. An occurrence is escaped when
+    an odd number of backslashes directly precedes it: the parity the destination scanner's skip-two loop produces."""
+    found: dict[str, list[int]] = {'"': [], "'": [], ")": []}
+    backslashes = 0  # length of the run of backslashes directly before the current position
+    for index, char in enumerate(text):
+        if char == "\\":
+            backslashes += 1
+            continue
+        if char in found and backslashes % 2 == 0:
+            found[char].append(index)
+        backslashes = 0
+    return {char: tuple(positions) for char, positions in found.items()}
+
+
 def _inline_image_target(text: str, start: int) -> tuple[str, int] | None:
-    """Read a Markdown destination and optional title after its opening parenthesis."""
+    """Read a Markdown destination and optional title after its opening parenthesis. Destination nesting deeper than
+    32 parentheses is no link (CommonMark's limit), which bounds each call and keeps the opener pass linear."""
+    global _DEST_STEPS
     pos = start + 1
     while pos < len(text) and text[pos].isspace():
+        _DEST_STEPS += 1
         pos += 1
     begin = pos
     if pos < len(text) and text[pos] == "<":
         begin = pos = pos + 1
         while pos < len(text) and text[pos] != ">":
+            _DEST_STEPS += 1
             if text[pos] in "\n<":
                 return None
             pos += 2 if text[pos] == "\\" else 1
@@ -547,6 +576,7 @@ def _inline_image_target(text: str, start: int) -> tuple[str, int] | None:
     else:
         depth = 0
         while pos < len(text):
+            _DEST_STEPS += 1
             char = text[pos]
             if char == "\\":
                 pos += 2
@@ -555,6 +585,8 @@ def _inline_image_target(text: str, start: int) -> tuple[str, int] | None:
                 break
             if char == "(":
                 depth += 1
+                if depth > 32:  # CommonMark's nesting limit: a deeper destination is no link
+                    return None
             elif char == ")":
                 depth -= 1
             pos += 1
@@ -562,16 +594,19 @@ def _inline_image_target(text: str, start: int) -> tuple[str, int] | None:
             return None
         target = text[begin:pos]
     while pos < len(text) and text[pos].isspace():
+        _DEST_STEPS += 1
         pos += 1
     if pos < len(text) and text[pos] in "\"'(":
         end = ")" if text[pos] == "(" else text[pos]
         pos += 1
-        while pos < len(text) and text[pos] != end:
-            pos += 2 if text[pos] == "\\" else 1
-        if pos >= len(text):
+        _DEST_STEPS += 1  # one title lookup, not one step per character it passes over
+        ends = _title_ends(text)[end]
+        at = bisect.bisect_left(ends, pos)  # the first unescaped end character at or after the title start
+        if at == len(ends):
             return None
-        pos += 1
+        pos = ends[at] + 1
         while pos < len(text) and text[pos].isspace():
+            _DEST_STEPS += 1
             pos += 1
     if pos >= len(text) or text[pos] != ")":
         return None
