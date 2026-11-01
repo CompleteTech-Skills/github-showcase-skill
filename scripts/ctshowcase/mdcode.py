@@ -160,14 +160,18 @@ def _interrupts(rest: str, depth: int, para_depth: int, base: int) -> bool:
 
 
 @functools.lru_cache(maxsize=16)
-def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, int], ...], tuple[int, ...]]:
-    """(inline regions, fenced spans, continuation starts). An inline region is a stretch in which one inline code span
-    can live: a paragraph, a heading line, an HTML block start line or one table cell. A continuation start is the
-    source offset of a line that continues an open paragraph or table (not the first line of a block, not a heading,
-    not a line inside a fence)."""
+def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, int], ...], tuple[int, ...],
+                                tuple[tuple[int, int], ...]]:
+    """(inline regions, fenced spans, continuation starts, raw HTML block spans). An inline region is a stretch in which
+    one inline code span can live: a paragraph, a heading line, an HTML block start line or one table cell. A
+    continuation start is the source offset of a line that continues an open paragraph or table (not the first line of
+    a block, not a heading, not a line inside a fence). An HTML block span runs from its first line to just past its
+    last line, excluding a terminating blank line or the line that ended its container."""
     WORK['layout_builds'] += 1
     regions: list[tuple[int, int]] = []
     fences: list[tuple[int, int]] = []
+    html_blocks: list[tuple[int, int]] = []
+    hstart = 0
     conts: set[int] = set()
     seg: list[tuple[int, str]] = []
     # an open fence: (fence run, block-quote depth, list-item content column (0 outside an item), item-before-quote flag)
@@ -215,13 +219,16 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
             lead = len(body) - len(body.lstrip(" ")) if houter else len(inner) - len(inner.lstrip(" "))
             if depth < hdepth or (hcol and depth == hdepth and rest.strip(" \t") and lead < hcol):
                 html = None   # its quote or list item ended: an HTML block has no lazy continuation
+                html_blocks.append((hstart, at))
             elif end is None:
                 if rest.strip(" \t"):
                     continue
                 html = None   # a type 6 or 7 block ends at the blank line, which is then handled as usual
+                html_blocks.append((hstart, at))
             else:
                 if end.search(rest):
                     html = None
+                    html_blocks.append((hstart, pos))
                 continue
         if not rest.strip(" \t"):
             flush(seg)
@@ -262,7 +269,10 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
             regions.append((at, pos))
         elif (kind := _html_block(crest)) is not None:
             # raw HTML: no inline region, so a backtick on these lines never pairs and the block's images stay visible
-            if kind is True or not kind.search(crest):
+            hstart = at
+            if kind is not True and kind.search(crest):
+                html_blocks.append((at, pos))   # the block closes on its own opening line
+            else:
                 html = (None if kind is True else kind, cdepth, col, bool(col) and not _QUOTE.match(body))
         elif not _THEMATIC.match(rest):
             item = _ITEM_PREFIX.match(rest)
@@ -271,7 +281,9 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
         fences.append((fstart, len(text)))
     else:
         flush(seg)
-    return tuple(regions), tuple(fences), tuple(sorted(conts))
+    if html is not None:
+        html_blocks.append((hstart, len(text)))
+    return tuple(regions), tuple(fences), tuple(sorted(conts)), tuple(html_blocks)
 
 
 @functools.lru_cache(maxsize=16)
@@ -341,6 +353,12 @@ def find_inline_code(text: str, start: int = 0) -> tuple[int, int] | None:
 def fence_spans(text: str) -> tuple[tuple[int, int], ...]:
     """Sorted (start, end) of every fenced block, including fences inside block quotes (the cached `_layout` fences)."""
     return tuple(sorted(_layout(text)[1]))
+
+
+@functools.lru_cache(maxsize=16)
+def html_block_spans(text: str) -> tuple[tuple[int, int], ...]:
+    """Sorted, non-overlapping (start, end) of every raw HTML block (the cached `_layout` HTML spans)."""
+    return tuple(sorted(_layout(text)[3]))
 
 
 @functools.lru_cache(maxsize=16)
