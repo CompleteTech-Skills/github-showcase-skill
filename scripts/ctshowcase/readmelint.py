@@ -19,7 +19,7 @@ IMG_MD = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)[^)]*\)")
 IMG_HTML = re.compile(r"<img\b([^>]*)>", re.I)
 PALETTE = {"1E3A8A", "005ADD", "067647", "64748B", "E551BA", "F386A1", "1E1E1E"}
 REF_DEFINITION = re.compile(
-    r"^\x00* {0,3}\[((?:\\.|[^\[\]\\\n])+)\]:[ \t\x00]*(?:\n[ \t\x00]*)?(?:<([^<>\n]+)>|([^\s\x00]+?))"
+    r"^\x00* {0,3}\[((?:\\.|[^\[\]\\\n]|\n(?![ \t\x00]*\n))+)\]:[ \t\x00]*(?:\n[ \t\x00]*)?(?:<([^<>\n]+)>|([^\s\x00]+?))"
     r"(?:(?:[ \t]+|[ \t\x00]*\n[ \t\x00]*)(?:\"(?:\\.|[^\"\\\n]|\n(?![ \t\x00]*\n))*\"|'(?:\\.|[^'\\\n]|\n(?![ \t\x00]*\n))*'"
     r"|\((?:\\.|[^()\\\n]|\n(?![ \t\x00]*\n))*\)))?[ \t]*$", re.M)
 # a title may span lines but never a blank one; NUL stands in for a blanked quote or list-item prefix (see below)
@@ -189,7 +189,13 @@ def _definition_candidates(document: str) -> str:
         else:
             prefix = quoted
             if items and not blank:
-                prefix += _whitespace_columns(line[quoted:], items[-1][1])[0]
+                chars, cols = _whitespace_columns(line[quoted:], items[-1][1])
+                # a tab that crosses the content column keeps its residual columns: with the spaces that follow, four
+                # or more make indented code, so that tab is left unpeeled and the line cannot match as a definition
+                if cols > items[-1][1] and line[quoted + chars - 1] == "\t" and (
+                        cols - items[-1][1] + _whitespace_columns(line[quoted + chars:])[1] >= 4):
+                    chars -= 1
+                prefix += chars
         out[pos:pos + prefix] = ["\x00"] * prefix
         pos += len(raw)
     return "".join(out)
@@ -804,8 +810,8 @@ def _inline_image_target(text: str, start: int) -> tuple[str, int] | None:
         at = bisect.bisect_left(ends, pos)  # the first unescaped end character at or after the title start
         if at == len(ends):
             return None
-        if _blank_between(text, pos, ends[at]):  # (c) a title may span lines, never a paragraph boundary
-            return None
+        if _blank_between(text, pos, ends[at]) or _crosses_block(text, pos, ends[at], _fence_spans(text)):
+            return None  # (c) a title may span soft line breaks, never a paragraph or block boundary (heading, list, fence)
         title_close = pos = ends[at] + 1
         while pos < len(text) and text[pos].isspace():
             _DEST_STEPS += 1
