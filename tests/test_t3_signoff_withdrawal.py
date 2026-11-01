@@ -322,3 +322,128 @@ def test_cli_refuses_a_padded_owner_withdrawal(padded, tmp_path):
     recs = [_rec("g1", ["*"], owner=own), _rec("w1", ["*"], approved=False, on="2026-06-01", owner=_pad(padded, own))]
     r = _cli(tmp_path, recs, "describe")
     assert r.returncode == 2 and "t3-signoff:revoked" in r.stdout + r.stderr, r.stdout + r.stderr
+
+
+# ------------------------------------------------------------------ cross-owner README repositories (issue 23, r5)
+# A README names repositories of owners other than the board's. Each is authorized on ITS OWN resolved owner and name,
+# whatever the board owner's tier: a T3 owner's repository on a non-T3 board is gated like any T3 repository.
+T3_OWNER = "Pick-Your-AI"
+BOARD_OWNER = "CompleteTech-Skills"
+T3_WILD = [{"id": "t3s-all"},
+           {"id": "t3s-drop-x", "repos": ["withdrawn-x"], "approved": False, "approved_on": "2026-10-01"}]
+
+
+def _xo_capture(captured=None, owner=BOARD_OWNER):
+    """The private copy capture on `owner`'s board, every view numbered; `captured` fills spec.repositories."""
+    from test_t3_emission_scope import _private_board
+    c = _private_board()
+    p = c["data"]["organization"]["projectV2"]
+    p["url"] = f"https://github.com/orgs/{owner}/projects/{p['number']}"
+    p["repositories"] = {"nodes": [{"nameWithOwner": n} for n in captured or []]}
+    return c
+
+
+def _xo_plan(brand, tmp_path, monkeypatch, records, repos, captured=None, allow_t3=True, owner=BOARD_OWNER):
+    from test_t3_emission_scope import _Strict, _file, _resolver
+    from ctshowcase import project as PJ
+    with _Strict(monkeypatch, _file(tmp_path, records)):
+        return PJ.copy_plan(owner, role="org", copied=_xo_capture(captured, owner), resolver=_resolver(brand),
+                            repositories=repos, allow_t3=allow_t3, reviewed="2026-10-25")
+
+
+def _xo_readme(plan):
+    rd = [j for j in plan["jobs"] if "--readme" in (j.get("argv") or [])]
+    assert len(rd) == 1, [j["id"] for j in plan["jobs"]]
+    return rd[0], rd[0]["argv"][rd[0]["argv"].index("--readme") + 1]
+
+
+def _xo_ids(job):
+    return set(job.get("signoff_ids") or []) | ({job["signoff_id"]} if job.get("signoff_id") else set())
+
+
+def test_cross_owner_board_is_not_t3(brand):
+    """Precondition: the board owner is not T3, the repository owner is (so the board-owner check cannot gate it)."""
+    from test_t3_emission_scope import _resolver
+    r = _resolver(brand)
+    assert r.owner_status(BOARD_OWNER) != "t3" and r.owner_status(T3_OWNER) == "t3"
+
+
+def test_cross_owner_explicit_no_grant_omits_readme_repo(brand, tmp_path, monkeypatch):
+    plan = _xo_plan(brand, tmp_path, monkeypatch, [], [f"{T3_OWNER}/withdrawn-x"])
+    _, text = _xo_readme(plan)
+    assert "withdrawn-x" not in text, text
+    assert any(str(x).startswith(f"t3-signoff:missing:{T3_OWNER}/withdrawn-x") for x in plan["logs"]), plan["logs"]
+
+
+def test_cross_owner_explicit_withdrawn_omitted_kept_retained_with_grant_id(brand, tmp_path, monkeypatch):
+    plan = _xo_plan(brand, tmp_path, monkeypatch, T3_WILD, [f"{T3_OWNER}/withdrawn-x", f"{T3_OWNER}/kept-y"])
+    job, text = _xo_readme(plan)
+    assert "withdrawn-x" not in text and "kept-y" in text, text
+    assert "t3s-all" in _xo_ids(job), job
+    assert any(str(x).startswith(f"t3-signoff:revoked:{T3_OWNER}/withdrawn-x") for x in plan["logs"]), plan["logs"]
+
+
+def test_cross_owner_explicit_valid_grant_retained_and_stamped(brand, tmp_path, monkeypatch):
+    plan = _xo_plan(brand, tmp_path, monkeypatch, [{"id": "t3s-all"}], [f"{T3_OWNER}/kept-y"])
+    job, text = _xo_readme(plan)
+    assert "kept-y" in text, text
+    assert "t3s-all" in _xo_ids(job), job
+    assert not any(str(x).startswith("t3-signoff:") for x in plan["logs"]), plan["logs"]
+
+
+def test_cross_owner_explicit_regrant_stamps_repository_record(brand, tmp_path, monkeypatch):
+    recs = [*T3_WILD, {"id": "t3s-regrant", "repos": ["withdrawn-x"], "approved_on": "2026-10-02"}]
+    plan = _xo_plan(brand, tmp_path, monkeypatch, recs, [f"{T3_OWNER}/withdrawn-x"])
+    job, text = _xo_readme(plan)
+    assert "withdrawn-x" in text, text
+    assert "t3s-regrant" in _xo_ids(job), job
+
+
+def test_cross_owner_captured_repositories_withdrawn_vs_kept(brand, tmp_path, monkeypatch):
+    """repositories=None: the README names the board's captured spec.repositories, each checked on its own owner."""
+    plan = _xo_plan(brand, tmp_path, monkeypatch, T3_WILD, None,
+                    captured=[f"{T3_OWNER}/withdrawn-x", f"{T3_OWNER}/kept-y"])
+    job, text = _xo_readme(plan)
+    assert "withdrawn-x" not in text and "kept-y" in text, text
+    assert "t3s-all" in _xo_ids(job), job
+    assert any(str(x).startswith(f"t3-signoff:revoked:{T3_OWNER}/withdrawn-x") for x in plan["logs"]), plan["logs"]
+    assert not [j for j in plan["jobs"] if "-link-" in j["id"]], [j["id"] for j in plan["jobs"]]  # no link job for captured
+
+
+def test_cross_owner_captured_without_grant_omits_repository(brand, tmp_path, monkeypatch):
+    plan = _xo_plan(brand, tmp_path, monkeypatch, [], None, captured=[f"{T3_OWNER}/withdrawn-x"])
+    _, text = _xo_readme(plan)
+    assert "withdrawn-x" not in text, text
+    assert any(str(x).startswith(f"t3-signoff:missing:{T3_OWNER}/withdrawn-x") for x in plan["logs"]), plan["logs"]
+
+
+def test_control_cross_owner_non_t3_repository_untouched(brand, tmp_path, monkeypatch):
+    other = "Northwind-Trading-Co"
+    plan = _xo_plan(brand, tmp_path, monkeypatch, [], [f"{other}/some-repo"], captured=[f"{other}/cap-repo"])
+    _, text = _xo_readme(plan)
+    assert "some-repo" in text, text
+    assert not any(str(x).startswith("t3-signoff:") for x in plan["logs"]), plan["logs"]
+
+
+def test_control_same_owner_behaviour_unchanged(brand, tmp_path, monkeypatch):
+    plan = _xo_plan(brand, tmp_path, monkeypatch, T3_WILD, [f"{T3_OWNER}/withdrawn-x", f"{T3_OWNER}/kept-y"],
+                    owner=T3_OWNER)
+    job, text = _xo_readme(plan)
+    assert "withdrawn-x" not in text and "kept-y" in text, text
+    assert "t3s-all" in _xo_ids(job), job
+
+
+def test_control_without_allow_t3_path_unchanged(brand, tmp_path, monkeypatch):
+    plan = _xo_plan(brand, tmp_path, monkeypatch, [], [f"{T3_OWNER}/withdrawn-x"], allow_t3=False)
+    _, text = _xo_readme(plan)
+    assert "withdrawn-x" in text, text
+    assert not any(str(x).startswith("t3-signoff:") for x in plan["logs"]), plan["logs"]
+
+
+def test_control_standalone_project_readme_unchanged(brand):
+    """`project readme` is read-only text: it names the repositories it is given, with no sign-off lookup."""
+    from ctshowcase import project as PJ
+    text, logs = PJ.readme(BOARD_OWNER, "Skills", 3, {v["name"]: i + 1 for i, v in enumerate(PJ.VIEWS)},
+                           repositories=[f"{T3_OWNER}/withdrawn-x"], reviewed="2026-10-25")
+    assert "withdrawn-x" in text, text
+    assert not any(str(x).startswith("t3-signoff:") for x in logs), logs
