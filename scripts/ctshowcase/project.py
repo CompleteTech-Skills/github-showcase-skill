@@ -688,21 +688,57 @@ def _grant_key(resolver, ro: str, rn: str) -> str:
     return f"{owner_key}/{rn}".lower()
 
 
+def _normalize_repo_entries(entries, board_owner: str | None, role: str, resolver, logs: list) -> list[str]:
+    """Each repository entry in canonical form, once: `NAME` or `OWNER/NAME`, stripped, with no trailing `/` and no
+    `.git` (signoff.canonical_repo). A malformed entry is dropped and logged (`repos-malformed:`). On an org board a bare
+    NAME means <board owner>/<NAME>; on any other board it stays bare, which no sign-off can authorise. Duplicates fold
+    case-insensitively, keeping the first spelling and the order."""
+    from . import signoff
+    out: list[str] = []
+    seen: set[str] = set()
+    for entry in entries or []:
+        c = signoff.canonical_repo(entry)
+        if c is None:
+            logs.append(f"repos-malformed:{entry!r}")
+            continue
+        if "/" not in c:
+            if role == "org" and board_owner and board_owner != "@me":
+                c = f"{board_owner}/{c}"
+        else:
+            owner, name = c.split("/", 1)
+            c = f"{owner.strip()}/{name}"
+        if c.lower() in seen:
+            continue
+        seen.add(c.lower())
+        out.append(c)
+    return out
+
+
 def _authorize_readme_repos(readme_repos, resolver, allow_t3: bool, grants: dict, held_lower: set,
-                            logs: list) -> list[str]:
-    """Keep the README repositories this copy may name. A T3 owner's repository needs a valid sign-off record that
-    covers that repository itself (checked on its own owner and name, whatever the board owner is); a denied one is
-    logged and dropped, a granted one is recorded in grants for the README job's sign-off ids. Other references are
-    kept unchanged, and so is everything when --allow-t3 is not passed."""
+                            logs: list, *, board_owner: str | None = None, role: str = "org") -> list[str]:
+    """Keep the README repositories this copy may name. Every entry is normalised once first (_normalize_repo_entries).
+    An entry whose owner cannot be resolved (a bare name off an org board, no resolver, or an unknown status) is held.
+    A T3 owner's repository is dropped with `t3-signoff:readme:<owner>/<repo>` when --allow-t3 is not passed; with it,
+    the repository needs a valid sign-off record that covers it on its own owner and name (checked on its own owner and
+    name, whatever the board owner is). A denied one is logged and dropped, a granted one is recorded in grants for the
+    README job's sign-off ids. Other owners' references are kept unchanged."""
     from . import signoff
     kept: list[str] = []
-    for r0 in readme_repos:
-        if "/" not in r0:
-            kept.append(r0)
+    for r0 in _normalize_repo_entries(readme_repos, board_owner, role, resolver, logs):
+        if "/" not in r0 or resolver is None:
+            logs.append(f"readme-held:{r0} (owner cannot be resolved)")
             continue
         ro, rn = r0.split("/", 1)
-        if not (allow_t3 and resolver is not None and resolver.owner_status(ro) == "t3"):
+        ro = resolver.canonical(ro)
+        status = resolver.owner_status(ro)
+        if status not in (None, "excluded", "hold", "t3", "watching"):
+            logs.append(f"readme-held:{r0} (owner cannot be resolved)")
+            continue
+        if status != "t3":
             kept.append(r0)
+            continue
+        if not allow_t3:
+            logs.append(f"t3-signoff:readme:{ro}/{rn}")
             continue
         key = _grant_key(resolver, ro, rn)
         if key in grants:  # already authorized by the link loop or an earlier reference
@@ -961,6 +997,8 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
     held_lower: set[str] = set()  # lowercase owner/repo names held for lack of a valid sign-off
     captured_populated = False  # a populated captured repository list with no explicit --repos
     grants: dict[str, dict | None] = {}  # lowercase owner/repo -> the sign-off record that covers it
+    if repositories:  # the explicit list, normalised once: canonical OWNER/NAME entries for the link loop and the README
+        repositories = _normalize_repo_entries(repositories, owner, role, resolver, logs)
     readme_repos, lg = _readme_repos(spec, owner, role, resolver, repositories)
     logs += lg
     if role == "org":
@@ -999,11 +1037,12 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
             captured_populated = bool(captured_repos)
             same = [x for x in captured_repos if "/" in x and resolver_same(resolver, x.split("/", 1)[0], owner)]
             for r in _authorize_readme_repos([f"{owner}/{x.split('/', 1)[1]}" for x in same], resolver, allow_t3,
-                                             grants, held_lower, logs):
+                                             grants, held_lower, logs, board_owner=owner, role=role):
                 if r.lower() not in {a.lower() for a, _ in authorized}:
                     authorized.append((r, grants.get(_grant_key(resolver, *r.split("/", 1)))))
     # every README repository (explicit or captured) is authorized on its own resolved owner and name, for every role
-    readme_repos = _authorize_readme_repos(readme_repos, resolver, allow_t3, grants, held_lower, logs)
+    readme_repos = _authorize_readme_repos(readme_repos, resolver, allow_t3, grants, held_lower, logs,
+                                           board_owner=owner, role=role)
     # 4. text: short description and README (README needs every view number)
     nums = view_numbers(spec)
     edit = ["gh", "project", "edit", num, "--owner", own_flag, "--description", short]
@@ -1511,6 +1550,22 @@ def _resolver(args) -> Resolver:
                                getattr(args, "approved_yaml", None), getattr(args, "actions", None))
 
 
+def _parse_repos_arg(raw: str | None) -> list[str]:
+    """The --repos list: split on ',', every entry stripped, empty entries skipped (a trailing comma is fine), each one
+    canonicalised (signoff.canonical_repo). A malformed entry refuses the whole command (usage), so nothing is planned."""
+    from . import signoff
+    out: list[str] = []
+    for piece in (raw or "").split(","):
+        entry = piece.strip()
+        if not entry:
+            continue
+        canon = signoff.canonical_repo(entry)
+        if canon is None:
+            raise ShowcaseError(f"--repos entry {entry!r} is not a valid [OWNER/]REPO name", log="usage")
+        out.append(canon)
+    return out
+
+
 def cmd_project(args):
     from .org import append_jobs
     act = args.action
@@ -1554,8 +1609,7 @@ def cmd_project(args):
             raise NeedsInput("display-name", f"{owner} has no display_name in references/brand.yaml (pass --display-name)")
         canon = r.canonical(owner) if not estate else "@me"
         # the same privacy gate as copy-plan: a board that is public or may go public names no repository
-        repos, gate = _readme_repos(spec, canon, "estate" if estate else "org", r,
-                                    [x for x in (args.repos or "").split(",") if x])
+        repos, gate = _readme_repos(spec, canon, "estate" if estate else "org", r, _parse_repos_arg(args.repos))
         text, logs = readme(canon, name, spec.get("number"), view_numbers(spec),
                             fields=doc_fields(spec, estate=estate), repositories=repos,
                             out_of_scope=args.out_of_scope, reviewed=args.reviewed, estate=estate)
@@ -1573,7 +1627,7 @@ def cmd_project(args):
             raise ShowcaseError("copy-plan needs --target ORG (or @me)", log="usage")
         ws = _load(args.workstreams)
         res = copy_plan(args.target, role=args.role, source=args.source, title=args.title, display_name=args.display_name,
-                        copied=copied, workstreams=ws, repositories=[x for x in (args.repos or "").split(",") if x] or None,
+                        copied=copied, workstreams=ws, repositories=_parse_repos_arg(args.repos) or None,
                         approval_id=args.approval_id, resolver=r, user_id=args.user_id, out_of_scope=args.out_of_scope,
                         reviewed=args.reviewed, status_update=not args.no_status_update, allow_t3=getattr(args, "allow_t3", False))
     if args.jobs and res.get("files") and not args.files_dir:
