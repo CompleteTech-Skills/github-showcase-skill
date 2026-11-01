@@ -197,9 +197,10 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
             # only the fence's own quote depth is container syntax: extra `>` characters inside it are code content
             inner = _strip_quotes(body, fdepth)
             lead = len(body) - len(body.lstrip(" ")) if outer else len(inner) - len(inner.lstrip(" "))
-            if depth < fdepth or (col and depth == fdepth and rest.strip(" \t") and lead < col):
-                # the quote container of an open fence ended, or a non-blank line left the item's content column: the
-                # fence ends unclosed at this line, and this line is then processed as an ordinary line
+            if depth < fdepth or (col and depth >= fdepth and rest.strip(" \t") and lead < col):
+                # the quote container of an open fence ended, or a non-blank line at the fence's quote depth OR DEEPER
+                # (a new quote opened by the line) that is indented below the item content column ends the fence
+                # unclosed; the line is then processed as an ordinary line (a dedented `>` begins a real quote)
                 fences.append((fstart, at))
                 fence = None
             else:
