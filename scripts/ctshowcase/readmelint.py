@@ -136,15 +136,37 @@ def _definition_candidates(document: str) -> str:
     return "".join(out)
 
 
+def _balanced_destination(dest: str) -> bool:
+    """CommonMark bare link destination: a backslash escapes the character after it (an escaped parenthesis does not
+    count), and every unescaped `(` is closed by an unescaped `)` without the depth going below zero."""
+    depth, i = 0, 0
+    while i < len(dest):
+        char = dest[i]
+        if char == "\\":
+            i += 2
+            continue
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth < 0:
+                return False
+        i += 1
+    return depth == 0
+
+
 @functools.lru_cache(maxsize=16)
 def _definitions(document: str) -> tuple:
     """Live reference definitions, as regex matches over the document-length candidate text. A definition cannot
     interrupt a paragraph (CommonMark), so a definition-like line that continues a paragraph is text; only a line that
     starts a block counts, plus a definition directly after another live definition. Definitions are decided before
-    inline code, so a backtick in a definition destination pairs with nothing. Computed once per document."""
+    inline code, so a backtick in a definition destination pairs with nothing. A bare destination must have balanced
+    unescaped parentheses (CommonMark); otherwise the line is ordinary Markdown. Computed once per document."""
     continuation = mdcode.continuation_starts(document)
     live: list = []
     for match in REF_DEFINITION.finditer(_definition_candidates(document)):
+        if match.group(3) is not None and not _balanced_destination(match.group(3)):
+            continue  # a malformed bare destination is not a definition: the line stays ordinary Markdown
         if match.start() in continuation and not (live and live[-1].end() + 1 == match.start()):
             continue
         live.append(match)
@@ -381,10 +403,11 @@ def _active_openers(text: str) -> frozenset[int]:
     (`_reference_form`); an inline `(dest)` is tried first. The label of a full reference is read up to the next
     non-inline inert region, so a backtick in a resolved label is literal and an unresolved label is not consumed. Inert regions are found
     by cached lookups as in `_outside_code`, so the pass is linear. Offsets are the source offsets. It never calls
-    `_outside_code`."""
+    `_outside_code`. Live reference definitions (`_definition_spans`) are inert block regions like raw HTML blocks: their brackets and backticks are literal, and the opener stack is cleared entering and leaving one."""
     global _OPENER_STEPS
     fences = _fence_spans(text)
     html_spans = mdcode.html_block_spans(text)
+    defs = _definition_spans(text)  # live reference definitions: inert block regions, cached per document
     keys = {_label_key(m.group(1)) for m in _definitions(text)}  # live definition labels, computed once per call
     opened: set[int] = set()
     stack: list[tuple[int, bool]] = []  # (index of `[`, whether it opens an image `![`)
@@ -398,9 +421,14 @@ def _active_openers(text: str) -> frozenset[int]:
             if not found:
                 return False
             inside = _span_at(fences, found[0])
-            if inside is None:
-                return found
-            start = inside[1]
+            if inside is not None:
+                start = inside[1]
+                continue
+            inside = _span_at(defs, found[0])  # a backtick inside a live definition is literal, not code
+            if inside is not None:
+                start = inside[1]
+                continue
+            return found
 
     while pos < n:
         fence = _span_at(fences, pos)
@@ -414,6 +442,13 @@ def _active_openers(text: str) -> frozenset[int]:
         if html_block is not None:  # a raw HTML block is inert text and a block boundary, like fenced code
             _OPENER_STEPS += 1
             pos = html_block[1]
+            stack.clear()
+            barrier = 0
+            continue
+        definition = _span_at(defs, pos)
+        if definition is not None:  # a live definition is not paragraph text: a block boundary, like raw HTML
+            _OPENER_STEPS += 1
+            pos = definition[1]
             stack.clear()
             barrier = 0
             continue
@@ -436,6 +471,9 @@ def _active_openers(text: str) -> frozenset[int]:
         h = bisect.bisect_left(html_spans, (pos, -1))
         if h < len(html_spans):
             regions.append(html_spans[h])
+        d = bisect.bisect_left(defs, (pos, -1))  # the next live definition at or after `pos` (`pos` is outside all of them)
+        if d < len(defs):
+            regions.append(defs[d])
         region = min(regions) if regions else None  # the next inert region at or after `pos`
         limit = region[0] if region else n
         # the next inert region other than inline code: a backtick inside a reference label is literal, so the start of
@@ -449,6 +487,8 @@ def _active_openers(text: str) -> frozenset[int]:
             ref_limit = min(ref_limit, fences[k][0])
         if h < len(html_spans):
             ref_limit = min(ref_limit, html_spans[h][0])
+        if d < len(defs):
+            ref_limit = min(ref_limit, defs[d][0])
         jump = None
         i = pos
         while i < limit:  # plain text between inert regions: brackets are read one position at a time
@@ -501,6 +541,9 @@ def _active_openers(text: str) -> frozenset[int]:
                 stack.clear()
                 barrier = 0
             elif h < len(html_spans) and region == html_spans[h]:  # so is a raw HTML block skipped as a region
+                stack.clear()
+                barrier = 0
+            elif d < len(defs) and region == defs[d]:  # and so is a live definition (its own block boundary)
                 stack.clear()
                 barrier = 0
             pos = region[1]
