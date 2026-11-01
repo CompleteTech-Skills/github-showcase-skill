@@ -54,3 +54,5 @@ Jobs follow the shared contract `{id, phase: "6.3", kind, org, approval_id?, arg
 ## Without the estate bundle
 
 `capture-query`, `normalize`, `lint` and `readme` work on any capture file. `copy-plan` and `estate-plan` use `references/brand.yaml` for display names and read approvals and the registry only when given (`--registry`, `--approved`) or found beside the skill (`$SHOWCASE_ESTATE_ROOT`); with none, every approval is "not yet given" and logged. Synthetic captures for trying the commands are in `tests/fixtures/project/`.
+
+Settings pass (§13.9 step 7): with `--allow-t3`, the Default repository and auto-add steps use only sign-off-authorized repositories, are held with `settings-held:` when none remain, and the settings job carries `signoff_id`/`signoff_ids` (see t3-signoff.md).
