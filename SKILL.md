@@ -140,8 +140,11 @@ The four command groups follow the same rules as the repository commands: read-o
 
 `content icon` defaults to the installed skill's `references/art-direction.md`,
 including a repository glyph template for option A and the illustration template
-for option B. Palette values come from `references/brand.yaml`; documented family
-seeds are used when available, otherwise the prompt uses the tool's default seed. Use
+for option B. Palette values come from `references/brand.yaml`. The prompt asks for
+one image and asserts no seed; pass `--seed N` to request one (recorded in the prompt and
+its provenance line, otherwise "not supported"). The glyph `size_class` is WIDE, TALL,
+SQUARE or DIAGONAL (case-insensitive); anything else stays `needs-writer` and the result
+lists the four values with their meanings. Use
 `--art-direction FILE` to select another file; relative paths use the current
 directory, and missing files report `needs-input:art-direction` with the selected path.
 Older custom configs without `icon_ink`/`icon_spark` keep normalization and checks
@@ -222,7 +225,7 @@ project readme --capture FILE --owner OWNER [--out FILE]
 project estate-plan [--copied FILE] [--user-id ID] [--source OWNER/N] [--jobs FILE]
 content social [--out PATH] [--title TEXT] [--icon PATH] [--job] [--allow-unmeasured] [--allow-hold]
 content icon prompt|normalize|check [--option A|B] [--glyph FILE] [--art-direction FILE] [--in PNG]
-    [--ground auto|transparent|keep] [--ground-tolerance DE] [--out PATH] [--preview PATH]
+    [--ground auto|transparent|keep] [--ground-tolerance DE (0 to 12)] [--seed N] [--out PATH] [--preview PATH]
     [--strict] [--min-contrast RATIO] [--ocr]
 content links [FILE...] [--readme-path PATH] [--base-ref REF] [--online] [--cache FILE] [--strict] [--diff]
 content linguist [--min-share 0.02] [--language NAME]
