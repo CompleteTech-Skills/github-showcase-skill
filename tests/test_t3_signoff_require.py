@@ -1311,7 +1311,7 @@ def test_held_pin_holds_the_exact_set_order_job_but_not_the_authorized_pin(tmp_p
         signoff.stamp(res["jobs"])
         ids = [j["id"] for j in res["jobs"]]
         assert not any(i.endswith("-pin-public-order") for i in ids), ids
-        assert f"pins-order-held:public:t3-signoff" in res["logs"], res["logs"]
+        assert "pins-order-held:public:t3-signoff" in res["logs"], res["logs"]
         assert f"t3-signoff:revoked:{OWNER}/withdrawn-x" in res["logs"], res["logs"]
         kept = [j for j in res["jobs"] if "kept-y" in json.dumps(j)]
         assert kept and all(j["signoff_id"] == "t3s-all" for j in kept), res["jobs"]
