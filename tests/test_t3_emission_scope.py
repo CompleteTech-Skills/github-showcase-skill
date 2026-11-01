@@ -98,6 +98,62 @@ def test_copy_plan_link_carries_the_repository_regrant(tmp_path, monkeypatch, br
     assert not any(str(x).startswith("t3-signoff:") for x in plan["logs"]), plan["logs"]
 
 
+def _settings(plan):
+    return [j for j in plan["jobs"] if j["id"].endswith("-settings")]
+
+
+def test_copy_plan_settings_excludes_withdrawn_repository(tmp_path, monkeypatch, brand):
+    with _Strict(monkeypatch, _file(tmp_path, WILD)):
+        plan = _copy(brand, [f"{OWNER}/withdrawn-x", f"{OWNER}/ok-y"])
+    settings = _settings(plan)
+    assert len(settings) == 1, [j["id"] for j in plan["jobs"]]
+    steps = settings[0]["steps"]
+    default = [s for s in steps if "Default repository" in s]
+    auto = [s for s in steps if "Auto-add" in s]
+    assert default and "ok-y" in default[0] and "withdrawn-x" not in default[0], default
+    assert auto and "ok-y" in auto[0] and "withdrawn-x" not in auto[0], auto
+    for j in plan["jobs"]:
+        if j.get("kind") == "browser":
+            assert not any("withdrawn-x" in s for s in j["steps"]), j["id"]
+    assert settings[0].get("signoff_id") == "t3s-all", settings[0]
+    assert any(str(x).startswith(f"link-held:{OWNER}/withdrawn-x") for x in plan["logs"]), plan["logs"]
+
+
+def test_copy_plan_settings_held_when_all_repositories_withdrawn(tmp_path, monkeypatch, brand):
+    recs = [{"id": "t3s-all"},
+            {"id": "t3s-drop-x", "repos": ["withdrawn-x", "withdrawn-z"], "approved": False, "approved_on": "2026-10-01"}]
+    with _Strict(monkeypatch, _file(tmp_path, recs)):
+        plan = _copy(brand, [f"{OWNER}/withdrawn-x", f"{OWNER}/withdrawn-z"])
+    assert not _settings(plan), [j["id"] for j in plan["jobs"]]
+    assert any(str(x).startswith("settings-held:") for x in plan["logs"]), plan["logs"]
+    for j in plan["jobs"]:
+        if j.get("kind") == "browser":
+            steps = " ".join(j["steps"])
+            assert "withdrawn-x" not in steps and "withdrawn-z" not in steps, j["id"]
+    assert not [j for j in plan["jobs"] if "-link-" in j["id"]], [j["id"] for j in plan["jobs"]]
+
+
+def test_copy_plan_settings_keeps_regrant_ids(tmp_path, monkeypatch, brand):
+    recs = [*WILD, {"id": "t3s-regrant", "repos": ["withdrawn-x"], "approved_on": "2026-10-02"}]
+    with _Strict(monkeypatch, _file(tmp_path, recs)):
+        plan = _copy(brand, [f"{OWNER}/withdrawn-x", f"{OWNER}/ok-y"])
+    settings = _settings(plan)
+    assert len(settings) == 1, [j["id"] for j in plan["jobs"]]
+    default = [s for s in settings[0]["steps"] if "Default repository" in s]
+    assert default and "withdrawn-x" in default[0], default
+    assert settings[0].get("signoff_id") == "t3s-regrant", settings[0]
+    assert not any(str(x).startswith("settings-held:") for x in plan["logs"]), plan["logs"]
+
+
+def test_copy_plan_without_repositories_keeps_generic_settings(tmp_path, monkeypatch, brand):
+    with _Strict(monkeypatch, _file(tmp_path, WILD)):
+        plan = _copy(brand, None)
+    settings = _settings(plan)
+    assert len(settings) == 1, [j["id"] for j in plan["jobs"]]
+    assert any("the org's main repository" in s for s in settings[0]["steps"]), settings[0]["steps"]
+    assert not any(str(x).startswith("settings-held:") for x in plan["logs"]), plan["logs"]
+
+
 def _add_org_field(cap, option_desc):
     cap["data"]["user"]["projectV2"]["fields"]["nodes"].append({
         "__typename": "ProjectV2SingleSelectField", "id": "PVTF_org", "databaseId": 1099, "name": "Org",
