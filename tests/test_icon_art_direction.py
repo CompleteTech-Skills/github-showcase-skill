@@ -210,15 +210,20 @@ def test_legacy_config_option_b_does_not_require_glyph_inks(explicit_art_directi
 
 
 @pytest.mark.parametrize("option", ["A", "B"])
-def test_previous_bundled_template_via_override_still_asks_for_one_image(option, brand, make_ctx):
-    """The pre-#61 bundled file said 'Produce four candidates.'; as an explicit --art-direction override it must not
-    leave the prompt requesting four while provenance records one image."""
+def test_synthetic_legacy_template_via_override_still_asks_for_one_image(option, brand, make_ctx):
+    """The fixture is a minimal synthetic legacy template that imitates the pre-#61 'Produce four candidates.' syntax
+    and is not a production snapshot. As an explicit --art-direction override it must not leave the prompt requesting
+    four while provenance records one image."""
     from ctshowcase.resolver import Resolver
 
-    old = (Path(__file__).parent / "fixtures" / "content" / "ART_DIRECTION.previous-bundled.md").read_text(encoding="utf-8")
-    assert "Produce four candidates." in old
-    result = C.icon_prompt(make_ctx(owner="CompleteTech-Skills"), Resolver(brand, {}, {}), old, GLYPH, option,
-                           skill_art=(old if option == "B" else None))
+    legacy = (Path(__file__).parent / "fixtures" / "content" / "ART_DIRECTION.synthetic-legacy.md").read_text(encoding="utf-8")
+    assert "Produce four candidates." in legacy
+    assert len(legacy.splitlines()) < 80
+    assert legacy.count("Produce four candidates.") == 1
+    assert not any(token in legacy for token in ("jev-reference", "jevplay", "AI Ascension", "Jev-Engineering", "#00A7FD", "1025")), \
+        "the fixture must stay synthetic"
+    result = C.icon_prompt(make_ctx(owner="CompleteTech-Skills"), Resolver(brand, {}, {}), legacy, GLYPH, option,
+                           skill_art=(legacy if option == "B" else None))
     assert "four candidates" not in result["prompt"].lower()
     assert "Produce one image." in result["prompt"]
     assert "- Requested: 1 image; seed: not supported." in C.prompt_markdown(result)
