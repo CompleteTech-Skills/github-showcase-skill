@@ -375,6 +375,17 @@ def cmd_footer(args):
     return None, OK
 
 
+def _authored_footer_refusal(ctx, text):
+    """[] when every marked footer block of `text` is a footer copy the footer refresh may replace; otherwise the
+    refusal (a partner or foreign image is authored content, and the refresh would remove it)."""
+    from ctshowcase import readme
+    for fm in readme.find_blocks(readme.MARK, readme.normalize_text(text)):
+        if fm.group(1) == "footer" and not readme.is_footer_copy(fm.group(2), ctx.brand, own_site=True):
+            return ["readme-shrink: the marked footer holds authored content (a partner or foreign image) that the "
+                    "footer refresh would remove; README left unchanged"]
+    return []
+
+
 def cmd_readme(args):
     from ctshowcase import readme, records
     ctx = context(args)
@@ -396,6 +407,11 @@ def cmd_readme(args):
     if args.bootstrap:
         state = readme.bootstrap_state(before)
         removed = []
+        # every state (pristine, edited, none) refuses before any write: the footer refresh below would replace it
+        problems = _authored_footer_refusal(ctx, before)
+        if problems:
+            return base("readme", ctx, result="fail", mode="bootstrap", problems=problems,
+                        logs=ctx.logs + ["readme-shrink"]), CHECK_FAILED
         if state == "pristine":
             after = readme.bootstrap(ctx, before)
             cp = rd / "CONTRIBUTING.md"
@@ -411,13 +427,11 @@ def cmd_readme(args):
             after, removed = readme.upgrade(ctx, base_text)
             if readme.preservation(base_text, after, removed):
                 # a marked footer that holds authored content (partner or foreign image) must never be regenerated
-                for fm in readme.find_blocks(readme.MARK, base_text):
-                    if fm.group(1) == "footer" and not readme.is_footer_copy(fm.group(2), ctx.brand):
-                        return base("readme", ctx, result="fail", mode="bootstrap",
-                                    problems=["readme-shrink: the marked footer holds authored content (a partner or "
-                                              "foreign image) that the footer refresh would remove; README left "
-                                              "unchanged"] + readme.preservation(base_text, after, removed)[:19],
-                                    logs=ctx.logs + ["readme-shrink"]), CHECK_FAILED
+                refusal = _authored_footer_refusal(ctx, base_text)
+                if refusal:
+                    return base("readme", ctx, result="fail", mode="bootstrap",
+                                problems=refusal + readme.preservation(base_text, after, removed)[:19],
+                                logs=ctx.logs + ["readme-shrink"]), CHECK_FAILED
                 ctx.log("readme-shrink")
                 after, removed = readme.header_only(ctx, base_text), []
         else:
