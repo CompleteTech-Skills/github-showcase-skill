@@ -959,6 +959,7 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
     authorized: list[tuple[str, dict | None]] = []  # (repo, sign-off record or None): the only repos the settings job may name
     link_jobs: list[dict] = []  # repository-link jobs, emitted right after the text job
     held_lower: set[str] = set()  # lowercase owner/repo names held for lack of a valid sign-off
+    captured_populated = False  # a populated captured repository list with no explicit --repos
     grants: dict[str, dict | None] = {}  # lowercase owner/repo -> the sign-off record that covers it
     readme_repos, lg = _readme_repos(spec, owner, role, resolver, repositories)
     logs += lg
@@ -991,6 +992,16 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
                 signoff.stamp_associations(link, [str(rec["id"])])
             link_jobs.append(link)
         reads.append({"name": "org-projects-setting", "argv": ["gh", "api", f"orgs/{owner}", "--jq", ".has_organization_projects"]})
+        if not repositories:
+            # no explicit list: the captured same-owner repositories feed the default repository and auto-add, each
+            # authorized on its own resolved owner and name. They never create a link job (no new association).
+            captured_repos = [str(x) for x in (spec.get("repositories") or [])]
+            captured_populated = bool(captured_repos)
+            same = [x for x in captured_repos if "/" in x and resolver_same(resolver, x.split("/", 1)[0], owner)]
+            for r in _authorize_readme_repos([f"{owner}/{x.split('/', 1)[1]}" for x in same], resolver, allow_t3,
+                                             grants, held_lower, logs):
+                if r.lower() not in {a.lower() for a, _ in authorized}:
+                    authorized.append((r, grants.get(_grant_key(resolver, *r.split("/", 1)))))
     # every README repository (explicit or captured) is authorized on its own resolved owner and name, for every role
     readme_repos = _authorize_readme_repos(readme_repos, resolver, allow_t3, grants, held_lower, logs)
     # 4. text: short description and README (README needs every view number)
@@ -1058,7 +1069,7 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
         on = on_tpl if role == "template" else on_org
         if words == "auto-add" and role == "estate":
             continue
-        if words == "auto-add" and role == "org" and repositories and not authorized:
+        if words == "auto-add" and role == "org" and (repositories or captured_populated) and not authorized:
             # no repository may be chosen for the auto-add rule: the step names none, so it is held rather than emitted
             logs.append("workflows-held:auto-add (no authorized repository remains to choose; links held or skipped)")
             continue
@@ -1093,7 +1104,7 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
                               f"templates', tick '{title}' and save.", "Screenshot the setting."],
                              "project-recommended-template", "§13.9 step 6: offer the template in the org's dialog."))
     if role == "org":
-        if repositories and not authorized:
+        if (repositories or captured_populated) and not authorized:
             # every listed repository is withdrawn, unauthorized or on another owner: the default-repository and
             # auto-add steps would name one of them, so the settings job is held instead of emitted
             logs.append("settings-held:default-repository-and-auto-add (no authorized repository remains to choose; links held or skipped)")

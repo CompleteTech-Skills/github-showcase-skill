@@ -121,8 +121,8 @@ def _same_owner_plan(brand, tmp_path, monkeypatch, records, captured, repositori
 def test_same_owner_captured_withdrawn_omitted_across_all_jobs(brand, tmp_path, monkeypatch):
     from test_t3_emission_scope import _workflows, _settings, _readme_jobs
     from test_t3_signoff_withdrawal import T3_WILD
-    # repositories=None: workflows and settings derive repositories only from explicit --repos; captured repositories
-    # feed the README only. The README authorises its captured repositories on its own (t23 captured-readme note).
+    # repositories=None: the captured same-owner repositories feed README, workflows auto-add and settings alike
+    # (t23-adjudication-captured-workflows-settings-12dd.md); each is authorised on its own owner and name.
     plan = _same_owner_plan(brand, tmp_path, monkeypatch, T3_WILD, ["withdrawn-x", "kept-y"])
     readmes = _readme_jobs(plan)
     assert len(readmes) == 1, [j["id"] for j in plan["jobs"]]
@@ -134,11 +134,14 @@ def test_same_owner_captured_withdrawn_omitted_across_all_jobs(brand, tmp_path, 
         assert "withdrawn-x" not in json.dumps(j), j["id"]
     workflows = _workflows(plan)
     assert workflows, [j["id"] for j in plan["jobs"]]
-    assert any("auto-add" in s.lower() for j in workflows for s in j["steps"]), workflows
+    adds = [s for j in workflows for s in j["steps"] if "auto-add" in s.lower()]
+    assert adds and all("kept-y" in s for s in adds), adds
+    assert "t3s-all" in _ids(workflows[0]), workflows[0]
     settings = _settings(plan)
     assert settings, [j["id"] for j in plan["jobs"]]
     for j in settings:
-        assert not any("withdrawn-x" in s for s in j["steps"]), (j["id"], j["steps"])
+        assert any("kept-y" in s for s in j["steps"]), j["steps"]
+        assert "t3s-all" in _ids(j), j
     assert not [j["id"] for j in plan["jobs"] if "-link-" in j["id"]], [j["id"] for j in plan["jobs"]]
 
 
@@ -153,6 +156,25 @@ def test_same_owner_captured_regrant_retained_across_jobs(brand, tmp_path, monke
     assert "withdrawn-x" in text and "kept-y" in text, text
     ids = _ids(readmes[0])
     assert "t3s-regrant" in ids and "t3s-all" in ids, readmes[0]
+    from test_t3_emission_scope import _workflows, _settings
+    adds = [s for j in _workflows(plan) for s in j["steps"] if "auto-add" in s.lower()]
+    assert adds and all("withdrawn-x" in s for s in adds), adds
+    assert "t3s-regrant" in _ids(_workflows(plan)[0])
+    for j in _settings(plan):
+        assert any("withdrawn-x" in s for s in j["steps"]), j["steps"]
+        assert "t3s-regrant" in _ids(j), j
+
+
+def test_same_owner_captured_all_withdrawn_names_no_repository(brand, tmp_path, monkeypatch):
+    from test_t3_emission_scope import _workflows, _settings
+    from test_t3_signoff_withdrawal import T3_WILD
+    recs = [{"id": "t3s-all", "repos": ["*"], "approved_on": "2026-01-01"},
+            {"id": "t3s-wd", "repos": ["withdrawn-x", "withdrawn-z"], "approved": False, "approved_on": "2026-10-01"}]
+    plan = _same_owner_plan(brand, tmp_path, monkeypatch, recs, ["withdrawn-x", "withdrawn-z"])
+    for j in plan["jobs"]:
+        assert "withdrawn-x" not in json.dumps(j) and "withdrawn-z" not in json.dumps(j), j["id"]
+    assert not [s for j in _workflows(plan) for s in j["steps"] if "auto-add" in s.lower()]
+    assert not _settings(plan), [j["id"] for j in plan["jobs"]]
 
 
 # 7) distinct controls -----------------------------------------------------------------------------------------------
