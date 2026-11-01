@@ -410,6 +410,14 @@ def cmd_readme(args):
             base_text = readme.drop_pristine(before)
             after, removed = readme.upgrade(ctx, base_text)
             if readme.preservation(base_text, after, removed):
+                # a marked footer that holds authored content (partner or foreign image) must never be regenerated
+                for fm in readme.find_blocks(readme.MARK, base_text):
+                    if fm.group(1) == "footer" and not readme.is_footer_copy(fm.group(2), ctx.brand):
+                        return base("readme", ctx, result="fail", mode="bootstrap",
+                                    problems=["readme-shrink: the marked footer holds authored content (a partner or "
+                                              "foreign image) that the footer refresh would remove; README left "
+                                              "unchanged"] + readme.preservation(base_text, after, removed)[:19],
+                                    logs=ctx.logs + ["readme-shrink"]), CHECK_FAILED
                 ctx.log("readme-shrink")
                 after, removed = readme.header_only(ctx, base_text), []
         else:
