@@ -515,6 +515,40 @@ def test_crlf_converted_untouched_block_still_counts_as_generated(make_ctx, tmp_
     assert readme.generated_badges(block.replace("\n", "\r\n"))
 
 
+def _tab_indented_first_row(text):
+    body = badge_block(text)
+    comment, rows = body.strip("\n").split("\n", 1)
+    indented = f"{comment}\n\t{rows}"
+    return text.replace(body, indented), indented
+
+
+def test_tab_indenting_a_generated_badge_row_makes_the_block_authored(make_ctx, tmp_path):
+    ctx = profile_context(make_ctx, tmp_path)
+    before = readme.scaffold(ctx)
+    assert readme.generated_badges(badge_block(before))
+    edited, indented = _tab_indented_first_row(before)
+    assert badge_block(edited) == indented
+    assert not readme.generated_badges(badge_block(edited))
+    after_ctx = make_ctx(repo_dir=tmp_path, **(ctx.meta | {"license": "Apache-2.0"}))
+    header = readme.header_only(after_ctx, edited)
+    assert badge_block(header) == indented
+    upgraded, removed = readme.upgrade(after_ctx, edited)
+    assert badge_block(upgraded) == indented
+    assert readme.preservation(edited, upgraded, removed) == []
+
+
+def test_untouched_generated_badge_row_refreshes_on_license_change(make_ctx, tmp_path):
+    ctx = profile_context(make_ctx, tmp_path)
+    before = readme.scaffold(ctx)
+    assert readme.generated_badges(badge_block(before))
+    after_ctx = make_ctx(repo_dir=tmp_path, **(ctx.meta | {"license": "Apache-2.0"}))
+    header = readme.header_only(after_ctx, before)
+    assert badge_block(header) != badge_block(before)
+    assert readme.generated_badges(badge_block(header))
+    assert "license-MIT-" not in badge_block(header)
+    assert "Apache" in badge_block(header)
+
+
 @pytest.mark.parametrize("variant", ["no-lead", "extra-lead", "extra-trail", "no-trail"])
 def test_marker_separator_newline_variations_still_validate(make_ctx, tmp_path, variant):
     ctx = profile_context(make_ctx, tmp_path)
@@ -528,4 +562,5 @@ def test_marker_separator_newline_variations_still_validate(make_ctx, tmp_path, 
 def test_badge_digest_is_not_the_template_body_digest(make_ctx, tmp_path):
     body = badge_block(readme.scaffold(profile_context(make_ctx, tmp_path))).split("\n", 1)[1]
     assert readme.badge_sha(body) != readme.badge_sha("    " + body)
+    assert readme.badge_sha(body) != readme.badge_sha("\t" + body)
     assert readme.badge_sha(body) == readme.badge_sha(body.replace("\n", "\r\n"))
