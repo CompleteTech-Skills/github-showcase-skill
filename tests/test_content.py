@@ -1591,3 +1591,33 @@ def test_icon_check_cli_undecodable_idat_exits_1_with_logs_and_bad_args_exit_2(t
                    for c in res["qa"]["checks"]), res
     code, res = run_content(capsys, *check, "--out", bad, "--min-contrast", "0.5", *art, *NO_ESTATE)
     assert code == 2, res
+
+
+def test_icon_normalize_cli_undecodable_idat_exits_1_with_logs_and_missing_input_exit_2(tmp_path, capsys, monkeypatch):
+    # normalize with a structurally valid PNG whose IDAT cannot decode: a structured QA failure (exit 1, JSON with a
+    # `logs` list, no output file), while a nonexistent or omitted --in stays a usage error (exit 2)
+    import struct
+    import zlib
+
+    def chunk(kind, body):
+        return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body) & 0xFFFFFFFF)
+    data = (bytes.fromhex("89504e470d0a1a0a") + chunk(b"IHDR", struct.pack(">IIBBBBB", 1024, 1024, 8, 6, 0, 0, 0))
+            + chunk(b"IDAT", b"this is not a zlib stream") + chunk(b"IEND", b""))
+    monkeypatch.setattr(C, "_tesseract", lambda: None)
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    bad = tmp_path / "bad.png"
+    bad.write_bytes(data)
+    out = tmp_path / "out" / "icon.png"
+    norm = ("--meta", meta, "--no-repo-dir", "content", "icon", "normalize")
+    art = ("--art-direction", FIX / "ART_DIRECTION.min.md")
+    for extra in ((), ("--ocr",)):
+        code, res = run_content(capsys, *norm, "--in", bad, "--out", out, *extra, *art, *NO_ESTATE)
+        assert code == 1 and res["result"] == "fail" and res["out"] is None, (extra, res)
+        assert isinstance(res["logs"], list) and "art-fail:icon-qa" in res["logs"], (extra, res)
+        assert any(c["check"] == "png" and c["result"] == "fail" for c in res["qa"]["checks"]), res
+        assert not out.exists()
+    code, res = run_content(capsys, *norm, "--in", tmp_path / "missing.png", "--out", out, *art, *NO_ESTATE)
+    assert code == 2, res
+    code, res = run_content(capsys, *norm, "--out", out, *art, *NO_ESTATE)
+    assert code == 2, res
