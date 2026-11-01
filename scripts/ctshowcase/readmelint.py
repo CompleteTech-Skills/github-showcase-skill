@@ -281,27 +281,98 @@ def _closing_bracket(text: str, start: int) -> int | None:
     return None
 
 
-def _has_link_opener(text: str, close: int) -> bool:
-    """True when the `]` at index `close` closes a link text: scanning backward within the paragraph, an unescaped `[`
-    at bracket depth zero opens it. A blank line or the start of the text ends the search with no opener."""
-    depth = 0
-    i = close - 1
-    while i >= 0:
-        char = text[i]
-        if char == "\n":
-            j = i - 1
-            while j >= 0 and text[j] in " \t\r":
-                j -= 1
-            if j >= 0 and text[j] == "\n":  # a blank line is a paragraph boundary
+# work counter of the opener pass: one per position advanced (an inert-region skip counts one) and one per call of
+# `_has_link_opener`; the regression test reads and resets it
+_OPENER_STEPS = 0
+
+
+@functools.lru_cache(maxsize=16)
+def _active_openers(text: str) -> frozenset[int]:
+    """Indices of every `]` that closes a link text, i.e. has a matching ACTIVE `[` before it in the same paragraph.
+    One left-to-right pass keeps a stack of active `[` indices. Fenced code, inline code, HTML comments and HTML open
+    tags (attribute values included) are inert, so a bracket inside them is text: it neither opens nor closes a link.
+    An unescaped `]` that pops an opener and is directly followed by a destination `(...)` skips that destination,
+    which is literal (a backtick in it opens no code span). A blank line clears the stack. Inert regions are found by
+    cached lookups as in `_outside_code`, so the pass is linear. Offsets are the source offsets. It never calls
+    `_outside_code`."""
+    global _OPENER_STEPS
+    fences = _fence_spans(text)
+    html_spans = mdcode.html_block_spans(text)
+    opened: set[int] = set()
+    stack: list[int] = []
+    inline = tag = comment = None  # cached next starts: None = not searched yet, False = none left
+    n, pos = len(text), 0
+
+    def next_inline(start):
+        while True:
+            found = find_inline_code(text, start)  # (start, end) or None
+            if not found:
                 return False
-        elif char == "]" and not _escaped(text, i):
-            depth += 1
-        elif char == "[" and not _escaped(text, i):
-            if depth == 0:
-                return True
-            depth -= 1
-        i -= 1
-    return False
+            inside = _span_at(fences, found[0])
+            if inside is None:
+                return found
+            start = inside[1]
+
+    while pos < n:
+        fence = _span_at(fences, pos)
+        if fence is not None:  # fenced code is inert
+            _OPENER_STEPS += 1
+            pos = fence[1]
+            continue
+        if inline is not False and (inline is None or inline[0] < pos):
+            inline = next_inline(pos)
+        if tag is not False and (tag is None or tag.start() < pos):
+            tag = _search_unescaped(HTML_OPEN_TAG, text, pos, html_spans) or False
+        if comment is not False and (comment is None or comment.start() < pos):
+            comment = _search_unescaped(HTML_COMMENT, text, pos, html_spans) or False
+        k = bisect.bisect_left(fences, (pos, -1))
+        regions = []
+        if inline:
+            regions.append(inline)
+        if tag:
+            regions.append(tag.span())
+        if comment:
+            regions.append(comment.span())
+        if k < len(fences):
+            regions.append(fences[k])
+        region = min(regions) if regions else None  # the next inert region at or after `pos`
+        limit = region[0] if region else n
+        jump = None
+        i = pos
+        while i < limit:  # plain text between inert regions: brackets are read one position at a time
+            _OPENER_STEPS += 1
+            char = text[i]
+            if char == "[" and not _escaped(text, i):
+                stack.append(i)
+            elif char == "]" and stack and not _escaped(text, i):
+                stack.pop()
+                opened.add(i)
+                if text[i + 1:i + 2] == "(" and (target := _inline_image_target(text, i + 1)):
+                    jump = target[1]  # the destination of a link is literal text
+                    break
+            elif char == "\n":
+                j = i + 1
+                while j < n and text[j] in " \t\r":
+                    j += 1
+                if j < n and text[j] == "\n":  # a blank line is a paragraph boundary
+                    stack.clear()
+            i += 1
+        if jump is not None:
+            pos = jump
+        elif region is None:
+            break
+        else:
+            _OPENER_STEPS += 1
+            pos = region[1]
+    return frozenset(opened)
+
+
+def _has_link_opener(text: str, close: int) -> bool:
+    """True when the `]` at index `close` closes a link text: it is in the set of active closing brackets of `text`
+    (see `_active_openers`). After the cached pass each call is one set lookup."""
+    global _OPENER_STEPS
+    _OPENER_STEPS += 1
+    return close in _active_openers(text)
 
 
 def _label_key(value: str) -> str:
