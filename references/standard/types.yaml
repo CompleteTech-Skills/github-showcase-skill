@@ -15,7 +15,7 @@ deps:
 types:
   fork:             {variant: G, category: null}
   backup:           {variant: H, category: null}
-  github-profile:   {variant: J, category: null}
+  github-profile:   {variant: J, category: null, badge_category: GitHub profile}
   template:         {variant: C, category: Template}
   agent-skills:     {variant: A, variant_elsewhere: C, category: Agent skill}
   security-check:   {variant: F, category: CVE checker}
