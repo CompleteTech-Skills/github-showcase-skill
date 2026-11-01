@@ -252,7 +252,8 @@ def badge_body(ctx: RepoContext, existing: str | None = None) -> str:
         return existing
     body = badges_md(ctx)
     previous = GENERATED_BADGES.fullmatch(existing or "")
-    replaced_digest = body_sha(existing) if is_legacy else previous.group(2) if previous else None
+    # The replaces digest must preserve significant whitespace (badge_sha), matching preservation().
+    replaced_digest = badge_sha(existing) if is_legacy else previous.group(2) if previous else None
     replaces = f" replaces={replaced_digest}" if replaced_digest else ""
     return f"<!-- showcase:badges:generated sha256={badge_sha(body)}{replaces} -->\n{body}"
 
@@ -1304,7 +1305,8 @@ def preservation(before: str, after: str, removed: list[str]) -> list[str]:
                 replacements.add(match.group(2))
 
     def omit_owned_badges(m):
-        owned = generated_badges(m.group(2)) or body_sha(m.group(2)) in replacements
+        # The digest must preserve significant whitespace (badge_sha), matching badge_body's replaces=.
+        owned = generated_badges(m.group(2)) or badge_sha(m.group(2)) in replacements
         return wrap("badges", "") if m.group(1) == "badges" and owned else m.group(0)
 
     before = _sub_blocks(before, omit_owned_badges)
