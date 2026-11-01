@@ -19,7 +19,7 @@ IMG_MD = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)[^)]*\)")
 IMG_HTML = re.compile(r"<img\b([^>]*)>", re.I)
 PALETTE = {"1E3A8A", "005ADD", "067647", "64748B", "E551BA", "F386A1", "1E1E1E"}
 REF_DEFINITION = re.compile(
-    r"^\x00* {0,3}\[((?:\\.|[^\]\\\n])+)\]:[ \t\x00]*(?:\n[ \t\x00]*)?(?:<([^<>\n]+)>|([^\s\x00]+?))"
+    r"^\x00* {0,3}\[((?:\\.|[^\[\]\\\n])+)\]:[ \t\x00]*(?:\n[ \t\x00]*)?(?:<([^<>\n]+)>|([^\s\x00]+?))"
     r"(?:(?:[ \t]+|[ \t\x00]*\n[ \t\x00]*)(?:\"(?:\\.|[^\"\\\n]|\n(?![ \t\x00]*\n))*\"|'(?:\\.|[^'\\\n]|\n(?![ \t\x00]*\n))*'"
     r"|\((?:\\.|[^()\\\n]|\n(?![ \t\x00]*\n))*\)))?[ \t]*$", re.M)
 # a title may span lines but never a blank one; NUL stands in for a blanked quote or list-item prefix (see below)
