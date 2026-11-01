@@ -320,7 +320,8 @@ def test_backtick_in_a_resolved_reference_label_does_not_pair_with_later_code(ma
 
 
 # GFM expectation (test data): orphan junction renders 1 image, raw comment boundary 1, and the inline-comment,
-# valid-reference and consecutive-reference controls 0 images.
+# valid-reference and consecutive-reference controls (same label, distinct labels, three same label) render 0 images,
+# matching GFM per the 6dcc adjudication.
 IMAGE_IN_CODE = "`![Shot](<docs/images/missing.png>)`"
 REF_DEF = "\n\n[ref`x]: https://example.test/"
 ORPHAN_JUNCTION_CASES = {
@@ -329,6 +330,11 @@ ORPHAN_JUNCTION_CASES = {
     "inline_comment_control": ("[open <!-- note -->](a`b) " + IMAGE_IN_CODE, False),
     "valid_reference_control": ("[text][ref`x] " + IMAGE_IN_CODE + REF_DEF, False),
     "consecutive_reference_control": ("[a][ref`x] [b][ref`x] " + IMAGE_IN_CODE + REF_DEF, False),
+    "consecutive_distinct_label_control": (
+        "[a][one`x] [b][two`y] " + IMAGE_IN_CODE + "\n\n[one`x]: https://example.test/\n[two`y]: https://example.test/",
+        False,
+    ),
+    "consecutive_three_same_label_control": ("[a][ref`x] [b][ref`x] [c][ref`x] " + IMAGE_IN_CODE + REF_DEF, False),
 }
 
 
