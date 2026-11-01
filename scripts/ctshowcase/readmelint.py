@@ -41,10 +41,14 @@ def _escaped(text: str, i: int) -> bool:
     return count % 2 == 1
 
 
-def _search_unescaped(pattern, text: str, pos: int):
-    """First match at or after `pos` whose opening character is not backslash-escaped."""
+def _search_unescaped(pattern, text: str, pos: int, html_spans=None):
+    """First match at or after `pos` whose opening character is not backslash-escaped. A match starting inside one of
+    `html_spans` (raw HTML block spans) is never escaped: backslashes are literal there."""
+    def escaped(start):
+        return _escaped(text, start) and not (html_spans is not None and _span_at(html_spans, start) is not None)
+
     match = pattern.search(text, pos)
-    while match and _escaped(text, match.start()):
+    while match and escaped(match.start()):
         match = pattern.search(text, match.start() + 1)
     return match
 
@@ -62,6 +66,12 @@ def _span_at(spans, index: int, strict: bool = False):
 def _in_inline_code(text: str, index: int) -> bool:
     """True when `index` lies strictly inside a non-fenced inline code span (a < index < b for a span (a, b))."""
     return _span_at(mdcode.inline_code_spans(text), index, strict=True) is not None
+
+
+def _in_html_block(text: str, index: int) -> bool:
+    """True when `index` lies inside a raw HTML block (CommonMark HTML block extent): there a backslash is literal text,
+    and the block's lines are not Markdown reference definitions. The spans are cached per document by `mdcode`."""
+    return _span_at(mdcode.html_block_spans(text), index) is not None
 
 
 def _badge_colour(path: str) -> str:
@@ -91,6 +101,12 @@ def _definition_candidates(document: str) -> str:
     """The document with fenced blocks and HTML comments blanked (same length), the text in which a definition is read."""
     out = list(document)
     for a, b in mdcode.fence_spans(document):
+        for i in range(a, b):
+            if out[i] != "\n":
+                out[i] = " "
+    # raw HTML block text is literal HTML, not Markdown: a `[label]: dest` line inside it defines nothing. The block's
+    # extent ends at its end condition, so a definition after the block still counts.
+    for a, b in mdcode.html_block_spans(document):
         for i in range(a, b):
             if out[i] != "\n":
                 out[i] = " "
@@ -150,7 +166,7 @@ class _HTMLTokens:
         self.images = []
         for match in HTML_OPEN_TAG.finditer(text):
             start, end = match.span()
-            if _escaped(text, start):
+            if _escaped(text, start) and not _in_html_block(text, start):  # raw HTML: a backslash is literal
                 continue
             self.tags.append((start, end))
             if match.group(1).lower() == "img":
@@ -176,6 +192,7 @@ def _outside_code(text: str, mask_inline: bool = True) -> str:
     fences = _fence_spans(text)
     definitions = _definition_spans(text)  # decided before inline code: a definition destination's backtick is literal
     labels = _reference_label_spans(text)  # resolved full-reference labels: their backticks are literal too
+    html_spans = mdcode.html_block_spans(text)  # raw HTML blocks: tags there are never escaped by a backslash
     out, pos = list(text), 0
     tag = comment = inline = dest = None
 
@@ -210,7 +227,7 @@ def _outside_code(text: str, mask_inline: bool = True) -> str:
         if dest is not False and (dest is None or dest[0] < pos):
             dest = next_destination(pos)
         if tag is not False and (tag is None or tag.start() < pos):
-            tag = _search_unescaped(HTML_OPEN_TAG, text, pos) or False
+            tag = _search_unescaped(HTML_OPEN_TAG, text, pos, html_spans) or False
         if comment is not False and (comment is None or comment.start() < pos):
             comment = _search_unescaped(HTML_COMMENT, text, pos) or False
         n = bisect.bisect_left(fences, (pos, -1))
