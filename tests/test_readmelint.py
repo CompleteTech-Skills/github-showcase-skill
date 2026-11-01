@@ -427,3 +427,28 @@ def test_backticks_after_the_html_block_ends_at_a_blank_line_still_hide_an_image
     ctx = good_readme(make_ctx, tmp_path, brand)
     p = _insert_usage(tmp_path, "<div>\nraw\n</div>\n\nUse ` and " + RAW_HTML_IMG + " and `")
     assert not any("local image" in f for f in readmelint.lint(ctx, p)["fails"])
+
+
+# Raw HTML blocks are literal HTML: no live reference definitions, and backslashes are not escapes there.
+def test_definition_inside_a_raw_html_block_is_not_live(make_ctx, tmp_path, brand):
+    ctx = good_readme(make_ctx, tmp_path, brand)
+    p = _insert_usage(tmp_path, "![Shot][shot]\n\n<div>\n[shot]: docs/images/missing.png\n</div>")
+    assert not any("local image" in f for f in readmelint.lint(ctx, p)["fails"])
+
+
+def test_definition_after_the_html_block_ends_is_live(make_ctx, tmp_path, brand):
+    ctx = good_readme(make_ctx, tmp_path, brand)
+    p = _insert_usage(tmp_path, "![Shot][shot]\n\n<div>\nraw\n</div>\n\n[shot]: docs/images/missing.png")
+    assert MISSING in readmelint.lint(ctx, p)["fails"]
+
+
+def test_escaped_img_inside_a_raw_html_block_is_still_checked(make_ctx, tmp_path, brand):
+    ctx = good_readme(make_ctx, tmp_path, brand)
+    p = _insert_usage(tmp_path, "<div>\n\\" + RAW_HTML_IMG + "\n</div>")
+    assert MISSING in readmelint.lint(ctx, p)["fails"]
+
+
+def test_escaped_img_in_an_ordinary_paragraph_is_not_checked(make_ctx, tmp_path, brand):
+    ctx = good_readme(make_ctx, tmp_path, brand)
+    p = _insert_usage(tmp_path, "\\" + RAW_HTML_IMG)
+    assert not any("local image" in f for f in readmelint.lint(ctx, p)["fails"])
