@@ -1629,28 +1629,27 @@ def test_icon_normalize_cli_undecodable_idat_exits_1_with_logs_and_missing_input
     assert out.read_bytes() == sentinel
 
 
-def _png_trailing_empty_iccp() -> bytes:
-    # synthetic pixels: valid IHDR, zlib-compressed valid IDAT, then a zero-length iCCP chunk (correct CRC), then IEND
-    import binascii
-    import struct
-    import zlib
-
-    def chunk(kind, body):
-        return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", binascii.crc32(kind + body) & 0xFFFFFFFF)
-    raw = (b"\x00" + bytes((0x20, 0x30, 0x40, 0xFF)) * 1024) * 1024
-    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 1024, 1024, 8, 6, 0, 0, 0))
-            + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"iCCP", b"") + chunk(b"IEND", b""))
-
-
 def test_icon_trailing_empty_iccp_is_structured_failure_in_api_check_and_normalize(tmp_path, capsys, monkeypatch, brand):
     # validate_png accepts the sequence, but Pillow raises IndexError while loading the trailing empty iCCP chunk:
     # icon_qa, `icon check` and `icon normalize` (with and without --ocr) must report the structured PNG failure
     from ctshowcase.pnglint import validate_png
-    data = _png_trailing_empty_iccp()
+    import binascii
+    import struct
+    card = brand.style(NW)["tokens"]["card_fill"]
+    good_data = C.icon_bytes(C.normalize_icon(_candidate(card, ink=(0, 90, 221)), "transparent", card)[0])[0]
+
+    def chunk(kind, body):
+        return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", binascii.crc32(kind + body) & 0xFFFFFFFF)
+    # the last 12 bytes of a PNG are the IEND chunk: insert a zero-length, CRC-valid iCCP just before it, so the
+    # pixel payload is byte-identical to the valid control
+    assert good_data[-12:] == chunk(b"IEND", b"")
+    data = good_data[:-12] + chunk(b"iCCP", b"") + good_data[-12:]
+    assert data != good_data and len(data) == len(good_data) + 12
+    validate_png(good_data)
     validate_png(data)
     monkeypatch.setattr(C, "_tesseract", lambda: None)
     for ocr in (False, True):
-        qa = C.icon_qa(data, card="#0B1020", ocr=ocr, source="s.png")
+        qa = C.icon_qa(data, card=card, ocr=ocr, source="s.png")
         assert qa["result"] == "fail" and qa["logs"] == ["unreadable-image:s.png"], qa
         assert any(c["check"] == "png" and c["result"] == "fail" for c in qa["checks"]), qa
     meta = tmp_path / "meta.json"
@@ -1676,11 +1675,7 @@ def test_icon_trailing_empty_iccp_is_structured_failure_in_api_check_and_normali
     code, res = run_content(capsys, *base, "normalize", "--in", tmp_path / "missing.png", "--out", out, *art, *NO_ESTATE)
     assert code == 2, res
     assert out.read_bytes() == sentinel
-    # valid control: a passing icon (same family ink on the configured card) without the malformed trailing iCCP
-    # chunk still passes the API and every CLI path with exit 0
-    card = brand.style(NW)["tokens"]["card_fill"]
-    good_data = C.icon_bytes(C.normalize_icon(_candidate(card, ink=(0, 90, 221)), "transparent", card)[0])[0]
-    validate_png(good_data)
+    # valid control: the SAME bytes without the inserted iCCP chunk pass the API and every CLI path with exit 0
     for ocr in (False, True):
         qa = C.icon_qa(good_data, card=card, ocr=ocr, source="g.png")
         assert qa["result"] in ("pass", "warn") and not any(log.startswith("unreadable-image") for log in qa.get("logs", [])), qa
