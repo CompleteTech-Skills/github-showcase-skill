@@ -2272,18 +2272,20 @@ def _ocr_words(png: bytes, exe: str) -> list[str] | None:
 
 def icon_qa(data: bytes, *, card: str, ink: list[str] | None = None, org_mark: Path | None = None,
             siblings: list[str] | None = None, strict: bool = False, min_contrast: float = 3.0,
-            ocr: bool = False) -> dict:
+            ocr: bool = False, source: str | None = None) -> dict:
     """Automated icon checks (f.3, art QA): size, budget, alpha, live area, coverage, contrast on the card, family
     inks, not the org glyph, one file. The 48 px set sheet stays manual. `strict` makes a failing family-ink
     check fail the icon (default: warn); with no `ink` the family-ink check is not emitted at all. `min_contrast` is
     the contrast floor of the dominant ink on the card (default 3.0; see icon_contrast_floor). `ocr` (opt-in, off by
     default) reads the icon with tesseract on PATH: words of 2+ alphanumerics are text, warn (fail with `strict`);
     without tesseract, or when it fails, no-text stays manual and `logs` names needs-input:ocr-unavailable or
-    needs-input:ocr-failed. Only with `ocr` is a `logs` key returned."""
+    needs-input:ocr-failed. A `logs` key is returned with `ocr`, and always on a png failure, where it is
+    ["unreadable-image:<source>"] naming the unreadable image (`source` is the file path when known, else <bytes>)."""
     from PIL import Image
     from .color import contrast, hexstr, rgb as hexrgb
     from .pnglint import validate_png
     checks: list[dict] = []
+    unreadable = {"logs": [f"unreadable-image:{source or '<bytes>'}"]}
 
     def add(name, ok, detail="", level="fail"):
         checks.append({"check": name, "result": "pass" if ok else level, "detail": detail})
@@ -2291,7 +2293,7 @@ def icon_qa(data: bytes, *, card: str, ink: list[str] | None = None, org_mark: P
         w, h, colour = validate_png(data)
     except ValueError as exc:
         add("png", False, str(exc))
-        return {"result": "fail", "checks": checks, **({"logs": []} if ocr else {})}
+        return {"result": "fail", "checks": checks, **unreadable}
     add("png", True)
     add("size", (w, h) == (ICON_PX, ICON_PX), f"{w}x{h}")
     add("bytes", len(data) <= ICON_BUDGET, f"{len(data)} <= {ICON_BUDGET}")
@@ -2302,7 +2304,7 @@ def icon_qa(data: bytes, *, card: str, ink: list[str] | None = None, org_mark: P
     except (OSError, ValueError, SyntaxError, Image.DecompressionBombError) as exc:
         # structurally valid PNG whose compressed IDAT data cannot be decoded: a structured failure, never a traceback
         add("png", False, f"undecodable image data: {str(exc)[:80]}")
-        return {"result": "fail", "checks": checks, **({"logs": []} if ocr else {})}
+        return {"result": "fail", "checks": checks, **unreadable}
     alpha = rgba.getchannel("A")
     transparent = colour in (4, 6) or (colour == 3 and "transparency" in im.info)
     lab = _lab_cache()
@@ -2779,18 +2781,22 @@ def _cmd_icon(args, cli, resolver, head):
         except (OSError, ValueError, SyntaxError, Image.DecompressionBombError):
             # readable but undecodable source: the structured png failure from icon_qa, nothing written
             qa = icon_qa(raw, card=card, ink=ink, org_mark=mark, siblings=siblings, strict=strict,
-                         min_contrast=floor, ocr=ocr)
+                         min_contrast=floor, ocr=ocr, source=str(args.src))
             if qa["result"] != "fail":
                 qa["result"] = "fail"
                 qa["checks"].append({"check": "png", "result": "fail", "detail": "undecodable image data"})
+            qa_logs = qa.get("logs", [])
+            unreadable_log = f"unreadable-image:{args.src}"
+            if unreadable_log not in qa_logs:
+                qa_logs = qa_logs + [unreadable_log]
             return dict(head, result="fail", out=None, info=None, qa=qa,
-                        logs=ctx.logs + qa.get("logs", []) + ["art-fail:icon-qa"],
+                        logs=ctx.logs + qa_logs + ["art-fail:icon-qa"],
                         note="nothing written"), CHECK_FAILED
         img, info = normalize_icon(src, args.ground, card, pixel_art=bool(ctx.style.get("icon_pixel_art")),
                                   tolerance=args.ground_tolerance)
         data, qlogs = icon_bytes(img)
         qa = icon_qa(data, card=card, ink=ink, org_mark=mark, siblings=siblings, strict=strict, min_contrast=floor,
-                     ocr=ocr)
+                     ocr=ocr, source=str(args.src))
         out = Path(args.out) if args.out else cli.default_out(args, "assets/icon.png")
         if qa["result"] == "fail":
             return dict(head, result="fail", out=None, info=info, qa=qa,
@@ -2809,7 +2815,7 @@ def _cmd_icon(args, cli, resolver, head):
         return dict(head, result="fail", file=str(path) if path else None, logs=ctx.logs + ["needs-input:repo-icon"]), \
             CHECK_FAILED
     qa = icon_qa(path.read_bytes(), card=card, ink=ink, org_mark=mark, siblings=siblings, strict=strict,
-                 min_contrast=floor, ocr=ocr)
+                 min_contrast=floor, ocr=ocr, source=str(path))
     return dict(head, result=qa["result"], file=str(path), qa=qa, logs=ctx.logs + qa.get("logs", [])), _code(qa["result"])
 
 
