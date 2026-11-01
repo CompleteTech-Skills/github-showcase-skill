@@ -99,6 +99,10 @@ def test_scheduled_workflow_really_heads_the_footer_logos():
     steps = [s for job in wf["jobs"].values() for s in job["steps"]]
     online = [s for s in steps if s.get("run", "").strip() == "python scripts/showcase.py footer --check README.md --online"]
     assert len(online) == 1
+    assert online[0].get("if") == "github.event_name != 'pull_request'"
+    assert "pull_request" in triggers
+    offline = [s for s in steps if "assets" not in s.get("run", "") and "brand.yaml" in s.get("run", "")]
+    assert len(offline) == 1 and offline[0].get("if") == "github.event_name == 'pull_request'"
     assert "continue-on-error" not in online[0]
     assert not any("continue-on-error" in job for job in wf["jobs"].values())
     assert not re.search(r"\|\|\s*(true|:)", text)
