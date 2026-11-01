@@ -432,21 +432,32 @@ _DEST_STEPS = 0
 # block starts at a line start after up to three spaces of indent (CommonMark 4.1 ATX headings, 4.2 thematic breaks,
 # 5.2 list items, which may interrupt a paragraph); blockquotes are tested apart because a quote line continues a quote
 _BLOCK_START_LINE = re.compile(
-    r" {0,3}(?:#{1,6}(?:[ \t]|$)|(?:[-+*]|\d{1,9}[.)])(?:[ \t]|$)"
+    r" {0,3}(?:#{1,6}(?:[ \t]|$)|[-+*](?:[ \t]|$)"
     r"|(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})$)", re.M)
 # single-line blocks (headings and thematic breaks): the line itself is the whole block
 _ATX_OR_THEMATIC_LINE = re.compile(
     r" {0,3}(?:#{1,6}(?:[ \t]|$)|(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})$)", re.M)
 _BLOCKQUOTE_LINE = re.compile(r" {0,3}>")
+# an ordered list item start: only `1.` may interrupt a paragraph, but a sibling item of the enclosing list (a marker
+# indented less than the item's content column) always ends the item (CommonMark 5.2, as `mdcode._interrupts`)
+_ORDERED_START_LINE = re.compile(r"( {0,3})(\d{1,9})[.)](?:[ \t]|$)")
+_ITEM_CONTENT = re.compile(r" {0,3}(?:[-+*]|\d{1,9}[.)])[ \t]+(?=\S)")
+
+
+def _list_base(text: str, pos: int) -> int:
+    """Content column of the list item whose marker starts the line holding `pos`, or 0 outside a list item line."""
+    item = _ITEM_CONTENT.match(text, text.rfind("\n", 0, pos) + 1)
+    return item.end() - item.start() if item else 0
 # the underline of a setext heading: `===` or `---` after paragraph text (a bare `---` line is a thematic break above)
 _SETEXT_UNDERLINE = re.compile(r" {0,3}(?:=+|-+)[ \t]*$", re.M)
 
 
-def _block_boundary(text: str, newline: int, fences: tuple[tuple[int, int], ...]) -> bool:
+def _block_boundary(text: str, newline: int, fences: tuple[tuple[int, int], ...], base: int = 0) -> bool:
     """True when the newline at `newline` (plain text, outside every inert region) ends a link-opener span even though
     no blank line follows: the line that just ended is a heading, a thematic break or the underline of a setext heading,
     or the next line starts a heading, list item, thematic break, fence, or a blockquote that does not continue a
-    blockquote line. Each check reads at most the two adjacent lines (the previous line is found backwards only as far
+    blockquote line. An ordered item interrupts only as `1.` or, when `base` (the content column of the list item that
+    holds the paragraph) is set, as a sibling indented less than `base`; `2.` and `0.` stay paragraph text. Each check reads at most the two adjacent lines (the previous line is found backwards only as far
     as its own start), so the cost is linear in the length of the lines involved."""
     ended = text.rfind("\n", 0, newline) + 1  # start of the line that just ended
     if _ATX_OR_THEMATIC_LINE.match(text, ended):
@@ -457,6 +468,9 @@ def _block_boundary(text: str, newline: int, fences: tuple[tuple[int, int], ...]
             return True
     nxt = newline + 1
     if _BLOCK_START_LINE.match(text, nxt):
+        return True
+    ordered = _ORDERED_START_LINE.match(text, nxt)
+    if ordered and (int(ordered.group(2)) == 1 or (base and len(ordered.group(1)) < base)):
         return True
     k = nxt  # a fence opener is found at its line start after up to three spaces of indent
     while k < len(text) and k - nxt < 3 and text[k] == " ":
@@ -471,8 +485,9 @@ def _crosses_block(text: str, start: int, end: int, fences: tuple[tuple[int, int
     """True when a newline in text[start:end] is a block boundary (see `_block_boundary`). A plain soft line break is
     not one: alt text and labels may continue on the next line of their paragraph."""
     newline = text.find("\n", start, end)
+    base = _list_base(text, start) if newline != -1 else 0
     while newline != -1:
-        if _block_boundary(text, newline, fences):
+        if _block_boundary(text, newline, fences, base):
             return True
         newline = text.find("\n", newline + 1, end)
     return False
@@ -657,7 +672,7 @@ def _active_openers(text: str) -> frozenset[int]:
                 if j < n and text[j] == "\n":  # a blank line is a paragraph boundary
                     stack.clear()
                     barrier = 0
-                elif _block_boundary(text, i, fences):  # so is the start of a block without a blank line
+                elif _block_boundary(text, i, fences, _list_base(text, stack[0][0]) if stack else 0):  # so is the start of a block without a blank line
                     stack.clear()
                     barrier = 0
             i += 1
@@ -740,9 +755,9 @@ def _blank_between(text: str, a: int, b: int) -> bool:
 
 @functools.lru_cache(maxsize=16)
 def _title_ends(text: str) -> dict[str, tuple[int, ...]]:
-    """Sorted positions of the unescaped `"`, `'` and `)` in `text`, from one linear pass. An occurrence is escaped when
+    """Sorted positions of the unescaped `"`, `'`, `)` and `(` in `text`, from one linear pass. An occurrence is escaped when
     an odd number of backslashes directly precedes it: the parity the destination scanner's skip-two loop produces."""
-    found: dict[str, list[int]] = {'"': [], "'": [], ")": []}
+    found: dict[str, list[int]] = {'"': [], "'": [], ")": [], "(": []}
     backslashes = 0  # length of the run of backslashes directly before the current position
     for index, char in enumerate(text):
         if char == "\\":
@@ -810,6 +825,11 @@ def _inline_image_target(text: str, start: int) -> tuple[str, int] | None:
         at = bisect.bisect_left(ends, pos)  # the first unescaped end character at or after the title start
         if at == len(ends):
             return None
+        if end == ")":  # a parenthesized title may not hold an unescaped `(`: the link is then no link (CommonMark 6.3)
+            opens = _title_ends(text)["("]
+            first_open = bisect.bisect_left(opens, pos)
+            if first_open < len(opens) and opens[first_open] < ends[at]:
+                return None
         if _blank_between(text, pos, ends[at]) or _crosses_block(text, pos, ends[at], _fence_spans(text)):
             return None  # (c) a title may span soft line breaks, never a paragraph or block boundary (heading, list, fence)
         title_close = pos = ends[at] + 1
