@@ -753,13 +753,15 @@ def test_nested_link_deactivation_work_is_linear():
 # deactivates earlier LINK openers, including reference-style links, while IMAGE openers stay; (3) unmatched brackets and
 # adjacent links behave as in CommonMark. GFM citations: the raw-pre inert control and the valid-link control above
 # (gfm-2d3-raw_pre_inert_control.html, gfm-2d3-valid_link_control.html). Every other case is a CommonMark 4.6 / 6.3
-# derivation: GFM render pending (not yet executed). A case that disagrees with the implementation is an xfail(strict).
+# derivation (GFM render pending (not yet executed) unless a gfm-<sha>-* file is cited). The nine exact oracle cases of
+# t7-adjudication-reference-links-e90d748.md are pinned, with their GFM files, in test_e90_gfm_oracle_cases.
 
 
 # Raw HTML block types (CommonMark 4.6). Type 1 (script/pre/style/textarea) ends at its end tag, which may be on the start
 # line, and it does NOT end at a blank line; type 7 ends at a blank line. The `[open` is raw text, so the orphan `](a`b)`
 # after the block is not a closer and the following image renders (MISSING reported).
-# GFM render pending (not yet executed) for every id below.
+# GFM renders exist for script/style/textarea/type-7 (gfm-e90-raw_{script,style,textarea,type7}_opener.html, pinned in
+# test_e90_gfm_oracle_cases); the other ids here are derivations: GFM render pending (not yet executed).
 @pytest.mark.parametrize("body", [
     "<script>\n[open\n</script>\n" + RAW_TAIL,  # type 1 script, end tag on its own later line
     "<style>\n[open\n</style>\n" + RAW_TAIL,  # type 1 style, end tag on its own later line
@@ -799,13 +801,11 @@ def test_valid_link_control_hides_image_in_code_span(make_ctx, tmp_path, brand):
 
 
 REF_DEFINITION = "\n\n[ref]: https://example.test/r"
-REF_XFAIL = pytest.mark.xfail(strict=True, reason="GFM render pending")
 
 
-# GFM render pending (not yet executed). A completed reference link (full, collapsed or shortcut, with a live
-# definition) deactivates the enclosing link opener, so the orphan `](a`b)` is literal and the image renders. Observed
-# lint output matches this derivation (the image is reported); the `_active_openers` set does not deactivate on `][ref]`
-# (see the xfail direct test below).
+# A completed reference link (full, collapsed or shortcut, with a live definition) deactivates the enclosing link
+# opener, so the orphan `](a`b)` is literal and the image renders. The exact GFM-rendered cases are in
+# test_e90_gfm_oracle_cases below (gfm-e90-inner_*_reference.html).
 @pytest.mark.parametrize("usage", [
     "[outer [x][ref]](a`b) `![Shot](<docs/images/missing.png>)",
     "[outer [ref][]](a`b) `![Shot](<docs/images/missing.png>)",
@@ -830,10 +830,9 @@ def test_reference_style_controls_do_not_report_the_image(make_ctx, tmp_path, br
     assert MISSING not in fails, fails
 
 
-# GFM render pending (not yet executed). Direct opener state for the reference-style nested link: the inner closer stays
-# active and the enclosing link closer must be inactive. The implementation does not deactivate on `][ref]`, so this is
-# xfail(strict) until it does.
-@REF_XFAIL
+# Direct opener state for the reference-style nested link (derived from the CommonMark rule that links may not contain
+# links, matching gfm-e90-inner_full_reference.html): the inner closer stays active and the enclosing link closer is
+# inactive.
 def test_reference_inner_link_closer_active_and_enclosing_link_closer_inactive():
     readmelint._active_openers.cache_clear()
     text = "[outer [x][ref]](z)" + REF_DEFINITION
@@ -878,3 +877,28 @@ def test_reference_link_work_is_linear():
 
     ratios = [ratio(k) for k in (100, 200, 400)]
     assert max(ratios) <= 1.5 * min(ratios), ratios
+
+
+# The nine cases of t7-adjudication-reference-links-e90d748.md. Each has a live GitHub GFM render in the
+# showcase-orchestration 20261031 directory (gfm-e90-<id>.html): the eight True cases render one real image (so R7 must
+# report it missing) and the undefined-reference control renders none (an unresolved reference is plain text, not a link,
+# so it must NOT deactivate the enclosing opener).
+_IMG = "`![Shot](<docs/images/missing.png>)`"
+E90_CASES = [
+    ("inner_full_reference", "[outer [inner][ref]](a`b) " + _IMG + "\n\n[ref]: ok", True),
+    ("inner_collapsed_reference", "[outer [inner][]](a`b) " + _IMG + "\n\n[inner]: ok", True),
+    ("inner_shortcut_reference", "[outer [ref]](a`b) " + _IMG + "\n\n[ref]: ok", True),
+    ("undefined_reference_control", "[outer [inner][ref]](a`b) " + _IMG, False),
+    ("raw_script_opener", "<script>\n[open\n</script>\n](a`b) " + _IMG, True),
+    ("raw_style_opener", "<style>\n[open\n</style>\n](a`b) " + _IMG, True),
+    ("raw_textarea_opener", "<textarea>\n[open\n</textarea>\n](a`b) " + _IMG, True),
+    ("adjacent_links_opener", "[a](b)[c](d) ](a`b) " + _IMG, True),
+    ("raw_type7_opener", "<custom>\n[open\n</custom>\n\n](a`b) " + _IMG, True),
+]
+
+
+@pytest.mark.parametrize("body,expect_missing", [(b, m) for _, b, m in E90_CASES], ids=[c[0] for c in E90_CASES])
+def test_e90_gfm_oracle_cases(make_ctx, tmp_path, brand, body, expect_missing):
+    readmelint._active_openers.cache_clear()
+    fails = _usage_fails(make_ctx, tmp_path, brand, body)
+    assert (MISSING in fails) is expect_missing, fails
