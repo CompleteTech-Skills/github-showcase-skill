@@ -438,56 +438,123 @@ _BLOCK_START_LINE = re.compile(
 _ATX_OR_THEMATIC_LINE = re.compile(
     r" {0,3}(?:#{1,6}(?:[ \t]|$)|(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})$)", re.M)
 _BLOCKQUOTE_LINE = re.compile(r" {0,3}>")
-# an ordered list item start: only `1.` may interrupt a paragraph, but a sibling item of the enclosing list (a marker
-# indented less than the item's content column) always ends the item (CommonMark 5.2, as `mdcode._interrupts`)
+# an ordered list item start (CommonMark 5.2, as `mdcode._interrupts`): only `1.` interrupts a paragraph of its own
+# container. Any other number ends the paragraph when the newline leaves an open container, that is a block quote the
+# span starts in and the next line has fewer `>` markers, or a list item the span lies in and the next line is indented
+# less than the item's content column. `_block_boundary` applies that rule to the container of the span's start line.
 _ORDERED_START_LINE = re.compile(r"( {0,3})(\d{1,9})[.)](?:[ \t]|$)")
 _ITEM_CONTENT = re.compile(r" {0,3}(?:[-+*]|\d{1,9}[.)])[ \t]+(?=\S)")
 
 
-def _list_base(text: str, pos: int) -> int:
-    """Content column of the list item whose marker starts the line holding `pos`, or 0 outside a list item line."""
-    item = _ITEM_CONTENT.match(text, text.rfind("\n", 0, pos) + 1)
-    return item.end() - item.start() if item else 0
+@functools.lru_cache(maxsize=16)
+def _paragraph_items(text: str) -> dict[int, tuple[int, int] | None]:
+    """For each non-blank line start, the item that its paragraph or item inherits: (block-quote depth, content column)
+    of the nearest earlier item marker, or None. The inherited item ends at a line of another quote depth, at a heading
+    or thematic break, and at a non-blank line indented less than its column after a blank line (a blank line alone
+    keeps the item open, as CommonMark does). One forward pass per text, so each lookup costs constant time."""
+    items: dict[int, tuple[int, int] | None] = {}
+    carry = None  # (quote depth, content column) of the item that the lines read so far belong to, or None
+    prev_blank = True
+    start, n = 0, len(text)
+    while True:
+        end = text.find("\n", start)
+        end = n if end == -1 else end
+        depth, rest = mdcode._quotes(text[start:end])  # block-quote markers are container syntax, not paragraph text
+        if rest.strip(" \t\r\x00"):
+            indent = len(rest) - len(rest.lstrip(" "))
+            if _ATX_OR_THEMATIC_LINE.match(rest):
+                items[start] = carry = None
+            elif own := _ITEM_CONTENT.match(rest):
+                items[start] = carry  # the span line's own marker is read first, so this entry is not consulted
+                carry = (depth, own.end())
+            else:
+                if carry is not None and (carry[0] != depth or (prev_blank and indent < carry[1])):
+                    carry = None
+                items[start] = carry
+            prev_blank = False
+        else:
+            prev_blank = True
+        if end >= n:
+            return items
+        start = end + 1
+
+
+def _container_context(text: str, pos: int) -> tuple[int, int]:
+    """(block-quote depth, list-item content column) of the line that holds `pos`. The column is 0 outside a list item.
+    A line with its own item marker is in that item. A continuation line is in the nearest earlier item of its paragraph
+    when it is indented at least to that item's content column (see `_paragraph_items`)."""
+    start = text.rfind("\n", 0, pos) + 1
+    end = text.find("\n", start)
+    depth, rest = mdcode._quotes(text[start:len(text) if end == -1 else end])
+    if own := _ITEM_CONTENT.match(rest):
+        return depth, own.end()
+    carried = _paragraph_items(text).get(start)
+    indent = len(rest) - len(rest.lstrip(" "))
+    if carried is not None and carried[0] == depth and indent >= carried[1]:
+        return depth, carried[1]
+    return depth, 0
+
+
 # the underline of a setext heading: `===` or `---` after paragraph text (a bare `---` line is a thematic break above)
 _SETEXT_UNDERLINE = re.compile(r" {0,3}(?:=+|-+)[ \t]*$", re.M)
 
 
-def _block_boundary(text: str, newline: int, fences: tuple[tuple[int, int], ...], base: int = 0) -> bool:
+def _block_boundary(text: str, newline: int, fences: tuple[tuple[int, int], ...],
+                    context: tuple[int, int] = (0, 0)) -> bool:
     """True when the newline at `newline` (plain text, outside every inert region) ends a link-opener span even though
-    no blank line follows: the line that just ended is a heading, a thematic break or the underline of a setext heading,
-    or the next line starts a heading, list item, thematic break, fence, or a blockquote that does not continue a
-    blockquote line. An ordered item interrupts only as `1.` or, when `base` (the content column of the list item that
-    holds the paragraph) is set, as a sibling indented less than `base`; `2.` and `0.` stay paragraph text. Each check reads at most the two adjacent lines (the previous line is found backwards only as far
-    as its own start), so the cost is linear in the length of the lines involved."""
+    no blank line follows. `context` is (block-quote depth, list-item content column) of the line where the span starts
+    (see `_container_context`). Block-quote markers are container syntax, so the line that just ended and the next line
+    are read after their quote markers are removed: up to the ended line's depth, a deeper `>` stays content. The
+    boundary is then a heading, a thematic break or a setext underline ending the paragraph, a list item, a fence, or a
+    line of a deeper quote (a quote line after an unquoted line included). An ordered marker interrupts as `1.`, and any
+    other number when the newline leaves an open container: the span is in a quote and the next line has fewer `>`
+    markers than that depth, or the span is in a list item and the next line is indented less than its content column
+    (a sibling item). Otherwise `2.` and `0.` stay paragraph text. Each check reads at most the two adjacent lines (the
+    previous line is found backwards only as far as its own start), so the cost is linear in the length of the lines."""
+    span_depth, item_col = context
     ended = text.rfind("\n", 0, newline) + 1  # start of the line that just ended
-    if _ATX_OR_THEMATIC_LINE.match(text, ended):
+    ended_depth, ended_rest = mdcode._quotes(text[ended:newline])
+    if _ATX_OR_THEMATIC_LINE.match(ended_rest):
         return True
-    if ended > 0 and _SETEXT_UNDERLINE.match(text, ended):  # an underline makes a heading only after paragraph text
+    if ended > 0 and _SETEXT_UNDERLINE.match(ended_rest):  # an underline makes a heading only after paragraph text
         previous = text.rfind("\n", 0, ended - 1) + 1
-        if text[previous:ended - 1].strip():
+        if mdcode._quotes(text[previous:ended - 1])[1].strip():
             return True
     nxt = newline + 1
-    if _BLOCK_START_LINE.match(text, nxt):
+    eol = text.find("\n", nxt)
+    next_body = text[nxt:len(text) if eol == -1 else eol]
+    next_depth = mdcode._quotes(next_body)[0]
+    next_rest = mdcode._strip_quotes(next_body, ended_depth)  # the next line without the markers of its container
+    if _BLOCK_START_LINE.match(next_rest):
         return True
-    ordered = _ORDERED_START_LINE.match(text, nxt)
-    if ordered and (int(ordered.group(2)) == 1 or (base and len(ordered.group(1)) < base)):
-        return True
-    k = nxt  # a fence opener is found at its line start after up to three spaces of indent
-    while k < len(text) and k - nxt < 3 and text[k] == " ":
-        k += 1
-    at = bisect.bisect_left(fences, (k, -1))
-    if at < len(fences) and fences[at][0] == k:
-        return True
-    return bool(_BLOCKQUOTE_LINE.match(text, nxt)) and not _BLOCKQUOTE_LINE.match(text, ended)
+    ordered = _ORDERED_START_LINE.match(next_rest)
+    if ordered:
+        if int(ordered.group(2)) == 1:
+            return True
+        if span_depth and next_depth < span_depth:  # the block quote the span lies in ended
+            return True
+        content = mdcode._strip_quotes(next_body, span_depth)
+        if item_col and len(content) - len(content.lstrip(" ")) < item_col:  # a sibling of the span's list item
+            return True
+    # a fence opener sits at its line start after up to three spaces of indent, or after the quote markers of the line
+    for start in (nxt, nxt + len(next_body) - len(next_rest)):
+        k = start
+        while k < len(text) and k - start < 3 and text[k] == " ":
+            k += 1
+        at = bisect.bisect_left(fences, (k, -1))
+        if at < len(fences) and fences[at][0] == k:
+            return True
+    return next_depth > ended_depth  # a deeper quote, or a quote line after an unquoted line
 
 
 def _crosses_block(text: str, start: int, end: int, fences: tuple[tuple[int, int], ...]) -> bool:
-    """True when a newline in text[start:end] is a block boundary (see `_block_boundary`). A plain soft line break is
-    not one: alt text and labels may continue on the next line of their paragraph."""
+    """True when a newline in text[start:end] is a block boundary (see `_block_boundary`), read against the container
+    of the line where the range starts (`_container_context`). A plain soft line break is not one: alt text, labels and
+    link titles may continue on the next line of their paragraph, or inside their quote or list item."""
     newline = text.find("\n", start, end)
-    base = _list_base(text, start) if newline != -1 else 0
+    context = _container_context(text, start) if newline != -1 else (0, 0)
     while newline != -1:
-        if _block_boundary(text, newline, fences, base):
+        if _block_boundary(text, newline, fences, context):
             return True
         newline = text.find("\n", newline + 1, end)
     return False
@@ -538,8 +605,9 @@ def _active_openers(text: str) -> frozenset[int]:
     tags (attribute values included) are inert, so a bracket inside them is text: it neither opens nor closes a link.
     An unescaped `]` that pops an opener and is directly followed by a destination `(...)` skips that destination,
     which is literal (a backtick in it opens no code span). A blank line clears the stack, and so does a block
-    boundary: a heading, list item, thematic break, fence or blockquote start (see `_block_boundary`), and the line
-    after a heading or thematic break, and the underline of a setext heading. A quote line continues an open quote,
+    boundary: a heading, list item, thematic break, fence or blockquote start (see `_block_boundary`), an ordered marker
+    that leaves the open block quote or list item of the span (its container exit), and the line after a heading or
+    thematic break, and the underline of a setext heading. A quote line continues an open quote,
     so a `[` and its `](` in one blockquote still pair. Raw HTML blocks (`mdcode.html_block_spans`) are inert and are block boundaries: no `[` inside one opens
     a link, and the stack is cleared entering and leaving it. Completing an inline link deactivates every earlier LINK
     opener in the stack (CommonMark: links may not contain links), while earlier IMAGE openers stay active; a `barrier`
@@ -558,6 +626,7 @@ def _active_openers(text: str) -> frozenset[int]:
     stack: list[tuple[int, bool]] = []  # (index of `[`, whether it opens an image `![`)
     barrier = 0  # stack positions below this hold inactive link openers (a link was completed after them)
     inline = tag = comment = None  # cached next starts: None = not searched yet, False = none left
+    context_at, context = -1, (0, 0)  # container of the bottom opener, recomputed only when that opener changes
     n, pos = len(text), 0
 
     def next_inline(start):
@@ -669,10 +738,12 @@ def _active_openers(text: str) -> frozenset[int]:
                 j = i + 1
                 while j < n and text[j] in " \t\r":
                     j += 1
+                if stack and stack[0][0] != context_at:  # the container of the paragraph's first open `[` (memoized)
+                    context_at, context = stack[0][0], _container_context(text, stack[0][0])
                 if j < n and text[j] == "\n":  # a blank line is a paragraph boundary
                     stack.clear()
                     barrier = 0
-                elif _block_boundary(text, i, fences, _list_base(text, stack[0][0]) if stack else 0):  # so is the start of a block without a blank line
+                elif _block_boundary(text, i, fences, context if stack else (0, 0)):  # so is the start of a block without a blank line
                     stack.clear()
                     barrier = 0
             i += 1
@@ -780,7 +851,9 @@ def _inline_image_target(text: str, start: int) -> tuple[str, int] | None:
     if _blank_between(text, start + 1, pos):  # (a) a paragraph boundary before the destination
         return None
     begin = pos
+    angle = False
     if pos < len(text) and text[pos] == "<":
+        angle = True
         begin = pos = pos + 1
         while pos < len(text) and text[pos] != ">":
             _DEST_STEPS += 1
@@ -812,6 +885,8 @@ def _inline_image_target(text: str, start: int) -> tuple[str, int] | None:
             return None
         target = text[begin:pos]
     dest_end = pos
+    if angle and dest_end < len(text) and text[dest_end] in "\"'(":
+        return None  # CommonMark: whitespace must separate an angle destination from its title
     while pos < len(text) and text[pos].isspace():
         _DEST_STEPS += 1
         pos += 1
@@ -908,8 +983,10 @@ def _markdown_images(text: str, document: str) -> list[tuple[str, str, int, int]
         key = label(document[match.end():close] if len(document) >= len(text) else alt)
         if after < len(text) and text[after] == "[":
             ref_close = _closing_bracket(text, after)
-            # a label holding a block boundary is no label: the shortcut form below still applies, as CommonMark has it
-            if ref_close is not None and not _crosses_block(text, after + 1, ref_close, fences):
+            # a label holding a block boundary or an unescaped bracket is no label (CommonMark): the shortcut form below
+            # still applies, with the alt text as its label
+            if (ref_close is not None and not _crosses_block(text, after + 1, ref_close, fences)
+                    and _next_unescaped_bracket(text, after + 1, ref_close) == -1):
                 key = label((document if len(document) >= len(text) else text)[after + 1:ref_close]) or key
                 after = ref_close + 1
         if key in definitions:
