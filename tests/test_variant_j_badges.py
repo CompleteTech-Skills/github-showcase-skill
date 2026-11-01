@@ -484,3 +484,48 @@ def test_local_inherited_template_badge_migrates_like_remote(make_ctx, tmp_path)
         body = readme.badge_body(ctx, existing)
         assert body != existing and readme.generated_badges(body)
         assert "type-GitHub%20profile-" in body and "license-MIT-" in body
+
+
+# --- The generated-badge digest preserves Markdown-significant whitespace ---------------------------------------
+def _indented_first_row(text):
+    body = badge_block(text)
+    comment, rows = body.strip("\n").split("\n", 1)
+    indented = f"{comment}\n    {rows}"
+    return text.replace(body, indented), indented
+
+
+def test_indenting_a_generated_badge_row_makes_the_block_authored(make_ctx, tmp_path):
+    ctx = profile_context(make_ctx, tmp_path)
+    before = readme.scaffold(ctx)
+    assert readme.generated_badges(badge_block(before))
+    edited, indented = _indented_first_row(before)
+    assert badge_block(edited) == indented
+    assert not readme.generated_badges(badge_block(edited))
+    after_ctx = make_ctx(repo_dir=tmp_path, **(ctx.meta | {"license": "Apache-2.0"}))
+    header = readme.header_only(after_ctx, edited)
+    assert badge_block(header) == indented
+    upgraded, removed = readme.upgrade(after_ctx, edited)
+    assert badge_block(upgraded) == indented
+    assert readme.preservation(edited, upgraded, removed) == []
+
+
+def test_crlf_converted_untouched_block_still_counts_as_generated(make_ctx, tmp_path):
+    ctx = profile_context(make_ctx, tmp_path)
+    block = badge_block(readme.scaffold(ctx))
+    assert readme.generated_badges(block.replace("\n", "\r\n"))
+
+
+@pytest.mark.parametrize("variant", ["no-lead", "extra-lead", "extra-trail", "no-trail"])
+def test_marker_separator_newline_variations_still_validate(make_ctx, tmp_path, variant):
+    ctx = profile_context(make_ctx, tmp_path)
+    block = badge_block(readme.scaffold(ctx))
+    comment, body = block.strip("\n").split("\n", 1)
+    shaped = {"no-lead": f"{comment}\n{body}", "extra-lead": f"{comment}\n\n{body}",
+              "extra-trail": f"{comment}\n{body}\n\n", "no-trail": f"{comment}\n{body}"}[variant]
+    assert readme.generated_badges(shaped)
+
+
+def test_badge_digest_is_not_the_template_body_digest(make_ctx, tmp_path):
+    body = badge_block(readme.scaffold(profile_context(make_ctx, tmp_path))).split("\n", 1)[1]
+    assert readme.badge_sha(body) != readme.badge_sha("    " + body)
+    assert readme.badge_sha(body) == readme.badge_sha(body.replace("\n", "\r\n"))

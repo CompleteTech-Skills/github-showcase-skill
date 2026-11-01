@@ -1034,3 +1034,61 @@ def test_r3_nested_container_cases(make_ctx, tmp_path, brand, body, expect_missi
     readmelint._active_openers.cache_clear()
     fails = _usage_fails(make_ctx, tmp_path, brand, body)
     assert (MISSING in fails) is expect_missing, fails
+
+
+# --- Link destinations and titles are literal; comment openers inside complete tags are text ---------------------
+def _profile_readme(make_ctx, tmp_path):
+    (tmp_path / "docs/images").mkdir(parents=True)
+    (tmp_path / "docs/images/banner.png").write_bytes(b"banner")
+    ctx = make_ctx(repo_dir=tmp_path, repo=".github", language=None,
+                   description="Community health files for Northwind Trading Co.")
+    return ctx, readme.scaffold(ctx)
+
+
+def test_image_text_in_a_link_title_is_not_a_badge(make_ctx, tmp_path):
+    ctx, text = _profile_readme(make_ctx, tmp_path)
+    license_row = next(line for line in text.splitlines() if "license-MIT-" in line)
+    path = tmp_path / "README.md"
+    path.write_text(text, encoding="utf-8")
+    assert not any("badge" in f for f in readmelint.lint(ctx, path)["fails"])
+    title = '[Docs](https://example.test "![License](https://img.shields.io/badge/license-MIT-64748B)")'
+    path.write_text(text.replace(license_row, title), encoding="utf-8")
+    assert "R7 2-4 header badges required (found 1)" in readmelint.lint(ctx, path)["fails"]
+
+
+def test_images_inside_a_link_title_are_neither_validated_nor_counted(make_ctx, tmp_path, brand):
+    ctx = good_readme(make_ctx, tmp_path, brand)
+    p = _insert_usage(tmp_path, '[Docs](https://example.test "![Shot](docs/images/missing.png)'
+                                '![Type](https://img.shields.io/badge/type-x-FF0000)'
+                                '<img src=\'https://img.shields.io/badge/type-x-FF0000\' alt=\'x\'>")')
+    fails = readmelint.lint(ctx, p)["fails"]
+    assert not any("missing.png" in f or "off-palette" in f for f in fails), fails
+
+
+def test_linked_image_in_link_text_is_still_validated(make_ctx, tmp_path, brand):
+    ctx = good_readme(make_ctx, tmp_path, brand)
+    p = _insert_usage(tmp_path, "[![Shot](docs/images/missing.png)](https://example.test)")
+    assert "R7 local image does not resolve: docs/images/missing.png" in readmelint.lint(ctx, p)["fails"]
+
+
+def test_comment_opener_inside_an_html_attribute_does_not_blank_a_definition(make_ctx, tmp_path, brand):
+    ctx = good_readme(make_ctx, tmp_path, brand)
+    p = _insert_usage(tmp_path, 'Read <span title="<!--">note</span>.\n\n![Shot][shot]\n\n'
+                                '[shot]: docs/images/missing.png\n\n<!-- end -->')
+    assert "R7 local image does not resolve: docs/images/missing.png" in readmelint.lint(ctx, p)["fails"]
+
+
+def test_plain_comment_before_a_definition_still_blanks_properly(make_ctx, tmp_path, brand):
+    ctx = good_readme(make_ctx, tmp_path, brand)
+    p = _insert_usage(tmp_path, '<!-- note\n[shot]: docs/images/missing.png\n-->\n\n![Shot][shot]\n\n'
+                                '[shot]: docs/images/banner.png')
+    fails = readmelint.lint(ctx, p)["fails"]
+    assert not any("missing.png" in f for f in fails), fails
+
+
+def test_real_comment_with_tag_like_text_still_hides_a_definition(make_ctx, tmp_path, brand):
+    ctx = good_readme(make_ctx, tmp_path, brand)
+    p = _insert_usage(tmp_path, '<!-- <span title="x"> [shot]: docs/images/missing.png -->\n\n'
+                                '![Shot][shot]\n\n[shot]: docs/images/banner.png')
+    fails = readmelint.lint(ctx, p)["fails"]
+    assert not any("missing.png" in f for f in fails), fails

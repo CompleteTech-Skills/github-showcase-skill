@@ -19,7 +19,7 @@ MARK = re.compile(r"<!-- showcase:([a-z-]+):start -->\n?(.*?)\n?<!-- showcase:\1
 EMOJI = re.compile("[\U0001F000-\U0001FAFF☀-➿⬀-⯿️‍]")
 SHIELDS = "https://img.shields.io/badge/"
 GENERATED_BADGES = re.compile(r"<!-- showcase:badges:generated sha256=([0-9a-f]{64})"
-                              r"(?: replaces=([0-9a-f]{64}))? -->\n(.*)", re.S)
+                              r"(?: replaces=([0-9a-f]{64}))? -->\r?\n(.*)", re.S)
 BOM = "\ufeff"
 
 
