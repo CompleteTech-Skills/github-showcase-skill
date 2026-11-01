@@ -1,0 +1,72 @@
+name: Bug report
+description: Report something that is broken or behaves incorrectly
+title: "[Bug]: "
+labels: ["type:bug", "status:needs-triage"]
+body:
+  - type: markdown
+    id: intro
+    attributes:
+      value: |
+        Thanks for reporting a bug. Before you open a new issue, please search the existing issues to check whether it has already been reported.
+
+        Do not include tokens, secrets, private repository names or email addresses in this issue. Replace them with placeholders.
+
+        Security vulnerabilities must not be reported in public issues. Report them privately through the security policy of this repository instead.
+  - type: input
+    id: command
+    attributes:
+      label: Command or workflow
+      placeholder: e.g. showcase.py banner
+    validations:
+      required: false
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the problem you observed.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+      description: Describe the behaviour you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: List the smallest set of steps that reproduces the problem.
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+    validations:
+      required: false
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - GitHub Actions
+        - Other
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output or logs
+      description: Paste relevant output or logs. Remove tokens and private details first.
+      render: text
+    validations:
+      required: false
