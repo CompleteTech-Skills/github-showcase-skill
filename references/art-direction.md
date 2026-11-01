@@ -97,17 +97,18 @@ This recipe does not rely on a documented image path: OpenAI documentation cover
 
 ### Read the image path from the run output
 
-1. After the run, search the `run.jsonl` events (or the final message) for the image file path Codex reports for the generated image, and use exactly that path.
+1. After the run, search the `run.jsonl` events (or the final message) for every image file path Codex reports for the generated images, and use exactly those paths (see item 5).
 2. Never pick the newest file in the generated-images folder. Parallel sessions write into the same place, so the newest file can belong to another run and the wrong image gets normalized.
 3. If the run output names no readable image path, treat the attempt as an empty run (see Retry and attempt limits). Do not fall back to the newest file or to a directory listing.
-4. Pass the chosen path to `content icon normalize --in PATH`. In the `PROMPTS.md` provenance block, record the Codex session id and only the image file name, or the path written relative to `$CODEX_HOME` (for example `$CODEX_HOME/generated_images/<file>`), in the prose beside the record. Never record the absolute path: it contains the local user name. The Provenance record fenced template itself does not change.
+4. Copy the chosen image to scratch (see Sandbox (d)) and pass that copy to content icon normalize --in PATH, not the generated_images path. In the `PROMPTS.md` provenance block, record the Codex session id and only the image file name, or the path written relative to `$CODEX_HOME` (for example `$CODEX_HOME/generated_images/<file>`), in the prose beside the record. Never record the absolute path: it contains the local user name. The Provenance record fenced template itself does not change.
 5. One invocation may report between zero and four image paths. Every DISTINCT path the run output reports is one candidate; use exactly the reported paths, never a directory listing or the newest file. A run that reports no readable path is an empty run: either it reports no path, or every path it reports is unreadable (unreadable-only output). An unreadable path fills no slot, and readable paths in the same run still fill their slots. Parallel sessions write into the same place, so do not run candidates for several repositories in the same working directory at once unless you can tell their outputs apart.
 
 ### Retry and attempt limits
 
-- The limit applies per candidate, not per candidate set. The fixed prompt asks for four candidates, so there are four candidate slots, and the cap applies to each slot. A run that returns k distinct readable paths fills k slots (up to the unfilled ones); make further runs, with the same unchanged prompt, only for unfilled slots.
+- The limit applies per candidate, not per candidate set. Pipeline rule 7 asks for four candidates (the option A template also says so), so there are four candidate slots, and the cap applies to each slot. A run that returns k distinct readable paths fills k slots (up to the unfilled ones); make further runs, with the same unchanged prompt, only for unfilled slots.
 - An empty run (no path, or unreadable-only output) is retried as a NEW run with the same unchanged prompt, at most 2 retries (3 attempts total) for each slot that is still unfilled. Each empty run counts as one attempt against every slot that is still unfilled. Parallel runs can finish without a path, which is why a retry is allowed. Retries never alter the prompt.
 - Successful candidates never count toward the cap, so the four-candidate round of pipeline rule 7 (then 4 more once, then log `art-fail`) is still reachable. Only empty runs count toward the 3 attempts, and they are not candidates. An unreadable path is not a successful candidate, so unreadable-only output is counted as an empty run and cannot loop forever.
+- The second round of rule 7 ("4 more once") opens four new slots with the same per-slot cap of 3 attempts (2 retries each); slots from the first round do not carry over their attempt counts.
 - After 3 empty attempts for any one slot, including attempts that returned only unreadable paths, stop and log `art-fail` with a one-line reason. Do not loop.
 
 ### Privacy: only public facts go into prompts
