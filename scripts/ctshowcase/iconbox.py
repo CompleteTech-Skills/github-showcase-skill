@@ -127,7 +127,8 @@ def _icon_nodes(ctx: RepoContext, im: Image.Image, box, clip=None, fit_alpha: bo
                 pic = Picture(x + (w - iw) / 2, y + (h - ih) / 2, iw, ih, im, "webp", 84, 2, resample)
                 # pixel art is meant to be enlarged: no icon-resolution warning (fit None)
                 return ([Clip(clip[2], clip[3], clip[4], [pic], clip[0], clip[1])] if clip else [pic]), None
-    if fit_alpha:
+    # icon_pixel_art keeps the retained image size even when the native grid is not recognized (no alpha crop)
+    if fit_alpha and not ctx.style.get("icon_pixel_art"):
         trimmed = alpha_fit(im)
         im = trimmed if trimmed is not None else im
     k = min(w / im.width, h / im.height)
