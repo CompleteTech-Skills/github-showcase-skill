@@ -564,3 +564,49 @@ def test_badge_digest_is_not_the_template_body_digest(make_ctx, tmp_path):
     assert readme.badge_sha(body) != readme.badge_sha("    " + body)
     assert readme.badge_sha(body) != readme.badge_sha("\t" + body)
     assert readme.badge_sha(body) == readme.badge_sha(body.replace("\n", "\r\n"))
+
+
+# --- Round 6: only line endings and separator newlines are normalized when recognizing the inherited template -----
+def _template_text(ctx, row):
+    text = readme.scaffold(ctx)
+    return text.replace(badge_block(text), row)
+
+
+def _refresh(ctx, text, mode):
+    if mode == "header":
+        return readme.header_only(ctx, text), []
+    return readme.upgrade(ctx, text)
+
+
+@pytest.mark.parametrize("which", [0, 1], ids=["remote", "local-svg"])
+@pytest.mark.parametrize("edit", ["indent4", "tab", "trailing-space", "indent1"])
+@pytest.mark.parametrize("mode", ["header", "upgrade"])
+def test_edited_template_row_without_digest_survives_refresh_byte_for_byte(make_ctx, tmp_path, mode, edit, which):
+    ctx = profile_context(make_ctx, tmp_path)
+    template = readme.template_badge_bodies(ctx.brand)[which]
+    row = {"indent4": "    " + template, "tab": "\t" + template, "trailing-space": template + "  ",
+           "indent1": " " + template}[edit]
+    text = _template_text(ctx, row)
+    assert badge_block(text) == row
+    after, removed = _refresh(ctx, text, mode)
+    assert badge_block(after) == row
+    assert "replaces=" not in after
+    assert readme.preservation(text, after, removed) == []
+    again, _ = _refresh(ctx, after, mode)
+    assert badge_block(again) == row
+
+
+@pytest.mark.parametrize("which", [0, 1], ids=["remote", "local-svg"])
+@pytest.mark.parametrize("shape", ["exact", "crlf", "padded", "crlf-padded"])
+@pytest.mark.parametrize("mode", ["header", "upgrade"])
+def test_exact_template_row_is_still_recognized_and_refreshed(make_ctx, tmp_path, mode, shape, which):
+    ctx = profile_context(make_ctx, tmp_path)
+    template = readme.template_badge_bodies(ctx.brand)[which]
+    row = {"exact": template, "crlf": template + "\r\n", "padded": "\n\n" + template + "\n\n",
+           "crlf-padded": "\r\n" + template + "\r\n"}[shape]
+    text = _template_text(ctx, row)
+    body = readme.badge_body(ctx, row)
+    assert body != row and readme.generated_badges(body)
+    after, _ = _refresh(ctx, text, mode)
+    assert "type-Template" not in badge_block(after) and "type-template" not in badge_block(after)
+    assert readme.generated_badges(badge_block(after))

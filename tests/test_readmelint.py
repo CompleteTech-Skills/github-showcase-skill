@@ -1092,3 +1092,70 @@ def test_real_comment_with_tag_like_text_still_hides_a_definition(make_ctx, tmp_
                                 '![Shot][shot]\n\n[shot]: docs/images/banner.png')
     fails = readmelint.lint(ctx, p)["fails"]
     assert not any("missing.png" in f for f in fails), fails
+
+
+# --- Round 6: list-continuation definitions, link-title comment openers ---------------------------------------------
+LIST_CONTINUATION = [
+    "1. Entry\n\n    [shot]: docs/images/missing.png",
+    "- Entry\n\n  [shot]: docs/images/missing.png",
+    "- Outer\n  - Inner\n\n      [shot]: docs/images/missing.png",
+    "1. Outer\n\n   1. Inner\n\n       [shot]: docs/images/missing.png",
+    "> 1. Entry\n>\n>     [shot]: docs/images/missing.png",
+    "- > Entry\n  >\n  > [shot]: docs/images/missing.png",
+    "1. Entry\n\n\t[shot]: docs/images/missing.png",
+]
+LIST_CONTINUATION_IDS = ["ordered", "bullet", "nested-bullet", "nested-ordered", "quote-list",
+                         "list-quote", "tab"]
+
+
+@pytest.mark.parametrize("snippet", LIST_CONTINUATION, ids=LIST_CONTINUATION_IDS)
+def test_list_continuation_definition_reports_the_missing_file(make_ctx, tmp_path, brand, snippet):
+    assert MISSING in _usage_fails(make_ctx, tmp_path, brand, f"![Shot][shot]\n\n{snippet}")
+
+
+@pytest.mark.parametrize("control", [
+    "    [shot]: docs/images/missing.png",
+    "Paragraph.\n\n    [shot]: docs/images/missing.png",
+    "1. Entry\n\nParagraph closes the list.\n\n    [shot]: docs/images/missing.png",
+    "- Entry\n\n  Still in the item.\n\ntext\n\n    [shot]: docs/images/missing.png",
+    "1. Entry\n    [shot]: docs/images/missing.png",
+], ids=["no-list", "after-paragraph", "list-closed", "list-closed-bullet", "lazy-continuation-text"])
+def test_indented_definition_without_an_open_list_item_is_code(make_ctx, tmp_path, brand, control):
+    fails = _usage_fails(make_ctx, tmp_path, brand, f"![Shot][shot]\n\n{control}")
+    assert MISSING not in fails, fails
+
+
+LINK_TITLE_DOC = '[Docs](https://example.test "<!--")\n\n![Shot][shot]\n\n[shot]: docs/images/missing.png\n\n{tail}'
+
+
+def test_comment_opener_in_a_link_title_does_not_hide_a_definition(make_ctx, tmp_path, brand):
+    assert MISSING in _usage_fails(make_ctx, tmp_path, brand, LINK_TITLE_DOC.format(tail="<!-- end -->"))
+
+
+def test_comment_opener_in_a_single_quoted_link_title_does_not_hide_a_definition(make_ctx, tmp_path, brand):
+    doc = LINK_TITLE_DOC.replace('"<!--"', "'<!--'").format(tail="<!-- end -->")
+    assert MISSING in _usage_fails(make_ctx, tmp_path, brand, doc)
+
+
+def test_real_comment_still_blanks_a_definition_it_hides(make_ctx, tmp_path, brand):
+    doc = '[Docs](https://example.test "title")\n\n<!--\n[shot]: docs/images/missing.png\n-->\n\n![Shot][shot]'
+    fails = _usage_fails(make_ctx, tmp_path, brand, doc)
+    assert MISSING not in fails, fails
+
+
+def test_real_comment_after_a_link_title_opener_still_blanks_a_definition(make_ctx, tmp_path, brand):
+    doc = ('[Docs](https://example.test "<!--")\n\n<!--\n[shot]: docs/images/missing.png\n-->\n\n![Shot][shot]\n\n'
+           '[shot]: docs/images/banner.png')
+    fails = _usage_fails(make_ctx, tmp_path, brand, doc)
+    assert MISSING not in fails, fails
+
+
+def test_unterminated_inline_comment_opener_is_unchanged(make_ctx, tmp_path, brand):
+    doc = "text <!-- never closed\n\n![Shot][shot]\n\n[shot]: docs/images/missing.png"
+    assert MISSING in _usage_fails(make_ctx, tmp_path, brand, doc)
+
+
+def test_unterminated_block_comment_opener_is_unchanged(make_ctx, tmp_path, brand):
+    # a block-start opener without `-->` is an HTML block running to the end of the document: nothing after it is live
+    doc = "<!-- never closed\n\n![Shot][shot]\n\n[shot]: docs/images/missing.png"
+    assert MISSING not in _usage_fails(make_ctx, tmp_path, brand, doc)

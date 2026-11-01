@@ -273,3 +273,27 @@ def test_balanced_or_escaped_destinations_remain_live_definitions(line):
     document = f"{line}\n[next]: https://example.test/n\n"
     assert len(readmelint._definitions(document)) == 2
     assert len(readmelint._definition_spans(document)) == 2
+
+
+# --- Round 6: a reference image cannot span a paragraph boundary ------------------------------------------------
+LICENSE_URL = "https://img.shields.io/badge/license-MIT-64748B"
+
+
+def test_alt_text_split_by_a_blank_line_is_not_an_image_and_is_not_counted(make_ctx, tmp_path):
+    result = lint_reference(make_ctx, tmp_path, "![License\n\n][lic]", f"[lic]: {LICENSE_URL}")
+    assert "R7 2-4 header badges required (found 1)" in result["fails"], result
+
+
+def test_label_split_by_a_blank_line_is_not_counted_as_a_reference_label(make_ctx, tmp_path):
+    result = lint_reference(make_ctx, tmp_path, "![License][li\n\nc]", f"[lic]: {LICENSE_URL}")
+    assert "R7 2-4 header badges required (found 1)" in result["fails"], result
+
+
+@pytest.mark.parametrize("usage,definitions", [
+    ("![a\nb](" + LICENSE_URL + ")", ""),
+    ("![License][lic]", f"[lic]: {LICENSE_URL}"),
+    ("![License\nbadge][lic]", f"[lic]: {LICENSE_URL}"),
+], ids=["soft-break-inline", "split-reference", "soft-break-reference"])
+def test_controls_soft_break_and_normal_reference_still_count(make_ctx, tmp_path, usage, definitions):
+    result = lint_reference(make_ctx, tmp_path, usage, definitions)
+    assert not any("badge" in failure for failure in result["fails"]), result
