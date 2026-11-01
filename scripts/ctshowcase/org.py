@@ -928,6 +928,13 @@ def profile(estate: Estate, org: str, *, out_dir: str | Path | None = None, rend
             allow_unmeasured: bool = False, lists_capture: dict | None = None, meta_dir: str | None = None) -> tuple[dict, int]:
     """`org profile`: README + data.json + the asset list; writes only under out_dir, and only when the leak check passes."""
     login, row, reg = _gate(estate, org, allow_t3=allow_t3)
+    # public_slice excludes `.github`, so its repository check never sees the profile's own destination. A later
+    # withdrawal scoped to `.github` (a wildcard grant stays valid org-wide) must hold the generated README/data.json
+    # before anything is built or written (tests/test_t3_emission_scope.py::test_profile_holds_a_github_scoped_withdrawal).
+    if (code := _t3_repo_refusal(estate, login, ".github", allow_t3)):
+        from .errors import Refused
+        raise Refused(f"{login}/.github sign-off is {code}: the org profile is not generated or written",
+                      log=f"t3-signoff:{code}:{login}/.github")
     data, logs = public_slice(estate, org, lists_capture, allow_t3=allow_t3)
     email = _email(estate, login, reg, email_approved)[0]
     flagship = _tier(row) == "T1" and row.get("flagship")
