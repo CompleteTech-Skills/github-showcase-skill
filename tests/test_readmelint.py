@@ -658,3 +658,85 @@ def test_heading_opener_does_not_leak_into_following_paragraph():
     readmelint._active_openers.cache_clear()
     text = "## [open\nfoo ](x)"
     assert readmelint._has_link_opener(text, text.index("]")) is False
+
+
+# --- round-1 (fix plan) raw HTML block openers and nested links ---
+# Static CommonMark traces from the reviewer findings on 2d3a866 (not VM-executed; do not label as VM evidence).
+# Adjudications: t7-adjudication-link-opener-assess-3e855.md and t7-adjudication-opener-block-boundary-4f32c0a.md
+# (showcase-orchestration 20261031 directory).
+RAW_TAIL = "](a`b) `![Shot](<docs/images/missing.png>)`"
+
+
+# A `[` inside a raw HTML block is literal text, so it must not stay active for an orphan `](a`b)` after the block.
+# The `<pre>` case has no blank line before the orphan, so only the raw-block boundary separates them. The `<div>` and
+# `<table>` cases end with a blank line, which already clears the stack; they guard the same rendered image.
+@pytest.mark.parametrize("body", [
+    "<pre>\n[open\n</pre>\n" + RAW_TAIL,
+    "<div>\n[open\n</div>\n\n" + RAW_TAIL,
+    "<table>\n<tr><td>[open</td></tr>\n</table>\n\n" + RAW_TAIL,
+], ids=["pre-no-blank", "div-blank-after", "table-blank-after"])
+def test_raw_html_block_opener_does_not_leak(make_ctx, tmp_path, brand, body):
+    readmelint._active_openers.cache_clear()
+    fails = _usage_fails(make_ctx, tmp_path, brand, body)
+    assert MISSING in fails, fails
+
+
+def test_raw_pre_opener_is_not_an_active_opener():
+    readmelint._active_openers.cache_clear()
+    text = "<pre>\n[open\n</pre>\n" + RAW_TAIL
+    assert readmelint._has_link_opener(text, text.index("](a")) is False
+
+
+# A balanced bracket pair inside a raw HTML block is inert, and a valid link after the block still hides the image.
+def test_bracket_pair_inside_raw_html_block_does_not_change_later_markdown(make_ctx, tmp_path, brand):
+    readmelint._active_openers.cache_clear()
+    body = "<pre>\n[a](b)\n</pre>\n\n[See](a`b) `![Shot](<docs/images/missing.png>)`"
+    fails = _usage_fails(make_ctx, tmp_path, brand, body)
+    assert MISSING not in fails, fails
+
+
+# Once an inner link forms, CommonMark deactivates every earlier link opener (links may not contain links), so the
+# enclosing `](a`b)` is literal and its backtick pairs normally. An enclosing IMAGE opener stays active. Each body
+# is a static CommonMark trace of the reviewer finding, not a VM run.
+@pytest.mark.parametrize("body,expect_missing", [
+    ("[outer [inner](ok)](a`b) `![Shot](<docs/images/missing.png>)`", True),
+    ("[a [b [c](x)](y)](a`b) `![Shot](<docs/images/missing.png>)`", True),
+    ("![alt [inner](ok)](a`b) `![Shot](<docs/images/missing.png>)`", False),
+    ("[x[y]](a`b) `![Shot](<docs/images/missing.png>)`", False),
+], ids=["nested-link", "three-deep", "image-encloses-link", "bracket-without-destination"])
+def test_resolved_inner_link_deactivates_enclosing_link_opener(make_ctx, tmp_path, brand, body, expect_missing):
+    readmelint._active_openers.cache_clear()
+    fails = _usage_fails(make_ctx, tmp_path, brand, body)
+    if expect_missing:
+        assert MISSING in fails, fails
+    else:
+        assert MISSING not in fails, fails
+
+
+def test_inner_link_closer_active_and_enclosing_link_closer_inactive():
+    readmelint._active_openers.cache_clear()
+    text = "[outer [inner](ok)](z)"
+    active = readmelint._active_openers(text)
+    assert text.rindex("]") not in active
+    assert text.index("]") in active
+
+
+def test_inner_link_does_not_deactivate_enclosing_image_opener():
+    readmelint._active_openers.cache_clear()
+    text = "![alt [inner](ok)](z)"
+    active = readmelint._active_openers(text)
+    assert text.index("]") in active
+    assert text.rindex("]") in active
+
+
+# Deterministic counter (not wall-clock): steps per input character must not grow with the nesting depth k.
+def test_nested_link_deactivation_work_is_linear():
+    def ratio(k):
+        text = "[a " * k + "[b](c)" + "](d) " * k
+        readmelint._active_openers.cache_clear()
+        readmelint._OPENER_STEPS = 0
+        readmelint._active_openers(text)
+        return readmelint._OPENER_STEPS / len(text)
+
+    ratios = [ratio(k) for k in (100, 200, 400)]
+    assert max(ratios) <= 1.5 * min(ratios), ratios
