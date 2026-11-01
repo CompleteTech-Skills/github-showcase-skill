@@ -447,3 +447,147 @@ def test_control_standalone_project_readme_unchanged(brand):
                            repositories=[f"{T3_OWNER}/withdrawn-x"], reviewed="2026-10-25")
     assert "withdrawn-x" in text, text
     assert not any(str(x).startswith("t3-signoff:") for x in logs), logs
+
+
+# ------------------------------------------------------------------ Estate Org options and association ids (issue 23, r6)
+# A job that already holds a repository-specific regrant keeps it when the Org/association grant is stamped later; the
+# direct `project copy-plan --role estate` path stamps the captured T3 Org option exactly as estate_plan does.
+SITE = f"{T3_OWNER}/site"
+REGRANT_RECORDS = [{"id": "t3s-g"},
+                   {"id": "t3s-w", "repos": ["site"], "approved": False, "approved_on": "2026-10-01"},
+                   {"id": "t3s-r", "repos": ["site"], "approved_on": "2026-10-02"}]
+
+
+def _estate_capture(option_name="Pick Your AI", option_desc=f"T3: {T3_OWNER}", repositories=()):
+    """A complete private Estate capture (every view numbered) whose Org field holds one option."""
+    from test_t3_signoff_require import _complete_estate_capture
+    cap = _complete_estate_capture()
+    board = cap["data"]["user"]["projectV2"]
+    org = [f for f in board["fields"]["nodes"] if f["name"] == "Org"][0]
+    org["options"] = [{"id": "optorg1", "name": option_name, "color": "YELLOW", "description": option_desc}]
+    board["repositories"] = {"nodes": [{"nameWithOwner": n} for n in repositories]}
+    assert board["public"] is False
+    return cap
+
+
+def _estate_resolver(brand, in_directory=True):
+    from test_t3_emission_scope import _registry, _resolver
+    reg = _registry(True)
+    if in_directory:
+        reg["profile"]["org_directory"].append({"group": "T3", "orgs": [T3_OWNER]})
+    return _resolver(brand, reg)
+
+
+def _ids_of(job):
+    return list(job.get("signoff_ids") or ([job["signoff_id"]] if job.get("signoff_id") else []))
+
+
+@pytest.mark.parametrize("in_directory", [True, False], ids=["org-listed", "org-retained-from-capture"])
+def test_estate_org_option_keeps_repository_regrant(brand, tmp_path, monkeypatch, in_directory):
+    """Grant G covers `*`, a withdrawal revokes site, and a repository-scoped regrant R reauthorizes site. The Estate
+    README links site (authorized by R) and names the Pick-Your-AI Org option (authorized by G): it carries both, and the
+    Org stamp must not replace R with G."""
+    from test_t3_emission_scope import _Strict, _file
+    from ctshowcase import project as PJ, signoff
+    with _Strict(monkeypatch, _file(tmp_path, REGRANT_RECORDS)):
+        assert signoff.evaluate([T3_OWNER], "site")[0]["id"] == "t3s-r"  # precondition: R is what authorizes site
+        plan = PJ.estate_plan(_estate_resolver(brand, in_directory), copied=_estate_capture(repositories=[SITE]),
+                              user_id=100, allow_t3=True, reviewed="2026-10-25")
+    readme = [j for j in plan["jobs"] if "--readme" in (j.get("argv") or [])]
+    assert len(readme) == 1, [j["id"] for j in plan["jobs"]]
+    text = readme[0]["argv"][readme[0]["argv"].index("--readme") + 1]
+    assert "site" in text and "Pick Your AI" in text, text
+    ids = _ids_of(readme[0])
+    assert "t3s-r" in ids and "t3s-g" in ids and len(ids) == len(set(ids)), readme[0]
+    assert not any(str(x).startswith("t3-signoff:") for x in plan["logs"]), plan["logs"]
+
+
+def test_stamp_associations_keeps_ids_already_on_the_item():
+    from ctshowcase import signoff
+    item = {"id": "j", "signoff_id": "t3s-r"}
+    signoff.stamp_associations(item, ["t3s-g"])
+    assert item["signoff_id"] == "t3s-r" and item["signoff_ids"] == ["t3s-r", "t3s-g"], item
+    listed = {"id": "j", "signoff_ids": ["t3s-r", "t3s-x"]}  # signoff_ids input, deduplicated with the new ids
+    signoff.stamp_associations(listed, ["t3s-x", "t3s-g", "t3s-g"])
+    assert listed["signoff_id"] == "t3s-r" and listed["signoff_ids"] == ["t3s-r", "t3s-x", "t3s-g"], listed
+    again = {"id": "j", "signoff_id": "t3s-g"}  # the same id is neither duplicated nor turned into a list
+    signoff.stamp_associations(again, ["t3s-g"])
+    assert again["signoff_id"] == "t3s-g" and "signoff_ids" not in again, again
+    bare = {"id": "j"}
+    signoff.stamp_associations(bare, [])  # no association ids: untouched
+    assert bare == {"id": "j"}, bare
+
+
+# the direct CLI path (`project copy-plan --target @me --role estate`) ----------------------------------------------
+def _direct_estate(tmp_path, capture, records, *flags):
+    from test_t3_emission_scope import _file
+    cap = tmp_path / "capture.json"
+    cap.write_text(json.dumps(capture), encoding="utf-8")
+    sf = _file(tmp_path, records)
+    e = dict(os.environ)
+    e.pop("SHOWCASE_T3_SIGNOFF_FILE", None)
+    e.pop("SHOWCASE_ESTATE_ROOT", None)
+    r = subprocess.run([*SHOWCASE, "--t3-signoff-file", str(sf), "project", "copy-plan", "--target", "@me",
+                        "--role", "estate", "--copied", str(cap), "--files-dir", str(tmp_path / "bodies"),
+                        "--user-id", "100", "--reviewed", "2026-10-25", *flags],
+                       cwd=ROOT, env=e, capture_output=True, text=True, encoding="utf-8")
+    try:
+        out = json.loads(r.stdout)
+    except ValueError:
+        out = {}
+    return r, out
+
+
+def _readme_job(out):
+    jobs = [j for j in out.get("jobs", []) if "--readme" in (j.get("argv") or [])]
+    return jobs[0] if jobs else None
+
+
+def test_direct_copy_plan_estate_stamps_captured_t3_org(tmp_path):
+    r, out = _direct_estate(tmp_path, _estate_capture(), [{"id": "t3s-g"}], "--allow-t3")
+    assert r.returncode == 0, r.stdout + r.stderr
+    job = _readme_job(out)
+    assert job is not None, [j["id"] for j in out["jobs"]]
+    assert "Pick Your AI" in job["argv"][job["argv"].index("--readme") + 1]
+    assert _ids_of(job) == ["t3s-g"], job
+    assert not any(str(x).startswith("t3-signoff:") for x in out["logs"]), out["logs"]
+
+
+def test_direct_copy_plan_estate_repository_regrant_survives_org_stamp(tmp_path):
+    r, out = _direct_estate(tmp_path, _estate_capture(repositories=[SITE]), REGRANT_RECORDS, "--allow-t3")
+    assert r.returncode == 0, r.stdout + r.stderr
+    job = _readme_job(out)
+    assert job is not None and "site" in job["argv"][job["argv"].index("--readme") + 1], out["jobs"]
+    assert set(_ids_of(job)) == {"t3s-g", "t3s-r"}, job
+
+
+def test_direct_copy_plan_estate_control_without_the_flag_stamps_nothing(tmp_path):
+    r, out = _direct_estate(tmp_path, _estate_capture(), [{"id": "t3s-g"}])
+    assert "t3s-g" not in r.stdout, r.stdout  # nothing is stamped from a run without --allow-t3
+    assert not any(_ids_of(j) for j in out.get("jobs", [])), out.get("jobs")
+
+
+def test_direct_copy_plan_estate_control_without_a_record_is_held(tmp_path):
+    r, out = _direct_estate(tmp_path, _estate_capture(), [], "--allow-t3")
+    assert f"t3-signoff:missing:{T3_OWNER}" in r.stdout + r.stderr, r.stdout + r.stderr
+    assert "t3s-" not in r.stdout, r.stdout
+    assert _readme_job(out) is None, out.get("jobs")
+    assert "Pick Your AI" not in json.dumps(out.get("jobs", [])), out.get("jobs")
+
+
+def test_direct_copy_plan_estate_withdrawn_captured_org_leaves_no_readme_and_no_stamp(tmp_path):
+    recs = [{"id": "t3s-g"}, {"id": "t3s-w", "approved": False, "approved_on": "2026-10-01"}]
+    r, out = _direct_estate(tmp_path, _estate_capture(), recs, "--allow-t3")
+    assert f"t3-signoff:revoked:{T3_OWNER}" in out.get("logs", []), r.stdout + r.stderr
+    assert _readme_job(out) is None, out["jobs"]  # the README is held with the withdrawn Org
+    assert "Pick Your AI" not in json.dumps(out["jobs"]), out["jobs"]
+    assert not any(_ids_of(j) for j in out["jobs"]), [j for j in out["jobs"] if _ids_of(j)]
+
+
+def test_direct_copy_plan_estate_control_non_t3_org_option_gets_no_stamp(tmp_path):
+    cap = _estate_capture(option_name="CompleteTech Skills", option_desc="T1: CompleteTech-Skills")
+    r, out = _direct_estate(tmp_path, cap, [{"id": "t3s-g"}], "--allow-t3")
+    assert r.returncode == 0, r.stdout + r.stderr
+    job = _readme_job(out)
+    assert job is not None and "CompleteTech Skills" in job["argv"][job["argv"].index("--readme") + 1], out["jobs"]
+    assert not any(_ids_of(j) for j in out["jobs"]), [j for j in out["jobs"] if _ids_of(j)]
