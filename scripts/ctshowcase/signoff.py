@@ -118,7 +118,7 @@ def register_aliases(logins: list[str]) -> None:
     """Remember that these logins name one org, so a record under a former login still matches wherever the owner is
     re-checked (doctor rows, org and project helpers) without each caller passing the aliases again."""
     granted, aliases = _run_state()
-    group = {x.lower() for x in logins if x}
+    group = {_owner_key(x) for x in logins if x}
     for x in list(group):
         group |= aliases.get(x, frozenset())
     new = dict(aliases)
@@ -127,9 +127,16 @@ def register_aliases(logins: list[str]) -> None:
     _RUN.set((granted, new))
 
 
+def _owner_key(owner) -> str:
+    """The ONE owner identity used to match grants, withdrawals and the cached run grants: all surrounding whitespace
+    (tab, newline, NBSP included) stripped, then case-folded as before. A padded spelling of an owner is that owner, so
+    it can neither escape its own withdrawal nor be read as a different owner."""
+    return owner.strip().lower() if isinstance(owner, str) else ""
+
+
 def _expand(owners: list[str]) -> list[str]:
     aliases = _aliases()
-    out = {o.lower() for o in owners if o}
+    out = {_owner_key(o) for o in owners if o} - {""}
     for o in list(out):
         out |= aliases.get(o, frozenset())
     return sorted(out)
@@ -309,10 +316,10 @@ def _withdrawn(grant: dict, withdrawals: list[dict], logins: list[str] | None = 
     g_repos = _repo_list(grant.get("repos"))
     if g_on is None or g_repos is None or isinstance(g_on, _dt.datetime):
         return False
-    owners = {x.lower() for x in logins} if logins is not None else None
+    owners = {_owner_key(x) for x in logins} if logins is not None else None
     g_keys = {_scope_key(x, logins) for x in g_repos}
     for f in withdrawals:
-        if owners is not None and str(f.get("owner") or "").lower() not in owners:
+        if owners is not None and _owner_key(f.get("owner")) not in owners:
             continue
         f_on = _parse_when(f.get("approved_on"))
         f_repos = _repo_list(f.get("repos"))
@@ -377,7 +384,7 @@ def evaluate(owners: list[str], repo: str | None = None, today: _dt.date | None 
         if rid and rid in seen:
             return None, f"invalid:{rid}: duplicate id (record ids must be unique within the file)"
         seen.add(rid)
-    ours = [r for r in records if str(r.get("owner") or "").lower() in logins]
+    ours = [r for r in records if _owner_key(r.get("owner")) in logins]
     today = now.astimezone().date()
     valid = [r for r in ours if not problems(r, today)]
     withdrawals = [r for r in valid if r.get("approved") is False]
@@ -474,7 +481,7 @@ def record_for(owner: str, repo: str | None = None) -> dict | None:
     logins = _expand([owner or ""])  # a grant cached under a former login still applies once the alias is registered
     granted = _granted()
     withdrawals = [r for r in load_records() if r.get("approved") is False] if granted else []
-    for login in dict.fromkeys([(owner or "").lower(), *logins]):
+    for login in dict.fromkeys([_owner_key(owner), *logins]):
         for rec in granted.get(login, ()):
             if _covers(rec, repo, logins) and not _withdrawn(rec, withdrawals, logins, repo):
                 return rec

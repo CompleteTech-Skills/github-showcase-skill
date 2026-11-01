@@ -241,3 +241,84 @@ def test_whitespace_padded_withdrawal_scope_still_vetoes_a_single_repository(rep
     """A schema-valid but padded `repos` entry must scope the same way for a single repository as for the owner."""
     recs = [_rec("g1", ["*"]), _rec("w1", repos, approved=False, on="2026-06-01")]
     assert _ev(recs, "site") == (None, "revoked")
+
+
+# One owner-normalisation policy (strip all surrounding whitespace, then case-fold) for evaluate(), _withdrawn() and
+# record_for(): a padded spelling of an owner is that owner, never a different one that escapes its withdrawal.
+PADDED = [" Acme", "Acme ", " Acme ", "\tAcme\n", " Acme "]
+
+
+def _pad(template, name):
+    return template.replace("Acme", name)
+
+
+@pytest.mark.parametrize("padded", PADDED)
+@pytest.mark.parametrize("repo", ["site", None])
+def test_padded_owner_withdrawal_revokes_the_grant(padded, repo):
+    recs = [_rec("g1", ["*"]), _rec("w1", ["*"], approved=False, on="2026-06-01", owner=padded)]
+    assert _ev(recs, repo) == (None, "revoked")
+
+
+def test_plain_owner_withdrawal_control():
+    recs = [_rec("g1", ["*"]), _rec("w1", ["*"], approved=False, on="2026-06-01")]
+    assert _ev(recs, "site") == (None, "revoked") and _ev(recs, None) == (None, "revoked")
+
+
+@pytest.mark.parametrize("padded", PADDED)
+def test_padded_grant_owner_with_a_clean_withdrawal_is_revoked(padded):
+    recs = [_rec("g1", ["*"], owner=padded), _rec("w1", ["*"], approved=False, on="2026-06-01")]
+    assert _ev(recs, "site") == (None, "revoked") and _ev(recs, None) == (None, "revoked")
+
+
+@pytest.mark.parametrize("padded", PADDED)
+def test_padded_grant_owner_alone_still_grants(padded):
+    assert _ev([_rec("g1", ["*"], owner=padded)], "site") == ("g1", None)
+
+
+@pytest.mark.parametrize("padded", PADDED)
+def test_padded_unrelated_owner_withdrawal_is_isolated(padded):
+    recs = [_rec("g1", ["*"]), _rec("w1", ["*"], approved=False, on="2026-06-01", owner=_pad(padded, "Other"))]
+    assert _ev(recs, "site") == ("g1", None) and _ev(recs, None) == ("g1", None)
+
+
+@pytest.mark.parametrize("padded", PADDED)
+def test_require_refuses_a_padded_owner_withdrawal(padded, tmp_path, monkeypatch):
+    from ctshowcase import signoff
+    from ctshowcase.errors import Refused
+    p = tmp_path / "s.yaml"
+    p.write_text(json.dumps({"signoffs": [_rec("g1", ["*"]),
+                                          _rec("w1", ["*"], approved=False, on="2026-06-01", owner=padded)]}),
+                 encoding="utf-8")
+    monkeypatch.setenv("SHOWCASE_T3_SIGNOFF_FILE", str(p))
+    run = signoff.reset()
+    try:
+        for repo in ("site", None):
+            with pytest.raises(Refused) as ei:
+                signoff.require(OWN, repo)
+            assert ei.value.log == "t3-signoff:revoked", ei.value.log
+    finally:
+        signoff.restore(run)
+
+
+@pytest.mark.parametrize("padded", PADDED)
+def test_record_for_never_stamps_a_grant_withdrawn_under_a_padded_owner(padded, tmp_path, monkeypatch):
+    from ctshowcase import signoff
+    recs = [_rec("g1", ["*"]), _rec("w1", ["a"], approved=False, on="2026-06-01", owner=padded)]
+    p = tmp_path / "s.yaml"
+    p.write_text(json.dumps({"signoffs": recs}), encoding="utf-8")
+    monkeypatch.setenv("SHOWCASE_T3_SIGNOFF_FILE", str(p))
+    run = signoff.reset()
+    try:
+        signoff._grant(OWN.lower(), recs[0])
+        assert signoff.record_for(OWN, "a") is None
+        assert signoff.record_for(OWN, "site")["id"] == "g1"
+    finally:
+        signoff.restore(run)
+
+
+@pytest.mark.parametrize("padded", PADDED)
+def test_cli_refuses_a_padded_owner_withdrawal(padded, tmp_path):
+    own = "Pick-Your-AI"
+    recs = [_rec("g1", ["*"], owner=own), _rec("w1", ["*"], approved=False, on="2026-06-01", owner=_pad(padded, own))]
+    r = _cli(tmp_path, recs, "describe")
+    assert r.returncode == 2 and "t3-signoff:revoked" in r.stdout + r.stderr, r.stdout + r.stderr
