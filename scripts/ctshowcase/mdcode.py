@@ -176,8 +176,9 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
     seg: list[tuple[int, str]] = []
     # an open fence: (fence run, block-quote depth, list-item content column (0 outside an item), item-before-quote flag)
     fence, fstart, table, para_depth, base, pos = None, 0, False, 0, 0, 0
-    # content columns of the open depth-0 list items; they persist across blank lines (see the list update below)
-    lists: list[int] = []
+    # open list items as (block-quote depth, content column): the depth of the quote the item sits in and the column its
+    # content starts at, measured on the quote-stripped line. They persist across blank lines (see the list update below)
+    lists: list[tuple[int, int]] = []
     # an open raw HTML block: (end regex, or None for a block that ends at a blank line; the same container fields)
     html = None
 
@@ -230,7 +231,8 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
                 html = None   # a type 6 or 7 block ends at the blank line, which is then handled as usual
                 html_blocks.append((hstart, at))
             else:
-                if end.search(rest):
+                # an item's indentation is container syntax, so a terminator (`</pre>`, `-->`) is found after it is removed
+                if end.search(inner[min(lead, hcol):] if hcol else rest):
                     html = None
                     html_blocks.append((hstart, pos))
                 continue
@@ -265,23 +267,37 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
             flush(seg)
             seg, base = [], 0
         # the opener may sit behind quote and list-item markers in any order, e.g. `- ```x` or `> - ```x`
-        # CommonMark list items: a blank line keeps the item open and a dedented non-blank line ends it. A depth-0 line
-        # pops the items it is dedented out of and an item marker pushes its content column; quoted lines leave `lists`.
+        # CommonMark list items: a blank line keeps the item open and a non-blank line left of an open item's content
+        # column ends it, within the item's own quote. A line of lower quote depth pops every item it leaves; an item
+        # marker pushes its (quote depth, content column). Blank lines never reach this update, so items persist.
+        # `depth` is the leading quote depth, the quote the item marker sits in: `> - x` is an item of quote depth 1, and
+        # `- > x` an item of depth 0 whose quote is item content (measured on the raw line, so its quote markers are not
+        # container syntax for the item's indentation)
         cdepth, col, crest = _containers(body)
-        lead = len(body) - len(body.lstrip(" "))
-        if cdepth == 0:
-            while lists and lead < lists[-1]:
-                lists.pop()
-            if col:
-                lists.append(col)
+        inner = _strip_quotes(body, depth)
+        ilead = len(inner) - len(inner.lstrip(" "))
+        while lists and (depth < lists[-1][0] or (depth == lists[-1][0] and ilead < lists[-1][1])):
+            lists.pop()
+        if col:
+            lists.append((depth, col))
         opener = FENCE_OPEN.match(crest)
-        # an unmarked line indented into an open item may open a fence at that item's content column
-        in_item = cdepth == 0 and col == 0 and bool(lists) and lead >= lists[-1]
-        item_opener = FENCE_OPEN.match(body[lists[-1]:]) if in_item else None
+        # an unmarked line indented into an open item may open a fence or raw HTML block at that item's content column
+        in_item = col == 0 and bool(lists) and depth == lists[-1][0] and ilead >= lists[-1][1]
+        item_opener = FENCE_OPEN.match(inner[lists[-1][1]:]) if in_item else None
+        item_html = _html_block(inner[lists[-1][1]:]) if in_item and not item_opener else None
         if item_opener:
-            fence, fstart = (item_opener.group(1), 0, lists[-1], True), at
+            fence, fstart = (item_opener.group(1), cdepth, lists[-1][1], not cdepth), at
         elif opener:
             fence, fstart = (opener.group(1), cdepth, col, bool(col) and not _QUOTE.match(body)), at
+        elif item_html is not None:
+            # raw HTML indented into an item: its content column is removed before the block's own tests and
+            # terminators, and it ends when a line leaves the item (a dedented line starts Markdown again)
+            hstart, icol = at, lists[-1][1]
+            stripped = inner[icol:]
+            if item_html is not True and item_html.search(stripped):
+                html_blocks.append((at, pos))   # the block closes on its own opening line
+            else:
+                html = (None if item_html is True else item_html, cdepth, icol, not cdepth)
         elif _ATX_HEADING.match(rest):
             regions.append((at, pos))
         elif (kind := _html_block(crest)) is not None:
