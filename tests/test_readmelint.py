@@ -319,7 +319,8 @@ def test_backtick_in_a_resolved_reference_label_does_not_pair_with_later_code(ma
     assert "R7 off-palette badge colour FF0000" in _badge_fails(make_ctx, second, brand, type_off)
 
 
-# GFM expectation (test data): orphan junction renders 1 image, raw comment boundary 1, both controls 0 images.
+# GFM expectation (test data): orphan junction renders 1 image, raw comment boundary 1, and the inline-comment,
+# valid-reference and consecutive-reference controls 0 images.
 IMAGE_IN_CODE = "`![Shot](<docs/images/missing.png>)`"
 REF_DEF = "\n\n[ref`x]: https://example.test/"
 ORPHAN_JUNCTION_CASES = {
@@ -327,6 +328,7 @@ ORPHAN_JUNCTION_CASES = {
     "raw_comment_boundary": ("See [open\n<!-- note -->\n](a`b) " + IMAGE_IN_CODE, True),
     "inline_comment_control": ("[open <!-- note -->](a`b) " + IMAGE_IN_CODE, False),
     "valid_reference_control": ("[text][ref`x] " + IMAGE_IN_CODE + REF_DEF, False),
+    "consecutive_reference_control": ("[a][ref`x] [b][ref`x] " + IMAGE_IN_CODE + REF_DEF, False),
 }
 
 
