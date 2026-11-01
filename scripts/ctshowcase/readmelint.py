@@ -111,18 +111,38 @@ def _definition_candidates(document: str) -> str:
             if out[i] != "\n":
                 out[i] = " "
     fences = mdcode.fence_spans(document)
+    html_spans = mdcode.html_block_spans(document)
+    # Left-to-right scan over the next HTML open tag and the next comment, as in `_outside_code`: a comment opener that
+    # sits inside a complete open tag (for example an attribute value) is attribute text, so the tag is consumed whole.
     pos = 0
-    while (m := HTML_COMMENT.search(document, pos)):
-        start = m.start()
+    tag = comment = None
+    while True:
+        if tag is not False and (tag is None or tag.start() < pos):
+            tag = _search_unescaped(HTML_OPEN_TAG, document, pos, html_spans) or False
+        if comment is not False and (comment is None or comment.start() < pos):
+            comment = _search_unescaped(HTML_COMMENT, document, pos, html_spans) or False
+        found = [m for m in (tag, comment) if m]
+        if not found:
+            break
+        nxt = min(found, key=lambda m: m.start())
+        start = nxt.start()
+        if nxt is tag:
+            # a tag inside inline code or a fence is text: the search resumes one character on. A real tag is consumed
+            # without blanking, so a `<!--` inside its attributes never opens a comment.
+            if _in_inline_code(document, start) or _span_at(fences, start) is not None:
+                pos = start + 1
+            else:
+                pos = nxt.end()
+            continue
         # an opener that is escaped, inside inline code or inside a fence is text: the search resumes one character on,
         # so a code-span `<!--` never consumes text up to a later real `-->`
         if _escaped(document, start) or _in_inline_code(document, start) or _span_at(fences, start) is not None:
             pos = start + 1
             continue
-        for i in range(*m.span()):
+        for i in range(*nxt.span()):
             if out[i] != "\n":
                 out[i] = " "
-        pos = m.end()
+        pos = nxt.end()
     # Quote and list-item markers are container syntax: a definition inside `> ` or `- ` is still a definition and is
     # global to the document. Each peeled prefix becomes NUL (same length), so offsets are unchanged and the pattern
     # sees an ordinary line start. Fenced lines are already blanked; blanked comment text has no prefix to peel.
@@ -671,6 +691,21 @@ def _inline_image_target(text: str, start: int) -> tuple[str, int] | None:
     return html.unescape(re.sub(r"\\([^\w\s])", r"\1", target)), pos + 1
 
 
+@functools.lru_cache(maxsize=16)
+def _link_literal_spans(document: str) -> tuple[tuple[int, int], ...]:
+    """Spans of resolved inline link destinations and titles, from `(` through the closing `)`. This text is literal: a
+    `![...](...)` inside a link title renders no image, while a linked image in the link text is not covered. The spans
+    are sorted and never overlap, because `_active_openers` skips a completed destination."""
+    spans = []
+    for i in sorted(_active_openers(document)):
+        if document[i + 1:i + 2] != "(":
+            continue
+        target = _inline_image_target(document, i + 1)
+        if target is not None:
+            spans.append((i + 1, target[1]))
+    return tuple(sorted(spans))
+
+
 def _markdown_images(text: str, document: str) -> list[tuple[str, str, int, int]]:
     """Read inline and reference images with balanced alt text; definitions use first-wins labels."""
     def label(value):
@@ -683,12 +718,15 @@ def _markdown_images(text: str, document: str) -> list[tuple[str, str, int, int]
         definitions.setdefault(label(match.group(1)), target)
     spans = _definition_spans(document)  # definition titles are never rendered as images
     html_spans = mdcode.html_block_spans(document)  # raw HTML blocks are literal: Markdown image syntax there is text
+    link_spans = _link_literal_spans(document)  # a link destination or title is literal text, never a rendered image
     sources = []
     consumed = 0
     for match in re.finditer(r"!\[", text):
         if match.start() < consumed:
             continue
         if _span_at(spans, match.start()) or _span_at(html_spans, match.start()):
+            continue
+        if _span_at(link_spans, match.start()) is not None:
             continue
         pos = match.start() - 1
         while pos >= 0 and text[pos] == "\\":
@@ -735,7 +773,9 @@ def _images(text: str, document: str) -> list[tuple[str, str]]:
         span = _span_at(spans, start)
         return span is not None and end <= span[1]
 
-    tags = [(start, end) for start, end in parser.tags if not inside(image_spans, start, end)]
+    link_spans = _link_literal_spans(document)  # tags and images inside a link destination or title are literal text
+    tags = [(start, end) for start, end in parser.tags if not inside(image_spans, start, end)
+            and _span_at(link_spans, start) is None]
     def written_alt(alt, start):
         # `text` has Markdown code masked to spaces (same length): read code-formatted alt text from the document
         begin = start + 2
@@ -744,11 +784,13 @@ def _images(text: str, document: str) -> list[tuple[str, str]]:
     spans = _definition_spans(document)
     def in_definition(start):
         return _span_at(spans, start) is not None
+    def in_link_literal(start):
+        return _span_at(link_spans, start) is not None
     result = [(written_alt(alt, start), source) for alt, source, start, end in markdown
-              if not in_definition(start) and not inside(tags, start, end)]
+              if not in_definition(start) and not inside(tags, start, end) and not in_link_literal(start)]
     kept = set(tags)
     result += [(alt, source) for alt, source, start, end in parser.images
-               if (start, end) in kept and not in_definition(start)]
+               if (start, end) in kept and not in_definition(start) and not in_link_literal(start)]
     return result
 
 
