@@ -654,6 +654,47 @@ def test_cli_write_never_silently_removes_the_indented_authored_badge(make_ctx, 
         assert written == before
 
 
+def two_block_unchanged_license(make_ctx, tmp_path):
+    """Variant J with current license MIT: an authored indented MIT row, then the same row unindented."""
+    ctx = profile_context(make_ctx, tmp_path, license="MIT")
+    text = readme.scaffold(ctx)
+    marked = readme.wrap("badges", INDENTED_MIT) + "\n\n" + readme.wrap("badges", PLAIN_MIT)
+    return ctx, text.replace(readme.wrap("badges", badge_block(text)), marked)
+
+
+def test_unchanged_license_indented_authored_badge_block_is_not_silently_removed(make_ctx, tmp_path):
+    ctx, before = two_block_unchanged_license(make_ctx, tmp_path)
+    after, removed = readme.upgrade(ctx, before)
+    problems = readme.preservation(before, after, removed)
+    # The generated unindented row must not stand in for the authored indented row: keep it, or report a lost line.
+    assert INDENTED_MIT in after or any("License MIT" in problem for problem in problems), (problems, after)
+
+
+def test_cli_write_refuses_to_drop_the_unchanged_license_indented_badge(make_ctx, tmp_path):
+    ctx, before = two_block_unchanged_license(make_ctx, tmp_path)
+    path = tmp_path / "README.md"
+    path.write_text(before, encoding="utf-8")
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(ctx.meta), encoding="utf-8")
+    env = dict(os.environ, PYTHONIOENCODING="utf-8")
+    result = subprocess.run([sys.executable, str(ROOT / "scripts/showcase.py"), "--meta", str(meta),
+                             "--repo-dir", str(tmp_path), "readme", "--mode", "upgrade", "--write"],
+                            capture_output=True, encoding="utf-8", env=env)
+    written = path.read_text(encoding="utf-8")
+    if result.returncode == 0:
+        assert INDENTED_MIT in written, written
+    else:
+        assert "readme-shrink" in result.stdout + result.stderr
+        assert written == before
+
+
+def test_unchanged_license_single_unindented_block_still_passes_preservation(make_ctx, tmp_path):
+    ctx = profile_context(make_ctx, tmp_path, license="MIT")
+    before = readme.wrap("badges", PLAIN_MIT) + "\n\nAuthored paragraph to retain.\n"
+    after, removed = readme.upgrade(ctx, before)
+    assert readme.preservation(before, after, removed) == []
+
+
 @pytest.mark.parametrize("mode", ["upgrade", "header"])
 def test_single_block_legacy_migration_still_passes_without_shrink_and_is_stable(make_ctx, tmp_path, mode):
     ctx = profile_context(make_ctx, tmp_path, license="Apache-2.0")

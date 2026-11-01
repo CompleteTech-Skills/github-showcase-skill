@@ -1423,3 +1423,87 @@ def test_two_spaces_under_a_list_item_is_live(make_ctx, tmp_path):
     fails = _header_with_definition(make_ctx, tmp_path, BADGE_LICENSE_LINE,
                                     "- Example\n\n  [lic]: https://img.shields.io/badge/license-MIT-64748B")
     assert not any("2-4 header badges required" in f for f in fails), fails
+
+
+# --- round-7 (#7 e8a3e22 findings): container exits, quoted block checks, angle titles, reference-label brackets ----
+
+LICENSE_IMAGE = "![License MIT](https://img.shields.io/badge/license-MIT-64748B)"
+TYPE_TAIL = f"2. GitHub profile]({GITHUB_PROFILE_BADGE})"
+
+
+def _badges_body_fails(make_ctx, tmp_path, body):
+    """Variant J whose whole badges block is `body`; returns the lint failures."""
+    (tmp_path / "docs/images").mkdir(parents=True)
+    (tmp_path / "docs/images/banner.png").write_bytes(b"banner")
+    ctx = make_ctx(repo_dir=tmp_path, repo=".github", language=None,
+                   description="Community health files for Northwind Trading Co.")
+    text = readme.scaffold(ctx)
+    original = next(m.group(2) for m in readme.MARK.finditer(text) if m.group(1) == "badges")
+    path = tmp_path / "README.md"
+    path.write_text(text.replace(original, body + "\n"), encoding="utf-8")
+    return readmelint.lint(ctx, path)["fails"]
+
+
+def _image_count(body):
+    return len(readmelint._images(readmelint._outside_code(body), body))
+
+
+# Expected render (CommonMark 0.9.2 / markdown-it-py, recorded in the e8a3e22 VM container-exit receipt) as literal counts.
+CONTAINER_EXIT_CASES = [
+    pytest.param(f"> ![Type\n{TYPE_TAIL}\n\n{LICENSE_IMAGE}", 1, id="a-quote-exit"),
+    pytest.param(f"- intro\n  ![Type\n{TYPE_TAIL}\n\n{LICENSE_IMAGE}", 1, id="b-item-exit"),
+    pytest.param(f"![Type\n{TYPE_TAIL}\n\n{LICENSE_IMAGE}", 2, id="plain2"),
+    pytest.param(f"- ![Type\n  {TYPE_TAIL}\n\n{LICENSE_IMAGE}", 2, id="direct-item2"),
+    pytest.param(f"> ![Type\n> {TYPE_TAIL}\n\n{LICENSE_IMAGE}", 2, id="quote-kept2"),
+    pytest.param(f"- intro\n  ![Type\n  {TYPE_TAIL}\n\n{LICENSE_IMAGE}", 2, id="continuation-kept2"),
+]
+
+
+@pytest.mark.parametrize("body, count", CONTAINER_EXIT_CASES)
+def test_ordered_marker_leaving_a_container_ends_the_image_alt(make_ctx, tmp_path, body, count):
+    assert _image_count(body) == count
+    fails = _badges_body_fails(make_ctx, tmp_path, body)
+    if count == 1:
+        assert "R7 2-4 header badges required (found 1)" in fails, fails
+    else:
+        assert not any("2-4 header badges required" in f for f in fails), fails
+
+
+def test_heading_inside_a_continued_quote_ends_the_link_title(make_ctx, tmp_path, brand):
+    doc = '> [Docs](https://example.test "unfinished\n> ## Usage\n> ![Shot](docs/images/missing.png)\n> ")'
+    assert MISSING in _usage_fails(make_ctx, tmp_path, brand, doc)
+
+
+def test_quoted_soft_line_break_title_still_hides_an_image(make_ctx, tmp_path, brand):
+    doc = '> [Docs](https://example.test "soft\n> break ![Shot](docs/images/missing.png)")'
+    assert MISSING not in _usage_fails(make_ctx, tmp_path, brand, doc)
+
+
+def test_angle_destination_title_without_whitespace_is_no_title(make_ctx, tmp_path, brand):
+    doc = '[Docs](<https://example.test>"![Shot](docs/images/missing.png)")'
+    assert MISSING in _usage_fails(make_ctx, tmp_path, brand, doc)
+
+
+def test_angle_destination_title_after_whitespace_keeps_the_image_inert(make_ctx, tmp_path, brand):
+    doc = '[Docs](<https://example.test> "![Shot](docs/images/missing.png)")'
+    assert MISSING not in _usage_fails(make_ctx, tmp_path, brand, doc)
+
+
+def test_unescaped_nested_brackets_in_a_reference_label_are_not_a_badge(make_ctx, tmp_path):
+    (tmp_path / "docs/images").mkdir(parents=True)
+    (tmp_path / "docs/images/banner.png").write_bytes(b"banner")
+    ctx = make_ctx(repo_dir=tmp_path, repo=".github", language=None,
+                   description="Community health files for Northwind Trading Co.")
+    text = readme.scaffold(ctx)
+    original = next(m.group(2) for m in readme.MARK.finditer(text) if m.group(1) == "badges")
+    definition = r"[\[lic\]]: https://img.shields.io/badge/license-MIT-64748B"
+    for usage, expected in (("![License][[lic]]", 1), (r"![License][\[lic\]]", 2)):
+        body = f"{BADGE_TYPE_LINE}\n{usage}\n"
+        path = tmp_path / "README.md"
+        path.write_text(text.replace(original, body).replace(
+            "<!-- showcase:footer:start -->", definition + "\n\n<!-- showcase:footer:start -->"), encoding="utf-8")
+        fails = readmelint.lint(ctx, path)["fails"]
+        if expected == 1:
+            assert "R7 2-4 header badges required (found 1)" in fails, (usage, fails)
+        else:
+            assert not any("2-4 header badges required" in f for f in fails), (usage, fails)
