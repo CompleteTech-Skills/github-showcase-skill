@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Read the onboarding guide
+    url: https://github.com/CompleteTech-Skills/github-showcase-skill/blob/main/ONBOARDING.md
+    about: Setup and usage questions are usually answered in the onboarding guide. Never report a vulnerability in a public issue.

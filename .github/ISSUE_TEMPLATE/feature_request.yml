@@ -1,0 +1,53 @@
+name: Feature request
+description: Suggest a new capability or enhancement
+title: "[Feature]: "
+labels: ["type:feature", "status:needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting a feature. Before you open a new request, please search the existing issues to check whether it has already been proposed. If it has, add your context to that issue instead.
+
+        Please do not include tokens, private names, private repository names or email addresses in this form.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the situation or need that is not covered today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the capability or change you would like to see.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Describe any workarounds or other approaches you have considered.
+    validations:
+      required: false
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of the showcase does this feature mostly touch?
+      options:
+        - Banner
+        - Card
+        - README
+        - Content
+        - Org or project
+        - Labels
+        - Docs
+        - Other
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add any other context, links or examples that help explain the request.
+    validations:
+      required: false
