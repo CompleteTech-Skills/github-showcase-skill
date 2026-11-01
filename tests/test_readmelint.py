@@ -1271,3 +1271,102 @@ def test_single_paragraph_inline_comment_still_hides_an_image(make_ctx, tmp_path
 def test_inline_comment_closed_in_its_paragraph_does_not_fail_the_badge_count(make_ctx, tmp_path):
     fails = _header_with(make_ctx, tmp_path, 'text <!-- x --> [Docs](https://example.test)')
     assert not any('2-4 header badges required' in f for f in fails), fails
+
+
+# --- round-5 (#7 f774 / 26c4933 findings): title crossing a block boundary, multiline labels, tab columns ----------
+
+HEADING_TITLE = '[Docs](https://example.test "unfinished\n## Usage\n{image}\n")'
+
+
+def test_title_crossing_a_heading_does_not_hide_a_missing_image(make_ctx, tmp_path, brand):
+    # The `## Usage` heading ends the paragraph, so the local image after it renders and must be reported.
+    doc = HEADING_TITLE.format(image="![Shot](docs/images/missing.png)")
+    assert MISSING in _usage_fails(make_ctx, tmp_path, brand, doc)
+
+
+def test_title_crossing_a_heading_does_not_hide_an_off_palette_badge(make_ctx, tmp_path, brand):
+    # The heading ends the paragraph, so the off-palette badge after it renders and must be reported.
+    doc = HEADING_TITLE.format(image="![Type](https://img.shields.io/badge/type-x-ABCDEF)")
+    assert OFF_ABC in _usage_fails(make_ctx, tmp_path, brand, doc)
+
+
+def test_soft_break_title_with_image_on_the_next_line_stays_inert(make_ctx, tmp_path, brand):
+    # One paragraph: the image sits inside the link title, so GFM renders no image and nothing is reported.
+    doc = '[Docs](https://example.test "unfinished\n![Shot](docs/images/missing.png)\n")'
+    assert MISSING not in _usage_fails(make_ctx, tmp_path, brand, doc)
+
+
+def test_soft_break_title_with_prose_before_the_image_stays_inert(make_ctx, tmp_path, brand):
+    # One paragraph: the title continues through the prose line and the image line, so no image renders.
+    doc = '[Docs](https://example.test "unfinished\nstill the title\n![Shot](docs/images/missing.png)\n")'
+    assert MISSING not in _usage_fails(make_ctx, tmp_path, brand, doc)
+
+
+def test_title_crossing_a_list_item_does_not_hide_a_missing_image(make_ctx, tmp_path, brand):
+    # The list item interrupts the paragraph, and the following line is part of that item, so the image renders.
+    doc = '[Docs](https://example.test "unfinished\n- item\n![Shot](docs/images/missing.png)\n")'
+    assert MISSING in _usage_fails(make_ctx, tmp_path, brand, doc)
+
+
+def _header_with_definition(make_ctx, tmp_path, header_line, definition):
+    """Variant J header with the type badge then `header_line` in the badges block, and `definition` after the header."""
+    (tmp_path / "docs/images").mkdir(parents=True)
+    (tmp_path / "docs/images/banner.png").write_bytes(b"banner")
+    ctx = make_ctx(repo_dir=tmp_path, repo=".github", language=None,
+                   description="Community health files for Northwind Trading Co.")
+    text = readme.scaffold(ctx)
+    original = next(m.group(2) for m in readme.MARK.finditer(text) if m.group(1) == "badges")
+    text = text.replace(original, BADGE_TYPE_LINE + "\n" + header_line + "\n")
+    text = text.replace("<!-- showcase:footer:start -->", definition + "\n\n<!-- showcase:footer:start -->")
+    path = tmp_path / "README.md"
+    path.write_text(text, encoding="utf-8")
+    return readmelint.lint(ctx, path)["fails"]
+
+
+def test_multiline_label_definition_counts_its_header_badge(make_ctx, tmp_path):
+    # GFM normalizes the soft line break inside `lic\nense` to a space, so the definition resolves: two badges.
+    fails = _header_with_definition(make_ctx, tmp_path, "![License][lic ense]",
+                                    "[lic\nense]: https://img.shields.io/badge/license-MIT-64748B")
+    assert not any("2-4 header badges required" in f for f in fails), fails
+
+
+def test_label_split_by_a_paragraph_break_is_not_a_definition(make_ctx, tmp_path):
+    # A blank line inside the label ends the paragraph, so the line is text and only the type badge counts.
+    fails = _header_with_definition(make_ctx, tmp_path, "![License][lic ense]",
+                                    "[lic\n\nense]: https://img.shields.io/badge/license-MIT-64748B")
+    assert "R7 2-4 header badges required (found 1)" in fails, fails
+
+
+def test_label_with_an_unescaped_bracket_is_not_a_definition(make_ctx, tmp_path):
+    # An unescaped `[` inside the label makes the line invalid as a definition, so only the type badge counts.
+    fails = _header_with_definition(make_ctx, tmp_path, "![License][lic ense]",
+                                    "[li[c]\nense]: https://img.shields.io/badge/license-MIT-64748B")
+    assert "R7 2-4 header badges required (found 1)" in fails, fails
+
+
+def test_tab_indented_definition_under_a_list_item_is_live(make_ctx, tmp_path):
+    # A tab is four columns: the item content column is two, so two residual columns remain and this is a definition.
+    fails = _header_with_definition(make_ctx, tmp_path, BADGE_LICENSE_LINE,
+                                    "- Example\n\n\t[lic]: https://img.shields.io/badge/license-MIT-64748B")
+    assert not any("2-4 header badges required" in f for f in fails), fails
+
+
+def test_tab_plus_two_spaces_under_a_list_item_is_indented_code(make_ctx, tmp_path):
+    # Six visual columns leave four beyond the item content column, so this is code, not a definition.
+    fails = _header_with_definition(make_ctx, tmp_path, BADGE_LICENSE_LINE,
+                                    "- Example\n\n\t  [lic]: https://img.shields.io/badge/license-MIT-64748B")
+    assert "R7 2-4 header badges required (found 1)" in fails, fails
+
+
+def test_six_spaces_under_a_list_item_is_indented_code(make_ctx, tmp_path):
+    # Six spaces leave four beyond the content column of `- `, so this is code, not a definition.
+    fails = _header_with_definition(make_ctx, tmp_path, BADGE_LICENSE_LINE,
+                                    "- Example\n\n      [lic]: https://img.shields.io/badge/license-MIT-64748B")
+    assert "R7 2-4 header badges required (found 1)" in fails, fails
+
+
+def test_two_spaces_under_a_list_item_is_live(make_ctx, tmp_path):
+    # Two spaces equal the content column of `- `, so this line is a continuation definition.
+    fails = _header_with_definition(make_ctx, tmp_path, BADGE_LICENSE_LINE,
+                                    "- Example\n\n  [lic]: https://img.shields.io/badge/license-MIT-64748B")
+    assert not any("2-4 header badges required" in f for f in fails), fails
