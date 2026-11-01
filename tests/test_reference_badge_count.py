@@ -216,3 +216,52 @@ def test_real_comment_containing_a_definition_still_hides_it(make_ctx, tmp_path)
 def test_escaped_comment_opener_does_not_start_a_comment(make_ctx, tmp_path):
     result = _count(make_ctx, tmp_path, r"Write \<!-- to open a comment.")
     assert not any("header badges" in failure for failure in result["fails"]), result
+
+
+MISSING_FAIL = "R7 local image does not resolve: docs/images/missing.png"
+
+
+def test_definition_backtick_does_not_hide_a_later_rendered_image(make_ctx, tmp_path):
+    block = "[ref]: https://example.test/a`b\n[Guide](`help) ![Shot](docs/images/missing.png) `code`"
+    result = lint_reference(make_ctx, tmp_path, "![CI][ci]", f"[ci]: {URL}\n\n{block}")
+    assert MISSING_FAIL in result["fails"], result
+
+
+def test_control_without_definition_backtick_still_reports_the_missing_image(make_ctx, tmp_path):
+    block = "[ref]: https://example.test/ab\n[Guide](`help) ![Shot](docs/images/missing.png) `code`"
+    result = lint_reference(make_ctx, tmp_path, "![CI][ci]", f"[ci]: {URL}\n\n{block}")
+    assert MISSING_FAIL in result["fails"], result
+
+
+def test_definition_backtick_before_an_existing_rendered_image_passes(make_ctx, tmp_path):
+    block = "[ref]: https://example.test/a`b\n[Guide](`help) ![Shot](docs/images/shot.png) `code`"
+    result = lint_reference(make_ctx, tmp_path, "![CI][ci]", f"[ci]: {URL}\n\n{block}",
+                            files=["docs/images/shot.png"])
+    assert not any("local image" in failure for failure in result["fails"]), result
+
+
+def test_unbalanced_bare_destination_is_not_a_definition_and_its_image_renders(make_ctx, tmp_path):
+    result = lint_reference(make_ctx, tmp_path, "![CI][ci]",
+                            f"[ci]: {URL}\n\n[ref]: ![Shot](docs/images/missing.png))")
+    assert MISSING_FAIL in result["fails"], result
+
+
+def test_unbalanced_license_definition_does_not_count_as_a_badge(make_ctx, tmp_path):
+    result = lint_reference(make_ctx, tmp_path, "![License][lic]", LIC + ")")
+    assert "R7 2-4 header badges required (found 1)" in result["fails"], result
+
+
+def test_balanced_license_definition_counts_as_a_badge(make_ctx, tmp_path):
+    result = lint_reference(make_ctx, tmp_path, "![License][lic]", LIC)
+    assert not any("header badges" in failure for failure in result["fails"]), result
+
+
+@pytest.mark.parametrize("line", [
+    "[ref]: https://example.test/a_(b)",
+    r"[ref]: https://example.test/a\(b",
+    r"[ref]: https://example.test/a\)b",
+])
+def test_balanced_or_escaped_destinations_remain_live_definitions(line):
+    document = f"{line}\n[next]: https://example.test/n\n"
+    assert len(readmelint._definitions(document)) == 2
+    assert len(readmelint._definition_spans(document)) == 2
