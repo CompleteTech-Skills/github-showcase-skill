@@ -340,3 +340,25 @@ def test_recipe_unreadable_only_output_counts_against_slot_budget():
     assert "one attempt" in sandbox_c[0]
     assert "art-fail" in sandbox_c[0]
     assert "retry the run under the retry limit" not in sandbox_c[0]
+
+
+def test_recipe_opus_p3_fixes_plural_paths_rule7_slots_and_scratch_copy():
+    # Static wording test (mock evidence, not an image-generation run): the four accepted P3 findings.
+    text = _text()
+    assert text.count("Produce four candidates.") == 1
+    lowered = _recipe(text).lower()
+    # (1) item 1 reads every image path the run reports, not a single path
+    assert "every image file path codex reports" in lowered
+    assert "use exactly those paths (see item 5)" in lowered
+    assert "use exactly that path" not in lowered
+    # (2) the first retry bullet distinguishes pipeline rule 7 and the option A template
+    assert "pipeline rule 7 asks for four candidates" in lowered
+    assert "the option a template also says so" in lowered
+    assert "the fixed prompt asks for four candidates" not in lowered
+    assert "four candidate slots" in lowered
+    # (3) the second round of rule 7 opens four new slots with the same per-slot cap
+    assert "the second round of rule 7" in lowered
+    assert "four new slots with the same per-slot cap of 3 attempts" in lowered
+    # (4) item 4 normalizes a scratch copy of the chosen image, not the generated path
+    assert "copy the chosen image to scratch (see sandbox (d)) and pass that copy to content icon normalize --in path" in lowered
+    assert "pass the chosen path to `content icon normalize" not in lowered
