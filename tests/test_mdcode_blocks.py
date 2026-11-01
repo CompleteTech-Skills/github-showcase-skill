@@ -388,3 +388,28 @@ def test_type_7_tag_alone_on_a_line_is_raw_but_cannot_interrupt_a_paragraph():
 def test_unclosed_type_2_block_runs_to_the_end_and_masks_nothing():
     t = "<!--\n`a\n" + IMAGE + "\nb`\n"
     assert mdcode.inline_code_spans(t) == ()
+
+
+@pytest.mark.parametrize("opener", ["<div>", "<!--", "<pre>"], ids=["type6", "comment", "pre"])
+@pytest.mark.parametrize("marker,indent", ITEM_MARKERS, ids=["dash", "star", "plus", "ordered"])
+def test_dedented_quote_after_item_html_block_ends_the_block(marker, indent, opener):
+    pad = " " * indent
+    t = f"{marker}{opener}\n{pad}raw\n> ![Shot](<docs/images/missing.png>)\n\nOrdinary paragraph.\n"
+    (a, b), = mdcode.html_block_spans(t)
+    assert b == t.index("> ![Shot]")
+    assert images(t) == [("Shot", "docs/images/missing.png")]
+
+
+def test_dedented_deeper_quote_after_quoted_item_html_block_ends_the_block():
+    t = "> - <div>\n>   raw\n> > ![Shot](<docs/images/missing.png>)\n\nOrdinary paragraph.\n"
+    (a, b), = mdcode.html_block_spans(t)
+    assert b == t.index("> > ![Shot]")
+
+
+@pytest.mark.parametrize("t", [
+    "- <div>\n  raw\n  > ![Shot](<docs/images/missing.png>)\n\nOrdinary paragraph.\n",
+    "> - <div>\n>   raw\n>   > ![Shot](<docs/images/missing.png>)\n\nOrdinary paragraph.\n",
+], ids=["item", "quoted-item"])
+def test_indented_quote_inside_item_html_block_stays_block_content(t):
+    (a, b), = mdcode.html_block_spans(t)
+    assert b == t.index("\n\n") + 1

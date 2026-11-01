@@ -452,3 +452,37 @@ def test_escaped_img_in_an_ordinary_paragraph_is_not_checked(make_ctx, tmp_path,
     ctx = good_readme(make_ctx, tmp_path, brand)
     p = _insert_usage(tmp_path, "\\" + RAW_HTML_IMG)
     assert not any("local image" in f for f in readmelint.lint(ctx, p)["fails"])
+
+
+DEDENTED_QUOTE_TAIL = "\n\nOrdinary paragraph."
+
+
+def test_dedented_quote_after_a_list_item_fence_is_scanned_for_images(make_ctx, tmp_path, brand):
+    # the unindented `>` cannot continue the list item, so the item and its unclosed fence end and a real quote begins
+    ctx = good_readme(make_ctx, tmp_path, brand)
+    p = _insert_usage(tmp_path, "- ```text\n  example\n> ![Shot](<docs/images/missing.png>)" + DEDENTED_QUOTE_TAIL)
+    assert "R7 local image does not resolve: docs/images/missing.png" in readmelint.lint(ctx, p)["fails"]
+
+
+def test_indented_quote_inside_a_list_item_fence_stays_code(make_ctx, tmp_path, brand):
+    ctx = good_readme(make_ctx, tmp_path, brand)
+    p = _insert_usage(tmp_path, "- ```text\n  example\n  > ![Shot](<docs/images/missing.png>)\n  ```")
+    assert not any("local image" in f for f in readmelint.lint(ctx, p)["fails"])
+
+
+def test_dedented_quote_badges_after_a_list_item_fence_are_counted(make_ctx, tmp_path, brand):
+    # the header badges become a dedented quote after an unclosed list-item fence: CommonMark renders both images
+    ctx = good_readme(make_ctx, tmp_path, brand)
+    p = tmp_path / "README.md"
+    text = p.read_text(encoding="utf-8")
+    lines = text.split(chr(10))
+    at = next(i for i, ln in enumerate(lines) if "img.shields.io/badge/" in ln)
+    lines[at:at + 3] = [  # the three derived badges are replaced, so only the quoted pair can be counted
+        "- ```text", "  example",
+        "> ![A](<https://img.shields.io/badge/type-example-005ADD>)"
+        " ![B](<https://img.shields.io/badge/license-MIT-64748B>)",
+        "", "Ordinary paragraph.",
+    ]
+    p.write_text(chr(10).join(lines), encoding="utf-8")
+    fails = readmelint.lint(ctx, p)["fails"]
+    assert not any(f.startswith("R7 2-4 header badges") for f in fails), fails

@@ -218,8 +218,9 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
             end, hdepth, hcol, houter = html
             inner = _strip_quotes(body, hdepth)
             lead = len(body) - len(body.lstrip(" ")) if houter else len(inner) - len(inner.lstrip(" "))
-            if depth < hdepth or (hcol and depth == hdepth and rest.strip(" \t") and lead < hcol):
-                html = None   # its quote or list item ended: an HTML block has no lazy continuation
+            if depth < hdepth or (hcol and depth >= hdepth and rest.strip(" \t") and lead < hcol):
+                # its quote or list item ended (a dedented line may open a new, deeper quote): no lazy continuation
+                html = None
                 html_blocks.append((hstart, at))
             elif end is None:
                 if rest.strip(" \t"):
