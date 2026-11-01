@@ -538,3 +538,35 @@ def test_many_images_and_html_blocks_are_scanned_in_linear_work():
 
     small, large = work(200), work(1600)
     assert large <= small * 8 * 2, (small, large)
+
+
+# GFM evidence: gfm-a358-raw_comment_one.html, gfm-a358-raw_comment_three.html, gfm-a358-escaped_comment_outside.html, gfm-a358-bare_destination.html, gfm-a358-valid_destination_control.html; review-cases-a358707026b1de858620e75ee652612c54ae507f-vm.json
+@pytest.mark.parametrize("backslashes", [1, 3])
+def test_raw_html_block_backslash_comment_hides_image(make_ctx, tmp_path, brand, backslashes):
+    ctx = good_readme(make_ctx, tmp_path, brand)
+    usage = "<div>\n" + "\\" * backslashes + '<!-- <img alt="Hidden" src="docs/images/missing.png"> -->\n</div>'
+    p = _insert_usage(tmp_path, usage)
+    fails = readmelint.lint(ctx, p)["fails"]
+    assert "R7 local image does not resolve: docs/images/missing.png" not in fails, fails
+    assert not any(f.startswith("R7") for f in fails), fails
+
+
+def test_backslash_comment_outside_raw_html_still_fails(make_ctx, tmp_path, brand):
+    ctx = good_readme(make_ctx, tmp_path, brand)
+    p = _insert_usage(tmp_path, '\\<!-- <img alt="Hidden" src="docs/images/missing.png"> -->')
+    assert "R7 local image does not resolve: docs/images/missing.png" in readmelint.lint(ctx, p)["fails"]
+
+
+def test_bare_link_destination_backtick_does_not_hide_the_missing_image(make_ctx, tmp_path, brand):
+    ctx = good_readme(make_ctx, tmp_path, brand)
+    p = _insert_usage(tmp_path, "See ](a`b) `![Shot](<docs/images/missing.png>)`")
+    res = readmelint.lint(ctx, p)
+    assert "R7 local image does not resolve: docs/images/missing.png" in res["fails"], res["fails"]
+    assert res["result"] == "fail", res
+
+
+def test_valid_link_destination_backtick_still_hides_the_image(make_ctx, tmp_path, brand):
+    ctx = good_readme(make_ctx, tmp_path, brand)
+    p = _insert_usage(tmp_path, "[See](a`b) `![Shot](<docs/images/missing.png>)`")
+    fails = readmelint.lint(ctx, p)["fails"]
+    assert "R7 local image does not resolve: docs/images/missing.png" not in fails, fails
