@@ -285,6 +285,37 @@ def _closing_bracket(text: str, start: int) -> int | None:
 # `_has_link_opener`; the regression test reads and resets it
 _OPENER_STEPS = 0
 
+# block starts at a line start after up to three spaces of indent (CommonMark 4.1 ATX headings, 4.2 thematic breaks,
+# 5.2 list items, which may interrupt a paragraph); blockquotes are tested apart because a quote line continues a quote
+_BLOCK_START_LINE = re.compile(
+    r" {0,3}(?:#{1,6}(?:[ \t]|$)|(?:[-+*]|\d{1,9}[.)])(?:[ \t]|$)"
+    r"|(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})$)", re.M)
+# single-line blocks (headings and thematic breaks): the line itself is the whole block
+_ATX_OR_THEMATIC_LINE = re.compile(
+    r" {0,3}(?:#{1,6}(?:[ \t]|$)|(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})$)", re.M)
+_BLOCKQUOTE_LINE = re.compile(r" {0,3}>")
+
+
+def _block_boundary(text: str, newline: int, fences: tuple[tuple[int, int], ...]) -> bool:
+    """True when the newline at `newline` (plain text, outside every inert region) ends a link-opener span even though
+    no blank line follows: the line that just ended is a heading or thematic break, or the next line starts a heading,
+    list item, thematic break, fence, or a blockquote that does not continue a blockquote line. Each check reads at most
+    the two adjacent lines (the previous line is found backwards only as far as its own start), so the cost is linear
+    in the length of the lines involved."""
+    ended = text.rfind("\n", 0, newline) + 1  # start of the line that just ended
+    if _ATX_OR_THEMATIC_LINE.match(text, ended):
+        return True
+    nxt = newline + 1
+    if _BLOCK_START_LINE.match(text, nxt):
+        return True
+    k = nxt  # a fence opener is found at its line start after up to three spaces of indent
+    while k < len(text) and k - nxt < 3 and text[k] == " ":
+        k += 1
+    at = bisect.bisect_left(fences, (k, -1))
+    if at < len(fences) and fences[at][0] == k:
+        return True
+    return bool(_BLOCKQUOTE_LINE.match(text, nxt)) and not _BLOCKQUOTE_LINE.match(text, ended)
+
 
 @functools.lru_cache(maxsize=16)
 def _active_openers(text: str) -> frozenset[int]:
@@ -292,9 +323,11 @@ def _active_openers(text: str) -> frozenset[int]:
     One left-to-right pass keeps a stack of active `[` indices. Fenced code, inline code, HTML comments and HTML open
     tags (attribute values included) are inert, so a bracket inside them is text: it neither opens nor closes a link.
     An unescaped `]` that pops an opener and is directly followed by a destination `(...)` skips that destination,
-    which is literal (a backtick in it opens no code span). A blank line clears the stack. Inert regions are found by
-    cached lookups as in `_outside_code`, so the pass is linear. Offsets are the source offsets. It never calls
-    `_outside_code`."""
+    which is literal (a backtick in it opens no code span). A blank line clears the stack, and so does a block
+    boundary: a heading, list item, thematic break, fence or blockquote start (see `_block_boundary`), and the line
+    after a heading or thematic break. A quote line continues an open quote, so a `[` and its `](` in one blockquote
+    still pair. Inert regions are found by cached lookups as in `_outside_code`, so the pass is linear. Offsets are the
+    source offsets. It never calls `_outside_code`."""
     global _OPENER_STEPS
     fences = _fence_spans(text)
     html_spans = mdcode.html_block_spans(text)
@@ -315,9 +348,11 @@ def _active_openers(text: str) -> frozenset[int]:
 
     while pos < n:
         fence = _span_at(fences, pos)
-        if fence is not None:  # fenced code is inert
+        if fence is not None:  # fenced code is inert and a block boundary: no opener before it can match a closer after it
             _OPENER_STEPS += 1
+            stack.clear()
             pos = fence[1]
+            stack.clear()
             continue
         if inline is not False and (inline is None or inline[0] < pos):
             inline = next_inline(pos)
@@ -356,6 +391,8 @@ def _active_openers(text: str) -> frozenset[int]:
                     j += 1
                 if j < n and text[j] == "\n":  # a blank line is a paragraph boundary
                     stack.clear()
+                elif _block_boundary(text, i, fences):  # so is the start of a block without a blank line
+                    stack.clear()
             i += 1
         if jump is not None:
             pos = jump
@@ -363,6 +400,8 @@ def _active_openers(text: str) -> frozenset[int]:
             break
         else:
             _OPENER_STEPS += 1
+            if k < len(fences) and region == fences[k]:  # a fence skipped as a region is a block boundary too
+                stack.clear()
             pos = region[1]
     return frozenset(opened)
 
