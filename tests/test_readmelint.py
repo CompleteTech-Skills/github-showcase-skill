@@ -1007,3 +1007,30 @@ def test_r4_destination_nesting_deeper_than_32_is_no_link():
 
     assert target(32) is not None  # 32 nested parentheses still form a destination
     assert target(33) is None  # 33 is beyond CommonMark's nesting limit: not a link
+
+
+# --- r3 (8783e0e): nested containers, invalid reference labels, list-continuation HTML (#7) -------------------------------
+# GFM oracle: gfm-878-nested-containers-summary.json (an image renders in each failing input; none in each control).
+# Adjudication: t7-adjudication-nested-containers-8783.md.
+_HTML_IMG = '<img alt="Shot" src="docs/images/missing.png">'
+NESTED_CASES = [
+    # 1. an unescaped opening bracket makes the label invalid, so the line is ordinary Markdown and the image renders
+    ("invalid_label", "Intro.\n\n[bad[label]: ![Shot](docs/images/missing.png)", True),
+    ("escaped_bracket_control", "Intro.\n\n[ok\\[label]: ![Shot](docs/images/missing.png)", False),
+    # 2. raw HTML indented into a list item: the item's four spaces are container syntax, the backticks are literal
+    ("item_html_backticks", "- Example\n\n    <div>\n    One ` character.\n    " + _HTML_IMG + "\n    Another ` character.\n    </div>", True),
+    ("item_html_real_code_control", "- Example\n\n    <div>\n    One `code` here.\n    " + _HTML_IMG + "\n    </div>", True),
+    ("item_inline_code_control", "- Example\n\n  Text `" + _HTML_IMG + "` more", False),
+    ("item_fenced_control", "- Example\n\n  ```html\n  " + _HTML_IMG + "\n  ```", False),
+    # 3. a fence opened on a list continuation line inside a quote ends where the line dedents out of the quote item
+    ("quoted_list_fence", "> - Example\n>\n>   ```text\n>   code\n\n> ![Shot](docs/images/missing.png)", True),
+    ("quoted_list_fence_quote_blank", "> - Example\n>\n>   ```text\n>   code\n>\n> ![Shot](docs/images/missing.png)", True),
+    ("quoted_list_closed_fence_control", "> - Example\n>\n>   ```text\n>   ![Shot](docs/images/missing.png)\n>   ```", False),
+]
+
+
+@pytest.mark.parametrize("body,expect_missing", [(b, m) for _, b, m in NESTED_CASES], ids=[c[0] for c in NESTED_CASES])
+def test_r3_nested_container_cases(make_ctx, tmp_path, brand, body, expect_missing):
+    readmelint._active_openers.cache_clear()
+    fails = _usage_fails(make_ctx, tmp_path, brand, body)
+    assert (MISSING in fails) is expect_missing, fails

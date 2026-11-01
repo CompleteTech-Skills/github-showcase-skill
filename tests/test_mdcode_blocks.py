@@ -457,3 +457,37 @@ def test_blank_line_inside_a_list_fence_stays_code():
 def test_four_spaces_beyond_the_item_column_is_indented_code_not_a_fence():
     text = "- Example\n\n      ```text\n      code\n\n" + SHOT
     assert mdcode.fence_spans(text) == ()
+
+
+# --- nested containers (#7 r3, 8783e0e): layout offsets for the three Sol cases and their controls ---------------------
+HTML_IMG = '<img alt="Shot" src="docs/images/missing.png">'
+
+
+@pytest.mark.parametrize("gap", ["", ">"], ids=["blank", "quote-blank"])
+def test_quoted_list_fence_ends_at_the_line_that_leaves_the_quote_item(gap):
+    text = "> - Example\n>\n>   ```text\n>   code\n" + gap + "\n> " + SHOT
+    (start, end), = mdcode.fence_spans(text)
+    assert start <= text.index("```")
+    assert end <= text.index(SHOT)
+    assert [found[1] for found in images(text)] == ["docs/images/missing.png"]
+
+
+def test_quoted_list_fence_closed_on_its_own_line_hides_the_image():
+    text = "> - Example\n>\n>   ```text\n>   " + SHOT + "\n>   ```\n"
+    (start, end), = mdcode.fence_spans(text)
+    assert start < text.index(SHOT) < end
+    assert not images(text)
+
+
+def test_item_html_block_after_four_space_indent_leaves_the_image_visible():
+    text = "- Example\n\n    <div>\n    One ` character.\n    " + HTML_IMG + "\n    Another ` character.\n    </div>\n"
+    (start, end), = mdcode.html_block_spans(text)
+    assert start <= text.index("<div>") and start < text.index(HTML_IMG) < end
+    assert [found[1] for found in images(text)] == ["docs/images/missing.png"]
+    assert mdcode.code_spans(text) == []
+
+
+def test_item_html_block_terminator_is_found_after_the_item_indent():
+    text = "- Example\n\n    <pre>\n    ` one\n    </pre>\n  " + HTML_IMG + " `\n"
+    (start, end), = mdcode.html_block_spans(text)
+    assert end <= text.index(HTML_IMG)
