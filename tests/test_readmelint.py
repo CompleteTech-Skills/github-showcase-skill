@@ -1176,3 +1176,22 @@ def test_unsplit_alt_text_reference_still_reports_the_missing_file_control(make_
 def test_plain_link_title_before_a_reference_image_still_reports_the_missing_file(make_ctx, tmp_path, brand, title):
     doc = f"[Docs](https://example.test {title})\n\n![Shot][shot]\n\n[shot]: docs/images/missing.png"
     assert MISSING in _usage_fails(make_ctx, tmp_path, brand, doc)
+
+
+# GFM valid-shortcut: "![Shot]" stays valid when its full label is invalid (split label); evidence gfm-e0d-label-shortcut.json, label-shortcut-e0d9745c...-vm.json
+def test_label_split_by_a_blank_line_falls_back_to_the_valid_shortcut_image(make_ctx, tmp_path, brand):
+    doc = "![Shot][sh\n\not]\n\n[shot]: docs/images/missing.png"
+    fails = _usage_fails(make_ctx, tmp_path, brand, doc)
+    assert MISSING in fails, fails
+
+
+def test_label_split_by_a_blank_line_is_not_a_local_image(make_ctx, tmp_path, brand):
+    doc = "![Other][sh\n\not]\n\n[shot]: docs/images/missing.png"
+    fails = _usage_fails(make_ctx, tmp_path, brand, doc)
+    assert MISSING not in fails, fails
+
+
+def test_plain_shortcut_reference_image_reports_the_missing_file_control(make_ctx, tmp_path, brand):
+    doc = "![Shot]\n\n[shot]: docs/images/missing.png"
+    fails = _usage_fails(make_ctx, tmp_path, brand, doc)
+    assert MISSING in fails, fails
