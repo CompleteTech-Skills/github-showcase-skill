@@ -1300,6 +1300,45 @@ def test_wildcard_grant_with_a_repo_withdrawal_holds_that_repo_in_profile_and_pi
         assert sum("pin-public" in j["id"] or "-pin-public-" in j["id"] for j in res["jobs"]) >= 2, res["jobs"]
 
 
+def test_held_pin_holds_the_exact_set_order_job_but_not_the_authorized_pin(tmp_path, monkeypatch, brand):
+    """The order job says "make the ticked set exactly the kept list and untick every other repository", which would
+    also untick the pin held for sign-off. So when any pin of a target is held, that target's order job is held
+    (`pins-order-held:<target>:t3-signoff`) and the authorized pin job for kept-y remains, with its signoff_id."""
+    from ctshowcase import org as O, signoff
+    est, _ = _pya_estate(brand)
+    with _Strict(monkeypatch, _file(_bundle(tmp_path, _WILD))):
+        res, _ = O.pins(est, OWNER, allow_t3=True)
+        signoff.stamp(res["jobs"])
+        ids = [j["id"] for j in res["jobs"]]
+        assert not any(i.endswith("-pin-public-order") for i in ids), ids
+        assert f"pins-order-held:public:t3-signoff" in res["logs"], res["logs"]
+        assert f"t3-signoff:revoked:{OWNER}/withdrawn-x" in res["logs"], res["logs"]
+        kept = [j for j in res["jobs"] if "kept-y" in json.dumps(j)]
+        assert kept and all(j["signoff_id"] == "t3s-all" for j in kept), res["jobs"]
+        assert res["order"]["public"] == ["withdrawn-x", "kept-y"]  # nothing deleted from the plan data
+    with _Strict(monkeypatch, _file(_bundle(tmp_path / "ok", _WILD[:1]))):  # control: no withdrawal
+        res, _ = O.pins(est, OWNER, allow_t3=True)
+        signoff.stamp(res["jobs"])
+        order = [j for j in res["jobs"] if j["id"].endswith("-pin-public-order")]
+        assert len(order) == 1 and order[0]["signoff_id"] == "t3s-all", res["jobs"]
+        assert "withdrawn-x" in json.dumps(order[0]) and "kept-y" in json.dumps(order[0]), order
+        assert not any(x.startswith("pins-order-held") for x in res["logs"]), res["logs"]
+
+
+def test_control_non_t3_org_pins_order_is_unchanged(brand):
+    from ctshowcase import org as O
+    from ctshowcase.resolver import Resolver
+    reg = {"orgs": {"CompleteTech-Skills": {"final_repos": ["a", "b"], "pins_public": ["a", "b"],
+                                            "sections": [{"title": "T", "repos": ["a", "b"]}]}}}
+    metas = {n: {"owner": "CompleteTech-Skills", "repo": n, "visibility": "public", "description": "synthetic"}
+             for n in ("a", "b")}
+    est = O.Estate(brand, Resolver(brand, reg, {"rows": set(), "ids": set(), "answers": {}, "extra": [], "actions": []}),
+                   metas)
+    res, _ = O.pins(est, "CompleteTech-Skills", allow_t3=False)
+    assert any(j["id"].endswith("-pin-public-order") for j in res["jobs"]), [j["id"] for j in res["jobs"]]
+    assert not any(x.startswith("pins-order-held") for x in res["logs"]), res["logs"]
+
+
 def test_without_the_flag_the_profile_is_unchanged_by_a_repo_withdrawal(tmp_path, brand):
     """Control: without --allow-t3 the profile is the base behaviour (nothing newly held)."""
     from ctshowcase import org as O

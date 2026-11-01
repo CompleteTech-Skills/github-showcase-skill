@@ -2591,6 +2591,10 @@ def _finish(args, obj: dict, code: int):
     jobs = list(obj.get("jobs") or []) + ([obj["job"]] if obj.get("job") else [])
     from .signoff import stamp
     stamp(jobs)  # before any serialization (--jobs, --report)
+    # Writer-shaped proposals (phase/kind/repo/argv, e.g. a workflow-toggle awaiting --approval) carry the granting
+    # sign-off in the report and stdout but are NOT added to `jobs`, so they stay out of the writer queue. stamp() only
+    # touches dicts with `phase` or std/owner/repo, so diff-style proposals (no phase) are left untouched.
+    stamp([p for p in (obj.get('proposals') or []) if isinstance(p, dict)])
     if getattr(args, "jobs", None) and jobs:  # writer jobs only; unapproved proposals stay in the report
         from .records import append
         append(args.jobs, jobs)

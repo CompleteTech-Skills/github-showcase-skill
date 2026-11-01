@@ -1284,7 +1284,7 @@ def _main(argv=None) -> int:
             print(f"{args.command}: {obj['error']}", file=sys.stderr)
             return code
     if obj is not None:
-        for key in ("jobs", "records"):  # writer jobs and change records (adopt, new, enterprise plan)
+        for key in ("jobs", "records", "proposals"):  # writer jobs, change records, writer-shaped proposals
             if isinstance(obj.get(key), list):
                 signoff.stamp(obj[key])  # the granting record
         emit(args, obj)

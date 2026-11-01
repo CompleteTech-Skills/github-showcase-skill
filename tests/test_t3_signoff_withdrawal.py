@@ -636,3 +636,82 @@ def test_direct_copy_plan_estate_control_non_t3_org_option_gets_no_stamp(tmp_pat
     job = _readme_job(out)
     assert job is not None and "CompleteTech Skills" in job["argv"][job["argv"].index("--readme") + 1], out["jobs"]
     assert not any(_ids_of(j) for j in out["jobs"]), [j for j in out["jobs"] if _ids_of(j)]
+
+
+# ------------------------------------------------------------------ stored scope canonicalization (issue 23, round 13)
+# Stored `repos` entries in grants and withdrawals are canonicalized like the requested repository: `site/`, ` site` and
+# `site.git` name `site`, `*` is preserved, and an entry with no canonical form makes the record malformed (fail closed).
+STORED = ["site/", " site", "site ", "site.git", "site/.git", "Acme/site/", "Acme/site.git", "SITE/"]
+
+
+@pytest.mark.parametrize("spelling", STORED)
+def test_stored_withdrawal_spelling_cannot_be_ignored_behind_a_wildcard_grant(spelling):
+    recs = [_rec("g1", ["*"]), _rec("w1", [spelling], approved=False, on="2026-06-01")]
+    assert _ev(recs, "site") == (None, "revoked")
+    assert _ev(recs, "other") == ("g1", None)  # control: another repository keeps the grant
+
+
+@pytest.mark.parametrize("spelling", STORED)
+def test_stored_grant_and_withdrawal_spellings_revoke_each_other(spelling):
+    grant_padded = [_rec("g1", [spelling]), _rec("w1", ["site"], approved=False, on="2026-06-01")]
+    assert _ev(grant_padded, "site") == (None, "revoked")
+    withdrawal_padded = [_rec("g1", ["site"]), _rec("w1", [spelling], approved=False, on="2026-06-01")]
+    assert _ev(withdrawal_padded, "site") == (None, "revoked")
+    assert _ev([_rec("g1", [spelling])], "site") == ("g1", None)  # a padded stored grant still grants its repository
+
+
+@pytest.mark.parametrize("bad", [["a b"], ["/"], [".."], ["site", "a b"], [""]])
+def test_uncanonicalizable_withdrawal_scope_is_malformed_and_fails_closed(bad):
+    from ctshowcase import signoff
+    w = _rec("w1", bad, approved=False, on="2026-06-01")
+    assert any(p.startswith("repos:") for p in signoff.problems(w)), signoff.problems(w)
+    recs = [_rec("g1", ["*"]), w]
+    for repo in ("site", "other"):
+        got, err = _ev(recs, repo)
+        assert got is None and err and err.startswith("invalid:w1:"), (repo, got, err)
+
+
+@pytest.mark.parametrize("bad", [["a b"], ["/"], [".."], ["site", "a b"]])
+def test_uncanonicalizable_grant_scope_never_authorizes(bad):
+    from ctshowcase import signoff
+    g = _rec("g1", bad)
+    assert any(p.startswith("repos:") for p in signoff.problems(g)), signoff.problems(g)
+    for repo in ("site", "a", "b"):
+        got, _ = _ev([g], repo)
+        assert got is None
+
+
+@pytest.mark.parametrize("flag", ["false", 0, None, "true", 1, "yes"])
+def test_non_boolean_approved_on_a_scoped_record_fails_closed_for_that_scope_only(flag):
+    recs = [_rec("g1", ["*"]), _rec("w1", ["site/"], approved=flag, on="2026-06-01")]
+    got, err = _ev(recs, "site")
+    assert got is None and err and err.startswith("invalid:w1:"), (got, err)
+    assert _ev(recs, "other") == ("g1", None)  # an unrelated repository is not blocked
+
+
+def test_record_for_never_stamps_a_wildcard_grant_withdrawn_under_a_padded_spelling(tmp_path, monkeypatch):
+    from ctshowcase import signoff
+    recs = [_rec("g1", ["*"]), _rec("w1", [" site.git/"], approved=False, on="2026-06-01")]
+    p = tmp_path / "s.yaml"
+    p.write_text(json.dumps({"signoffs": recs}), encoding="utf-8")
+    monkeypatch.setenv("SHOWCASE_T3_SIGNOFF_FILE", str(p))
+    run = signoff.reset()
+    try:
+        signoff._grant(OWN.lower(), recs[0])
+        assert signoff.record_for(OWN, "site") is None
+        assert signoff.record_for(OWN, "other")["id"] == "g1"
+    finally:
+        signoff.restore(run)
+
+
+@pytest.mark.parametrize("scope,flag", [("site/", False), ("site.git", False), ("site/", "false"), ("a b", False)])
+def test_cli_refuses_a_padded_or_malformed_stored_withdrawal(scope, flag, tmp_path):
+    own = "Pick-Your-AI"
+    recs = [_rec("g1", ["*"], owner=own), _rec("w1", [scope], approved=flag, on="2026-06-01", owner=own)]
+    r = _cli(tmp_path, recs, "describe", repo="site")
+    out = r.stdout + r.stderr
+    assert r.returncode == 2 and ("t3-signoff:revoked" in out or "t3-signoff:invalid" in out), out
+    (tmp_path / "ok").mkdir()
+    if scope != "a b":  # control: an unrelated repository is not blocked (a malformed scope could cover anything)
+        other = _cli(tmp_path / "ok", recs, "describe", repo="other")
+        assert "t3-signoff:" not in other.stdout + other.stderr, other.stdout + other.stderr
