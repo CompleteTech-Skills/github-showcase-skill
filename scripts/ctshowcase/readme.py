@@ -1332,7 +1332,14 @@ def preservation(before: str, after: str, removed: list[str]) -> list[str]:
         for ln in block.group(2).splitlines():
             if ln.strip() and not ln.strip().startswith("<!-- showcase:"):
                 authored[ln.rstrip()] += 1
-    kept = Counter(ln.rstrip() for ln in after.splitlines() if ln.strip())
+    # Comparison is limited to the badge region, so an identical row outside the badges cannot substitute for a lost one.
+    kept = Counter()
+    for block in find_blocks(MARK, after):
+        if block.group(1) != "badges":
+            continue
+        for ln in block.group(2).splitlines():
+            if ln.strip() and not ln.strip().startswith("<!-- showcase:"):
+                kept[ln.rstrip()] += 1
     for ln, n in authored.items():
         for _ in range(max(0, n - kept.get(ln, 0))):
             if pending[ln.strip()] > 0:
