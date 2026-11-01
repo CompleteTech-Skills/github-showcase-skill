@@ -63,30 +63,38 @@ def test_historical_logo_path_with_query_still_migrates(brand, tmp_path):
 
 
 def test_regular_unmarked_footer_does_not_exempt_reemitted_banner_anchors(brand, tmp_path):
+    """The legacy footer is multi-line and shares its standalone anchor lines with the footer that is emitted again.
+    Anchor lines the new footer carries must not be added to `removed`: the multiset guard then still sees one banner
+    anchor pair missing (before: banner + old footer = 2, after: the new footer = 1). Had the whole old footer been
+    exempted (`removed += old_footer`), the exemption would hide the lost banner anchors and preservation would pass.
+    A one-line legacy footer would not show this, because it has no standalone anchor lines to exempt."""
     ctx = RepoContext(brand, normalize(meta_dict()), tmp_path)
     assert ctx.det["variant"] == "C"
     scaffold = readme.scaffold(ctx)
     banner_body = readme.banner_html(ctx)
     assert readme.wrap("banner", banner_body) in scaffold
     # the generated banner wrapped in a standalone company-link anchor, one anchor tag per line
-    linked = f"{readme.start('banner')}\n{OWN_SITE_LINK}\n{banner_body}\n{CLOSE_LINK}\n{readme.end('banner')}"
-    old_footer = unmarked("docs/images/logo.svg")
+    linked = "\n".join([readme.start("banner"), OWN_SITE_LINK, banner_body, CLOSE_LINK, readme.end("banner")])
+    light = brand.raw["footer"]["logo_light_url"]
+    old_footer = footer.markup(brand).replace(f'<img src="{light}"', '<img src="docs/images/logo.svg"', 1)
+    assert old_footer != footer.markup(brand)
+    old_lines, new_lines = Counter(stripped_lines(old_footer)), Counter(stripped_lines(footer.block(brand)))
+    for anchor in (OWN_SITE_LINK, CLOSE_LINK):  # both the old and the new footer carry the anchor as its own line
+        assert old_lines[anchor] == 1 and new_lines[anchor] == 1
     before = scaffold.replace(readme.wrap("banner", banner_body), linked).replace(footer.block(brand), old_footer)
     assert linked in before and old_footer in before and footer.block(brand) not in before
 
     after, removed = readme.upgrade(ctx, before)
 
+    assert after.count("Built by") == 1 and "docs/images/logo.svg" not in after
     # the regenerated banner carries no company anchors: the wrapper it lost must be reported, not exempted
     problems = readme.preservation(before, after, removed)
-    assert problems, "a banner anchor lost during upgrade was not reported by preservation"
     assert f"lost line: {OWN_SITE_LINK}" in problems
     assert f"lost line: {CLOSE_LINK}" in problems
-
-    # removed holds no banner anchor line beyond what the unmarked old footer consumed on its own
-    expected = Counter(stripped_lines(old_footer)) - Counter(stripped_lines(footer.block(brand)))
+    # removed holds no anchor line: the new footer carries both again
     removed_counts = Counter(stripped_lines("\n".join(removed)))
     for anchor in (OWN_SITE_LINK, CLOSE_LINK):
-        assert removed_counts[anchor] <= expected[anchor]
+        assert removed_counts[anchor] == 0
 
 
 def test_unmarked_footer_removed_lines_exclude_reemitted_lines(brand, tmp_path):
