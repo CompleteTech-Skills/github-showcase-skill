@@ -112,6 +112,7 @@ def _definition_candidates(document: str) -> str:
                 out[i] = " "
     fences = mdcode.fence_spans(document)
     html_spans = mdcode.html_block_spans(document)
+    links = _inline_link_spans(document, fences)  # resolved link destinations and titles: literal text, computed once
     # Left-to-right scan over the next HTML open tag and the next comment, as in `_outside_code`: a comment opener that
     # sits inside a complete open tag (for example an attribute value) is attribute text, so the tag is consumed whole.
     pos = 0
@@ -126,6 +127,10 @@ def _definition_candidates(document: str) -> str:
             break
         nxt = min(found, key=lambda m: m.start())
         start = nxt.start()
+        inside = _span_at(links, start)
+        if inside is not None:  # an opener inside a link destination or title is text: resume after that span
+            pos = inside[1]
+            continue
         if nxt is tag:
             # a tag inside inline code or a fence is text: the search resumes one character on. A real tag is consumed
             # without blanking, so a `<!--` inside its attributes never opens a comment.
@@ -146,14 +151,72 @@ def _definition_candidates(document: str) -> str:
     # Quote and list-item markers are container syntax: a definition inside `> ` or `- ` is still a definition and is
     # global to the document. Each peeled prefix becomes NUL (same length), so offsets are unchanged and the pattern
     # sees an ordinary line start. Fenced lines are already blanked; blanked comment text has no prefix to peel.
+    # A list item's content continues on the lines after its marker: a non-blank line indented at least to the content
+    # column of the deepest open item (within the same block quote) is inside that item, so that many columns are peeled.
+    # A blank line keeps the items open; a line indented less closes the items it does not reach.
     pos = 0
+    items: list[tuple[int, int]] = []  # open list items, outermost first: (block-quote depth, content column)
     for raw in re.findall(r"[^\n]*\n|[^\n]+", document):
         body = raw.rstrip("\r\n")
-        line = "".join(out[pos:pos + len(body)])
-        prefix = len(line) - len(mdcode._containers(line)[2])
+        end = pos + len(body)
+        line = "".join(out[pos:end])
+        doc_depth, doc_rest = mdcode._quotes(document[pos:end])  # structure is read from the source, not the blanking
+        blank = not doc_rest.strip()
+        quoted = len(line) - len(mdcode._quotes(line)[1])  # the block-quote markers are peeled first, as before
+        _, col, rest = mdcode._containers(line[quoted:])
+        indent = _whitespace_columns(doc_rest)[1]
+        if col or not blank:
+            while items and (items[-1][0] > doc_depth or items[-1][1] > indent):
+                items.pop()
+        if col:  # an item marker: its content column is the new innermost item
+            prefix = len(line) - len(rest)
+            items.append((doc_depth, col))
+        else:
+            prefix = quoted
+            if items and not blank:
+                prefix += _whitespace_columns(line[quoted:], items[-1][1])[0]
         out[pos:pos + prefix] = ["\x00"] * prefix
         pos += len(raw)
     return "".join(out)
+
+
+def _whitespace_columns(text: str, target: int | None = None) -> tuple[int, int]:
+    """(characters, columns) of the leading spaces and tabs of `text`, a tab advancing to the next multiple of four. The
+    scan stops once `target` columns are covered (None: all leading whitespace); a tab that crosses the target is
+    counted whole, so the characters can be peeled as one unit."""
+    col = i = 0
+    while i < len(text) and text[i] in " \t" and (target is None or col < target):
+        col = col + 1 if text[i] == " " else (col // 4 + 1) * 4
+        i += 1
+    return i, col
+
+
+def _inline_link_spans(document: str, fences: tuple[tuple[int, int], ...]) -> tuple[tuple[int, int], ...]:
+    """Spans of resolved inline link destinations and titles, from `(` through the closing `)`, for the definition scan:
+    an HTML comment or tag opener inside one is link text, not markup. A `](` opens a span only when a `[` opened a link
+    text earlier in the same paragraph (no blank line between). Computed in one pass; the spans are sorted and disjoint."""
+    spans: list[tuple[int, int]] = []
+    html_spans = mdcode.html_block_spans(document)  # raw HTML and fenced code are not link syntax
+    last_open = None  # the most recent unescaped `[` of the current paragraph
+    skip_until = 0  # text inside an accepted span is destination or title text: its brackets open nothing
+    for token in re.finditer(r"\[|\]\(|\n[ \t\x00\r]*\n", document):
+        at = token.start()
+        if at < skip_until:
+            continue
+        if token.group().startswith("\n"):
+            last_open = None  # a blank line ends the paragraph
+            continue
+        if _span_at(fences, at) is not None or _span_at(html_spans, at) is not None:
+            continue
+        if token.group() == "[":
+            if not _escaped(document, at):
+                last_open = at
+        elif last_open is not None and not _escaped(document, at) and not _in_inline_code(document, at):
+            target = _inline_image_target(document, at + 1)
+            if target is not None:
+                spans.append((at + 1, target[1]))
+                skip_until = target[1]
+    return tuple(spans)
 
 
 def _balanced_destination(dest: str) -> bool:
@@ -305,11 +368,19 @@ def _outside_code(text: str, mask_inline: bool = True) -> str:
     return "".join(out)
 
 
+_BLANK_LINE_AT = re.compile(r"\n[ \t\x00]*(?:\n|\Z)")  # a newline that starts a blank line (or ends the text)
+
+
 def _closing_bracket(text: str, start: int) -> int | None:
-    """Find a balanced closing bracket, respecting escaped and nested brackets."""
+    """Find a balanced closing bracket, respecting escaped and nested brackets. None when the scan crosses a blank line
+    first: a link text or label cannot span a paragraph boundary (CommonMark), so the bracket is not closed there."""
     depth, pos = 1, start + 1
     while pos < len(text):
         char = text[pos]
+        # the newline that a backslash escapes is still a line end: a blank line after it is a boundary too
+        newline = pos if char == "\n" else pos + 1 if char == "\\" else -1
+        if newline >= 0 and text[newline:newline + 1] == "\n" and _BLANK_LINE_AT.match(text, newline):
+            return None
         if char == "\\":
             pos += 2
             continue
@@ -366,6 +437,17 @@ def _block_boundary(text: str, newline: int, fences: tuple[tuple[int, int], ...]
     if at < len(fences) and fences[at][0] == k:
         return True
     return bool(_BLOCKQUOTE_LINE.match(text, nxt)) and not _BLOCKQUOTE_LINE.match(text, ended)
+
+
+def _crosses_block(text: str, start: int, end: int, fences: tuple[tuple[int, int], ...]) -> bool:
+    """True when a newline in text[start:end] is a block boundary (see `_block_boundary`). A plain soft line break is
+    not one: alt text and labels may continue on the next line of their paragraph."""
+    newline = text.find("\n", start, end)
+    while newline != -1:
+        if _block_boundary(text, newline, fences):
+            return True
+        newline = text.find("\n", newline + 1, end)
+    return False
 
 
 _BRACKET = re.compile(r"[][]")
@@ -719,6 +801,9 @@ def _markdown_images(text: str, document: str) -> list[tuple[str, str, int, int]
     spans = _definition_spans(document)  # definition titles are never rendered as images
     html_spans = mdcode.html_block_spans(document)  # raw HTML blocks are literal: Markdown image syntax there is text
     link_spans = _link_literal_spans(document)  # a link destination or title is literal text, never a rendered image
+    # once per call: block boundaries inside alt text and labels. Fences come from the written document (the masked copy
+    # blanks fenced lines, and `_layout` is then built once per document, not once per copy)
+    fences = _fence_spans(document if len(document) >= len(text) else text)
     sources = []
     consumed = 0
     for match in re.finditer(r"!\[", text):
@@ -736,6 +821,8 @@ def _markdown_images(text: str, document: str) -> list[tuple[str, str, int, int]
         close = _closing_bracket(text, match.start() + 1)
         if close is None:
             continue
+        if _crosses_block(text, match.end(), close, fences):
+            continue  # alt text cannot hold a heading, list item, fence or quote start: no image forms there
         alt = text[match.end():close]
         after = close + 1  # tentative: `consumed` moves only once the image resolves, so a failed outer keeps its nested images
         if after < len(text) and text[after] == "(":
@@ -751,7 +838,8 @@ def _markdown_images(text: str, document: str) -> list[tuple[str, str, int, int]
         key = label(document[match.end():close] if len(document) >= len(text) else alt)
         if after < len(text) and text[after] == "[":
             ref_close = _closing_bracket(text, after)
-            if ref_close is not None:
+            # a label holding a block boundary is no label: the shortcut form below still applies, as CommonMark has it
+            if ref_close is not None and not _crosses_block(text, after + 1, ref_close, fences):
                 key = label((document if len(document) >= len(text) else text)[after + 1:ref_close]) or key
                 after = ref_close + 1
         if key in definitions:
