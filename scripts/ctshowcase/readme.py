@@ -472,7 +472,10 @@ def callout_only(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
     the former logo URLs) is replaced by the current one, and only the removed footer lines that the replacement footer
     does not carry again are reported (multiset difference), so the preservation check accepts them. A re-emitted
     line is not reported, so it cannot weaken the never-drop-a-line guard. A marked footer that is not a footer copy
-    (a partner image) is left as it is. A removed recognized footer is always replaced, even when fenced example text makes check() report drift."""
+    (a partner image) is left as it is. The trailing unmarked footer additionally accepts the brand's own-site historical
+    logo sources (`footer.legacy_logo_urls` entries and `docs/images/logo.svg`) under a vouching alt, while partner,
+    foreign and look-alike images stay authored. A removed recognized footer is always replaced, even when fenced
+    example text makes check() report drift."""
     if ctx.det["variant"] == "G" and ctx.brand.readme_opts.get("fork_readme") == "full":
         ctx.log("needs-input:fork-variant (q27 full treatment: pass readme --variant for the §5.4 variant)")
     body = text
@@ -507,7 +510,7 @@ def callout_only(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
                     had_footer = True
                     pos = fm.end()
             out = "".join(kept) + out[pos:]
-            out, old_footer = drop_old_footer(out, ctx.brand)
+            out, old_footer = drop_old_footer(out, ctx.brand, own_site=True)
             removed += old_footer
             if old_footer:
                 had_footer = True
