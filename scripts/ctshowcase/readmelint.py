@@ -193,25 +193,32 @@ def _whitespace_columns(text: str, target: int | None = None) -> tuple[int, int]
 
 def _inline_link_spans(document: str, fences: tuple[tuple[int, int], ...]) -> tuple[tuple[int, int], ...]:
     """Spans of resolved inline link destinations and titles, from `(` through the closing `)`, for the definition scan:
-    an HTML comment or tag opener inside one is link text, not markup. A `](` opens a span only when a `[` opened a link
-    text earlier in the same paragraph (no blank line between). Computed in one pass; the spans are sorted and disjoint."""
+    an HTML comment or tag opener inside one is link text, not markup. Link-text openers are kept on a stack, and each
+    `](` consumes one of them, whether or not its destination resolves, so a completed link's opener is never reused by
+    a later `](`: an orphan destination opens no span. A blank line clears the stack (a paragraph boundary). Escaped and
+    inline-code brackets are text and neither open nor consume. Computed in one pass; the spans are sorted and disjoint."""
     spans: list[tuple[int, int]] = []
     html_spans = mdcode.html_block_spans(document)  # raw HTML and fenced code are not link syntax
-    last_open = None  # the most recent unescaped `[` of the current paragraph
+    openers: list[int] = []  # unconsumed unescaped `[` of the current paragraph, innermost last
     skip_until = 0  # text inside an accepted span is destination or title text: its brackets open nothing
-    for token in re.finditer(r"\[|\]\(|\n[ \t\x00\r]*\n", document):
+    for token in re.finditer(r"\[|\]\(|\]|\n[ \t\x00\r]*\n", document):
         at = token.start()
         if at < skip_until:
             continue
         if token.group().startswith("\n"):
-            last_open = None  # a blank line ends the paragraph
+            openers.clear()  # a blank line ends the paragraph
             continue
         if _span_at(fences, at) is not None or _span_at(html_spans, at) is not None:
             continue
+        if _escaped(document, at) or _in_inline_code(document, at):
+            continue  # an escaped or code-span bracket is literal text
         if token.group() == "[":
-            if not _escaped(document, at):
-                last_open = at
-        elif last_open is not None and not _escaped(document, at) and not _in_inline_code(document, at):
+            openers.append(at)
+        elif token.group() == "]":
+            if openers:
+                openers.pop()
+        elif openers:  # `](` with an active opener: consume it, then read the destination
+            openers.pop()
             target = _inline_image_target(document, at + 1)
             if target is not None:
                 spans.append((at + 1, target[1]))
@@ -698,6 +705,19 @@ def _reference_label_spans(document: str) -> tuple[tuple[int, int], ...]:
 
 
 @functools.lru_cache(maxsize=16)
+def _blank_line_starts(text: str) -> tuple[int, ...]:
+    """Sorted start offsets of every paragraph boundary (a newline that starts a blank line), from one regex pass."""
+    return tuple(match.start() for match in re.finditer(r"\n[ \t\r\x00]*\n", text))
+
+
+def _blank_between(text: str, a: int, b: int) -> bool:
+    """True when a paragraph boundary starts at an offset in [a, b): a bisection over the cached boundary list."""
+    starts = _blank_line_starts(text)
+    at = bisect.bisect_left(starts, a)
+    return at < len(starts) and starts[at] < b
+
+
+@functools.lru_cache(maxsize=16)
 def _title_ends(text: str) -> dict[str, tuple[int, ...]]:
     """Sorted positions of the unescaped `"`, `'` and `)` in `text`, from one linear pass. An occurrence is escaped when
     an odd number of backslashes directly precedes it: the parity the destination scanner's skip-two loop produces."""
@@ -721,6 +741,8 @@ def _inline_image_target(text: str, start: int) -> tuple[str, int] | None:
     while pos < len(text) and text[pos].isspace():
         _DEST_STEPS += 1
         pos += 1
+    if _blank_between(text, start + 1, pos):  # (a) a paragraph boundary before the destination
+        return None
     begin = pos
     if pos < len(text) and text[pos] == "<":
         begin = pos = pos + 1
@@ -753,9 +775,12 @@ def _inline_image_target(text: str, start: int) -> tuple[str, int] | None:
         if depth:
             return None
         target = text[begin:pos]
+    dest_end = pos
     while pos < len(text) and text[pos].isspace():
         _DEST_STEPS += 1
         pos += 1
+    if _blank_between(text, dest_end, pos):  # (b) a boundary before the title, or before `)` when there is no title
+        return None
     if pos < len(text) and text[pos] in "\"'(":
         end = ")" if text[pos] == "(" else text[pos]
         pos += 1
@@ -764,10 +789,14 @@ def _inline_image_target(text: str, start: int) -> tuple[str, int] | None:
         at = bisect.bisect_left(ends, pos)  # the first unescaped end character at or after the title start
         if at == len(ends):
             return None
-        pos = ends[at] + 1
+        if _blank_between(text, pos, ends[at]):  # (c) a title may span lines, never a paragraph boundary
+            return None
+        title_close = pos = ends[at] + 1
         while pos < len(text) and text[pos].isspace():
             _DEST_STEPS += 1
             pos += 1
+        if _blank_between(text, title_close, pos):  # (d) the whitespace after the title, up to `)`
+            return None
     if pos >= len(text) or text[pos] != ")":
         return None
     return html.unescape(re.sub(r"\\([^\w\s])", r"\1", target)), pos + 1
