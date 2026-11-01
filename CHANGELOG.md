@@ -59,6 +59,7 @@ All notable changes to `github-showcase-skill` are recorded here. Versions follo
 - `content social` renders the personal-profile capstone and backup repositories wherever R10 and the `adopt` upload job include them; it previously exempted them, so the planned upload had no image. Where R10 leaves them out (the archive org, an archived capture) they stay exempt.
 - Label job plans include a per-repository `labels:OWNER/REPO` group for writer reconciliation. Explicit orchestrator groups are preserved.
 - `adopt` withholds jobs and change records for an archived capture, with instructions to re-capture inside the approved unarchive/polish/re-archive cycle. Security jobs are emitted only for active eligible repositories.
+- README lint rejects an unescaped opening parenthesis inside a parenthesized link title (`[Docs](https://example.test (see ![Shot](docs/images/missing.png)))` is not a link, so Shot renders and its missing file is reported; backslash-escaped parentheses stay a valid title) and applies the paragraph-interruption rule to ordered-list markers in multiline image alt text and labels: only `1.` interrupts (a sibling item of an enclosing list still does), so a `2.` continuation line no longer drops a Variant J header badge. Regressions cover each case with its control (#7).
 
 ## 1.0.0 — 2026-10-26
 
