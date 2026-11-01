@@ -352,6 +352,13 @@
   },
   "footer": {
    "type": "object",
+   "properties": {
+    "legacy_logo_urls": {
+     "type": "array",
+     "items": {"type": "string", "pattern": "^https://"},
+     "uniqueItems": true
+    }
+   },
    "required": [
     "href",
     "logo_light_url",
