@@ -355,3 +355,65 @@ def test_gh_callout_only_keeps_partner_and_foreign_footer_images(brand, tmp_path
     assert image_lines(after, src) == image_lines(before, src) >= 1
     assert not [ln for ln in removed if src in ln], "preservation must report no allowance for the partner image"
     assert readme.preservation(before, after, removed) == []
+
+
+# ---------------------------------------------------- bootstrap write: authored footer in every bootstrap state (issue 47, r2 P1)
+# The edited-state guard is covered above. These cases pin the pristine and none states, where `bootstrap` and
+# `header_only` regenerate the marked footer without any preservation check. Synthetic partner or foreign images only.
+SAMPLE_BODY = "## About\n\nGenerated sections for the fixture.\n"
+
+
+def _state_readme(brand, tmp_path, state, footer_block):
+    """The scaffolded README with `footer_block` as its marked footer, in the bootstrap `state`
+    ('pristine': a valid generated template body; 'none': no template-body marker at all)."""
+    ctx = RepoContext(brand, normalize(meta_dict()), tmp_path)
+    head = readme.scaffold(ctx).replace(footer.block(brand), footer_block)
+    if state == "pristine":  # the generated body sits above the marked footer, which stays the last block
+        head = head.replace(footer_block, readme.pristine_block(SAMPLE_BODY) + "\n\n" + footer_block, 1)
+    text = head + "\n"
+    assert readme.bootstrap_state(text) == state
+    return text
+
+
+AUTHORED_FOOTER_CASES = [
+    ("pristine", PARTNER_LIGHT, "pristine-partner-url"),
+    ("pristine", "assets/partner.png", "pristine-foreign-path"),
+    ("none", PARTNER_LIGHT, "none-partner-url"),
+    ("none", "assets/partner.png", "none-foreign-path"),
+]
+
+
+@pytest.mark.parametrize("state,src,name", AUTHORED_FOOTER_CASES, ids=[c[2] for c in AUTHORED_FOOTER_CASES])
+def test_bootstrap_write_refuses_authored_marked_footer_image_in_pristine_and_none_states(brand, tmp_path, state, src,
+                                                                                         name):
+    partner = footer.block(brand).replace(brand.raw["footer"]["logo_light_url"], src)
+    assert src in partner
+    text = _state_readme(brand, tmp_path, state, partner)
+    p, path = run_bootstrap_write(tmp_path, text, name)
+    assert p.returncode == 1, (p.returncode, p.stdout, p.stderr)  # CHECK_FAILED
+    assert "readme-shrink" in p.stdout + p.stderr
+    assert path.read_bytes() == text.encode("utf-8"), "a refused bootstrap write must leave README.md byte-identical"
+    assert src in path.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("state", ["pristine", "none"])
+def test_bootstrap_write_migrates_own_site_legacy_footer_in_pristine_and_none_states(brand, tmp_path, state):
+    text = _state_readme(brand, tmp_path, state, footer.block(legacy_brand_for(brand)))
+    p, path = run_bootstrap_write(tmp_path, text, state)
+    assert p.returncode == 0, (p.returncode, p.stdout, p.stderr)
+    after = path.read_text(encoding="utf-8")
+    assert brand.raw["footer"]["logo_light_url"] in after
+    assert legacy_brand_for(brand).raw["footer"]["logo_light_url"] not in after
+    assert after.count("Built by") == 1 and footer.check(brand, after)[0] == "pass"
+
+
+@pytest.mark.parametrize("state", ["pristine", "none"])
+def test_bootstrap_write_current_footer_is_idempotent_in_pristine_and_none_states(brand, tmp_path, state):
+    text = _state_readme(brand, tmp_path, state, footer.block(brand))
+    p, path = run_bootstrap_write(tmp_path, text, state + "-first")
+    assert p.returncode == 0, (p.returncode, p.stdout, p.stderr)
+    first = path.read_bytes()
+    assert footer.check(brand, first.decode("utf-8"))[0] == "pass"
+    p2, path2 = run_bootstrap_write(tmp_path, first.decode("utf-8"), state + "-second")
+    assert p2.returncode == 0, (p2.returncode, p2.stdout, p2.stderr)
+    assert path2.read_bytes() == first
