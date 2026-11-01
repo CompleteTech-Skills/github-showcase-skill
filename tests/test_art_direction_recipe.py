@@ -273,3 +273,45 @@ def test_recipe_attempt_cap_is_per_candidate():
     assert "per candidate set" not in lowered.replace("per candidate, not per candidate set", "")
     assert "successful candidates never count toward the cap" in lowered
     assert "only empty runs count toward the 3 attempts" in lowered
+
+
+def test_recipe_labels_sandbox_facts_as_observed_and_uses_exact_returned_path():
+    # Static wording test (mock evidence, not an image-generation run).
+    lowered = _recipe(_text()).lower()
+    assert "observed runtime notes" in lowered
+    assert "issue #64" in lowered
+    assert "not behaviour documented by openai" in lowered
+    assert "exact path returned by the run output" in lowered
+    assert "does not rely on a documented image path" in lowered
+    assert "codex-cli 0.166.0" in lowered
+    assert "at the time of writing" in lowered
+    for flag in ("--skip-git-repo-check", "--json", "--sandbox", "--output-last-message"):
+        assert flag in lowered, flag
+    assert "never invent a model id" in lowered
+    assert "not exposed" in lowered
+
+
+def test_recipe_does_not_cite_unverified_url_for_image_path():
+    # Static wording test (mock evidence, not an image-generation run).
+    assert "http" not in _recipe(_text()).lower()
+
+
+def test_recipe_candidate_contract_is_consistent_with_four_candidate_template():
+    # Static wording test: the fixed generator template line stays byte-identical and unique,
+    # and the recipe handles every returned path instead of one run per candidate.
+    text = _text()
+    assert text.count("Produce four candidates. {SEED_INSTRUCTION}") == 1
+    assert text.count("Produce four candidates.") == 1
+    section = _recipe(text)
+    lowered = section.lower()
+    assert "one run per candidate" not in lowered
+    assert "every distinct path the run output reports is one candidate" in lowered
+    assert "between zero and four image paths" in lowered
+    assert "empty run" in lowered
+    assert "four candidate slots" in lowered
+    assert "the cap applies to each slot" in lowered
+    assert "same unchanged prompt" in lowered
+    assert "new run" in lowered
+    assert "2 retries" in lowered and "3 attempts" in lowered
+    assert "after 3 empty attempts for any one slot" in lowered
+    assert "art-fail" in lowered
