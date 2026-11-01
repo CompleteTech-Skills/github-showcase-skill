@@ -610,3 +610,57 @@ def test_exact_template_row_is_still_recognized_and_refreshed(make_ctx, tmp_path
     after, _ = _refresh(ctx, text, mode)
     assert "type-Template" not in badge_block(after) and "type-template" not in badge_block(after)
     assert readme.generated_badges(badge_block(after))
+
+
+INDENTED_MIT = "    ![License MIT](https://img.shields.io/badge/license-MIT-64748B)"
+PLAIN_MIT = INDENTED_MIT.strip()
+
+
+def two_block_changed_license(make_ctx, tmp_path):
+    """Variant J with current license Apache-2.0: an authored indented MIT row, then the same row unindented."""
+    ctx = profile_context(make_ctx, tmp_path, license="Apache-2.0")
+    text = readme.scaffold(ctx)
+    marked = readme.wrap("badges", INDENTED_MIT) + "\n\n" + readme.wrap("badges", PLAIN_MIT)
+    return ctx, text.replace(readme.wrap("badges", badge_block(text)), marked)
+
+
+def test_indented_authored_badge_block_is_not_silently_removed(make_ctx, tmp_path):
+    ctx, before = two_block_changed_license(make_ctx, tmp_path)
+    after, removed = readme.upgrade(ctx, before)
+    problems = readme.preservation(before, after, removed)
+    # The authored indented MIT row is kept, or the shrink guard rejects its removal; never a silent drop.
+    assert INDENTED_MIT in after or any("License MIT" in problem for problem in problems), (problems, after)
+    # The unindented duplicate is a legacy generated row and migrates to the current license.
+    assert "license-Apache--2.0-64748B" in after
+    assert not re.search(r"^" + re.escape(PLAIN_MIT) + r"$", after, re.M)
+    assert after.count("<!-- showcase:badges:generated") == 1
+
+
+def test_cli_write_never_silently_removes_the_indented_authored_badge(make_ctx, tmp_path):
+    ctx, before = two_block_changed_license(make_ctx, tmp_path)
+    path = tmp_path / "README.md"
+    path.write_text(before, encoding="utf-8")
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(ctx.meta), encoding="utf-8")
+    env = dict(os.environ, PYTHONIOENCODING="utf-8")
+    result = subprocess.run([sys.executable, str(ROOT / "scripts/showcase.py"), "--meta", str(meta),
+                             "--repo-dir", str(tmp_path), "readme", "--mode", "upgrade", "--write"],
+                            capture_output=True, encoding="utf-8", env=env)
+    written = path.read_text(encoding="utf-8")
+    if result.returncode == 0:
+        assert INDENTED_MIT in written, written
+    else:
+        assert "readme-shrink" in result.stdout + result.stderr
+        assert written == before
+
+
+@pytest.mark.parametrize("mode", ["upgrade", "header"])
+def test_single_block_legacy_migration_still_passes_without_shrink_and_is_stable(make_ctx, tmp_path, mode):
+    ctx = profile_context(make_ctx, tmp_path, license="Apache-2.0")
+    before = readme.wrap("badges", PLAIN_MIT) + "\n\nAuthored paragraph to retain.\n"
+    run = (lambda text: readme.upgrade(ctx, text)) if mode == "upgrade" else (lambda text: (readme.header_only(ctx, text), []))
+    after, removed = run(before)
+    assert "license-Apache--2.0-64748B" in badge_block(after) and "license-MIT-" not in badge_block(after)
+    assert readme.preservation(before, after, removed) == []
+    again, removed_again = run(after)
+    assert again == after and readme.preservation(after, again, removed_again) == []

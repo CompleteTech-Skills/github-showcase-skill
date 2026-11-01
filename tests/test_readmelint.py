@@ -1195,3 +1195,56 @@ def test_plain_shortcut_reference_image_reports_the_missing_file_control(make_ct
     doc = "![Shot]\n\n[shot]: docs/images/missing.png"
     fails = _usage_fails(make_ctx, tmp_path, brand, doc)
     assert MISSING in fails, fails
+
+
+# --- round-4: paragraph-bounded inline titles and consumed link openers (real newlines throughout) -----------------
+UNFINISHED_TITLE = '[Docs](https://example.test "unfinished\n\n{image}\n\n")'
+
+
+def test_title_crossing_a_paragraph_boundary_does_not_hide_a_missing_image(make_ctx, tmp_path, brand):
+    doc = UNFINISHED_TITLE.format(image="![Shot](docs/images/missing.png)")
+    assert MISSING in _usage_fails(make_ctx, tmp_path, brand, doc)
+
+
+def test_title_crossing_a_paragraph_boundary_does_not_hide_an_off_palette_badge(make_ctx, tmp_path, brand):
+    doc = UNFINISHED_TITLE.format(image="![Type](https://img.shields.io/badge/type-x-ABCDEF)")
+    assert OFF_ABC in _usage_fails(make_ctx, tmp_path, brand, doc)
+
+
+def test_title_with_a_single_newline_is_still_a_link_title(make_ctx, tmp_path, brand):
+    doc = '[Docs](https://example.test "unfinished\n![Shot](docs/images/missing.png)\n")'
+    fails = _usage_fails(make_ctx, tmp_path, brand, doc)
+    assert MISSING not in fails, fails
+
+
+COMPLETED_LINK = '[Docs](https://example.test) ](x "<!--")'
+LIC_DEFINITION = "[lic]: https://img.shields.io/badge/license-MIT-64748B"
+ONE_BADGE = "R7 2-4 header badges required (found 1)"
+
+
+def _header_with(make_ctx, tmp_path, middle):
+    """Variant J whose header holds one real type badge followed by `middle`, then `![License][lic]` after a comment close."""
+    (tmp_path / "docs/images").mkdir(parents=True)
+    (tmp_path / "docs/images/banner.png").write_bytes(b"banner")
+    ctx = make_ctx(repo_dir=tmp_path, repo=".github", language=None,
+                   description="Community health files for Northwind Trading Co.")
+    text = readme.scaffold(ctx)
+    original = next(m.group(2) for m in readme.MARK.finditer(text) if m.group(1) == "badges")
+    body = BADGE_TYPE_LINE + "\n" + middle + "\n\n" + LIC_DEFINITION + "\n\n-->\n\n" + BADGE_LICENSE_LINE + "\n"
+    path = tmp_path / "README.md"
+    path.write_text(text.replace(original, body), encoding="utf-8")
+    return readmelint.lint(ctx, path)["fails"]
+
+
+def test_completed_link_opener_is_not_reused_for_an_orphan_destination(make_ctx, tmp_path):
+    # The second `](` has no active opener, so `<!--` starts a real comment and `[lic]` defines nothing: one badge.
+    assert ONE_BADGE in _header_with(make_ctx, tmp_path, COMPLETED_LINK)
+
+
+def test_genuine_link_title_still_protects_its_comment_opener(make_ctx, tmp_path):
+    fails = _header_with(make_ctx, tmp_path, '[a](u "<!--")')
+    assert not any("2-4 header badges required" in f for f in fails), fails
+
+
+def test_code_span_bracket_is_not_a_link_opener(make_ctx, tmp_path):
+    assert ONE_BADGE in _header_with(make_ctx, tmp_path, '`[` ](x "<!--")')
