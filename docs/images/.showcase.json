@@ -1,6 +1,6 @@
 {
- "config_sha256": "bd2386d654a06b2602ae9a379db613a44b7718a69e59e596c1aa59b3a6519e56",
- "fingerprint": "9e73067ba580bc56ff3336dc63bfad7df36ad22590a6f83ccad61976debc7ee8",
+ "config_sha256": "dc74956cdd1fec80148d97ba93ebbe148f0c659aeda2ccf070a28c37e6897023",
+ "fingerprint": "268b5e360b681be473d23fb9ae4fb610bf829740503920606e32eaa9b5d0e573",
  "inputs": {
   "description": "Generate CompleteTech LLC GitHub banners, cards, icons and READMEs, with repository checks and metadata plans.",
   "icon_sha256": null,
