@@ -613,3 +613,46 @@ def test_link_opener_lookup_work_is_linear():
     assert w100 <= 2.5 * w50, (w50, w100)
     assert w200 <= 2.5 * w100, (w100, w200)
     assert w50 <= 10 * len50 and w100 <= 10 * len(("word ](d) " * 100)) and w200 <= 10 * len200, (w50, w100, w200)
+
+# --- active link openers reset at real block boundaries ----------------------------------------------------------------
+# GFM oracle (rendered by GitHub): gfm-4f-opener_across_quote.html, gfm-4f-opener_across_list.html,
+# gfm-4f-opener_across_fence.html, gfm-4f-opener_across_heading.html, gfm-4f-opener_across_heading-h2.html and
+# gfm-4f-opener_blank_control.html (showcase-orchestration 20261031 directory). The unmatched `[open` ends its paragraph
+# at each block start, so the orphan `](a`b)` is not a link closer and the following real image renders.
+# Adjudication: t7-adjudication-opener-block-boundary-4f32c0a.md.
+@pytest.mark.parametrize("block", [
+    "> quote",
+    "- item",
+    "~~~text\nfenced\n~~~",
+    "### heading",
+    "## heading",
+    "",
+], ids=["quote", "list", "fence", "heading", "heading-h2", "blank-control"])
+def test_opener_resets_at_block_boundary(make_ctx, tmp_path, brand, block):
+    readmelint._active_openers.cache_clear()
+    text = f"See [open\n{block}\n](a`b) ![Shot](<docs/images/missing.png>)"
+    assert readmelint._has_link_opener(text, text.index("](a")) is False
+    fails = _usage_fails(make_ctx, tmp_path, brand, text)
+    assert MISSING in fails, fails
+
+
+# A `[` closed inside its own list item or blockquote is still an active opener there (the reset only cuts a stack
+# across a real block boundary). GFM: the closed link renders inside the block. Adjudication:
+# t7-adjudication-opener-block-boundary-4f32c0a.md.
+@pytest.mark.parametrize("text", [
+    "- [a](b)",
+    "> [a](b)",
+    "> [a\n> ](b)",
+    "- item [x\n  continued ](b)",
+    "[a\nb](c)",
+], ids=["list-closed", "quote-closed", "quote-continued", "list-continued", "paragraph-control"])
+def test_opener_closed_inside_block_stays_active(text):
+    readmelint._active_openers.cache_clear()
+    assert readmelint._has_link_opener(text, text.index("]", text.index("["))) is True
+
+
+# A heading line that carries its own unmatched opener does not leak it into the following paragraph line.
+def test_heading_opener_does_not_leak_into_following_paragraph():
+    readmelint._active_openers.cache_clear()
+    text = "## [open\nfoo ](x)"
+    assert readmelint._has_link_opener(text, text.index("]")) is False
