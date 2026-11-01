@@ -188,3 +188,48 @@ def test_control_no_repositories_and_no_capture(brand, tmp_path, monkeypatch):
     assert "withdrawn-x" not in text and "kept-y" not in text, text
     assert not any(str(x).startswith("t3-signoff:") for x in plan["logs"]), plan["logs"]
     assert readmes, [j["id"] for j in plan["jobs"]]
+
+
+# 8) distinct T3 board owner and repository owner: the README job names the board grant first ------------------------
+# Both owners are brand.yaml T3 owners (the board owner of the fixture and a second T3 org); records are synthetic.
+REPO_OWNER = "Jevelopers-neatHack-2026"
+BOARD_GRANT = {"id": "grant-board", "repos": ["*"], "approved_on": "2026-01-01"}
+REPO_GRANT = {"id": "grant-repo", "owner": REPO_OWNER, "repos": ["site"], "approved_on": "2026-01-02"}
+
+
+def _readme_from(jobs):
+    readmes = [j for j in jobs if "--readme" in j.get("argv", [])]
+    assert len(readmes) == 1, [j.get("id") for j in jobs]
+    return readmes[0]
+
+
+def _cli_both(tmp_path, records, repos):
+    """The README job from both channels: the --jobs file and the stdout plan."""
+    result, jobs = _cli_run(tmp_path, records, repos=repos)
+    assert result.returncode == 0, result.stdout + result.stderr
+    return _readme_from(jobs), _readme_from(json.loads(result.stdout)["jobs"])
+
+
+def test_cli_board_owner_grant_leads_the_readme_signoff_ids(tmp_path):
+    for job in _cli_both(tmp_path, [BOARD_GRANT, REPO_GRANT], [f"{REPO_OWNER}/site"]):
+        assert "site" in job["argv"][job["argv"].index("--readme") + 1], job
+        assert job.get("signoff_id") == "grant-board", job
+        assert job.get("signoff_ids") == ["grant-board", "grant-repo"], job
+
+
+def test_cli_single_owner_grant_covering_board_and_repository_has_no_duplicates(tmp_path):
+    # a record covers one owner, so the single-grant control is a repository of the board owner itself
+    for job in _cli_both(tmp_path, [BOARD_GRANT], ["Pick-Your-AI/site"]):
+        assert job.get("signoff_id") == "grant-board", job
+        assert "signoff_ids" not in job, job
+
+
+def test_cli_withdrawn_repository_is_still_omitted_with_a_board_grant(tmp_path):
+    withdraw = {"id": "withdraw-repo", "owner": REPO_OWNER, "repos": ["site"], "approved": False,
+                "approved_on": "2026-10-01"}
+    result, jobs = _cli_run(tmp_path, [BOARD_GRANT, REPO_GRANT, withdraw], repos=[f"{REPO_OWNER}/site"])
+    assert result.returncode == 0, result.stdout + result.stderr
+    job = _readme_from(jobs)
+    text = job["argv"][job["argv"].index("--readme") + 1]
+    assert f"{REPO_OWNER}/site" not in text, text
+    assert "grant-repo" not in _ids(job), job
