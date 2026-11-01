@@ -1545,7 +1545,7 @@ def _real_tesseract():
 
 needs_tesseract = pytest.mark.skipif(
     C._tesseract() is None,
-    reason="tesseract not installed: real-OCR controls skipped (they run on the VM and hosted CI where it is installed)")
+    reason="tesseract not installed: real-OCR controls skipped (they run where it is installed, e.g. the VM)")
 
 
 def _font(size):
