@@ -1,5 +1,7 @@
 """The installed skill's icon defaults work without the private estate bundle."""
 import json
+import re
+from pathlib import Path
 import copy
 import os
 import subprocess
@@ -114,17 +116,36 @@ def test_explicit_missing_template_reports_the_required_sections(brand, make_ctx
         C.icon_prompt(ctx, Resolver(brand, {}, {}), "# Empty custom art direction\n")
 
 
-@pytest.mark.parametrize(("owner", "seed"), [
-    ("CompleteTech-Skills", "1025"), ("AI-Ascension", None), ("Jev-Engineering", "3001"),
-    ("jevplay-games", "3101"), ("LibreEvolve", "4001"), ("TouchedByAnAgent", "5001"),
-    ("romgenie-archive-repostiory", "6001")])
-def test_bundled_prompt_has_a_valid_seed_instruction(owner, seed, brand, make_ctx):
+GLYPH = {"glyph_name": "Inbox Tray", "glyph_description": "An open tray seen front-on.",
+         "spark_placement": "held inside the tray", "size_class": "wide", "subject": "an inbox tray",
+         "objects": "a tray and a card"}
+
+
+@pytest.mark.parametrize("option", ["A", "B"])
+@pytest.mark.parametrize("owner", ["CompleteTech-Skills", "AI-Ascension", "Jev-Engineering", "romgenie-archive-repostiory"])
+def test_prompt_asks_for_one_image_and_asserts_no_seed_by_default(option, owner, brand, make_ctx):
     from ctshowcase.resolver import Resolver
 
-    result = C.icon_prompt(make_ctx(owner=owner), Resolver(brand, {}, {}), C.load_art_direction())
-    expected = f"Use seed {seed} when supported." if seed else "Use the tool's default seed."
-    assert expected in result["prompt"]
-    assert "seed not set" not in result["prompt"]
+    art = (C.SKILL_ART_DIRECTION.read_text(encoding="utf-8") if option == "B" else None)
+    result = C.icon_prompt(make_ctx(owner=owner), Resolver(brand, {}, {}), C.load_art_direction(), GLYPH, option,
+                           skill_art=art)
+    p = result["prompt"]
+    assert "Produce one image." in p
+    assert "four candidates" not in p.lower() and "when supported" not in p and "seed" not in p.lower()
+    assert result["requested"] == {"images": 1, "seed": "not supported"}
+    md = C.prompt_markdown(result)
+    assert "- Requested: 1 image; seed: not supported." in md
+
+
+@pytest.mark.parametrize("option", ["A", "B"])
+def test_requested_seed_is_in_the_prompt_and_provenance(option, brand, make_ctx):
+    from ctshowcase.resolver import Resolver
+
+    art = (C.SKILL_ART_DIRECTION.read_text(encoding="utf-8") if option == "B" else None)
+    result = C.icon_prompt(make_ctx(owner="CompleteTech-Skills"), Resolver(brand, {}, {}), C.load_art_direction(),
+                           GLYPH, option, skill_art=art, seed=4242)
+    assert "Produce one image. Use seed 4242." in result["prompt"]
+    assert "- Requested: 1 image; seed: 4242." in C.prompt_markdown(result)
 
 
 @pytest.mark.parametrize("missing", [("icon_ink",), ("icon_spark",), ("icon_ink", "icon_spark")])
@@ -186,3 +207,51 @@ def test_legacy_config_option_b_does_not_require_glyph_inks(explicit_art_directi
     result = json.loads(proc.stdout.decode("utf-8"))
     assert result["result"] == "ok" and result["missing"] == []
     assert "A tray holding an envelope." in output.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("option", ["A", "B"])
+def test_synthetic_legacy_template_via_override_still_asks_for_one_image(option, brand, make_ctx):
+    """The fixture is a minimal synthetic legacy template that imitates the pre-#61 'Produce four candidates.' syntax
+    and is not a production snapshot. As an explicit --art-direction override it must not leave the prompt requesting
+    four while provenance records one image."""
+    from ctshowcase.resolver import Resolver
+
+    legacy = (Path(__file__).parent / "fixtures" / "content" / "ART_DIRECTION.synthetic-legacy.md").read_text(encoding="utf-8")
+    assert "Produce four candidates." in legacy
+    assert len(legacy.splitlines()) < 80
+    assert legacy.count("Produce four candidates.") == 1
+    assert not any(token in legacy for token in ("jev-reference", "jevplay", "AI Ascension", "Jev-Engineering", "#00A7FD", "1025")), \
+        "the fixture must stay synthetic"
+    result = C.icon_prompt(make_ctx(owner="CompleteTech-Skills"), Resolver(brand, {}, {}), legacy, GLYPH, option,
+                           skill_art=(legacy if option == "B" else None))
+    assert "four candidates" not in result["prompt"].lower()
+    assert "Produce one image." in result["prompt"]
+    assert "- Requested: 1 image; seed: not supported." in C.prompt_markdown(result)
+
+
+def test_explicit_seed_is_requested_even_when_a_custom_template_has_no_seed_placeholder(brand, make_ctx):
+    """A custom --art-direction without {SEED}/{SEED_INSTRUCTION} must still carry a seed that provenance records."""
+    from ctshowcase.resolver import Resolver
+
+    art = C.load_art_direction()
+    art = re.sub(r"[^\n]*\{SEED(?:_INSTRUCTION)?\}[^\n]*", "", art)
+    result = C.icon_prompt(make_ctx(owner="CompleteTech-Skills"), Resolver(brand, {}, {}), art, GLYPH, "A", seed=4242)
+    assert "seed 4242" in result["prompt"].lower()
+    assert "- Requested: 1 image; seed: 4242." in C.prompt_markdown(result)
+    plain = C.icon_prompt(make_ctx(owner="CompleteTech-Skills"), Resolver(brand, {}, {}), art, GLYPH, "A")
+    assert "seed" not in plain["prompt"].lower()
+
+
+def test_legacy_conditional_seed_clause_in_a_custom_template_is_normalised(brand, make_ctx):
+    """'Use seed {SEED} when supported.' must not assert a seed (or 'not supported') the caller never requested."""
+    from ctshowcase.resolver import Resolver
+
+    art = C.load_art_direction()
+    art = re.sub(r"[^\n]*\{SEED(?:_INSTRUCTION)?\}[^\n]*", "", art)
+    art = art.rstrip() + "\n\nUse seed {SEED} when supported.\n"
+    ctx = make_ctx(owner="CompleteTech-Skills")
+    plain = C.icon_prompt(ctx, Resolver(brand, {}, {}), art, GLYPH, "A")
+    assert "seed" not in plain["prompt"].lower()
+    seeded = C.icon_prompt(ctx, Resolver(brand, {}, {}), art, GLYPH, "A", seed=4242)
+    assert "Use seed 4242." in seeded["prompt"]
+    assert "when supported" not in seeded["prompt"]

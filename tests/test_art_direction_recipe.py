@@ -75,13 +75,16 @@ BASE_TABLE_ROWS = """| Family | Canvas | Primary | Accent | Text | Motif | Fonts
 | TouchedByAnAgent | Glossy 3D product illustration on deep maroon: smooth pink-peach robotics, warm amber glow, soft magenta signal ripples, tasteful and non-suggestive, studio lighting. |
 | romgenie | Glossy illustrated 3D still life in a warm vault: brass-bound objects, soft lamp light from above, dark teal ambient background, storybook-premium finish. |""".splitlines()
 
+# The provenance template outside the recipe. Issue #61 (one image per prompt run) deliberately
+# replaced the former "Candidates: 4 or 8" line with "Images requested", because each run now
+# asks for one image; the recipe (#64) must not change anything else in this block.
 BASE_PROVENANCE = """## assets/icon.png
 - Date: YYYY-MM-DD
 - Tool and model: TOOL / MODEL ID AND VERSION
 - Seed: SEED or "not supported"
 - Reference images: golden reference path, jev-reference.png, or "none"
 - Prompt: (verbatim, fenced)
-- Candidates: 4 or 8; selected: N (reason: one line)
+- Images requested: as asked in the prompt (`content icon prompt` asks for 1); selected: N (reason: one line)
 - Post-processing: showcase.py VERSION; output sha256 HASH; size KB
 """
 
@@ -264,15 +267,16 @@ def test_recipe_provenance_never_records_absolute_path():
     assert "record the codex session id and the path" not in step.lower()
 
 
-def test_recipe_attempt_cap_is_per_candidate():
-    # Successful runs are candidates and must not exhaust the cap, otherwise the
-    # four-candidate round (pipeline rule 7) could never complete.
+def test_recipe_attempt_cap_is_per_slot():
+    # Successful runs fill a slot and must not exhaust the cap, otherwise the
+    # four-invocation round (pipeline rule 7) could never complete.
     section = _recipe(_text())
     lowered = section.lower()
-    assert "per candidate, not per candidate set" in lowered
-    assert "per candidate set" not in lowered.replace("per candidate, not per candidate set", "")
+    assert "the limit applies per candidate slot" in lowered
+    assert "per candidate set" not in lowered
     assert "successful candidates never count toward the cap" in lowered
     assert "only empty runs count toward the 3 attempts" in lowered
+    assert "one slot's empty run does not count against another slot" in lowered
 
 
 def test_recipe_labels_sandbox_facts_as_observed_and_uses_exact_returned_path():
@@ -296,17 +300,30 @@ def test_recipe_does_not_cite_unverified_url_for_image_path():
     assert "http" not in _recipe(_text()).lower()
 
 
-def test_recipe_candidate_contract_is_consistent_with_four_candidate_template():
-    # Static wording test: the fixed generator template line stays byte-identical and unique,
-    # and the recipe handles every returned path instead of one run per candidate.
+def test_recipe_candidate_contract_is_single_image():
+    # Static wording test (#61, replacing the #64 four-candidate pins): the generator template asks for
+    # ONE image, exactly once, and rule 7 is four single-image invocations.
     text = _text()
-    assert text.count("Produce four candidates. {SEED_INSTRUCTION}") == 1
-    assert text.count("Produce four candidates.") == 1
+    assert text.count("Produce one image.{SEED_INSTRUCTION}") == 1
+    assert "Produce four candidates" not in text
+    assert "four candidates. {SEED_INSTRUCTION}" not in text
     section = _recipe(text)
     lowered = section.lower()
     assert "one run per candidate" not in lowered
-    assert "every distinct path the run output reports is one candidate" in lowered
-    assert "between zero and four image paths" in lowered
+    assert "between zero and four image paths" not in lowered
+    assert "every distinct path the run output reports is one candidate" not in lowered
+    assert "asks for one image each" in lowered
+    assert "item 5" in lowered
+    assert "each invocation asks for one image and fills one slot" in lowered
+    assert "select the first readable path in the order the run reported them" in lowered
+    assert "one accepted candidate per slot, even when several paths are reported" in lowered
+    assert "the remaining reported paths are ignored" in lowered
+    assert "asks for one image, so a run reports at most one image path" not in lowered
+    assert "at most one image path" not in lowered
+    assert "one run reports at most one" not in lowered
+    assert "fills at most one candidate slot, but its output may report more than one path" in lowered
+    assert "first readable path the run reported" in lowered
+    assert "an extra path, if a run ever reports one" not in lowered
     assert "empty run" in lowered
     assert "four candidate slots" in lowered
     assert "the cap applies to each slot" in lowered
@@ -315,6 +332,17 @@ def test_recipe_candidate_contract_is_consistent_with_four_candidate_template():
     assert "2 retries" in lowered and "3 attempts" in lowered
     assert "after 3 empty attempts for any one slot" in lowered
     assert "art-fail" in lowered
+
+
+def test_pipeline_rules_4_and_7_match_the_single_image_prompt():
+    rules = _text().split("## Pipeline rules (MUST)", 1)[1]
+    rule4 = next(line for line in rules.splitlines() if line.startswith("4. "))
+    rule7 = next(line for line in rules.splitlines() if line.startswith("7. "))
+    assert "record a seed only when one was requested" in rule4.lower()
+    assert "content icon prompt --seed n" in rule4.lower() and '"not supported"' in rule4
+    assert "four single-image invocations" in rule7
+    assert "four more single-image invocations" in rule7 and "art-fail" in rule7
+    assert "generate 4 candidates" not in rule7.lower()
 
 
 def test_recipe_unreadable_only_output_counts_against_slot_budget():
@@ -326,7 +354,7 @@ def test_recipe_unreadable_only_output_counts_against_slot_budget():
     assert "a run that reports no readable path is an empty run" in lowered
     assert "unreadable-only" in lowered
     assert "an unreadable path fills no slot" in lowered
-    assert "counts as one attempt against every slot that is still unfilled" in lowered
+    assert "an empty run (no reported path is readable) is retried as a new run with the same unchanged prompt, at most 2 retries (3 attempts total) for that slot" in lowered
     assert "unreadable-only output is counted as an empty run" in lowered
     assert "after 3 empty attempts for any one slot, including attempts that returned only unreadable paths" in lowered
     assert "art-fail" in lowered
@@ -342,18 +370,38 @@ def test_recipe_unreadable_only_output_counts_against_slot_budget():
     assert "retry the run under the retry limit" not in sandbox_c[0]
 
 
-def test_recipe_opus_p3_fixes_plural_paths_rule7_slots_and_scratch_copy():
-    # Static wording test (mock evidence, not an image-generation run): the four accepted P3 findings.
+def test_recipe_distinguishes_one_accepted_candidate_from_one_reported_path():
+    # Static wording test (mock evidence, not an image-generation run): #61 review P2. A single-image run may report
+    # an unreadable sandbox copy and a readable generated_images file; the slot is filled by the readable one and the
+    # run is neither empty nor unreadable-only (it must not exhaust the 3-attempt budget despite a good generation).
+    section = _recipe(_text())
+    lowered = section.lower()
+    assert "the first readable path an invocation reports fills the slot that invocation was for" in lowered
+    assert "one unreadable path and one readable path is not unreadable-only" in lowered
+    assert "it fills the slot with the readable path and is not an empty run" in lowered
+    assert "an empty run (no reported path is readable)" in lowered
+    sandbox_c = [line.strip().lower() for line in section.splitlines()
+                 if line.strip().lower().startswith("- (c) if a path is unreadable")]
+    assert len(sandbox_c) == 1
+    assert "use the first other readable path the same run reported" in sandbox_c[0]
+    assert "only when no reported path is readable" in sandbox_c[0]
+    # sandbox (c) no longer declares the run empty unconditionally
+    assert "skip it" in sandbox_c[0] and not sandbox_c[0].split("only when no reported path is readable")[0].count("empty run")
+
+
+def test_recipe_opus_p3_fixes_single_path_rule7_slots_and_scratch_copy():
+    # Static wording test (mock evidence, not an image-generation run): the accepted #64 P3 findings,
+    # restated for the single-image contract of #61.
     text = _text()
-    assert text.count("Produce four candidates.") == 1
+    assert text.count("Produce one image.") == 1 and "Produce four candidates" not in text
     lowered = _recipe(text).lower()
-    # (1) item 1 reads every image path the run reports, not a single path
-    assert "every image file path codex reports" in lowered
-    assert "use exactly those paths (see item 5)" in lowered
-    assert "use exactly that path" not in lowered
+    # (1) item 1 reads the one image path the run reports
+    assert "for the image file path codex reports for the generated image" in lowered
+    assert "use exactly that path (see item 5)" in lowered
+    assert "use exactly those paths" not in lowered
     # (2) the first retry bullet distinguishes pipeline rule 7 and the option A template
-    assert "pipeline rule 7 asks for four candidates" in lowered
-    assert "the option a template also says so" in lowered
+    assert "pipeline rule 7 asks for four single-image invocations" in lowered
+    assert "the option a template asks for one image each" in lowered
     assert "the fixed prompt asks for four candidates" not in lowered
     assert "four candidate slots" in lowered
     # (3) the second round of rule 7 opens four new slots with the same per-slot cap
@@ -362,3 +410,5 @@ def test_recipe_opus_p3_fixes_plural_paths_rule7_slots_and_scratch_copy():
     # (4) item 4 normalizes a scratch copy of the chosen image, not the generated path
     assert "copy the chosen image to scratch (see sandbox (d)) and pass that copy to content icon normalize --in path" in lowered
     assert "pass the chosen path to `content icon normalize" not in lowered
+    # (5) CLI help is not image generation (#61)
+    assert "only a returned readable image path proves a generation" in lowered

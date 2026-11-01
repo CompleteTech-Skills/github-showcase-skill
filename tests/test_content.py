@@ -612,9 +612,10 @@ def test_icon_prompt_needs_writer_then_ok(brand, icon_ctx):
     p = res["prompt"]
     assert res["missing"] == [] and p.startswith("NEON NIGHT REPO ICON · STYLE LOCK v1.2 · Northwind-Trading-Co/")
     assert "#46B8FF" in p and "#CBEBFF" in p and "#0081ED" in p and "Bulb Gold #FFC300" in p
-    assert "Size class WIDE:" in p and "seed 1025" in p and "GitHub avatar" not in p and "28 avatars in" not in p
+    assert "Size class WIDE:" in p and "1025" not in p and "seed: not supported" in p and "GitHub avatar" not in p and "28 avatars in" not in p
     assert "art/reference/avatars/Northwind-Trading-Co.png" not in p.split("(b) Style")[0]
-    assert "art/out/icons/Northwind-Trading-Co/support-triage-agent-1024-c{1..4}.png" in p
+    assert "art/out/icons/Northwind-Trading-Co/support-triage-agent-1024.png" in p
+    assert "-c{1..4}" not in p and "candidates" not in p.lower()
     assert "Do not draw the Northwind-Trading-Co org glyph (Compass rose" in p
     assert res["render"]["ink"] == "#005ADD" and res["render"]["live_area"] == [168, 168, 856, 856]
     md = C.prompt_markdown(res)
@@ -783,7 +784,7 @@ def test_icon_noisy_dark_ground_falls_back_to_keying_inside_the_budget():
     assert len(C.icon_bytes(out)[0]) <= 300_000
 
 
-@pytest.mark.parametrize("bad", [float("nan"), float("inf"), -1.0])
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), -1.0, 12.5])
 def test_icon_ground_tolerance_rejects_non_finite_and_negative(bad):
     from ctshowcase.errors import ShowcaseError
     img = _candidate("#F8FAFC", size=256, box=(60, 60, 190, 190))
@@ -1124,7 +1125,7 @@ def test_icon_cli_ground_tolerance_flag_wired(capsys, tmp_path, brand):
     assert not out.exists()
 
 
-@pytest.mark.parametrize("bad", ["nan", "-1", "inf"])
+@pytest.mark.parametrize("bad", ["nan", "-1", "inf", "1000", "12.5"])
 def test_icon_cli_ground_tolerance_rejects_bad_values(capsys, tmp_path, brand, bad):
     """A non-finite or negative --ground-tolerance is a usage error (exit 2, log 'usage'); nothing is written."""
     card = brand.style(NW)["tokens"]["card_fill"]
@@ -1398,6 +1399,91 @@ def test_icon_min_contrast_cli(capsys, tmp_path, brand):
     assert code == 0 and res["result"] in ("pass", "warn"), res
     code, res = run_content(capsys, *check, "--min-contrast", "30")
     assert code == 2, res
+
+
+def _solid_icon(ink):
+    from PIL import Image, ImageDraw
+    im = Image.new("RGBA", (1024, 1024), (0, 0, 0, 0))
+    ImageDraw.Draw(im).rectangle((300, 300, 724, 724), fill=tuple(ink) + (255,))
+    return C.icon_bytes(im)[0]
+
+
+def _contrast_detail(qa):
+    return next(c["detail"] for c in qa["checks"] if c["check"] == "contrast-on-card")
+
+
+def test_icon_explicit_floor_measures_actual_ink_not_bucket_midpoint():
+    """Epic #51 review B, reproduced on 8f27ef1 with min_contrast=4.5: #707070 on #F8FAFC (actual 4.73:1) failed as
+    the bucket midpoint #787878 at 4.22:1, and #808080 on #032530 (actual 4.06:1) passed as #888888 at 4.52:1. An
+    explicitly configured floor measures the most common actual RGB; the unconfigured default keeps the legacy
+    midpoint so existing results do not move."""
+    from ctshowcase.color import contrast
+    assert contrast("#808080", "#032530") < 4.5 < contrast("#888888", "#032530")
+    assert contrast("#787878", "#F8FAFC") < 4.5 < contrast("#707070", "#F8FAFC")
+    false_pass = C.icon_qa(_solid_icon((0x80,) * 3), card="#032530", min_contrast=4.5, exact_contrast=True)
+    assert _check_result(false_pass, "contrast-on-card") == "fail", false_pass
+    assert "#808080" in _contrast_detail(false_pass)
+    false_fail = C.icon_qa(_solid_icon((0x70,) * 3), card="#F8FAFC", min_contrast=4.5, exact_contrast=True)
+    assert _check_result(false_fail, "contrast-on-card") == "pass", false_fail
+    assert "#707070" in _contrast_detail(false_fail)
+    # legacy default (no exact_contrast): the midpoint measurement is unchanged
+    legacy = C.icon_qa(_solid_icon((0x70,) * 3), card="#F8FAFC", min_contrast=4.5)
+    assert _check_result(legacy, "contrast-on-card") == "fail" and legacy["dominant_ink"] == "#787878"
+    assert "#787878" in _contrast_detail(legacy)
+
+
+def test_icon_min_contrast_cli_measures_actual_ink(capsys, tmp_path, brand):
+    """The CLI turns on the exact measurement only when a floor is configured (--min-contrast or the family key)."""
+    card = brand.style(NW)["tokens"]["card_fill"]
+    assert card.upper() == "#F8FAFC"
+    out = write(tmp_path, {"repo/assets/icon.png": _solid_icon((0x70,) * 3)}) / "repo" / "assets" / "icon.png"
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    check = ("--meta", meta, "--no-repo-dir", "content", "icon", "check", "--out", out,
+             "--art-direction", FIX / "ART_DIRECTION.min.md", *NO_ESTATE)
+    code, res = run_content(capsys, *check, "--min-contrast", "4.5")
+    assert _check_result(res["qa"], "contrast-on-card") == "pass", res
+    assert "#707070" in _contrast_detail(res["qa"])
+    # converse: no --min-contrast and no icon_min_contrast keeps the legacy bucket midpoint
+    code, res = run_content(capsys, *check)
+    assert "#787878" in _contrast_detail(res["qa"]), res
+    # a family icon_min_contrast alone also turns the exact measurement on
+    import yaml
+    raw = yaml.safe_load((Path(__file__).resolve().parents[1] / "references" / "brand.yaml").read_text(encoding="utf-8"))
+    raw["families"]["completetech"]["icon_min_contrast"] = 4.5
+    cfg = tmp_path / "brand-floor.yaml"
+    cfg.write_text(yaml.safe_dump(raw, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    code, res = run_content(capsys, "--config", cfg, *check)
+    assert _check_result(res["qa"], "contrast-on-card") == "pass", res
+    assert "#707070" in _contrast_detail(res["qa"]) and "(>= 4.5:1)" in _contrast_detail(res["qa"]), res
+
+
+def test_icon_ground_tolerance_is_range_checked(capsys, tmp_path, brand):
+    """Epic #51 review A, reproduced on 8f27ef1: NaN made every `spread > tol` false and 12.5 or 1000 widened the key
+    (KEY_DE + tol) until the whole glyph was removed (art-fail icon-empty, exit 3). All are usage errors (exit 2)."""
+    from ctshowcase.errors import ShowcaseError
+    assert C.icon_ground_tolerance(0) == 0.0 and C.icon_ground_tolerance(5) == 5.0 and C.icon_ground_tolerance(12) == 12.0
+    for bad in (float("nan"), float("inf"), -1, 12.5, 1000, True, "x"):
+        with pytest.raises(ShowcaseError) as exc:
+            C.icon_ground_tolerance(bad)
+        assert exc.value.log == "usage" and exc.value.code == 2, bad
+    src = tmp_path / "cand.png"
+    _candidate(brand.style(NW)["tokens"]["card_fill"]).save(src)
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    for bad in ("nan", "-1", "1000"):
+        out = tmp_path / f"icon-{bad}.png"
+        code, res = run_content(capsys, "--meta", meta, "--no-repo-dir", "content", "icon", "normalize", "--in", src,
+                                "--out", out, "--ground-tolerance", bad, "--art-direction",
+                                FIX / "ART_DIRECTION.min.md", *NO_ESTATE)
+        assert code == 2 and not out.exists(), (bad, res)
+    # an opaque candidate with --ground transparent and a huge tolerance is a usage error, not icon-empty
+    out = tmp_path / "icon-transparent.png"
+    code, res = run_content(capsys, "--meta", meta, "--no-repo-dir", "content", "icon", "normalize", "--in", src,
+                            "--out", out, "--ground", "transparent", "--ground-tolerance", "1000",
+                            "--art-direction", FIX / "ART_DIRECTION.min.md", *NO_ESTATE)
+    assert code == 2 and res["result"] == "usage" and "icon-empty" not in json.dumps(res), res
+    assert not out.exists()
 
 
 def test_schema_icon_min_contrast(brand):
@@ -1783,3 +1869,174 @@ def test_icon_trailing_empty_iccp_is_structured_failure_in_api_check_and_normali
         good_out.unlink(missing_ok=True)
         code, res = run_content(capsys, *base, "normalize", "--in", good, "--out", good_out, *extra, *art, *NO_ESTATE)
         assert code == 0 and res["result"] in ("pass", "warn") and good_out.is_file(), (extra, res)
+
+
+# ---------------------------------------------------------------------------------------------------
+# icon prompt: unrecognised size_class names the allowed values (#62); one image and honest seed (#63)
+# ---------------------------------------------------------------------------------------------------
+MEANINGS = {"WIDE": "full 688 px width", "TALL": "full 688 px height", "SQUARE": "squarish glyph",
+            "DIAGONAL": "corner to corner"}
+
+
+def _glyph_with_size(size):
+    return {"glyph_name": "Inbox Tray", "glyph_description": "An open tray seen front-on.",
+            "spark_placement": "held inside the tray", "size_class": size}
+
+
+def test_icon_prompt_invalid_size_class_lists_allowed_values_and_meanings(brand, icon_ctx):
+    res = C.icon_prompt(icon_ctx, resolver(brand), ART, _glyph_with_size("medium"))
+    assert res["missing"] == ["SIZE_CLASS"]
+    text = res["invalid"]["SIZE_CLASS"]
+    assert "'medium'" in text
+    for key, meaning in MEANINGS.items():
+        assert key in text and meaning in text
+
+
+def test_icon_prompt_valid_size_class_has_no_invalid_and_is_case_insensitive(brand, icon_ctx):
+    for size in ("wide", "Tall", "SQUARE", "diagonal"):
+        res = C.icon_prompt(icon_ctx, resolver(brand), ART, _glyph_with_size(size))
+        assert res["invalid"] == {} and res["missing"] == [], size
+        assert f"Size class {size.upper()}:" in res["prompt"]
+
+
+def test_size_class_help_lists_every_key_with_its_meaning():
+    text = C.size_class_help()
+    assert text.startswith("size_class must be one of: ") and text.endswith("Names are case-insensitive.")
+    assert set(C.SIZE_CLASSES) == set(MEANINGS)
+    for key, meaning in MEANINGS.items():
+        assert f"{key} (" in text and meaning in text
+
+
+def _cli_prompt(monkeypatch, tmp_path, capsys, glyph_data, art_text=None, extra=()):
+    monkeypatch.chdir(tmp_path)
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    glyph = tmp_path / "glyph.json"
+    glyph.write_text(json.dumps(glyph_data), encoding="utf-8")
+    out = tmp_path / "prompt.md"
+    args = ["--meta", str(meta), "--no-repo-dir", "content", "icon", "prompt", "--option", "A",
+            "--glyph", str(glyph), "--out", str(out)]
+    if art_text is not None:
+        art_file = tmp_path / "art.md"
+        art_file.write_text(art_text, encoding="utf-8")
+        args += ["--art-direction", str(art_file)]
+    code = C.main(args + list(extra))
+    return code, json.loads(capsys.readouterr().out), out
+
+
+_NO_SIZE = {"glyph_name": "Inbox", "glyph_description": "An open tray.", "spark_placement": "inside the tray"}
+
+
+def test_icon_prompt_cli_invalid_size_class_is_needs_writer_with_the_values(monkeypatch, tmp_path, capsys):
+    code, result, out = _cli_prompt(monkeypatch, tmp_path, capsys, dict(_NO_SIZE, size_class="medium"))
+    assert code == 1 and result["result"] == "needs-writer"
+    assert "SIZE_CLASS" in result["invalid"] and "needs-writer:SIZE_CLASS:invalid" in result["logs"]
+    for key in MEANINGS:
+        assert key in result["note"]
+    assert not out.exists()
+
+
+def test_icon_prompt_cli_invalid_size_class_blocks_out_with_a_literal_size_template(monkeypatch, tmp_path, capsys):
+    art = C.load_art_direction().replace("{SIZE_CLASS}", "WIDE")
+    code, result, out = _cli_prompt(monkeypatch, tmp_path, capsys, dict(_NO_SIZE, size_class="medium"), art_text=art)
+    assert code == 1 and result["result"] == "needs-writer" and "SIZE_CLASS" in result["invalid"]
+    assert not out.exists()
+
+
+def test_icon_prompt_cli_missing_size_class_names_allowed_values(monkeypatch, tmp_path, capsys):
+    code, result, out = _cli_prompt(monkeypatch, tmp_path, capsys, _NO_SIZE)
+    assert code == 1 and result["result"] == "needs-writer"
+    assert result["missing"] == ["SIZE_CLASS"] and result["invalid"] == {}
+    for key in MEANINGS:
+        assert key in result["note"]
+    assert not out.exists()
+
+
+def test_icon_prompt_cli_missing_size_class_with_literal_size_template(monkeypatch, tmp_path, capsys):
+    art = C.load_art_direction().replace("{SIZE_CLASS}", "WIDE")
+    code, result, out = _cli_prompt(monkeypatch, tmp_path, capsys, _NO_SIZE, art_text=art)
+    assert code == 1 and result["result"] == "needs-writer" and "SIZE_CLASS" in result["missing"]
+    for key in MEANINGS:
+        assert key in result["note"]
+    assert not out.exists()
+
+
+CUSTOM_TEMPLATE = """## Repository glyph prompt template
+
+```text
+Draw {GLYPH_NAME}: {GLYPH_DESCRIPTION}. Size class {SIZE_CLASS}. Spark {SPARK_PLACEMENT}.
+output art/out/avatars/x.png
+```
+"""
+
+
+@pytest.mark.parametrize("option", ["A", "B"])
+def test_icon_prompt_has_no_candidate_wording_for_bundled_options(brand, icon_ctx, option):
+    glyph = dict(_glyph_with_size("wide"), subject="an inbox tray", objects="a tray and a card")
+    skill_art = C.SKILL_ART_DIRECTION.read_text(encoding="utf-8") if option == "B" else None
+    res = C.icon_prompt(icon_ctx, resolver(brand), ART, glyph, option, skill_art=skill_art)
+    low = res["prompt"].lower()
+    assert "candidates" not in low and "four" not in low and "-c{1..4}" not in low
+    assert res["requested"] == {"images": 1, "seed": "not supported"}
+
+
+def test_icon_prompt_has_no_candidate_wording_for_a_custom_template(brand, icon_ctx):
+    custom = CUSTOM_TEMPLATE.replace("output art", "Produce four candidates. 4 candidates.\noutput art")
+    res = C.icon_prompt(icon_ctx, resolver(brand), custom, _glyph_with_size("wide"))
+    low = res["prompt"].lower()
+    assert "candidates" not in low and "four" not in low
+    assert "Produce one image." in res["prompt"]
+
+
+def test_icon_prompt_without_seed_asserts_none_and_records_not_supported(brand, icon_ctx):
+    res = C.icon_prompt(icon_ctx, resolver(brand), ART, _glyph_with_size("wide"))
+    # the estate-format fixture states the run setting; it never asserts a seed or "Use seed"
+    assert "seed: not supported" in res["prompt"] and "use seed" not in res["prompt"].lower()
+    assert not re.search(r"seed:? *[0-9]", res["prompt"], re.I)
+    assert res["requested"]["seed"] == "not supported"
+    assert "- Requested: 1 image; seed: not supported." in C.prompt_markdown(res)
+
+
+def test_icon_prompt_family_seed_is_never_inferred(brand, icon_ctx):
+    res = C.icon_prompt(icon_ctx, resolver(brand), ART, _glyph_with_size("wide"))
+    assert "1025" not in res["prompt"]
+
+
+def test_icon_prompt_seed_is_in_prompt_and_provenance(brand, icon_ctx):
+    res = C.icon_prompt(icon_ctx, resolver(brand), ART, _glyph_with_size("wide"), seed=1234)
+    assert "seed: 1234" in res["prompt"] and "not supported" not in res["prompt"]
+    assert res["requested"] == {"images": 1, "seed": "1234"}
+    assert "- Requested: 1 image; seed: 1234." in C.prompt_markdown(res)
+
+
+def test_icon_prompt_legacy_seed_placeholder_is_rewritten(brand, icon_ctx):
+    art = ART.replace("seed {SEED} if the tool supports seeds", "Use seed {SEED} when supported.")
+    assert "Use seed {SEED} when supported." in art
+    plain = C.icon_prompt(icon_ctx, resolver(brand), art, _glyph_with_size("wide"))
+    assert "when supported" not in plain["prompt"] and "not supported" not in plain["prompt"]
+    assert "use seed" not in plain["prompt"].lower()
+    seeded = C.icon_prompt(icon_ctx, resolver(brand), art, _glyph_with_size("wide"), seed=1234)
+    assert "Use seed 1234." in seeded["prompt"] and "when supported" not in seeded["prompt"]
+
+
+def test_icon_prompt_custom_template_without_seed_placeholder_still_gets_the_seed(brand, icon_ctx):
+    res = C.icon_prompt(icon_ctx, resolver(brand), CUSTOM_TEMPLATE, _glyph_with_size("wide"), seed=1234)
+    assert res["prompt"].lower().count("seed 1234") == 1
+
+
+def test_icon_prompt_output_path_has_no_candidate_suffix(brand, icon_ctx):
+    res = C.icon_prompt(icon_ctx, resolver(brand), ART, _glyph_with_size("wide"))
+    assert "support-triage-agent-1024.png" in res["prompt"] and "-c{1..4}" not in res["prompt"]
+
+
+def test_icon_prompt_cli_parses_seed(monkeypatch, tmp_path, capsys):
+    data = dict(_NO_SIZE, size_class="wide")
+    code, result, out = _cli_prompt(monkeypatch, tmp_path, capsys, data, extra=["--seed", "1234"])
+    assert code == 0 and result["result"] == "ok"
+    assert "Use seed 1234." in result["prompt"]
+    assert "seed: 1234." in out.read_text(encoding="utf-8")
+    code, result, out = _cli_prompt(monkeypatch, tmp_path, capsys, data)
+    assert "seed: not supported." in out.read_text(encoding="utf-8")
+    assert "seed" not in result["prompt"].lower()
+    with pytest.raises(SystemExit):
+        _cli_prompt(monkeypatch, tmp_path, capsys, data, extra=["--seed", "abc"])
