@@ -570,3 +570,46 @@ def test_valid_link_destination_backtick_still_hides_the_image(make_ctx, tmp_pat
     p = _insert_usage(tmp_path, "[See](a`b) `![Shot](<docs/images/missing.png>)`")
     fails = readmelint.lint(ctx, p)["fails"]
     assert "R7 local image does not resolve: docs/images/missing.png" not in fails, fails
+
+# --- round-11 active link openers --------------------------------------------------------------------------------------
+# GFM evidence: gfm-3e-code_opener.html, gfm-3e-attribute_opener.html (real missing image renders); VM-confirmed at 3e85537.
+@pytest.mark.parametrize("body,expect_missing", [
+    ("See `[x` ](a`b) `![Shot](<docs/images/missing.png>)`", True),
+    ('See <span title="[">x</span> ](a`b) `![Shot](<docs/images/missing.png>)`', True),
+    ("See [x](ok) ](a`b) `![Shot](<docs/images/missing.png>)`", True),
+    ("[x[y]](a`b) `![Shot](<docs/images/missing.png>)`", False),
+], ids=["code_opener", "attribute_opener", "closed_link_control", "nested_valid_control"])
+def test_round11_active_link_opener(make_ctx, tmp_path, brand, body, expect_missing):
+    fails = _usage_fails(make_ctx, tmp_path, brand, body)
+    if expect_missing:
+        assert MISSING in fails, fails
+    else:
+        assert MISSING not in fails, fails
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("`[a](b`", False),  # opener inside inline code
+    ('<span title="[">x</span> ](b)', False),  # opener inside a tag attribute
+    ("[a]", True),  # plain active opener
+    ("\\[a]", False),  # escaped opener
+    ("[a\n\nb]", False),  # blank line separates the opener from the closer
+], ids=["code-opener", "attribute-opener", "plain", "escaped", "blank-line"])
+def test_has_link_opener_direct(text, expected):
+    assert readmelint._has_link_opener(text, text.index("]")) is expected
+
+
+def test_link_opener_lookup_work_is_linear():
+    def work(n):
+        text = "word ](d) " * n
+        readmelint._active_openers.cache_clear()
+        readmelint._outside_code.cache_clear()
+        readmelint._OPENER_STEPS = 0
+        readmelint._outside_code(text)
+        return readmelint._OPENER_STEPS, len(text)
+
+    w50, len50 = work(50)
+    w100, _ = work(100)
+    w200, len200 = work(200)
+    assert w100 <= 2.5 * w50, (w50, w100)
+    assert w200 <= 2.5 * w100, (w100, w200)
+    assert w50 <= 10 * len50 and w100 <= 10 * len(("word ](d) " * 100)) and w200 <= 10 * len200, (w50, w100, w200)
