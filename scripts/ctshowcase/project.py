@@ -628,14 +628,33 @@ def rename_filter_values(flt: str, renames: dict) -> str:
 _REPO_QUALIFIER = re.compile(r"^repo:(.+)$", re.I)
 
 
+def _strip_filter_groups(flt: str) -> str:
+    """Replace grouping parentheses outside double-quoted values with a space, so `(repo:A/x) workstream:Research`
+    tokenizes like `repo:A/x workstream:Research`. Parentheses inside quotes are copied unchanged."""
+    if not flt:
+        return ""
+    out: list[str] = []
+    in_quotes = False
+    for ch in flt:
+        if ch == '"':
+            in_quotes = not in_quotes
+            out.append(ch)
+        elif not in_quotes and ch in "()":
+            out.append(" ")
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
 def _filter_repo_refs(flt: str) -> list[str]:
     """Repository references named by the POSITIVE `repo:` qualifiers of a Projects view filter, in order and
-    de-duplicated case-insensitively. A comma list is split (`repo:A/x,B/y`) and quotes and whitespace are stripped from
-    each part. An empty part or one with a `*` wildcard names no single repository, so it is skipped. A negative
-    `-repo:` token is ignored: an exclusion names no association."""
+    de-duplicated case-insensitively. Grouping parentheses outside quoted values are ignored for tokenizing, so a
+    grouped qualifier such as `(repo:A/x OR repo:B/y)` is still found. A comma list is split (`repo:A/x,B/y`) and
+    quotes and whitespace are stripped from each part. An empty part or one with a `*` wildcard names no single
+    repository, so it is skipped. A negative `-repo:` token is ignored: an exclusion names no association."""
     out: list[str] = []
     seen: set[str] = set()
-    for tok in _FILTER_TOKEN.findall(flt or ""):
+    for tok in _FILTER_TOKEN.findall(_strip_filter_groups(flt or "")):
         m = _REPO_QUALIFIER.match(tok)
         if not m:
             continue
