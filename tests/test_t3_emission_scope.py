@@ -234,3 +234,88 @@ def test_retained_authorized_captured_t3_option_carries_its_signoff_id(tmp_path,
     named = [j for j in plan["jobs"] if "Pick Your AI" in json.dumps(j, ensure_ascii=False) or OWNER in json.dumps(j)]
     assert any("--readme" in j.get("argv", []) for j in named), [j["id"] for j in plan["jobs"]]
     assert all(j.get("signoff_id") == "t3s-all" or "t3s-all" in (j.get("signoff_ids") or []) for j in named), named
+
+
+# ---------------------------------------------------------------------------------------------- workflows and README
+def _workflows(plan):
+    return [j for j in plan["jobs"] if j["id"].endswith("-workflows")]
+
+
+def _readme_jobs(plan):
+    return [j for j in plan["jobs"] if "--readme" in (j.get("argv") or [])]
+
+
+def _private_board():
+    """The copy capture with every required view numbered (My items and Shipped added), still private."""
+    c = json.loads((FIX / "copy-capture.json").read_text(encoding="utf-8"))
+    p = c["data"]["organization"]["projectV2"]
+    p["url"] = f"https://github.com/orgs/{OWNER}/projects/{p['number']}"
+    p["views"]["nodes"] += [
+        {**p["views"]["nodes"][2], "id": "PVTV_n6", "number": 6, "name": "My items", "filter": "assignee:@me -status:Done"},
+        {**p["views"]["nodes"][2], "id": "PVTV_n7", "number": 7, "name": "Shipped", "filter": "status:Done updated:>=@today-30d"}]
+    assert p["public"] is False, p["public"]
+    return c
+
+
+def _copy_private(brand, repos):
+    from ctshowcase import project as PJ
+    return PJ.copy_plan(OWNER, role="org", copied=_private_board(), resolver=_resolver(brand), repositories=repos,
+                        allow_t3=True, reviewed="2026-10-25")
+
+
+def test_copy_plan_workflows_job_omits_auto_add_when_all_withdrawn(tmp_path, monkeypatch, brand):
+    recs = [{"id": "t3s-all"},
+            {"id": "t3s-drop-x", "repos": ["withdrawn-x", "withdrawn-z"], "approved": False, "approved_on": "2026-10-01"}]
+    with _Strict(monkeypatch, _file(tmp_path, recs)):
+        plan = _copy(brand, [f"{OWNER}/withdrawn-x", f"{OWNER}/withdrawn-z"])
+    for j in _workflows(plan):
+        steps = " ".join(j["steps"])
+        assert "withdrawn-x" not in steps and "withdrawn-z" not in steps, (j["id"], j["steps"])
+        assert not any("auto-add" in s.lower() for s in j["steps"]), (j["id"], j["steps"])
+    assert not _settings(plan), [j["id"] for j in plan["jobs"]]
+    assert any(str(x).startswith(("workflows-held:", "settings-held:")) for x in plan["logs"]), plan["logs"]
+
+
+def test_copy_plan_workflows_job_names_authorized_repo_and_id(tmp_path, monkeypatch, brand):
+    with _Strict(monkeypatch, _file(tmp_path, WILD)):
+        plan = _copy(brand, [f"{OWNER}/withdrawn-x", f"{OWNER}/ok-y"])
+    wf = _workflows(plan)
+    assert len(wf) == 1, [j["id"] for j in plan["jobs"]]
+    steps = wf[0]["steps"]
+    auto = [s for s in steps if "auto-add" in s.lower()]
+    assert auto and "ok-y" in auto[0] and "withdrawn-x" not in auto[0], steps
+    assert not any("withdrawn-x" in s for s in steps), steps
+    assert wf[0].get("signoff_id") == "t3s-all", wf[0]
+
+
+def test_copy_plan_readme_omits_withdrawn_link_and_stamps_grant(tmp_path, monkeypatch, brand):
+    with _Strict(monkeypatch, _file(tmp_path, WILD)):
+        plan = _copy_private(brand, [f"{OWNER}/withdrawn-x", f"{OWNER}/kept-y"])
+    rd = _readme_jobs(plan)
+    assert len(rd) == 1, [j["id"] for j in plan["jobs"]]
+    text = rd[0]["argv"][rd[0]["argv"].index("--readme") + 1]
+    assert "withdrawn-x" not in text, text
+    assert "kept-y" in text, text
+    assert rd[0].get("signoff_id") == "t3s-all", rd[0]
+
+
+def test_copy_plan_readme_stamps_regrant_not_cached_wildcard(tmp_path, monkeypatch, brand):
+    recs = [*WILD, {"id": "t3s-regrant", "repos": ["withdrawn-x"], "approved_on": "2026-10-02"}]
+    with _Strict(monkeypatch, _file(tmp_path, recs)):
+        plan = _copy_private(brand, [f"{OWNER}/withdrawn-x", f"{OWNER}/kept-y"])
+    rd = _readme_jobs(plan)
+    assert len(rd) == 1, [j["id"] for j in plan["jobs"]]
+    text = rd[0]["argv"][rd[0]["argv"].index("--readme") + 1]
+    assert "withdrawn-x" in text and "kept-y" in text, text
+    ids = set(rd[0].get("signoff_ids") or [])
+    assert {"t3s-regrant", "t3s-all"} <= ids, rd[0]
+
+
+def test_copy_plan_without_repositories_readme_and_workflows_unchanged(tmp_path, monkeypatch, brand):
+    with _Strict(monkeypatch, _file(tmp_path, WILD)):
+        plan = _copy(brand, None)
+    wf = _workflows(plan)
+    assert len(wf) == 1, [j["id"] for j in plan["jobs"]]
+    assert any("auto-add" in s.lower() for s in wf[0]["steps"]), wf[0]["steps"]
+    assert "signoff_id" not in wf[0], wf[0]
+    assert not any(str(x).startswith("settings-held:") for x in plan["logs"]), plan["logs"]
