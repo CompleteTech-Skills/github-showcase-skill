@@ -798,7 +798,11 @@ def captured_t3(resolver: Resolver | None, spec: dict | None, allow_t3: bool) ->
     """Sign-off check of the T3 orgs that the CAPTURED Estate Org field names (an option whose description is
     `T3: <login>`, or whose name is a T3 org's display name) while --allow-t3 is passed. Returns (refusals, retained):
     refusals are `t3-signoff:<code>:<login>` for each such org with no valid sign-off record, and retained are
-    {login, name, tier, signoff_id} for each such org whose record is valid. Identities resolve through
+    {login, name, tier, signoff_id, labels} for each such org whose record is valid. The description remainder and the
+    option name are resolved independently: the remainder is tried first, and the option name only when the remainder
+    does not resolve (an empty remainder yields no candidate), so a T3 name is still checked when its description is
+    unresolved or obsolete. labels are the lowercased, stripped option name and description (empties omitted, duplicates
+    removed); an org retained from two options gets one entry whose labels are merged. Identities resolve through
     references/brand.yaml (current logins, former slugs, approved renames) as well as the registry, so an org that is
     no longer in registry.orgs is still checked. copy_plan keeps every captured option (ids are never dropped) and the
     README documents them, so a withdrawn association would otherwise survive into the option-update job and the README
@@ -830,18 +834,18 @@ def captured_t3(resolver: Resolver | None, spec: dict | None, allow_t3: bool) ->
                 continue
             if _is_t3(row):
                 _index(key, row)
-    refusals, retained, seen = [], [], set()
-    for o in have.get("options") or []:
-        desc = str(o.get("description") or "")
-        ident = desc[len(TIER_PREFIX_T3):] if desc.startswith(TIER_PREFIX_T3) else str(o.get("name") or "")
+    def _resolve(ident: str) -> str | None:
+        """The T3 org key that one captured identifier names (a login, rename, display name or former slug), or None."""
         ident = ident.strip().lower()
+        if not ident:
+            return None
         key = t3.get(ident)
-        if key is None and ident:  # an approved rename: resolve the identifier to its current login
+        if key is None:  # an approved rename: resolve the identifier to its current login
             try:
                 key = t3.get(resolver.canonical(ident).lower())
             except NeedsInput:
                 key = None
-        if key is None and ident:  # a former login: brand former_slugs resolve it without registry membership
+        if key is None:  # a former login: brand former_slugs resolve it without registry membership
             bk = resolver.brand_key(ident)
             if bk is not None:
                 try:
@@ -851,18 +855,36 @@ def captured_t3(resolver: Resolver | None, spec: dict | None, allow_t3: bool) ->
                 if _is_t3(row):
                     key = bk
                     rows[bk] = row
+        return key
+
+    refusals, retained, seen = [], [], set()
+    for o in have.get("options") or []:
+        desc = str(o.get("description") or "")
+        name = str(o.get("name") or "")
+        # the description remainder and the option name are resolved independently: the remainder first (only with the
+        # T3 prefix), the option name when the remainder does not resolve
+        candidates = [desc[len(TIER_PREFIX_T3):]] if desc.startswith(TIER_PREFIX_T3) else []
+        candidates.append(name)
+        key = None
+        for ident in candidates:
+            key = _resolve(ident)
+            if key is not None:
+                break
         if key is None:
             continue
+        labels = list(dict.fromkeys(x for x in (name.strip().lower(), desc.strip().lower()) if x))
         login = resolver.canonical(key)
         rec, why = signoff.evaluate([key, *resolver.aliases(key)])
         if rec is None:
             refusals.append(f"t3-signoff:{(why or 'missing').partition(':')[0]}:{login}")
             continue
-        if login.lower() in seen:
+        if login.lower() in seen:  # the same org under another captured option: its labels join the one entry
+            entry = next(r for r in retained if r["login"].lower() == login.lower())
+            entry["labels"] = list(dict.fromkeys([*entry["labels"], *labels]))
             continue
         seen.add(login.lower())
         retained.append({"login": login, "name": (rows.get(key) or {}).get("display_name") or key, "tier": "T3",
-                         "signoff_id": str(rec["id"])})
+                         "signoff_id": str(rec["id"]), "labels": labels})
     return list(dict.fromkeys(refusals)), retained
 
 
@@ -1483,7 +1505,8 @@ def _stamp_estate_orgs(jobs: list[dict], orgs: list[dict]) -> None:
     """Each job that names a signed-off T3 org (its Org-field option, its login) carries
     that org's record. The jobs target @me, so stamping by target owner never finds the T3 grant; several T3 orgs on
     one job give `signoff_ids` (signoff.stamp_associations). A `--readme` Markdown value names orgs inside its text,
-    so it is also searched by name. No-op when no org carries a signoff_id.
+    so it is also searched by name. An org's `labels` (its captured option names and descriptions, see captured_t3)
+    credit a job that quotes one of them as a whole token. No-op when no org carries a signoff_id.
     (tests/test_t3_signoff_require.py::test_estate_plan_jobs_carry_the_t3_orgs_signoff)"""
     from . import signoff
     t3 = [o for o in orgs if o.get("signoff_id")]
@@ -1498,7 +1521,8 @@ def _stamp_estate_orgs(jobs: list[dict], orgs: list[dict]) -> None:
         tokens = _job_tokens(j)
         ids = [o["signoff_id"] for o in t3
                if o["login"].lower() in tokens or f"{TIER_PREFIX_T3}{o['login']}".lower() in tokens
-               or (o["name"].lower() in tokens and o["name"].lower() not in others)]
+               or (o["name"].lower() in tokens and o["name"].lower() not in others)
+               or any(lab in tokens and lab not in others for lab in o.get("labels", []))]
         argv = j.get("argv") if isinstance(j.get("argv"), list) else []
         for i, arg in enumerate(argv[:-1]):
             if arg == "--readme" and isinstance(argv[i + 1], str):
@@ -1533,7 +1557,11 @@ def estate_plan(resolver: Resolver, *, source: str | None = None, copied: dict |
                                      "§13.2: the Estate stays private."))
     _, retained = captured_t3(resolver, _captured_spec(copied), allow_t3)
     listed = {o["login"].lower() for o in orgs}
-    _stamp_estate_orgs(plan["jobs"], orgs + [o for o in retained if o["login"].lower() not in listed])
+    # an org both listed and retained is stamped with its captured labels; copies keep plan["orgs"] unchanged
+    retained_labels = {r["login"].lower(): r["labels"] for r in retained}
+    stamp_orgs = [{**o, "labels": list(dict.fromkeys([*o.get("labels", []), *retained_labels[o["login"].lower()]]))}
+                  if o["login"].lower() in retained_labels else o for o in orgs]
+    _stamp_estate_orgs(plan["jobs"], stamp_orgs + [o for o in retained if o["login"].lower() not in listed])
     return plan
 
 
