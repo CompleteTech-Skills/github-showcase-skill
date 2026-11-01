@@ -2,9 +2,10 @@
 # Fails on any result other than pass, e.g. when a footer logo URL returns 404 (issue 47, subissue 50).
 # Flag spelling confirmed with `python scripts/showcase.py footer --check --help`: `--check README.md --online`
 # HEADs both decision 18 raw logo URLs (on main) and exits non-zero unless both return 200.
-# Triggers: pull requests (footer-touching paths), push to main, weekly schedule and manual dispatch all run the online
-# HEAD, so a PR cannot merge while a published logo URL returns an error. The PR-only step that checks the configured
-# footer logo files exist in the checkout stays as extra coverage for a PR that adds or renames them.
+# Triggers: push to main (a regression is caught as it lands), weekly schedule and manual dispatch run the online HEAD.
+# A pull request cannot be judged by HEADing main, so it runs an offline step instead: the configured footer logo
+# paths must exist in the PR checkout under assets/brand/.
+
 name: Footer assets
 
 on:
@@ -48,4 +49,5 @@ jobs:
         run: |
           python -c "import pathlib, sys, yaml; from urllib.parse import urlparse; f = yaml.safe_load(open('references/brand.yaml', encoding='utf-8'))['footer']; urls = [f['logo_light_url'], f['logo_dark_url']]; bad = [u for u in urls if not pathlib.Path(*urlparse(u).path.split('/main/', 1)[1].split('/')).is_file()]; print('missing in checkout:', bad) if bad else print('footer logo files present:', urls); sys.exit(1 if bad else 0)"
       - name: Real HEAD against footer logo URLs
+        if: github.event_name != 'pull_request'
         run: python scripts/showcase.py footer --check README.md --online
