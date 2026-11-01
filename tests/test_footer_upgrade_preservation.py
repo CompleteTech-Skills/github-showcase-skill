@@ -186,3 +186,183 @@ def test_schema_accepts_website_legacy_logo_and_rejects_bad_entries(brand):
     assert schema_errors(_with_legacy(brand, [url, url]).raw) != []  # duplicates
     assert schema_errors(_with_legacy(brand, [7]).raw) != []  # invalid entry type
     assert schema_errors(_with_legacy(brand, ["http://www.complete.tech/logo.png"]).raw) != []  # not https
+
+
+
+# ------------------------------------------------------------------ bootstrap write path (issue 47, r1 finding P1)
+PARTNER_LIGHT = "https://example.test/partner-badge.png"
+
+
+def edited_template_readme(footer_block):
+    """A README whose template-body block was edited (marker hash does not match), followed by `footer_block`."""
+    body = (readme.start("template-body") + "\n<!-- showcase:template-body:pristine sha256=" + "0" * 64 + " -->\n"
+            + "Edited by a person.\n" + readme.end("template-body"))
+    return "# New Thing\n\n" + body + "\n\n" + footer_block + "\n"
+
+
+def run_bootstrap_write(tmp_path, text, name):
+    import json
+
+    from conftest import run_cli
+
+    repo = tmp_path / name
+    repo.mkdir()
+    meta = tmp_path / (name + ".json")
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    (repo / "README.md").write_bytes(text.encode("utf-8"))
+    p = run_cli("--meta", meta, "--repo-dir", repo, "--format", "json", "readme", "--bootstrap", "--write")
+    return p, repo / "README.md"
+
+
+def test_bootstrap_write_refuses_marked_footer_with_a_partner_image(brand, tmp_path):
+    partner = footer.block(brand).replace(brand.raw["footer"]["logo_light_url"], PARTNER_LIGHT)
+    assert PARTNER_LIGHT in partner
+    text = edited_template_readme(partner)
+    assert readme.bootstrap_state(text) == "edited"
+    p, path = run_bootstrap_write(tmp_path, text, "partner")
+    assert p.returncode == 1, (p.returncode, p.stdout, p.stderr)  # CHECK_FAILED
+    assert "readme-shrink" in p.stdout
+    assert path.read_bytes() == text.encode("utf-8"), "a refused bootstrap write must leave README.md byte-identical"
+
+
+def test_bootstrap_write_positive_control_plain_old_footer_still_falls_back(brand, tmp_path):
+    old = footer.block(legacy_brand_urls(brand))
+    text = edited_template_readme(old)
+    assert readme.bootstrap_state(text) == "edited"
+    p, path = run_bootstrap_write(tmp_path, text, "plain")
+    assert p.returncode == 0, (p.returncode, p.stdout, p.stderr)
+    after = path.read_text(encoding="utf-8")
+    assert "Edited by a person." in after and footer.check(brand, after)[0] == "pass"
+
+
+def legacy_brand_urls(brand):
+    raw = copy.deepcopy(brand.raw)
+    legacy = "https://raw.githubusercontent.com/CompleteTech-LLC/.github/main/brand/"
+    raw["footer"].update(logo_light_url=legacy + "logo.png", logo_dark_url=legacy + "logo-dark.png")
+    return Brand(raw, brand.path)
+
+
+# ------------------------------------------------------------------ G/H historical own-site sources (issue 47, r1 finding P2)
+# The context construction below is copied locally from tests/test_footer_legacy_gh.py (no test module imports another).
+GH_PARENT = {"full_name": "someone/upstream", "default_branch": "main"}
+GH_VARIANTS = {"G": dict(fork=True, parent=GH_PARENT), "H": dict(repo="host-backup-20260914")}
+GH_UPSTREAM = "# Upstream project\n\nAuthored upstream text, kept as written.\n\n## Usage\n\nRun it.\n"
+WEBSITE_LOGO = "https://www.complete.tech/wp-content/uploads/logo.png"
+
+
+def gh_ctx(brand, variant, tmp_path):
+    ctx = RepoContext(brand, normalize(meta_dict(**GH_VARIANTS[variant])), tmp_path)
+    assert ctx.det["variant"] == variant
+    return ctx
+
+
+@pytest.mark.parametrize("src", [WEBSITE_LOGO, "docs/images/logo.svg"], ids=["website-logo", "docs-svg"])
+@pytest.mark.parametrize("variant", ["G", "H"])
+def test_gh_unmarked_own_site_footer_migrates_to_one_compliant_footer(brand, tmp_path, variant, src):
+    ctx = gh_ctx(brand, variant, tmp_path)
+    before = GH_UPSTREAM + "\n" + unmarked(src) + "\n"
+    assert footer.check(brand, before)[0] != "pass"
+    after, removed = readme.upgrade(ctx, before)
+    assert src not in after and after.count("Built by") == 1
+    assert footer.check(brand, after)[0] == "pass"
+    assert removed and readme.preservation(before, after, removed) == []
+    assert GH_UPSTREAM.strip() in after
+    again, _ = readme.upgrade(gh_ctx(brand, variant, tmp_path), after)
+    assert again == after
+
+
+@pytest.mark.parametrize("case", ["partner-file", "foreign-host", "look-alike-host", "other-domain", "wrong-alt"])
+@pytest.mark.parametrize("variant", ["G", "H"])
+def test_gh_unmarked_partner_or_foreign_footer_image_is_preserved(brand, tmp_path, variant, case):
+    src, alt = {
+        "partner-file": (NEGATIVE_SRCS[0], "CompleteTech LLC"),
+        "foreign-host": (NEGATIVE_SRCS[1], "CompleteTech LLC"),
+        "look-alike-host": (NEGATIVE_SRCS[2], "CompleteTech LLC"),
+        "other-domain": (NEGATIVE_SRCS[3], "CompleteTech LLC"),
+        "wrong-alt": (WEBSITE_LOGO, "Partner"),
+    }[case]
+    ctx = gh_ctx(brand, variant, tmp_path)
+    before = GH_UPSTREAM + "\n" + unmarked(src, alt=alt) + "\n"
+    after, removed = readme.upgrade(ctx, before)
+    assert image_lines(after, src) == image_lines(before, src) >= 1
+    assert not [ln for ln in removed if src in ln], f"{src} was reported as removed"
+    assert readme.preservation(before, after, removed) == []
+
+
+# ---------------------------------------------------------------- bootstrap write path (issue 47, r1 finding P1)
+EDITED_BODY = (f"{readme.start('template-body')}\n<!-- showcase:template-body:pristine sha256={'0' * 64} -->\n"
+               f"## About\n\nWritten by a person.\n{readme.end('template-body')}")
+
+
+def legacy_brand_for(brand):
+    raw = copy.deepcopy(brand.raw)
+    base = "https://raw.githubusercontent.com/CompleteTech-LLC/.github/main/brand/"
+    raw["footer"].update(logo_light_url=base + "logo.png", logo_dark_url=base + "logo-dark.png")
+    return Brand(raw, brand.path)
+
+
+def _bootstrap_cli(brand, tmp_path, footer_block):
+    """Run the real `readme --bootstrap --write` on an edited template body whose marked footer is `footer_block`."""
+    import json
+
+    from conftest import run_cli
+
+    ctx = RepoContext(brand, normalize(meta_dict()), tmp_path)
+    text = readme.scaffold(ctx).replace(footer.block(brand), footer_block) + "\n" + EDITED_BODY + "\n"
+    assert readme.bootstrap_state(text) == "edited"
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    path = tmp_path / "README.md"
+    path.write_bytes(text.encode("utf-8"))
+    return run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--bootstrap", "--write"), path, text
+
+
+def test_bootstrap_write_refuses_to_regenerate_a_marked_footer_with_a_partner_image(brand, tmp_path):
+    partner = footer.block(brand).replace(brand.raw["footer"]["logo_light_url"], "https://example.test/partner-badge.png")
+    p, path, text = _bootstrap_cli(brand, tmp_path, partner)
+    assert "https://example.test/partner-badge.png" in text
+    assert p.returncode == 1, p.stdout + p.stderr  # CHECK_FAILED
+    assert "readme-shrink" in p.stdout + p.stderr
+    assert path.read_bytes() == text.encode("utf-8"), "a refused bootstrap write must leave README.md unchanged"
+
+
+def test_bootstrap_write_fallback_still_works_for_a_plain_old_footer_copy(brand, tmp_path):
+    p, path, text = _bootstrap_cli(brand, tmp_path, footer.block(legacy_brand_for(brand)))
+    assert p.returncode == 0, p.stdout + p.stderr
+    after = path.read_text(encoding="utf-8")
+    assert "Written by a person." in after and "template-body:pristine" not in after
+    assert after.count("Built by") == 1 and footer.check(brand, after)[0] == "pass"
+
+
+# ---------------------------------------------------------------- G/H historical own-site sources (copied context)
+PARENT = {"full_name": "someone/upstream", "default_branch": "main"}
+UPSTREAM = "# Upstream project\n\nAuthored upstream text, kept as written.\n\n## Usage\n\nRun it.\n"
+GH_VARIANTS = {"G": dict(fork=True, parent=PARENT), "H": dict(repo="host-backup-20260914")}
+
+
+def gh_ctx(brand, variant, tmp_path):
+    ctx = RepoContext(brand, normalize(meta_dict(**GH_VARIANTS[variant])), tmp_path)
+    assert ctx.det["variant"] == variant
+    return ctx
+
+
+@pytest.mark.parametrize("variant", ["G", "H"])
+@pytest.mark.parametrize("src", POSITIVE_SRCS, ids=["website-logo", "docs-svg"])
+def test_gh_callout_only_migrates_an_unmarked_own_site_footer(brand, tmp_path, variant, src):
+    before = UPSTREAM + "\n" + unmarked(src) + "\n"
+    assert footer.check(brand, before)[0] != "pass"
+    after, removed = readme.upgrade(gh_ctx(brand, variant, tmp_path), before)
+    assert src not in after and after.count("Built by") == 1
+    assert footer.check(brand, after)[0] == "pass"
+    assert UPSTREAM.strip() in after
+    assert readme.preservation(before, after, removed) == []
+
+
+@pytest.mark.parametrize("variant", ["G", "H"])
+@pytest.mark.parametrize("src", NEGATIVE_SRCS)
+def test_gh_callout_only_keeps_partner_and_foreign_footer_images(brand, tmp_path, variant, src):
+    before = UPSTREAM + "\n" + unmarked(src) + "\n"
+    after, removed = readme.upgrade(gh_ctx(brand, variant, tmp_path), before)
+    assert image_lines(after, src) == image_lines(before, src) >= 1
+    assert not [ln for ln in removed if src in ln], "preservation must report no allowance for the partner image"
+    assert readme.preservation(before, after, removed) == []
