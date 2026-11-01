@@ -317,6 +317,44 @@ def _block_boundary(text: str, newline: int, fences: tuple[tuple[int, int], ...]
     return bool(_BLOCKQUOTE_LINE.match(text, nxt)) and not _BLOCKQUOTE_LINE.match(text, ended)
 
 
+_BRACKET = re.compile(r"[][]")
+
+
+def _next_unescaped_bracket(text: str, start: int, end: int) -> int:
+    """Index of the first unescaped `[` or `]` in text[start:end], or -1. The scan stops at that bracket, so a label
+    scan costs the length of the text it reads, and the scans of distinct closers do not overlap."""
+    for match in _BRACKET.finditer(text, start, end):
+        if not _escaped(text, match.start()):
+            return match.start()
+    return -1
+
+
+def _reference_form(text: str, open_idx: int, close: int, limit: int, keys: set) -> tuple[int | None, int | None] | None:
+    """Reference-style link after the `]` at `close` whose `[` is at `open_idx`, or None. Returns (jump, label_close):
+    `jump` is the index past the label's closing bracket (None for a shortcut, which does not jump) and `label_close`
+    is that bracket's index (None for a shortcut). The label must be plain text before
+    `limit`, the next inert region, so a jump never skips into one. Link text holding an unescaped bracket is no label.
+    An inline `(dest)` is decided by the caller first, so a `(` here means the closer is not a shortcut."""
+    if _next_unescaped_bracket(text, open_idx + 1, close) != -1:
+        return None
+    if text[close + 1:close + 2] == "[":
+        label_end = _next_unescaped_bracket(text, close + 2, limit)
+        if label_end == -1:
+            return None
+        if label_end == close + 2 and text[label_end] == "]":  # collapsed `[text][]`
+            if _label_key(text[open_idx + 1:close]) in keys:
+                return label_end + 1, label_end
+            return None
+        if text[label_end] == "]" and _label_key(text[close + 2:label_end]) in keys:  # full `[text][label]`
+            return label_end + 1, label_end
+        return None
+    if text[close + 1:close + 2] == "(":  # not a shortcut when a destination follows
+        return None
+    if _label_key(text[open_idx + 1:close]) in keys:  # shortcut `[text]`
+        return None, None
+    return None
+
+
 @functools.lru_cache(maxsize=16)
 def _active_openers(text: str) -> frozenset[int]:
     """Indices of every `]` that closes a link text, i.e. has a matching ACTIVE `[` before it in the same paragraph.
@@ -329,12 +367,15 @@ def _active_openers(text: str) -> frozenset[int]:
     still pair. Raw HTML blocks (`mdcode.html_block_spans`) are inert and are block boundaries: no `[` inside one opens
     a link, and the stack is cleared entering and leaving it. Completing an inline link deactivates every earlier LINK
     opener in the stack (CommonMark: links may not contain links), while earlier IMAGE openers stay active; a `barrier`
-    marks the stack depth below which link openers are inactive, so that deactivation is O(1). Inert regions are found
+    marks the stack depth below which link openers are inactive, so that deactivation is O(1). Reference-style links
+    `[x][ref]`, `[x][]` and `[x]` deactivate earlier link openers too when the label resolves to a live definition
+    (`_reference_form`); an inline `(dest)` is tried first. Inert regions are found
     by cached lookups as in `_outside_code`, so the pass is linear. Offsets are the source offsets. It never calls
     `_outside_code`."""
     global _OPENER_STEPS
     fences = _fence_spans(text)
     html_spans = mdcode.html_block_spans(text)
+    keys = {_label_key(m.group(1)) for m in _definitions(text)}  # live definition labels, computed once per call
     opened: set[int] = set()
     stack: list[tuple[int, bool]] = []  # (index of `[`, whether it opens an image `![`)
     barrier = 0  # stack positions below this hold inactive link openers (a link was completed after them)
@@ -397,7 +438,7 @@ def _active_openers(text: str) -> frozenset[int]:
             elif char == "]" and stack and not _escaped(text, i):
                 # the top opener is active unless a link was completed after it (images stay active)
                 active = stack[-1][1] or len(stack) - 1 >= barrier
-                _, is_image = stack.pop()
+                open_idx, is_image = stack.pop()
                 if len(stack) < barrier:
                     barrier = len(stack)
                 if active:
@@ -407,6 +448,16 @@ def _active_openers(text: str) -> frozenset[int]:
                         if not is_image:  # completing a link deactivates every earlier link opener
                             barrier = len(stack)
                         break
+                    form = _reference_form(text, open_idx, i, limit, keys)
+                    if form is not None:  # a reference-style link completes like an inline one
+                        jump_to, label_close = form
+                        if label_close is not None:  # the label's `]` is marked as the scan marks any active `]`
+                            opened.add(label_close)
+                        if not is_image:
+                            barrier = len(stack)
+                        if jump_to is not None:  # skip the label so its `[` never opens a link
+                            jump = jump_to
+                            break
             elif char == "\n":
                 j = i + 1
                 while j < n and text[j] in " \t\r":
