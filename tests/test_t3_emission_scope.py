@@ -490,3 +490,75 @@ def test_captured_org_option_ids_merge_with_a_repository_regrant_on_the_readme_j
                             repositories=[f"{OWNER}/withdrawn-x", f"{OWNER}/ok-y"], allow_t3=True, reviewed="2026-10-25")
     readme = _readme_jobs(plan)
     assert readme and all({"t3s-all", "t3s-regrant"} <= _ids(j) for j in readme), readme
+
+
+# ---------------------------------------------------------------------------------------------- name vs description
+def _estate_capture(name, desc, recolor=False):
+    """A complete Estate capture whose only T3 Org option has the given name and description. recolor adds a Northwind
+    option with a wrong colour, so the plan must emit an Org-options mutation beside the README job."""
+    from test_t3_signoff_require import _complete_estate_capture
+    cap = _complete_estate_capture()
+    opts = cap["data"]["user"]["projectV2"]["fields"]["nodes"][-1]["options"]
+    opts[0]["name"], opts[0]["description"] = name, desc
+    if recolor:
+        opts.append({"id": "optnw", "name": "Northwind Trading Co.", "color": "RED", "description": "T1: Northwind-Trading-Co"})
+    return cap
+
+
+def _org_options_jobs(plan):
+    return [j for j in plan["jobs"] if j["id"].endswith("-options-org")]
+
+
+def _estate(brand, monkeypatch, tmp_path, records, cap, res=None):
+    from ctshowcase import project as PJ
+    with _Strict(monkeypatch, _file(tmp_path, records)):
+        return PJ.estate_plan(res or _resolver(brand, _registry(False)), copied=cap, user_id=100, allow_t3=True)
+
+
+@pytest.mark.parametrize("desc", ["T3: obsolete-login", "T3: "], ids=["obsolete-login", "empty-remainder"])
+def test_unresolved_description_does_not_hide_a_known_t3_option_name(tmp_path, monkeypatch, brand, desc):
+    """The option name `Pick Your AI` is a T3 display name even when its description cannot be resolved: with no
+    sign-off the estate plan holds the README and names the refusal for the recognized org."""
+    plan = _estate(brand, monkeypatch, tmp_path, [], _estate_capture("Pick Your AI", desc))
+    assert f"t3-signoff:missing:{OWNER}" in plan["logs"], plan["logs"]
+    assert not _readme_jobs(plan), [j["id"] for j in plan["jobs"]]
+    assert "Pick Your AI" not in json.dumps(plan["jobs"], ensure_ascii=False), plan["jobs"]
+
+
+@pytest.mark.parametrize("desc", ["T3: obsolete-login", "T3: "], ids=["obsolete-login", "empty-remainder"])
+def test_unresolved_description_with_a_covering_record_keeps_the_option_and_stamps_the_id(tmp_path, monkeypatch, brand, desc):
+    plan = _estate(brand, monkeypatch, tmp_path, [{"id": "t3s-all"}], _estate_capture("Pick Your AI", desc))
+    assert not [x for x in plan["logs"] if str(x).startswith("t3-signoff:")], plan["logs"]
+    readme = _readme_jobs(plan)
+    assert readme and all("t3s-all" in _ids(j) for j in readme), [j["id"] for j in plan["jobs"]]
+
+
+# ---------------------------------------------------------------------------------------------- Org-options stamping
+def test_org_options_mutation_carries_the_signoff_of_a_retained_option_under_another_label(tmp_path, monkeypatch, brand):
+    cap = _estate_capture("Former Synthetic Name", f"T3: {OWNER}", recolor=True)
+    plan = _estate(brand, monkeypatch, tmp_path, [{"id": "t3s-all"}], cap, _renamed_resolver(brand))
+    muts = _org_options_jobs(plan)
+    assert muts and all("t3s-all" in _ids(j) for j in muts), [j["id"] for j in plan["jobs"]]
+    assert "Former Synthetic Name" in json.dumps(muts, ensure_ascii=False), muts
+    readme = _readme_jobs(plan)
+    assert readme and all("t3s-all" in _ids(j) for j in readme), readme
+
+
+def test_org_options_mutation_merges_existing_signoff_ids(tmp_path, monkeypatch, brand):
+    from ctshowcase import project as PJ
+    orgs = [{"login": "Pick-Your-Stack", "name": "Pick Your AI", "tier": "T3", "signoff_id": "t3s-all",
+             "labels": ["former synthetic name", "t3: pick-your-ai"]}]
+    jobs = [{"id": "m", "phase": 1, "signoff_id": "t3s-other",
+             "argv": ["gh", "api", "graphql", "-f", 'query=m { o: [{name: "Former Synthetic Name"}] }']}]
+    with _Strict(monkeypatch, _file(tmp_path, [{"id": "t3s-all"}])):
+        PJ._stamp_estate_orgs(jobs, orgs)
+    assert _ids(jobs[0]) == {"t3s-all", "t3s-other"}, jobs[0]
+
+
+def test_org_options_mutation_and_readme_are_both_held_when_the_option_is_withdrawn(tmp_path, monkeypatch, brand):
+    cap = _estate_capture("Former Synthetic Name", f"T3: {OWNER}", recolor=True)
+    plan = _estate(brand, monkeypatch, tmp_path, WITHDRAWN, cap, _renamed_resolver(brand))
+    assert any(str(x).startswith("t3-signoff:") for x in plan["logs"]), plan["logs"]
+    assert not _org_options_jobs(plan) and not _readme_jobs(plan), [j["id"] for j in plan["jobs"]]
+    blob = json.dumps(plan["jobs"], ensure_ascii=False)
+    assert "Former Synthetic Name" not in blob and "t3s-g" not in blob, blob
