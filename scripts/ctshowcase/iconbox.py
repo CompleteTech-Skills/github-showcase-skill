@@ -8,6 +8,10 @@ its own display name on the family plate: a T2 surface never carries the Complet
 Plate rule (review P1.2): an icon that brings its own opaque ground (four corners opaque and within ΔE 3 of each other)
 fills the card with that ground and is drawn full-bleed, clipped to the card radius, so there is never a plate inside a
 plate. Dark plates get a 2 px family-accent edge at 60% so they read on the navy canvas and on GitHub dark.
+
+Custom transparent icons (--icon, showcase.yml icon, assets/icon.png) are fitted by their alpha bounds so transparent
+margins do not shrink the art; bundled brand marks and logos, opaque or full-bleed icons, pixel art and blank images
+are unchanged.
 """
 from __future__ import annotations
 
@@ -27,6 +31,7 @@ SMALL_BOX = 200      # icon boxes narrower than this use the light mark instead 
 GROUND_DE = 3.0      # corner colours within this ΔE are one ground
 DARK_PLATE = 0.2     # relative luminance under which a plate gets the accent edge
 PIXEL_GRIDS = (16, 24, 32, 48, 64, 96, 128)
+CUSTOM_ICON_SOURCES = frozenset({"cli", "override", "repo"})  # ctx.light_icon sources that are user art, not bundled
 
 
 def corner_spread(im: Image.Image) -> float | None:
@@ -79,6 +84,19 @@ def native_pixels(im: Image.Image) -> Image.Image | None:
     return None
 
 
+def alpha_fit(im: Image.Image) -> Image.Image | None:
+    """Crop custom transparent art to its alpha bounds, or None when no crop applies.
+
+    Fits custom transparent art by its alpha bounds so transparent margins do not shrink it. Compositor only: the
+    source file is never modified, and the input image is neither mutated nor reassigned. Returns None when the image
+    is fully transparent (blank) or when the alpha bounds are the whole image (opaque or full-bleed art)."""
+    rgba = im.convert("RGBA")
+    bbox = rgba.getchannel("A").getbbox()
+    if bbox is None or bbox == (0, 0, rgba.width, rgba.height):
+        return None
+    return rgba.crop(bbox)
+
+
 def feather(im: Image.Image, sides: bool, ends: bool, frac: float = 0.14) -> Image.Image:
     """Blend a full-bleed icon's own ground into the card where the icon does not reach the card edge: an alpha ramp
     over the outer 14% of the ground only (glyphs sit inside the avatar live area, so the mark itself is untouched).
@@ -96,7 +114,7 @@ def feather(im: Image.Image, sides: bool, ends: bool, frac: float = 0.14) -> Ima
     return rgba
 
 
-def _icon_nodes(ctx: RepoContext, im: Image.Image, box, clip=None) -> tuple[list, float | None]:
+def _icon_nodes(ctx: RepoContext, im: Image.Image, box, clip=None, fit_alpha: bool = False) -> tuple[list, float | None]:
     x, y, w, h = box
     resample = "lanczos"
     if ctx.style.get("icon_pixel_art"):
@@ -109,6 +127,9 @@ def _icon_nodes(ctx: RepoContext, im: Image.Image, box, clip=None) -> tuple[list
                 pic = Picture(x + (w - iw) / 2, y + (h - ih) / 2, iw, ih, im, "webp", 84, 2, resample)
                 # pixel art is meant to be enlarged: no icon-resolution warning (fit None)
                 return ([Clip(clip[2], clip[3], clip[4], [pic], clip[0], clip[1])] if clip else [pic]), None
+    if fit_alpha:
+        trimmed = alpha_fit(im)
+        im = trimmed if trimmed is not None else im
     k = min(w / im.width, h / im.height)
     iw, ih = im.width * k, im.height * k
     if clip and (iw < w - 1 or ih < h - 1):
@@ -147,7 +168,8 @@ def plate(ctx: RepoContext, fonts: Fonts, card: tuple[float, float, float, float
         except ValueError:
             pass
         box = (x, y, w, h) if full_bleed else inner
-        icon_nodes, fit = _icon_nodes(ctx, im, box, (x, y, w, h, radius) if full_bleed else None)
+        icon_nodes, fit = _icon_nodes(ctx, im, box, (x, y, w, h, radius) if full_bleed else None,
+                                      fit_alpha=src in CUSTOM_ICON_SOURCES and not full_bleed)
         nodes += icon_nodes
         info = {"path": shown, "source": src, "plate": fill, "full_bleed": full_bleed}
     else:
