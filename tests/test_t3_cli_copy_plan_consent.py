@@ -7,11 +7,8 @@ repositories, keep kept repositories and carry the regrant ids) and t23-adjudica
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 from pathlib import Path
-
-import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -167,7 +164,6 @@ def test_same_owner_captured_regrant_retained_across_jobs(brand, tmp_path, monke
 
 def test_same_owner_captured_all_withdrawn_names_no_repository(brand, tmp_path, monkeypatch):
     from test_t3_emission_scope import _workflows, _settings
-    from test_t3_signoff_withdrawal import T3_WILD
     recs = [{"id": "t3s-all", "repos": ["*"], "approved_on": "2026-01-01"},
             {"id": "t3s-wd", "repos": ["withdrawn-x", "withdrawn-z"], "approved": False, "approved_on": "2026-10-01"}]
     plan = _same_owner_plan(brand, tmp_path, monkeypatch, recs, ["withdrawn-x", "withdrawn-z"])
