@@ -479,6 +479,41 @@ def evaluate(owners: list[str], repo: str | None = None, today: _dt.date | None 
     return live[0], None
 
 
+def withdrawn_repos(owners: list[str]) -> list[str]:
+    """The canonical bare repository names that any withdrawal-like record of OWNERS names, sorted and de-duplicated.
+
+    A withdrawal-like record is one of OWNERS' records whose `approved` is not the boolean true: a literal false, or any
+    non-boolean value, is treated as a possible withdrawal (the same fail-closed rule as _malformed_withdrawal). Its
+    `repos` entries are canonicalized (_canon_entries) and then scoped to the owner's own logins (_scope_key), so the
+    names are lowercase bare names such as `site`. A record whose `repos` is malformed contributes nothing here, since
+    evaluate() already refuses it. `*` and entries naming another account's repository (OWNER/NAME with an owner that is
+    not one of OWNERS' logins) are excluded. pins() uses this to find currently pinned repositories whose sign-off is
+    withdrawn but which the registry no longer lists, so they can be preserved rather than unpinned by an exact-set job.
+    Returns [] when there is no record file or no record for OWNERS."""
+    path = record_file()
+    if path is None or not path.is_file():
+        return []
+    records = load_records()
+    logins = sorted(set(_expand([o for o in owners if o])))
+    login_set = set(logins)
+    ours = [r for r in records if _owner_key(r.get("owner")) in login_set]
+    result: set[str] = set()
+    for r in ours:
+        if r.get("approved") is True:
+            continue
+        entries = _canon_entries(r.get("repos"))
+        if entries is None:
+            continue
+        for entry in entries:
+            if entry.strip() == "*":
+                continue
+            key = _scope_key(entry, logins)
+            if "/" in key:  # another account's repository, not one of this owner's
+                continue
+            result.add(key)
+    return sorted(result)
+
+
 def _covers(rec: dict, repo: str | None, logins: list[str] | None = None) -> bool:
     """`*` covers everything; a bare name covers that repository; OWNER/NAME needs the owner to be one of `logins`
     (the requested owner and its org aliases) as well as the name. A repository given as OWNER/NAME is covered only
