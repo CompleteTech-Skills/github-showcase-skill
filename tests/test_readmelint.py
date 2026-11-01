@@ -1159,3 +1159,20 @@ def test_unterminated_block_comment_opener_is_unchanged(make_ctx, tmp_path, bran
     # a block-start opener without `-->` is an HTML block running to the end of the document: nothing after it is live
     doc = "<!-- never closed\n\n![Shot][shot]\n\n[shot]: docs/images/missing.png"
     assert MISSING not in _usage_fails(make_ctx, tmp_path, brand, doc)
+
+
+# --- 75c committed controls: paragraph-split local image, plain link-title reference ---------------------------------
+def test_alt_text_split_by_a_blank_line_is_not_an_image_so_no_missing_file_failure(make_ctx, tmp_path, brand):
+    # GFM parses "![Shot\n\n][shot]" as text (0 images): the missing definition target must not be reported
+    fails = _usage_fails(make_ctx, tmp_path, brand, "![Shot\n\n][shot]\n\n[shot]: docs/images/missing.png")
+    assert MISSING not in fails, fails
+
+
+def test_unsplit_alt_text_reference_still_reports_the_missing_file_control(make_ctx, tmp_path, brand):
+    assert MISSING in _usage_fails(make_ctx, tmp_path, brand, "![Shot][shot]\n\n[shot]: docs/images/missing.png")
+
+
+@pytest.mark.parametrize("title", ['"note"', "'note'"], ids=["double", "single"])
+def test_plain_link_title_before_a_reference_image_still_reports_the_missing_file(make_ctx, tmp_path, brand, title):
+    doc = f"[Docs](https://example.test {title})\n\n![Shot][shot]\n\n[shot]: docs/images/missing.png"
+    assert MISSING in _usage_fails(make_ctx, tmp_path, brand, doc)
