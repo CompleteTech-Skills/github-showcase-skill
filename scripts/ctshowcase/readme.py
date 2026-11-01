@@ -575,11 +575,15 @@ FOOTER_IMG_ATTRS = ("alt", "src", "srcset")
 def _footer_attrs(attrs: str) -> dict[str, str]:
     """The `alt`, `src` and `srcset` attributes of one tag's attribute text, parsed as whole attributes: exact
     (case-insensitive) names only, so `data-alt`, `xalt` or text inside another attribute's quoted value never count;
-    the first occurrence of a name wins, as a browser reads it; the value is returned with its quotes removed."""
+    the first occurrence of a name wins, as a browser reads it; the value is returned with its quotes removed. A
+    recognised attribute with no value is recorded as an empty string, so a later duplicate cannot override it."""
     got: dict[str, str] = {}
     for tok in FOOTER_ATTR_TOKEN.finditer(attrs):
         name = tok.group(1).lower()
-        if name not in FOOTER_IMG_ATTRS or name in got or tok.group(2) is None:
+        if name not in FOOTER_IMG_ATTRS or name in got:
+            continue
+        if tok.group(2) is None:
+            got[name] = ""
             continue
         val = tok.group(2).split("=", 1)[1].strip()
         if len(val) >= 2 and val[0] in "\"'" and val[-1] == val[0]:
