@@ -215,6 +215,9 @@ def _outside_code(text: str, mask_inline: bool = True) -> str:
         """(start, end) of the first inline link or image destination `](...)` from `start`: its text is literal, so a
         backtick inside it opens no code span (CommonMark parses the destination before looking for later code)."""
         while match := _search_unescaped(re.compile(r"\]\("), text, start):
+            if not _has_link_opener(text, match.start()):
+                start = match.start() + 1
+                continue
             target = _inline_image_target(text, match.end() - 1)
             if target:
                 return match.start(), target[1]
@@ -229,7 +232,7 @@ def _outside_code(text: str, mask_inline: bool = True) -> str:
         if tag is not False and (tag is None or tag.start() < pos):
             tag = _search_unescaped(HTML_OPEN_TAG, text, pos, html_spans) or False
         if comment is not False and (comment is None or comment.start() < pos):
-            comment = _search_unescaped(HTML_COMMENT, text, pos) or False
+            comment = _search_unescaped(HTML_COMMENT, text, pos, html_spans) or False
         n = bisect.bisect_left(fences, (pos, -1))
         fence = fences[n] if n < len(fences) else None
         d = bisect.bisect_left(definitions, (pos, -1))
@@ -276,6 +279,29 @@ def _closing_bracket(text: str, start: int) -> int | None:
                 return pos
         pos += 1
     return None
+
+
+def _has_link_opener(text: str, close: int) -> bool:
+    """True when the `]` at index `close` closes a link text: scanning backward within the paragraph, an unescaped `[`
+    at bracket depth zero opens it. A blank line or the start of the text ends the search with no opener."""
+    depth = 0
+    i = close - 1
+    while i >= 0:
+        char = text[i]
+        if char == "\n":
+            j = i - 1
+            while j >= 0 and text[j] in " \t\r":
+                j -= 1
+            if j >= 0 and text[j] == "\n":  # a blank line is a paragraph boundary
+                return False
+        elif char == "]" and not _escaped(text, i):
+            depth += 1
+        elif char == "[" and not _escaped(text, i):
+            if depth == 0:
+                return True
+            depth -= 1
+        i -= 1
+    return False
 
 
 def _label_key(value: str) -> str:
