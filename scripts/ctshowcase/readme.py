@@ -1322,6 +1322,25 @@ def preservation(before: str, after: str, removed: list[str]) -> list[str]:
             continue  # headings may be renamed / demoted / emoji-stripped
         if a_lines.get(ln, 0) < n:
             problems.append(f"lost line: {ln[:60]}")
+    # The stripped counts above let a generated, unindented row stand in for an authored, indented row with the same
+    # text. Each authored (non-owned) badge row must therefore survive with its leading whitespace intact.
+    pending = Counter(r.strip() for r in removed)
+    authored = Counter()
+    for block in find_blocks(MARK, before):
+        if block.group(1) != "badges":
+            continue
+        for ln in block.group(2).splitlines():
+            if ln.strip() and not ln.strip().startswith("<!-- showcase:"):
+                authored[ln.rstrip()] += 1
+    kept = Counter(ln.rstrip() for ln in after.splitlines() if ln.strip())
+    for ln, n in authored.items():
+        for _ in range(max(0, n - kept.get(ln, 0))):
+            if pending[ln.strip()] > 0:
+                pending[ln.strip()] -= 1  # intentionally removed by upgrade, same convention as above
+                continue
+            message = f"lost line: {ln.strip()[:60]}"
+            if message not in problems:
+                problems.append(message)
     nb, na = nonws(before), nonws(after)
     if nb and na < nb * 0.9:
         problems.append(f"non-whitespace dropped {nb} -> {na}")
