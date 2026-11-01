@@ -526,14 +526,24 @@ def stamp_associations(item: dict, association_ids, owner: str | None = None, re
     brings in without targeting it: topics.merge `signoff_ids` for an `also_in` membership topic, project.estate_plan
     for a T3 org in the personal Estate's Org field). `signoff_id` is the first id and `signoff_ids` lists all of them
     only when there is more than one. Jobs carry only these sign-off ids: approval_id is never read or set here, since
-    it names the decisions/APPROVED_ACTIONS.yaml row. No-op when there are no association ids.
+    it names the decisions/APPROVED_ACTIONS.yaml row. Ids already on ITEM (`signoff_id`/`signoff_ids`) are kept and
+    merged, never replaced, so a repository-specific regrant stamped earlier survives a later Org/association stamp
+    (tests/test_t3_signoff_withdrawal.py::test_estate_org_option_keeps_repository_regrant).
+    No-op when there are no association ids.
     Shared by showcase.cmd_topics, intake.adopt and project.estate_plan
     (tests/test_t3_signoff_require.py::test_adopt_topics_job_carries_the_also_in_signoff,
     ::test_estate_plan_jobs_carry_the_t3_orgs_signoff)."""
     if not association_ids or not isinstance(item, dict):
         return item
+    existing: list[str] = []
+    if item.get("signoff_id"):
+        existing.append(str(item["signoff_id"]))
+    listed = item.get("signoff_ids")
+    if isinstance(listed, list) and listed:
+        existing += [str(x) for x in listed if x]
     own = record_for(owner, repo) if owner else None
-    ids = list(dict.fromkeys(([str(own["id"])] if own and own.get("id") else []) + [str(x) for x in association_ids]))
+    own_ids = [str(own["id"])] if own and own.get("id") else []
+    ids = list(dict.fromkeys(existing + own_ids + [str(x) for x in association_ids]))
     item["signoff_id"] = ids[0]
     if len(ids) > 1:
         item["signoff_ids"] = ids
