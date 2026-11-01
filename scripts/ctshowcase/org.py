@@ -1474,6 +1474,7 @@ def pins(estate: Estate, org: str, *, allow_t3: bool = False, lists_capture: dic
     login, row, reg = _gate(estate, org, allow_t3=allow_t3, allow_hold=True)
     checks, jobs, logs, order = [], [], [], {"public": [], "members": []}
     pin_records: dict[str, list[str]] = {}
+    t3_held: set[str] = set()  # targets with a pin held for co-owner sign-off (see the order-job loop below)
     held = _star_held(estate, org) == "hold"  # STANDARD §12.5 #4: a HOLD org's pins only report, as `profile` refuses
     if held:
         logs.append("pins:hold")
@@ -1524,6 +1525,7 @@ def pins(estate: Estate, org: str, *, allow_t3: bool = False, lists_capture: dic
             if held:
                 res, detail = "hold", "org on HOLD (STANDARD §12.5 #4): pins only report"
             elif (t3c := _t3_repo_refusal(estate, login, pin, allow_t3)):
+                t3_held.add(target)
                 res, detail = "hold", f"t3-signoff:{t3c}:{login}/{pin}"
                 logs.append(f"t3-signoff:{t3c}:{login}/{pin}")
             checks.append({"target": target, "position": i, "repo": pin, "result": res, "detail": detail,
@@ -1544,10 +1546,17 @@ def pins(estate: Estate, org: str, *, allow_t3: bool = False, lists_capture: dic
             if _pin_rec:
                 jobs[-1]["signoff_id"] = _pin_rec
                 pin_records.setdefault(target, []).append(_pin_rec)
+    # The exact-set order job below tells the writer to make the ticked set EXACTLY the kept list and untick every
+    # other repository. That would also withdraw a pin held for co-owner sign-off (withdrawn or unauthorized), so
+    # for a target with any such held pin the exact-set job is held and logged. The individual authorized pin jobs
+    # above (each adds one repository and keeps the others) are still emitted, so authorized kept pins remain.
     for target, label, view in (("public", "Public pins", "Public"), ("members", "Members-only pins", "Member")):
         bad = ("fail", "blocked", "unknown", "hold") if target == "public" else ("fail", "blocked", "hold")
         keep = [c["repo"] for c in checks if c.get("target") == target and c.get("repo") and c["result"] not in bad]
         if not keep:
+            continue
+        if target in t3_held:
+            logs.append(f"pins-order-held:{target}:t3-signoff")
             continue
         listing = "; ".join(f"{i}. {n}" for i, n in enumerate(keep, 1))
         jobs.append(browser_job(
