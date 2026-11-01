@@ -625,6 +625,30 @@ def rename_filter_values(flt: str, renames: dict) -> str:
     return _FILTER_TOKEN.sub(token, flt)
 
 
+_REPO_QUALIFIER = re.compile(r"^repo:(.+)$", re.I)
+
+
+def _filter_repo_refs(flt: str) -> list[str]:
+    """Repository references named by the POSITIVE `repo:` qualifiers of a Projects view filter, in order and
+    de-duplicated case-insensitively. A comma list is split (`repo:A/x,B/y`) and quotes and whitespace are stripped from
+    each part. An empty part or one with a `*` wildcard names no single repository, so it is skipped. A negative
+    `-repo:` token is ignored: an exclusion names no association."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for tok in _FILTER_TOKEN.findall(flt or ""):
+        m = _REPO_QUALIFIER.match(tok)
+        if not m:
+            continue
+        for part in re.findall(r'"[^"]*"|[^,]+', m.group(1)):
+            for piece in part.split(","):  # a quoted part may still hold a comma list: "A/x,A/y"
+                p = piece.strip().strip('"').strip()
+                if not p or "*" in p or p.lower() in seen:
+                    continue
+                seen.add(p.lower())
+                out.append(p)
+    return out
+
+
 def view_body(want: dict, spec: dict) -> tuple[dict, list[str]]:
     """REST view body with integer field ids (databaseId); a field without an id becomes a browser step."""
     ids = {(f.get("name") or "").lower(): f.get("databaseId") for f in spec.get("fields") or []}
@@ -965,6 +989,7 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
     vlist = [dict(v) for v in (views or (ESTATE_VIEWS if role == "estate" else VIEWS))]
     base = (f"users/{user_id}/projectsV2/{num}/views" if owner == "@me" and user_id else
             f"orgs/{owner}/projectsV2/{num}/views")
+    filter_jobs: list[tuple[dict, str]] = []  # (view-filter job, its new filter): authorized after the README repos
     for i, want in enumerate(vlist):
         have = _view(spec, want["name"])
         if have is not None:
@@ -973,8 +998,10 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
             if i > 0 and flt != want["filter"] and role != "org":
                 new = want["filter"]
             if new != flt and have.get("id"):
-                jobs.append(_gql_job(f"{pid}-{num}-view-{have.get('number')}-filter", owner, m_view_filter(have["id"], new),
-                                     f"View '{want['name']}' filter (§13.5{'; renamed options' if renames else ''})."))
+                fj = _gql_job(f"{pid}-{num}-view-{have.get('number')}-filter", owner, m_view_filter(have["id"], new),
+                              f"View '{want['name']}' filter (§13.5{'; renamed options' if renames else ''}).")
+                jobs.append(fj)
+                filter_jobs.append((fj, new))
             continue
         if owner == "@me" and not user_id:
             pending.append({"view": want["name"], "why": "numeric user id (gh api user --jq .id) for the user views path"})
@@ -1043,6 +1070,29 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
     # every README repository (explicit or captured) is authorized on its own resolved owner and name, for every role
     readme_repos = _authorize_readme_repos(readme_repos, resolver, allow_t3, grants, held_lower, logs,
                                            board_owner=owner, role=role)
+    # view filters: every repository a proposed filter names by a positive repo: qualifier is authorized like a README
+    # repository before the filter mutation goes out. A filter that names a denied repository is held (its job is
+    # removed); a permitted one carries the sign-off ids of the repositories it names. Bare names that do not resolve
+    # to an owner/name pair are left alone.
+    for fj, flt in filter_jobs:
+        refs = [r for r in _normalize_repo_entries(_filter_repo_refs(flt), owner, role, resolver, []) if "/" in r]
+        if not refs:
+            continue
+        kept = _authorize_readme_repos(refs, resolver, allow_t3, grants, held_lower, logs, board_owner=owner, role=role)
+        kept_keys = {_grant_key(resolver, *r.split("/", 1)) for r in kept if "/" in r}
+        if any(_grant_key(resolver, *r.split("/", 1)) not in kept_keys for r in refs):
+            jobs[:] = [j for j in jobs if j is not fj]
+            logs.append(f"view-filter-held:{fj['id']} (a repository in the proposed filter has no valid T3 sign-off or "
+                        "is not authorized)")
+            pending.append({"why": "view filter held: it names a repository without a valid T3 sign-off",
+                            "needs": "a valid record covering that repository, or remove it from the filter"})
+            continue
+        ids = [str(g["id"]) for r in kept if "/" in r
+               and (g := grants.get(_grant_key(resolver, *r.split("/", 1))))
+               and g.get("id")]
+        if ids:
+            from . import signoff
+            signoff.stamp_associations(fj, list(dict.fromkeys(ids)), owner)
     # 4. text: short description and README (README needs every view number)
     nums = view_numbers(spec)
     edit = ["gh", "project", "edit", num, "--owner", own_flag, "--description", short]
