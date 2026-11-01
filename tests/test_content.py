@@ -1538,11 +1538,12 @@ def test_icon_ocr_cli_logs(capsys, tmp_path, brand, monkeypatch):
 
 
 def test_icon_ocr_malformed_png_keeps_logs_key(monkeypatch):
-    # an unreadable PNG returns before the OCR step; with ocr=True the shape still carries `logs` (empty)
+    # an unreadable PNG returns before the OCR step; `logs` names the image with and without ocr
     monkeypatch.setattr(C, "_tesseract", lambda: None)
-    qa = C.icon_qa(b"bad", card="#0B1020", ocr=True)
-    assert qa["result"] == "fail" and qa["logs"] == [], qa
-    assert "logs" not in C.icon_qa(b"bad", card="#0B1020")
+    qa = C.icon_qa(b"bad", card="#0B1020", ocr=True, source="x/icon.png")
+    assert qa["result"] == "fail" and qa["logs"] == ["unreadable-image:x/icon.png"], qa
+    assert C.icon_qa(b"bad", card="#0B1020", source="x/icon.png")["logs"] == ["unreadable-image:x/icon.png"]
+    assert C.icon_qa(b"bad", card="#0B1020")["logs"] == ["unreadable-image:<bytes>"]
 
 
 def test_icon_ocr_undecodable_idat_is_structured_failure(monkeypatch):
@@ -1559,11 +1560,11 @@ def test_icon_ocr_undecodable_idat_is_structured_failure(monkeypatch):
             + chunk(b"IDAT", b"this is not a zlib stream") + chunk(b"IEND", b""))
     validate_png(data)  # structurally accepted, so the failure comes from decoding
     monkeypatch.setattr(C, "_tesseract", lambda: None)
-    qa = C.icon_qa(data, card="#0B1020", ocr=True)
-    assert qa["result"] == "fail" and qa["logs"] == [], qa
+    qa = C.icon_qa(data, card="#0B1020", ocr=True, source="s.png")
+    assert qa["result"] == "fail" and qa["logs"] == ["unreadable-image:s.png"], qa
     assert any(c["check"] == "png" and c["result"] == "fail" and "undecodable" in c["detail"] for c in qa["checks"]), qa
-    plain = C.icon_qa(data, card="#0B1020")
-    assert plain["result"] == "fail" and "logs" not in plain, plain
+    plain = C.icon_qa(data, card="#0B1020", source="s.png")
+    assert plain["result"] == "fail" and plain["logs"] == ["unreadable-image:s.png"], plain
 
 
 def test_icon_check_cli_undecodable_idat_exits_1_with_logs_and_bad_args_exit_2(tmp_path, capsys, monkeypatch):
@@ -1586,7 +1587,7 @@ def test_icon_check_cli_undecodable_idat_exits_1_with_logs_and_bad_args_exit_2(t
     art = ("--art-direction", FIX / "ART_DIRECTION.min.md")
     for extra in ((), ("--ocr",)):
         code, res = run_content(capsys, *check, "--out", bad, *extra, *art, *NO_ESTATE)
-        assert code == 1 and res["result"] == "fail" and isinstance(res["logs"], list), (extra, res)
+        assert code == 1 and res["result"] == "fail" and f"unreadable-image:{bad}" in res["logs"], (extra, res)
         assert any(c["check"] == "png" and c["result"] == "fail" and "undecodable" in c["detail"]
                    for c in res["qa"]["checks"]), res
     code, res = run_content(capsys, *check, "--out", bad, "--min-contrast", "0.5", *art, *NO_ESTATE)
@@ -1618,7 +1619,7 @@ def test_icon_normalize_cli_undecodable_idat_exits_1_with_logs_and_missing_input
     for extra in ((), ("--ocr",)):
         code, res = run_content(capsys, *norm, "--in", bad, "--out", out, *extra, *art, *NO_ESTATE)
         assert code == 1 and res["result"] == "fail" and res["out"] is None, (extra, res)
-        assert isinstance(res["logs"], list) and "art-fail:icon-qa" in res["logs"], (extra, res)
+        assert res["logs"].count(f"unreadable-image:{bad}") == 1 and "art-fail:icon-qa" in res["logs"], (extra, res)
         assert any(c["check"] == "png" and c["result"] == "fail" for c in res["qa"]["checks"]), res
         assert out.read_bytes() == sentinel, extra
     code, res = run_content(capsys, *norm, "--in", tmp_path / "missing.png", "--out", out, *art, *NO_ESTATE)
