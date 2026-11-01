@@ -609,11 +609,14 @@ def _old_local_logo(url: str) -> bool:
 
 
 OWN_SITE_LOCAL_LOGOS = {"docs/images/logo.svg"}
+OWN_SITE_LOGO_PATHS = {"/wp-content/uploads/logo.png"}
 
 
 def _own_site_logo(url: str, brand) -> bool:
-    """`url` is a demonstrated historical logo source of this brand: a file on the configured company website host
-    (`brand_strings.website`, never hardcoded) over http(s), or the conventional local `docs/images/logo.svg`."""
+    """`url` is a configured historical logo source of this brand: one of the exact paths in `OWN_SITE_LOGO_PATHS`
+    on the configured company website host (`brand_strings.website`, never hardcoded) over http(s), or the
+    conventional local `docs/images/logo.svg`. Any other file on that host (a team photo, a screenshot) is authored
+    content and is kept."""
     from urllib.parse import urlsplit
     url = url.strip()
     if "://" not in url:
@@ -621,7 +624,14 @@ def _own_site_logo(url: str, brand) -> bool:
         return (path[2:] if path.startswith("./") else path) in OWN_SITE_LOCAL_LOGOS
     try:
         got, want = urlsplit(url), urlsplit(brand.strings["website"])
-        return bool(want.hostname) and got.scheme in ("http", "https") and got.hostname == want.hostname             and got.port in (None, want.port) and got.username is None
+        return (
+            bool(want.hostname)
+            and got.scheme in ("http", "https")
+            and got.hostname == want.hostname
+            and got.port in (None, want.port)
+            and got.username is None
+            and got.path in OWN_SITE_LOGO_PATHS
+        )
     except ValueError:
         return False
 
@@ -681,7 +691,9 @@ def is_footer_copy(block: str, brand, loose_src: bool = False, own_site: bool = 
     rule that an alt exactly the company vouches for an image whatever its src (no caller in `upgrade()`: a generic
     alt is not provenance). `own_site=True` (`upgrade()`, for an unmarked trailing block that also passes
     `is_footer_like`) additionally recognizes, under an alt exactly the company or the footer alt, only the brand's
-    own-site historical logo sources (`_own_site_logo`); partner, foreign and look-alike hosts stay authored. The
+    own-site historical logo sources (`_own_site_logo`: the exact paths in `OWN_SITE_LOGO_PATHS` on the company
+    website host, plus the local `docs/images/logo.svg`; "historical logo sources" means those exact paths, not every
+    file on the host); partner, foreign and look-alike hosts, and other files on the company host, stay authored. The
     default is strict."""
     import html
     f, company = brand.raw["footer"], brand.strings["company"]
@@ -751,6 +763,21 @@ def drop_old_footer(text: str, brand, loose_src: bool = False, own_site: bool = 
     return body[:m.start()].rstrip() + "\n", [ln for ln in tail.splitlines() if ln.strip()]
 
 
+def _unreemitted(lines: list[str], kept: Counter) -> list[str]:
+    """`lines` minus the lines the emitted footer carries again: each non-empty line matched in the multiset `kept`
+    (stripped text) is dropped and decrements `kept`; the others are returned with their original text."""
+    out: list[str] = []
+    for ln in lines:
+        s = ln.strip()
+        if not s:
+            continue
+        if kept[s] > 0:
+            kept[s] -= 1
+        else:
+            out.append(ln)
+    return out
+
+
 def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
     """Return (new text, header lines removed). Raises nothing; callers run the shrink checks."""
     variant = ctx.det["variant"]
@@ -761,11 +788,15 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
     body, blocks = _strip_markers(text)
     want_footer = footer_wanted(ctx)
     removed: list[str] = []
+    # One multiset of the footer lines the emitted footer carries again, shared by the marked and the unmarked branch
+    # because only one new footer is emitted. A compliant footer is re-emitted unchanged and must not weaken the
+    # never-drop-a-line guard, so only the old lines it does not carry again are reported as removed.
+    kept: Counter = Counter()
+    if want_footer:
+        kept = Counter(ln.strip() for ln in footermod.block(ctx.brand).splitlines() if ln.strip())
     if want_footer and blocks.get("footer") and is_footer_copy(blocks["footer"], ctx.brand):
         # A configured publication-path change replaces only our recognized footer, not authored credits or partner
-        # images inside a similarly named block. Only the lines the emitted footer does not carry again are reported:
-        # a compliant footer is re-emitted unchanged and must not weaken the never-drop-a-line guard.
-        kept = Counter(ln.strip() for ln in footermod.block(ctx.brand).splitlines() if ln.strip())
+        # images inside a similarly named block.
         for ln in blocks["footer"].splitlines():
             if ln.strip():
                 if kept[ln.strip()] > 0:
@@ -774,7 +805,7 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
                     removed.append(ln)
     if want_footer:  # an unmarked or drifted footer at the end is replaced by the marked one, never kept beside it
         body, old_footer = drop_old_footer(body, ctx.brand, own_site=True)
-        removed += old_footer
+        removed += _unreemitted(old_footer, kept)
     # preserve list / existing third-party banner
     preserve = ctx.repo in (ctx.org.get("readme_preserve") or []) or len(text.encode()) > 15000
     pre, sections = split_sections(body)
