@@ -784,7 +784,7 @@ def test_icon_noisy_dark_ground_falls_back_to_keying_inside_the_budget():
     assert len(C.icon_bytes(out)[0]) <= 300_000
 
 
-@pytest.mark.parametrize("bad", [float("nan"), float("inf"), -1.0])
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), -1.0, 12.5])
 def test_icon_ground_tolerance_rejects_non_finite_and_negative(bad):
     from ctshowcase.errors import ShowcaseError
     img = _candidate("#F8FAFC", size=256, box=(60, 60, 190, 190))
@@ -1125,7 +1125,7 @@ def test_icon_cli_ground_tolerance_flag_wired(capsys, tmp_path, brand):
     assert not out.exists()
 
 
-@pytest.mark.parametrize("bad", ["nan", "-1", "inf"])
+@pytest.mark.parametrize("bad", ["nan", "-1", "inf", "1000", "12.5"])
 def test_icon_cli_ground_tolerance_rejects_bad_values(capsys, tmp_path, brand, bad):
     """A non-finite or negative --ground-tolerance is a usage error (exit 2, log 'usage'); nothing is written."""
     card = brand.style(NW)["tokens"]["card_fill"]
@@ -1399,6 +1399,91 @@ def test_icon_min_contrast_cli(capsys, tmp_path, brand):
     assert code == 0 and res["result"] in ("pass", "warn"), res
     code, res = run_content(capsys, *check, "--min-contrast", "30")
     assert code == 2, res
+
+
+def _solid_icon(ink):
+    from PIL import Image, ImageDraw
+    im = Image.new("RGBA", (1024, 1024), (0, 0, 0, 0))
+    ImageDraw.Draw(im).rectangle((300, 300, 724, 724), fill=tuple(ink) + (255,))
+    return C.icon_bytes(im)[0]
+
+
+def _contrast_detail(qa):
+    return next(c["detail"] for c in qa["checks"] if c["check"] == "contrast-on-card")
+
+
+def test_icon_explicit_floor_measures_actual_ink_not_bucket_midpoint():
+    """Epic #51 review B, reproduced on 8f27ef1 with min_contrast=4.5: #707070 on #F8FAFC (actual 4.73:1) failed as
+    the bucket midpoint #787878 at 4.22:1, and #808080 on #032530 (actual 4.06:1) passed as #888888 at 4.52:1. An
+    explicitly configured floor measures the most common actual RGB; the unconfigured default keeps the legacy
+    midpoint so existing results do not move."""
+    from ctshowcase.color import contrast
+    assert contrast("#808080", "#032530") < 4.5 < contrast("#888888", "#032530")
+    assert contrast("#787878", "#F8FAFC") < 4.5 < contrast("#707070", "#F8FAFC")
+    false_pass = C.icon_qa(_solid_icon((0x80,) * 3), card="#032530", min_contrast=4.5, exact_contrast=True)
+    assert _check_result(false_pass, "contrast-on-card") == "fail", false_pass
+    assert "#808080" in _contrast_detail(false_pass)
+    false_fail = C.icon_qa(_solid_icon((0x70,) * 3), card="#F8FAFC", min_contrast=4.5, exact_contrast=True)
+    assert _check_result(false_fail, "contrast-on-card") == "pass", false_fail
+    assert "#707070" in _contrast_detail(false_fail)
+    # legacy default (no exact_contrast): the midpoint measurement is unchanged
+    legacy = C.icon_qa(_solid_icon((0x70,) * 3), card="#F8FAFC", min_contrast=4.5)
+    assert _check_result(legacy, "contrast-on-card") == "fail" and legacy["dominant_ink"] == "#787878"
+    assert "#787878" in _contrast_detail(legacy)
+
+
+def test_icon_min_contrast_cli_measures_actual_ink(capsys, tmp_path, brand):
+    """The CLI turns on the exact measurement only when a floor is configured (--min-contrast or the family key)."""
+    card = brand.style(NW)["tokens"]["card_fill"]
+    assert card.upper() == "#F8FAFC"
+    out = write(tmp_path, {"repo/assets/icon.png": _solid_icon((0x70,) * 3)}) / "repo" / "assets" / "icon.png"
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    check = ("--meta", meta, "--no-repo-dir", "content", "icon", "check", "--out", out,
+             "--art-direction", FIX / "ART_DIRECTION.min.md", *NO_ESTATE)
+    code, res = run_content(capsys, *check, "--min-contrast", "4.5")
+    assert _check_result(res["qa"], "contrast-on-card") == "pass", res
+    assert "#707070" in _contrast_detail(res["qa"])
+    # converse: no --min-contrast and no icon_min_contrast keeps the legacy bucket midpoint
+    code, res = run_content(capsys, *check)
+    assert "#787878" in _contrast_detail(res["qa"]), res
+    # a family icon_min_contrast alone also turns the exact measurement on
+    import yaml
+    raw = yaml.safe_load((Path(__file__).resolve().parents[1] / "references" / "brand.yaml").read_text(encoding="utf-8"))
+    raw["families"]["completetech"]["icon_min_contrast"] = 4.5
+    cfg = tmp_path / "brand-floor.yaml"
+    cfg.write_text(yaml.safe_dump(raw, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    code, res = run_content(capsys, "--config", cfg, *check)
+    assert _check_result(res["qa"], "contrast-on-card") == "pass", res
+    assert "#707070" in _contrast_detail(res["qa"]) and "(>= 4.5:1)" in _contrast_detail(res["qa"]), res
+
+
+def test_icon_ground_tolerance_is_range_checked(capsys, tmp_path, brand):
+    """Epic #51 review A, reproduced on 8f27ef1: NaN made every `spread > tol` false and 12.5 or 1000 widened the key
+    (KEY_DE + tol) until the whole glyph was removed (art-fail icon-empty, exit 3). All are usage errors (exit 2)."""
+    from ctshowcase.errors import ShowcaseError
+    assert C.icon_ground_tolerance(0) == 0.0 and C.icon_ground_tolerance(5) == 5.0 and C.icon_ground_tolerance(12) == 12.0
+    for bad in (float("nan"), float("inf"), -1, 12.5, 1000, True, "x"):
+        with pytest.raises(ShowcaseError) as exc:
+            C.icon_ground_tolerance(bad)
+        assert exc.value.log == "usage" and exc.value.code == 2, bad
+    src = tmp_path / "cand.png"
+    _candidate(brand.style(NW)["tokens"]["card_fill"]).save(src)
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    for bad in ("nan", "-1", "1000"):
+        out = tmp_path / f"icon-{bad}.png"
+        code, res = run_content(capsys, "--meta", meta, "--no-repo-dir", "content", "icon", "normalize", "--in", src,
+                                "--out", out, "--ground-tolerance", bad, "--art-direction",
+                                FIX / "ART_DIRECTION.min.md", *NO_ESTATE)
+        assert code == 2 and not out.exists(), (bad, res)
+    # an opaque candidate with --ground transparent and a huge tolerance is a usage error, not icon-empty
+    out = tmp_path / "icon-transparent.png"
+    code, res = run_content(capsys, "--meta", meta, "--no-repo-dir", "content", "icon", "normalize", "--in", src,
+                            "--out", out, "--ground", "transparent", "--ground-tolerance", "1000",
+                            "--art-direction", FIX / "ART_DIRECTION.min.md", *NO_ESTATE)
+    assert code == 2 and res["result"] == "usage" and "icon-empty" not in json.dumps(res), res
+    assert not out.exists()
 
 
 def test_schema_icon_min_contrast(brand):

@@ -313,7 +313,13 @@ def test_recipe_candidate_contract_is_single_image():
     assert "between zero and four image paths" not in lowered
     assert "every distinct path the run output reports is one candidate" not in lowered
     assert "asks for one image each" in lowered
-    assert "item 5" in lowered and "asks for one image, so a run reports at most one image path" in lowered
+    assert "item 5" in lowered
+    assert "each invocation asks for one image and fills one slot" in lowered
+    assert "select the first readable path in the order the run reported them" in lowered
+    assert "one accepted candidate per slot, even when several paths are reported" in lowered
+    assert "the remaining reported paths are ignored" in lowered
+    assert "asks for one image, so a run reports at most one image path" not in lowered
+    assert "an extra path, if a run ever reports one" not in lowered
     assert "empty run" in lowered
     assert "four candidate slots" in lowered
     assert "the cap applies to each slot" in lowered
@@ -344,7 +350,7 @@ def test_recipe_unreadable_only_output_counts_against_slot_budget():
     assert "a run that reports no readable path is an empty run" in lowered
     assert "unreadable-only" in lowered
     assert "an unreadable path fills no slot" in lowered
-    assert "an empty run is retried as a new run with the same unchanged prompt, at most 2 retries (3 attempts total) for that slot" in lowered
+    assert "an empty run (no reported path is readable) is retried as a new run with the same unchanged prompt, at most 2 retries (3 attempts total) for that slot" in lowered
     assert "unreadable-only output is counted as an empty run" in lowered
     assert "after 3 empty attempts for any one slot, including attempts that returned only unreadable paths" in lowered
     assert "art-fail" in lowered
@@ -358,6 +364,25 @@ def test_recipe_unreadable_only_output_counts_against_slot_budget():
     assert "one attempt" in sandbox_c[0]
     assert "art-fail" in sandbox_c[0]
     assert "retry the run under the retry limit" not in sandbox_c[0]
+
+
+def test_recipe_distinguishes_one_accepted_candidate_from_one_reported_path():
+    # Static wording test (mock evidence, not an image-generation run): #61 review P2. A single-image run may report
+    # an unreadable sandbox copy and a readable generated_images file; the slot is filled by the readable one and the
+    # run is neither empty nor unreadable-only (it must not exhaust the 3-attempt budget despite a good generation).
+    section = _recipe(_text())
+    lowered = section.lower()
+    assert "the first readable path an invocation reports fills the slot that invocation was for" in lowered
+    assert "one unreadable path and one readable path is not unreadable-only" in lowered
+    assert "it fills the slot with the readable path and is not an empty run" in lowered
+    assert "an empty run (no reported path is readable)" in lowered
+    sandbox_c = [line.strip().lower() for line in section.splitlines()
+                 if line.strip().lower().startswith("- (c) if a path is unreadable")]
+    assert len(sandbox_c) == 1
+    assert "use the first other readable path the same run reported" in sandbox_c[0]
+    assert "only when no reported path is readable" in sandbox_c[0]
+    # sandbox (c) no longer declares the run empty unconditionally
+    assert "skip it" in sandbox_c[0] and not sandbox_c[0].split("only when no reported path is readable")[0].count("empty run")
 
 
 def test_recipe_opus_p3_fixes_single_path_rule7_slots_and_scratch_copy():
