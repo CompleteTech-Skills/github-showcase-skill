@@ -297,3 +297,22 @@ def test_label_split_by_a_blank_line_is_not_counted_as_a_reference_label(make_ct
 def test_controls_soft_break_and_normal_reference_still_count(make_ctx, tmp_path, usage, definitions):
     result = lint_reference(make_ctx, tmp_path, usage, definitions)
     assert not any("badge" in failure for failure in result["fails"]), result
+
+
+# --- 75c case 4: a fake badge in text beside a real type image ---
+def test_fake_license_badge_split_across_paragraphs_beside_real_type_image_is_not_counted(make_ctx, tmp_path):
+    usage = '![License' + chr(10)*2 + '][lic]'
+    result = lint_reference(make_ctx, tmp_path, usage, f'[lic]: {LICENSE_URL}')
+    assert 'R7 2-4 header badges required (found 1)' in result['fails'], result
+
+
+def test_fake_badge_with_split_label_beside_real_type_image_is_not_counted(make_ctx, tmp_path):
+    usage = '![License][li' + chr(10)*2 + 'c]'
+    result = lint_reference(make_ctx, tmp_path, usage, f'[lic]: {LICENSE_URL}')
+    assert 'R7 2-4 header badges required (found 1)' in result['fails'], result
+
+
+def test_real_license_badge_beside_real_type_image_is_counted_control(make_ctx, tmp_path):
+    usage = '![License][lic]'
+    result = lint_reference(make_ctx, tmp_path, usage, f'[lic]: {LICENSE_URL}')
+    assert not any('badge' in f for f in result['fails']), result
