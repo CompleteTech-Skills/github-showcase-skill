@@ -681,31 +681,56 @@ def _readme_repos(spec: dict, owner: str, role: str, resolver, repos) -> tuple[l
     return repos, []
 
 
-def held_captured_t3(resolver: Resolver | None, spec: dict | None, allow_t3: bool) -> list[str]:
-    """The refusals (`t3-signoff:<code>:<login>`) for T3 orgs that the CAPTURED Estate Org field already names (an option
-    whose description is `T3: <login>`, or whose name is a T3 org's display name) while --allow-t3 is passed and no
-    valid sign-off record covers the org. copy_plan keeps every captured option (ids are never dropped) and the README
-    documents them, so a withdrawn association would otherwise survive into the option-update job and the README
-    (tests/test_t3_signoff_require.py::test_estate_replan_holds_a_captured_t3_org_after_withdrawal). Empty without
-    --allow-t3 (the base behaviour is unchanged) or without a resolver."""
+def _is_t3(row: dict) -> bool:
+    """A brand or registry org row whose tier starts with T3 (a row with no tier is never T3)."""
+    words = str(row.get("tier") or "").split()
+    return bool(words) and words[0] == "T3"
+
+
+def _captured_spec(copied: dict | None) -> dict | None:
+    """The normalized spec of a captured board; copy_plan and estate_plan derive it the same way."""
+    if copied is None:
+        return None
+    return copied if "fields" in copied and "views" in copied and "std" in copied else normalize(copied)
+
+
+def captured_t3(resolver: Resolver | None, spec: dict | None, allow_t3: bool) -> tuple[list[str], list[dict]]:
+    """Sign-off check of the T3 orgs that the CAPTURED Estate Org field names (an option whose description is
+    `T3: <login>`, or whose name is a T3 org's display name) while --allow-t3 is passed. Returns (refusals, retained):
+    refusals are `t3-signoff:<code>:<login>` for each such org with no valid sign-off record, and retained are
+    {login, name, tier, signoff_id} for each such org whose record is valid. Identities resolve through
+    references/brand.yaml (current logins, former slugs, approved renames) as well as the registry, so an org that is
+    no longer in registry.orgs is still checked. copy_plan keeps every captured option (ids are never dropped) and the
+    README documents them, so a withdrawn association would otherwise survive into the option-update job and the README
+    (tests/test_t3_signoff_require.py::test_estate_replan_holds_a_captured_t3_org_after_withdrawal). This only reads.
+    Empty without --allow-t3 or without a resolver."""
     if not allow_t3 or resolver is None:
-        return []
+        return [], []
     have = _field(spec or {}, "Org")
     if not have:
-        return []
+        return [], []
     from . import signoff
-    t3 = {}
-    for key in (resolver.registry.get("orgs") or {}):
-        try:
-            row = resolver.brand_org(key)
-        except NeedsInput:
-            continue
-        if str(row.get("tier") or "").split()[0] == "T3":
-            for alias in resolver.aliases(key):  # a description written under a former login still names this org
-                t3[alias.lower()] = key
-            t3[resolver.canonical(key).lower()] = key
-            t3[str(row.get("display_name") or key).lower()] = key
-    out = []
+    t3, rows = {}, {}
+
+    def _index(key: str, row: dict) -> None:
+        rows[key] = row
+        for alias in resolver.aliases(key):  # a description written under a former login still names this org
+            t3[alias.lower()] = key
+        t3[resolver.canonical(key).lower()] = key
+        t3[str(row.get("display_name") or key).lower()] = key
+
+    sources = [list(resolver.registry.get("orgs") or {})]
+    if resolver.brand is not None:
+        sources.append(list((resolver.brand.raw.get("orgs") or {}).keys()))
+    for keys in sources:
+        for key in keys:
+            try:
+                row = resolver.brand_org(key)
+            except NeedsInput:
+                continue
+            if _is_t3(row):
+                _index(key, row)
+    refusals, retained, seen = [], [], set()
     for o in have.get("options") or []:
         desc = str(o.get("description") or "")
         ident = desc[len(TIER_PREFIX_T3):] if desc.startswith(TIER_PREFIX_T3) else str(o.get("name") or "")
@@ -716,12 +741,36 @@ def held_captured_t3(resolver: Resolver | None, spec: dict | None, allow_t3: boo
                 key = t3.get(resolver.canonical(ident).lower())
             except NeedsInput:
                 key = None
+        if key is None and ident:  # a former login: brand former_slugs resolve it without registry membership
+            bk = resolver.brand_key(ident)
+            if bk is not None:
+                try:
+                    row = resolver.brand_org(bk)
+                except NeedsInput:
+                    row = {}
+                if _is_t3(row):
+                    key = bk
+                    rows[bk] = row
         if key is None:
             continue
+        login = resolver.canonical(key)
         rec, why = signoff.evaluate([key, *resolver.aliases(key)])
         if rec is None:
-            out.append(f"t3-signoff:{(why or 'missing').partition(':')[0]}:{resolver.canonical(key)}")
-    return list(dict.fromkeys(out))
+            refusals.append(f"t3-signoff:{(why or 'missing').partition(':')[0]}:{login}")
+            continue
+        if login.lower() in seen:
+            continue
+        seen.add(login.lower())
+        retained.append({"login": login, "name": (rows.get(key) or {}).get("display_name") or key, "tier": "T3",
+                         "signoff_id": str(rec["id"])})
+    return list(dict.fromkeys(refusals)), retained
+
+
+def held_captured_t3(resolver: Resolver | None, spec: dict | None, allow_t3: bool) -> list[str]:
+    """The refusals (`t3-signoff:<code>:<login>`) for the captured T3 orgs that have no valid sign-off record while
+    --allow-t3 is passed. Identities resolve through references/brand.yaml as well as the registry; see captured_t3,
+    whose refusals this returns. Empty without --allow-t3 or without a resolver."""
+    return captured_t3(resolver, spec, allow_t3)[0]
 
 
 def copy_plan(target: str, *, role: str = "org", source: str | None = None, title: str | None = None,
@@ -777,7 +826,7 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
         return {"command": "project", "action": "copy-plan", "owner": owner, "role": role, "stage": 1, "title": title,
                 "short_description": short, "result": "ok", "jobs": jobs, "reads": reads, "pending": pending,
                 "files": files, "logs": logs}
-    spec = copied if "fields" in copied and "views" in copied and "std" in copied else normalize(copied)
+    spec = _captured_spec(copied)
     number, project_id = spec.get("number"), spec.get("id")
     if not number or not project_id:
         raise ShowcaseError("the --copied capture has no project number or id", log="usage")
@@ -898,10 +947,22 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
             r = f"{owner}/{r.split('/', 1)[1]}"  # a former login of the org links under its current one (CQ-03)
             if r.lower() in linked:
                 continue  # listed twice: one link job
+            rec = None
+            if allow_t3 and resolver is not None and resolver.owner_status(owner) == "t3":
+                # the owner-wide grant does not settle a repository that a later withdrawal names: check each link
+                from . import signoff
+                rec, why = signoff.evaluate([owner, *resolver.aliases(owner)], r.split("/", 1)[1])
+                if rec is None:
+                    logs.append(f"t3-signoff:{(why or 'missing').partition(':')[0]}:{r}")
+                    logs.append(f"link-held:{r} (no valid T3 sign-off covers this repository)")
+                    continue
             linked.add(r.lower())
-            jobs.append(_job(f"{pid}-{num}-link-{_repo_key(r.split('/', 1)[1])}", "project",
-                             ["gh", "project", "link", num, "--owner", owner, "--repo", r], owner,
-                             "Link before the §10.1 settings pass, or re-run R5 afterwards (§13.11)."))
+            link = _job(f"{pid}-{num}-link-{_repo_key(r.split('/', 1)[1])}", "project",
+                        ["gh", "project", "link", num, "--owner", owner, "--repo", r], owner,
+                        "Link before the §10.1 settings pass, or re-run R5 afterwards (§13.11).")
+            if rec is not None and rec.get("id"):  # the repository's own granting id; approval_id is never touched
+                signoff.stamp_associations(link, [str(rec["id"])])
+            jobs.append(link)
         reads.append({"name": "org-projects-setting", "argv": ["gh", "api", f"orgs/{owner}", "--jq", ".has_organization_projects"]})
     # 6. browser: UI-only view settings, workflows, insights, default repo, auto-add, recommended template
     url = project_url(owner, number)
@@ -1276,7 +1337,9 @@ def estate_plan(resolver: Resolver, *, source: str | None = None, copied: dict |
                                      [f"Open {url}/settings.", "Check that 'Visibility' reads Private; change nothing.",
                                       "Screenshot it into state/screens/projects/me/."], "project-check",
                                      "§13.2: the Estate stays private."))
-    _stamp_estate_orgs(plan["jobs"], orgs)
+    _, retained = captured_t3(resolver, _captured_spec(copied), allow_t3)
+    listed = {o["login"].lower() for o in orgs}
+    _stamp_estate_orgs(plan["jobs"], orgs + [o for o in retained if o["login"].lower() not in listed])
     return plan
 
 
