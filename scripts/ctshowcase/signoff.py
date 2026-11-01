@@ -307,7 +307,7 @@ def canonical_repo(value) -> str | None:
     if not sep:
         return name
     owner = owner.strip()
-    if not _REPO_PART_RE.fullmatch(owner):
+    if owner in (".", "..") or not _REPO_PART_RE.fullmatch(owner):
         return None
     return f"{owner}/{name}"
 

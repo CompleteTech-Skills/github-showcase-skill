@@ -10,6 +10,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT / "tests"))
@@ -19,7 +21,7 @@ BASE = [{"id": "grant", "repos": ["*"], "approved_on": "2026-01-01"},
 REGRANT = BASE + [{"id": "regrant", "repos": ["withdrawn-x"], "approved_on": "2026-10-02"}]
 
 
-def _cli_run(tmp_path, records, repos=None, captured=None):
+def _cli_run(tmp_path, records, repos=None, captured=None, repos_raw=None):
     """Run the real `scripts/showcase.py project copy-plan` (org role) and return (result, jobs)."""
     from test_t3_signoff_require import _bundle, _run, OWNER
     from test_project import cap_of
@@ -39,7 +41,7 @@ def _cli_run(tmp_path, records, repos=None, captured=None):
     jobsfile = root / "jobs.jsonl"
     result = _run(root, bundle, "--allow-t3", "project", "copy-plan", "--target", OWNER, "--copied", str(capfile),
                   "--jobs", str(jobsfile), "--files-dir", str(root / "bodies"),
-                  *(["--repos", ",".join(repos)] if repos else []))
+                  *(["--repos", repos_raw if repos_raw is not None else ",".join(repos)] if repos or repos_raw else []))
     jobs = []
     if jobsfile.exists():
         jobs = [json.loads(line) for line in jobsfile.read_text(encoding="utf-8").splitlines() if line.strip()]
@@ -233,3 +235,47 @@ def test_cli_withdrawn_repository_is_still_omitted_with_a_board_grant(tmp_path):
     text = job["argv"][job["argv"].index("--readme") + 1]
     assert f"{REPO_OWNER}/site" not in text, text
     assert "grant-repo" not in _ids(job), job
+
+
+# 9) repository spelling canonicalization through the real CLI (adjudication t23-adjudication-repo-canonicalization-50f)
+# Every valid spelling of a withdrawn repository is omitted, the kept one retained, in stdout AND the --jobs file.
+OWN = "Pick-Your-AI"
+SPELL_CASES = {
+    "trailing-slash": f"{OWN}/kept-y,{OWN}/withdrawn-x/",
+    "dot-git": f"{OWN}/kept-y,{OWN}/withdrawn-x.git",
+    "comma-space": f"{OWN}/kept-y, {OWN}/withdrawn-x",
+    "bare-name": f"{OWN}/kept-y,withdrawn-x",
+    "padded-owner": f"{OWN}/kept-y, {OWN} /withdrawn-x",
+}
+
+
+def _withdrawn_absent_everywhere(result, jobsfile_text):
+    out = json.loads(result.stdout)
+    plan_text = json.dumps(out.get("jobs", []))
+    for where, text in (("stdout jobs", plan_text), ("jobs file", jobsfile_text)):
+        assert "withdrawn-x" not in text, (where, text)
+    assert "kept-y" in plan_text and "kept-y" in jobsfile_text
+
+
+@pytest.mark.parametrize("case", sorted(SPELL_CASES))
+def test_cli_repo_spelling_cannot_resurrect_a_withdrawn_repository(case, tmp_path):
+    result, jobs = _cli_run(tmp_path, BASE, repos_raw=SPELL_CASES[case])
+    assert result.returncode == 0, result.stdout + result.stderr
+    _withdrawn_absent_everywhere(result, "\n".join(json.dumps(j) for j in jobs))
+    readme = [j for j in jobs if "--readme" in j.get("argv", [])]
+    assert len(readme) == 1 and "grant" in _ids(readme[0]), readme
+    assert not [j for j in jobs if "withdrawn-x" in json.dumps(j)], [j["id"] for j in jobs]  # no link job either
+
+
+@pytest.mark.parametrize("bad", ["a b", "/", ".git", f"{OWN}/kept-y,a b", "../x"])
+def test_cli_malformed_repos_entry_is_a_usage_refusal(bad, tmp_path):
+    result, jobs = _cli_run(tmp_path, BASE, repos_raw=bad)
+    out = json.loads(result.stdout)
+    assert result.returncode != 0 and "usage" in json.dumps(out.get("logs", out)), result.stdout + result.stderr
+    assert jobs == [], [j.get("id") for j in jobs]
+
+
+def test_cli_trailing_comma_and_empty_entries_are_skipped(tmp_path):
+    result, jobs = _cli_run(tmp_path, BASE, repos_raw=f"{OWN}/kept-y,, ,")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "kept-y" in json.dumps(jobs)

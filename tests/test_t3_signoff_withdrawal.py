@@ -434,10 +434,55 @@ def test_control_same_owner_behaviour_unchanged(brand, tmp_path, monkeypatch):
 
 
 def test_control_without_allow_t3_path_unchanged(brand, tmp_path, monkeypatch):
+    """Without --allow-t3 a T3 repository of another owner is dropped from a non-T3 board README (no sign-off lookup,
+    but never less restrictive than passing the flag); the omission is logged as t3-signoff:readme:<owner>/<repo>."""
     plan = _xo_plan(brand, tmp_path, monkeypatch, [], [f"{T3_OWNER}/withdrawn-x"], allow_t3=False)
     _, text = _xo_readme(plan)
-    assert "withdrawn-x" in text, text
+    assert "withdrawn-x" not in text, text
+    assert f"t3-signoff:readme:{T3_OWNER}/withdrawn-x" in plan["logs"], plan["logs"]
+
+
+def test_no_flag_non_t3_repository_is_still_named(brand, tmp_path, monkeypatch):
+    """A repository of a non-T3 owner is unaffected by the no-flag omission (a T3 board itself refuses without the flag)."""
+    other = "Northwind-Trading-Co"
+    plan = _xo_plan(brand, tmp_path, monkeypatch, [], [f"{other}/some-repo"], allow_t3=False)
+    _, text = _xo_readme(plan)
+    assert "some-repo" in text, text
     assert not any(str(x).startswith("t3-signoff:") for x in plan["logs"]), plan["logs"]
+
+
+# ------------------------------------------------------------------ repository spelling canonicalization (issue 23)
+# A trailing slash, padding or `.git` never hides a withdrawal behind a `*` grant: the requested repository is
+# canonicalized once, and an invalid remaining name fails closed.
+SPELLINGS = ["x/", " x", "x ", "x.git", "x/.git", "  x.git/ ", "X/"]
+
+
+@pytest.mark.parametrize("spelling", SPELLINGS)
+def test_requested_repo_spelling_cannot_bypass_a_withdrawal(spelling):
+    recs = [_rec("g1", ["*"]), _rec("w1", ["x"], approved=False, on="2026-06-01")]
+    assert _ev(recs, "x") == (None, "revoked")
+    assert _ev(recs, spelling) == _ev(recs, "x") == (None, "revoked")
+
+
+@pytest.mark.parametrize("spelling", SPELLINGS)
+def test_requested_repo_spelling_of_another_repo_still_gets_the_grant(spelling):
+    recs = [_rec("g1", ["*"]), _rec("w1", ["x"], approved=False, on="2026-06-01")]
+    other = spelling.replace("x", "y").replace("X", "y")
+    assert _ev(recs, other) == ("g1", None)
+
+
+@pytest.mark.parametrize("bad", ["a b", "/", ".git", "   ", "a//b/c", "../x", "x y.git"])
+def test_invalid_requested_repo_name_fails_closed(bad):
+    recs = [_rec("g1", ["*"]), _rec("w1", ["x"], approved=False, on="2026-06-01")]
+    got, err = _ev(recs, bad)
+    assert got is None and err and err.startswith("invalid:repo:"), (got, err)
+
+
+def test_canonical_repo_helper():
+    from ctshowcase import signoff
+    assert signoff.canonical_repo(" Acme/site.git/ ") == "Acme/site"
+    assert signoff.canonical_repo("site/.git") == "site"
+    assert [signoff.canonical_repo(v) for v in ("", "/", ".git", "a b", None, 3)] == [None] * 6
 
 
 def test_control_standalone_project_readme_unchanged(brand):

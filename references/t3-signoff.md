@@ -33,6 +33,8 @@ signoffs:
 | `expires` | no | optional; absent means no expiry. When present: date `YYYY-MM-DD`, or a timestamp with `Z` or `+HH:MM`; a timestamp without an offset is invalid; not earlier than `approved_on` |
 | `note` | no | string |
 
+Field names follow the issue #24 wording: `repos` is the scope (the issue's repository list), `approved_on` is the sign-off date and `expires` the optional expiry.
+
 No other fields are allowed. The file itself is an object with the one key `signoffs`, a list of record objects; a top-level list, any other top-level key or a non-object entry makes the whole file authorize nothing (`t3-signoff:missing`), as the schema refuses it.
 
 ## Refusals
@@ -65,3 +67,11 @@ The owner checked is also the one that holds the repository today: a repository 
 Project settings pass (`project copy-plan --allow-t3`, §13.9 step 7): the 'Default repository' and 'Auto-add to project' browser steps name only a repository that passed its own sign-off check (the first link actually emitted), never a withdrawn, unauthorized or other-owner one. When repositories are listed but none is authorized, the settings job is held and the plan logs `settings-held:default-repository-and-auto-add`. The settings job carries `signoff_id` (and `signoff_ids`) of the record that grants the repository it names, like the link jobs.
 
 Copy-plan sign-off scope: the per-repository authorization is decided once, before any job names a repository. The README job (links and default repository), the auto-add step of the `-workflows` browser job and the settings job all follow it. A withdrawn or unauthorized repository, whether from `--repos` or only captured in the board's README, appears in none of them. When no repository is authorized the auto-add step is omitted (`workflows-held:auto-add`). Each of these jobs carries the granting `signoff_id` of the repository records it names, so a later repository-specific regrant is stamped instead of the cached wildcard grant. Standalone `project readme` generation is unchanged.
+
+## Repository spelling (canonicalization, fail closed)
+
+The requested repository is canonicalized once, at the top of `evaluate()` and in `_covers()`, before the `*` shortcut (`signoff.canonical_repo`): surrounding whitespace, a trailing `/` and one trailing `.git` are stripped, so `x/`, ` x`, `x `, `x.git` and `x/.git` all name `x` and are vetoed by a withdrawal of `x` even beside a `*` grant, while a different repository in the same spellings still gets the grant. An empty or invalid remaining name (not `[A-Za-z0-9._-]+`; for example `a b`, `/`, `.git`, `   `, `../x`) fails closed as `invalid:repo: ...` (`t3-signoff:invalid`) and is never covered, not even by `*`.
+
+`project copy-plan --repos` splits on `,`, strips every entry, skips empty ones and canonicalizes each; a malformed entry refuses the command with a `usage` log and nothing is planned. README and link entries are normalised once before any authorization: a bare `NAME` on an org board means `<board owner>/<NAME>`, the owner is stripped and resolved to its canonical login, and an entry whose owner cannot be resolved is held (`readme-held:`), not kept. A malformed entry from any source is dropped with `repos-malformed:`.
+
+Without `--allow-t3`, a T3 owner's repository referenced from a non-T3 board README is omitted too, never kept unchecked (that would be less restrictive than passing the flag): the plan logs `t3-signoff:readme:<owner>/<repo>`. Standalone read-only `project readme` is unchanged apart from stripping and validating `--repos`.

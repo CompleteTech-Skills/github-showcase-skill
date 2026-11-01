@@ -319,3 +319,23 @@ def test_copy_plan_without_repositories_readme_and_workflows_unchanged(tmp_path,
     assert any("auto-add" in s.lower() for s in wf[0]["steps"]), wf[0]["steps"]
     assert "signoff_id" not in wf[0], wf[0]
     assert not any(str(x).startswith("settings-held:") for x in plan["logs"]), plan["logs"]
+
+
+# repository spelling canonicalization (t23-adjudication-repo-canonicalization-50f): in-library copy-plan, every valid
+# spelling of a withdrawn repository is omitted from the README, workflows and link jobs; kept-y is retained.
+@pytest.mark.parametrize("withdrawn", [f"{OWNER}/withdrawn-x/", f"{OWNER}/withdrawn-x.git", f" {OWNER}/withdrawn-x",
+                                       f" {OWNER} /withdrawn-x", "withdrawn-x"])
+def test_copy_plan_spelling_of_withdrawn_repository_is_omitted_everywhere(tmp_path, monkeypatch, brand, withdrawn):
+    with _Strict(monkeypatch, _file(tmp_path, WILD)):
+        plan = _copy_private(brand, [f"{OWNER}/kept-y", withdrawn])
+    rd = _readme_jobs(plan)
+    assert len(rd) == 1, [j["id"] for j in plan["jobs"]]
+    assert "kept-y" in rd[0]["argv"][rd[0]["argv"].index("--readme") + 1]
+    assert "withdrawn-x" not in json.dumps(plan["jobs"]), [j["id"] for j in plan["jobs"]]
+
+
+def test_copy_plan_malformed_repository_entry_is_dropped_with_a_log(tmp_path, monkeypatch, brand):
+    with _Strict(monkeypatch, _file(tmp_path, WILD)):
+        plan = _copy_private(brand, [f"{OWNER}/kept-y", "a b"])
+    assert any(str(x).startswith("repos-malformed:") for x in plan["logs"]), plan["logs"]
+    assert "a b" not in json.dumps(plan["jobs"])
