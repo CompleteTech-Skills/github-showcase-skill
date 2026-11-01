@@ -1219,7 +1219,6 @@ def test_title_with_a_single_newline_is_still_a_link_title(make_ctx, tmp_path, b
 
 COMPLETED_LINK = '[Docs](https://example.test) ](x "<!--")'
 LIC_DEFINITION = "[lic]: https://img.shields.io/badge/license-MIT-64748B"
-ONE_BADGE = "R7 2-4 header badges required (found 1)"
 
 
 def _header_with(make_ctx, tmp_path, middle):
@@ -1237,8 +1236,9 @@ def _header_with(make_ctx, tmp_path, middle):
 
 
 def test_completed_link_opener_is_not_reused_for_an_orphan_destination(make_ctx, tmp_path):
-    # The second `](` has no active opener, so `<!--` starts a real comment and `[lic]` defines nothing: one badge.
-    assert ONE_BADGE in _header_with(make_ctx, tmp_path, COMPLETED_LINK)
+    # GitHub GFM (gfm-f774-orphan_comment_badge.html) renders BOTH badges: the second `](` has no active opener, and an inline `<!--` cannot span the blank lines before `-->`, so it is literal text and `[lic]` stays a live definition.
+    fails = _header_with(make_ctx, tmp_path, COMPLETED_LINK)
+    assert not any('2-4 header badges required' in f for f in fails), fails
 
 
 def test_genuine_link_title_still_protects_its_comment_opener(make_ctx, tmp_path):
@@ -1247,4 +1247,27 @@ def test_genuine_link_title_still_protects_its_comment_opener(make_ctx, tmp_path
 
 
 def test_code_span_bracket_is_not_a_link_opener(make_ctx, tmp_path):
-    assert ONE_BADGE in _header_with(make_ctx, tmp_path, '`[` ](x "<!--")')
+    # The code-span `[` is not an opener, so the header keeps both badges as GFM renders them.
+    fails = _header_with(make_ctx, tmp_path, '`[` ](x "<!--")')
+    assert not any('2-4 header badges required' in f for f in fails), fails
+
+
+def test_orphan_comment_opener_does_not_hide_a_missing_local_image(make_ctx, tmp_path, brand):
+    # GitHub GFM (gfm-f774-orphan_comment_local.html) renders one local image, so the missing file must be reported.
+    doc = COMPLETED_LINK + '\n\n![Shot](docs/images/missing.png)\n\n-->'
+    assert MISSING in _usage_fails(make_ctx, tmp_path, brand, doc)
+
+
+def test_block_comment_across_a_blank_line_still_hides_an_image(make_ctx, tmp_path, brand):
+    doc = '<!--\n\n![Shot](docs/images/missing.png)\n\n-->'
+    assert MISSING not in _usage_fails(make_ctx, tmp_path, brand, doc)
+
+
+def test_single_paragraph_inline_comment_still_hides_an_image(make_ctx, tmp_path, brand):
+    doc = 'text <!-- ![Shot](docs/images/missing.png) --> end'
+    assert MISSING not in _usage_fails(make_ctx, tmp_path, brand, doc)
+
+
+def test_inline_comment_closed_in_its_paragraph_does_not_fail_the_badge_count(make_ctx, tmp_path):
+    fails = _header_with(make_ctx, tmp_path, 'text <!-- x --> [Docs](https://example.test)')
+    assert not any('2-4 header badges required' in f for f in fails), fails
