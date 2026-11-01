@@ -661,9 +661,15 @@ def test_heading_opener_does_not_leak_into_following_paragraph():
 
 
 # --- round-1 (fix plan) raw HTML block openers and nested links ---
-# Static CommonMark traces from the reviewer findings on 2d3a866 (not VM-executed; do not label as VM evidence).
-# Adjudications: t7-adjudication-link-opener-assess-3e855.md and t7-adjudication-opener-block-boundary-4f32c0a.md
-# (showcase-orchestration 20261031 directory).
+# GFM renders (GitHub, showcase-orchestration 20261031 directory), adjudication
+# t7-adjudication-raw-pre-nested-link-2d3a866.md:
+#   gfm-2d3-raw_pre_opener.html        -> test_raw_html_block_opener_does_not_leak[pre-no-blank]
+#   gfm-2d3-nested_link_opener.html    -> test_resolved_inner_link_deactivates_enclosing_link_opener[nested-link]
+#   gfm-2d3-raw_pre_inert_control.html -> test_raw_pre_inert_control_has_no_missing_image
+#   gfm-2d3-valid_link_control.html    -> test_valid_link_control_hides_image_in_code_span
+# Cases without a GFM file yet are marked 'GFM render pending (not yet executed)': they are CommonMark derivations,
+# not verified renders. Other adjudications: t7-adjudication-link-opener-assess-3e855.md and
+# t7-adjudication-opener-block-boundary-4f32c0a.md.
 RAW_TAIL = "](a`b) `![Shot](<docs/images/missing.png>)`"
 
 
@@ -733,6 +739,138 @@ def test_inner_link_does_not_deactivate_enclosing_image_opener():
 def test_nested_link_deactivation_work_is_linear():
     def ratio(k):
         text = "[a " * k + "[b](c)" + "](d) " * k
+        readmelint._active_openers.cache_clear()
+        readmelint._OPENER_STEPS = 0
+        readmelint._active_openers(text)
+        return readmelint._OPENER_STEPS / len(text)
+
+    ratios = [ratio(k) for k in (100, 200, 400)]
+    assert max(ratios) <= 1.5 * min(ratios), ratios
+
+
+# --- round-2 invariant table (2d3 fix2): raw block types, reference links, adjacent links, linear reference work ----
+# Invariants covered: (1) raw HTML block text creates no openers, with the block-end conditions; (2) a completed link
+# deactivates earlier LINK openers, including reference-style links, while IMAGE openers stay; (3) unmatched brackets and
+# adjacent links behave as in CommonMark. GFM citations: the raw-pre inert control and the valid-link control above
+# (gfm-2d3-raw_pre_inert_control.html, gfm-2d3-valid_link_control.html). Every other case is a CommonMark 4.6 / 6.3
+# derivation: GFM render pending (not yet executed). A case that disagrees with the implementation is an xfail(strict).
+
+
+# Raw HTML block types (CommonMark 4.6). Type 1 (script/pre/style/textarea) ends at its end tag, which may be on the start
+# line, and it does NOT end at a blank line; type 7 ends at a blank line. The `[open` is raw text, so the orphan `](a`b)`
+# after the block is not a closer and the following image renders (MISSING reported).
+# GFM render pending (not yet executed) for every id below.
+@pytest.mark.parametrize("body", [
+    "<script>\n[open\n</script>\n" + RAW_TAIL,  # type 1 script, end tag on its own later line
+    "<style>\n[open\n</style>\n" + RAW_TAIL,  # type 1 style, end tag on its own later line
+    "<textarea>\n[open\n</textarea>\n" + RAW_TAIL,  # type 1 textarea, end tag on its own later line
+    "<pre>[open</pre>\n" + RAW_TAIL,  # type 1 pre, end condition met on the start line
+    "<pre>\n[open\n\nstill raw\n</pre>\n" + RAW_TAIL,  # type 1 pre, a blank line inside does NOT end the block
+    "<custom-tag>\n[open\n\n" + RAW_TAIL,  # type 7, ends at the blank line
+], ids=[
+    "type1-script-end-tag-later-line",
+    "type1-style-end-tag-later-line",
+    "type1-textarea-end-tag-later-line",
+    "type1-pre-end-tag-on-start-line",
+    "type1-pre-blank-line-inside-not-an-end",
+    "type7-custom-tag-ends-at-blank-line",
+])
+def test_raw_html_block_types_do_not_leak_openers(make_ctx, tmp_path, brand, body):
+    readmelint._active_openers.cache_clear()
+    fails = _usage_fails(make_ctx, tmp_path, brand, body)
+    assert MISSING in fails, fails
+
+
+# GFM render: gfm-2d3-raw_pre_inert_control.html (no image). Everything inside a raw <pre> block is literal text.
+def test_raw_pre_inert_control_has_no_missing_image(make_ctx, tmp_path, brand):
+    readmelint._active_openers.cache_clear()
+    body = "<pre>\n[open\n![Shot](<docs/images/missing.png>)\n</pre>"
+    fails = _usage_fails(make_ctx, tmp_path, brand, body)
+    assert MISSING not in fails, fails
+
+
+# GFM render: gfm-2d3-valid_link_control.html (no image). The valid link's destination holds a backtick, and the next
+# backtick pair is a real code span that hides the image.
+def test_valid_link_control_hides_image_in_code_span(make_ctx, tmp_path, brand):
+    readmelint._active_openers.cache_clear()
+    body = "[outer](a`b) `![Shot](<docs/images/missing.png>)`"
+    fails = _usage_fails(make_ctx, tmp_path, brand, body)
+    assert MISSING not in fails, fails
+
+
+REF_DEFINITION = "\n\n[ref]: https://example.test/r"
+REF_XFAIL = pytest.mark.xfail(strict=True, reason="GFM render pending")
+
+
+# GFM render pending (not yet executed). A completed reference link (full, collapsed or shortcut, with a live
+# definition) deactivates the enclosing link opener, so the orphan `](a`b)` is literal and the image renders. Observed
+# lint output matches this derivation (the image is reported); the `_active_openers` set does not deactivate on `][ref]`
+# (see the xfail direct test below).
+@pytest.mark.parametrize("usage", [
+    "[outer [x][ref]](a`b) `![Shot](<docs/images/missing.png>)",
+    "[outer [ref][]](a`b) `![Shot](<docs/images/missing.png>)",
+    "[outer [ref]](a`b) `![Shot](<docs/images/missing.png>)",
+], ids=["full", "collapsed", "shortcut"])
+def test_reference_style_inner_link_deactivates_enclosing_link_opener(make_ctx, tmp_path, brand, usage):
+    readmelint._active_openers.cache_clear()
+    fails = _usage_fails(make_ctx, tmp_path, brand, usage + REF_DEFINITION)
+    assert MISSING in fails, fails
+
+
+# GFM render pending (not yet executed). Controls that must NOT report the image: an image opener inside a reference
+# link keeps its own closer active, and an unresolved reference label completes no link, so the enclosing `](a`b)` is
+# a link and the code span hides the image.
+@pytest.mark.parametrize("usage", [
+    "![alt [x][ref]](a`b) `![Shot](<docs/images/missing.png>)`",
+    "[outer [x][nope]](a`b) `![Shot](<docs/images/missing.png>)`",
+], ids=["image-opener-control", "unresolved-label-control"])
+def test_reference_style_controls_do_not_report_the_image(make_ctx, tmp_path, brand, usage):
+    readmelint._active_openers.cache_clear()
+    fails = _usage_fails(make_ctx, tmp_path, brand, usage + REF_DEFINITION)
+    assert MISSING not in fails, fails
+
+
+# GFM render pending (not yet executed). Direct opener state for the reference-style nested link: the inner closer stays
+# active and the enclosing link closer must be inactive. The implementation does not deactivate on `][ref]`, so this is
+# xfail(strict) until it does.
+@REF_XFAIL
+def test_reference_inner_link_closer_active_and_enclosing_link_closer_inactive():
+    readmelint._active_openers.cache_clear()
+    text = "[outer [x][ref]](z)" + REF_DEFINITION
+    active = readmelint._active_openers(text)
+    assert text.index("]") in active
+    assert text.index("]](z)") + 1 not in active
+
+
+# GFM render pending (not yet executed). Adjacent links `[a](b)[c](d)` both complete, and a code span after them hides
+# the image. An unmatched `[c` is closed by `](d`e)` (a valid link whose destination holds a backtick), so the code span
+# after it still hides the image. Direct `_has_link_opener` assertions pin the closers.
+@pytest.mark.parametrize("body,expect_missing", [
+    ("[a](b)[c](d) `![Shot](<docs/images/missing.png>)`", False),
+    ("[a](b)[c](d`e) `![Shot](<docs/images/missing.png>)`", False),
+    ("[open text] more ![Shot](<docs/images/missing.png>)", True),  # unmatched bracket pair, no link: image renders
+], ids=["adjacent-links", "adjacent-link-with-backtick-destination", "unmatched-bracket-pair"])
+def test_adjacent_links_and_unmatched_brackets(make_ctx, tmp_path, brand, body, expect_missing):
+    readmelint._active_openers.cache_clear()
+    fails = _usage_fails(make_ctx, tmp_path, brand, body)
+    if expect_missing:
+        assert MISSING in fails, fails
+    else:
+        assert MISSING not in fails, fails
+
+
+def test_adjacent_links_direct_openers():
+    readmelint._active_openers.cache_clear()
+    text = "[a](b)[c](d`e) `![Shot](<docs/images/missing.png>)`"
+    assert readmelint._has_link_opener(text, text.index("]")) is True  # closes [a
+    assert readmelint._has_link_opener(text, text.index("](d")) is True  # closes [c
+
+
+# Deterministic counter (not wall-clock): reference-link work per character must not grow with the nesting depth k.
+# The `[ref]: x` definition is appended so the reference labels are resolvable in the same text.
+def test_reference_link_work_is_linear():
+    def ratio(k):
+        text = "[a " * k + "[b][ref]" + "](d) " * k + "\n\n[ref]: x"
         readmelint._active_openers.cache_clear()
         readmelint._OPENER_STEPS = 0
         readmelint._active_openers(text)
