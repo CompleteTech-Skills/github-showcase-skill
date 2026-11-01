@@ -681,6 +681,46 @@ def _readme_repos(spec: dict, owner: str, role: str, resolver, repos) -> tuple[l
     return repos, []
 
 
+def _grant_key(resolver, ro: str, rn: str) -> str:
+    """The lowercase RESOLVED `<canonical owner>/<repo>` key of grants and held_lower: a former login of an org keys
+    the same as its current one, so a same-owner reference matches the link loop's key."""
+    owner_key = resolver.canonical(ro) if resolver is not None else ro
+    return f"{owner_key}/{rn}".lower()
+
+
+def _authorize_readme_repos(readme_repos, resolver, allow_t3: bool, grants: dict, held_lower: set,
+                            logs: list) -> list[str]:
+    """Keep the README repositories this copy may name. A T3 owner's repository needs a valid sign-off record that
+    covers that repository itself (checked on its own owner and name, whatever the board owner is); a denied one is
+    logged and dropped, a granted one is recorded in grants for the README job's sign-off ids. Other references are
+    kept unchanged, and so is everything when --allow-t3 is not passed."""
+    from . import signoff
+    kept: list[str] = []
+    for r0 in readme_repos:
+        if "/" not in r0:
+            kept.append(r0)
+            continue
+        ro, rn = r0.split("/", 1)
+        if not (allow_t3 and resolver is not None and resolver.owner_status(ro) == "t3"):
+            kept.append(r0)
+            continue
+        key = _grant_key(resolver, ro, rn)
+        if key in grants:  # already authorized by the link loop or an earlier reference
+            kept.append(r0)
+            continue
+        if key in held_lower:
+            continue
+        rec, why = signoff.evaluate([ro, *resolver.aliases(ro)], rn)
+        if rec is None:
+            logs.append(f"t3-signoff:{(why or 'missing').partition(':')[0]}:{ro}/{rn}")
+            logs.append(f"readme-held:{ro}/{rn} (no valid T3 sign-off covers this repository)")
+            held_lower.add(key)
+            continue
+        grants[key] = rec
+        kept.append(r0)
+    return kept
+
+
 def _is_t3(row: dict) -> bool:
     """A brand or registry org row whose tier starts with T3 (a row with no tier is never T3)."""
     words = str(row.get("tier") or "").split()
@@ -950,28 +990,13 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
             if rec is not None and rec.get("id"):  # the repository's own granting id; approval_id is never touched
                 signoff.stamp_associations(link, [str(rec["id"])])
             link_jobs.append(link)
-        if allow_t3 and resolver is not None and resolver.owner_status(owner) == "t3":
-            # captured repositories that the README names (and --repos does not) face the same check: a withdrawn one is held
-            from . import signoff
-            for r0 in readme_repos:
-                if "/" not in r0 or not resolver_same(resolver, r0.split("/", 1)[0], owner):
-                    continue
-                r = f"{owner}/{r0.split('/', 1)[1]}"
-                if r.lower() in grants or r.lower() in held_lower:
-                    continue
-                rec, why = signoff.evaluate([owner, *resolver.aliases(owner)], r.split("/", 1)[1])
-                if rec is None:
-                    logs.append(f"t3-signoff:{(why or 'missing').partition(':')[0]}:{r}")
-                    held_lower.add(r.lower())
-                else:
-                    grants[r.lower()] = rec
         reads.append({"name": "org-projects-setting", "argv": ["gh", "api", f"orgs/{owner}", "--jq", ".has_organization_projects"]})
+    # every README repository (explicit or captured) is authorized on its own resolved owner and name, for every role
+    readme_repos = _authorize_readme_repos(readme_repos, resolver, allow_t3, grants, held_lower, logs)
     # 4. text: short description and README (README needs every view number)
     nums = view_numbers(spec)
     edit = ["gh", "project", "edit", num, "--owner", own_flag, "--description", short]
     text = readme_text
-    if role == "org":  # a repository held for lack of a valid sign-off is named by no README link
-        readme_repos = [r for r in readme_repos if "/" not in r or f"{owner}/{r.split('/', 1)[1]}".lower() not in held_lower]
     if held_t3:
         text = None
         pending.append({"why": "README held: the Org field names a T3 org with no valid sign-off record",
@@ -990,12 +1015,12 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
     # with other content, which the writer refuses together with its whole batch
     text_job = _job(f"{pid}-{num}-text-{_digest(edit)}", "project", edit, owner,
                     "§13.2 short description" + (" and §13.7 README" if text is not None else " (README after re-capture)"))
-    if role == "org" and text is not None:
+    if text is not None:
         # the granting records of the repositories the README names (a retained authorized one carries its own)
         ids: list[str] = []
         for r in readme_repos:
-            if "/" in r and resolver_same(resolver, r.split("/", 1)[0], owner):
-                rec = grants.get(f"{owner}/{r.split('/', 1)[1]}".lower())
+            if "/" in r:
+                rec = grants.get(_grant_key(resolver, *r.split("/", 1)))
                 if rec and rec.get("id"):
                     ids.append(str(rec["id"]))
         if ids:
