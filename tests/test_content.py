@@ -1547,8 +1547,10 @@ def test_icon_ocr_malformed_png_keeps_logs_key(monkeypatch):
 
 def test_icon_ocr_undecodable_idat_is_structured_failure(monkeypatch):
     # valid signature, IHDR, chunk CRCs and IEND, but IDAT is not a zlib stream: validate_png accepts it and Pillow's
-    # load() raised OSError('broken data stream') out of icon_qa (no JSON, no logs) before this was handled
-    import struct, zlib
+    # load() made the icon_qa API raise OSError('broken data stream'); the CLI already caught that globally (JSON
+    # result=usage, logs=['usage'], exit 2), so the fix is the structured QA failure from the API
+    import struct
+    import zlib
     from ctshowcase.pnglint import validate_png
 
     def chunk(kind, body):
