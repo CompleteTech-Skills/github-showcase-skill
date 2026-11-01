@@ -10,14 +10,15 @@ fills the card with that ground and is drawn full-bleed, clipped to the card rad
 plate. Dark plates get a 2 px family-accent edge at 60% so they read on the navy canvas and on GitHub dark.
 
 Custom transparent icons (--icon, showcase.yml icon, assets/icon.png) are fitted by their alpha bounds so transparent
-margins do not shrink the art; bundled brand marks and logos, opaque or full-bleed icons, pixel art and blank images
-are unchanged.
+margins do not shrink the art. Any file under assets/brand is treated as bundled artwork and is never fitted, even when
+it is selected through --icon or showcase.yml icon; opaque or full-bleed icons, pixel art and blank images are unchanged.
 """
 from __future__ import annotations
 
 import math
 import re
 from itertools import combinations
+from pathlib import Path
 
 from PIL import Image, ImageChops
 
@@ -97,6 +98,17 @@ def alpha_fit(im: Image.Image) -> Image.Image | None:
     return rgba.crop(bbox)
 
 
+def is_bundled_brand_asset(path, root) -> bool:
+    """True when `path` resolves under <skill root>/assets/brand, whatever the selection route (cli, override or repo).
+
+    Bundled artwork under assets/brand is never alpha-cropped. Returns False when either path cannot be resolved."""
+    try:
+        Path(path).resolve().relative_to((Path(root) / "assets" / "brand").resolve())
+        return True
+    except (ValueError, OSError):
+        return False
+
+
 def feather(im: Image.Image, sides: bool, ends: bool, frac: float = 0.14) -> Image.Image:
     """Blend a full-bleed icon's own ground into the card where the icon does not reach the card edge: an alpha ramp
     over the outer 14% of the ground only (glyphs sit inside the avatar live area, so the mark itself is untouched).
@@ -170,7 +182,8 @@ def plate(ctx: RepoContext, fonts: Fonts, card: tuple[float, float, float, float
             pass
         box = (x, y, w, h) if full_bleed else inner
         icon_nodes, fit = _icon_nodes(ctx, im, box, (x, y, w, h, radius) if full_bleed else None,
-                                      fit_alpha=src in CUSTOM_ICON_SOURCES and not full_bleed)
+                                      fit_alpha=src in CUSTOM_ICON_SOURCES and not full_bleed
+                                      and not is_bundled_brand_asset(path, ctx.brand.root))
         nodes += icon_nodes
         info = {"path": shown, "source": src, "plate": fill, "full_bleed": full_bleed}
     else:
