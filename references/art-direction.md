@@ -90,7 +90,7 @@ codex exec --skip-git-repo-check --json "$(cat art/prompts/ORG/REPO/icon.md)" > 
 - `--sandbox MODE` selects the sandbox policy for model-generated shell commands.
 - `--output-last-message FILE` also writes the final message to FILE.
 - A prompt of `-` is read from standard input.
-- Each invocation runs one single-image prompt (`content icon prompt` asks for one image), so one run reports at most one image path, and that path is the candidate for that invocation's slot.
+- Each invocation runs one single-image prompt (`content icon prompt` asks for one image) and fills at most one candidate slot, but its output may report more than one path (for example an unreadable sandbox copy and a readable `generated_images` file). The candidate for the slot is the first readable path the run reported, see item 5 below.
 - `codex exec --help` and CLI help only document flags; they do not prove that an image is generated. Only a returned readable image path proves a generation.
 
 Use the same model and version for a whole family run (pipeline rule 4). Record the tool, model id and version in `PROMPTS.md` exactly as the run reports them; if the run does not expose a model id, write `not exposed` in the `TOOL / MODEL ID AND VERSION` field. Never invent a model id. Flag names follow codex-cli 0.166.0 at the time of writing; if one is rejected, run `codex exec --help` and change nothing else in the recipe.
