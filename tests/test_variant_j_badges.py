@@ -210,8 +210,15 @@ def test_real_template_bootstrap_replaces_inherited_badge(make_ctx, tmp_path):
     assert not any("badge" in f for f in profile_cli(ctx, tmp_path, "lint", "readme")["fails"])
 
 
-@pytest.mark.parametrize("html", [False, True])
-def test_local_profile_badge_plus_ci_passes_lint(make_ctx, tmp_path, html):
+# GFM evidence (GitHub Markdown API, mode gfm):
+# - gfm-d11-mixed_blank_boundary.html: a blank line between the HTML <img> and the Markdown CI badge
+#   renders TWO <img> elements, so a valid mixed fixture must keep that boundary.
+# - gfm-d11-mixed_adjacent.html: with no blank line, the HTML block absorbs the Markdown CI badge, which
+#   stays literal text and renders exactly ONE <img>.
+# The scaffold only emits Markdown badges for variant J (badges_md) with --badges local, so neither
+# HTML fixture below is generated output; the adjacent mix cannot be produced by the generator.
+@pytest.mark.parametrize("mode", ["markdown", "html_both", "html_blank_boundary"])
+def test_local_profile_badge_plus_ci_passes_lint(make_ctx, tmp_path, mode):
     (tmp_path / ".github/workflows").mkdir(parents=True)
     (tmp_path / ".github/workflows/ci.yml").write_text("name: CI\n", encoding="utf-8")
     ctx = profile_context(make_ctx, tmp_path, license=None)
@@ -219,11 +226,37 @@ def test_local_profile_badge_plus_ci_passes_lint(make_ctx, tmp_path, html):
     path = tmp_path / "README.md"
     text = path.read_text(encoding="utf-8")
     assert "docs/images/badges/type-github-profile.svg" in text
-    if html:
+    if mode == "html_both":
         text = re.sub(r"!\[([^\]]+)\]\((docs/images/badges/[^)]+)\)",
                       r'<img src="\2" alt="\1">', text)
+        text = re.sub(r"\[!\[([^\]]+)\]\(([^)]+)\)\]\(([^)]+)\)",
+                      r'<a href="\3"><img src="\2" alt="\1"></a>', text)
+        path.write_text(text, encoding="utf-8")
+    elif mode == "html_blank_boundary":
+        text = re.sub(r"!\[([^\]]+)\]\((docs/images/badges/[^)]+)\)",
+                      r'<img src="\2" alt="\1">', text)
+        text = text.replace(">\n[![CI]", ">\n\n[![CI]")
+        assert ">\n\n[![CI]" in text
         path.write_text(text, encoding="utf-8")
     assert not any("badge" in f for f in profile_cli(ctx, tmp_path, "lint", "readme")["fails"])
+
+
+def test_local_profile_adjacent_html_markdown_badge_mix_counts_one(make_ctx, tmp_path):
+    # Negative control for the GFM evidence in test_local_profile_badge_plus_ci_passes_lint:
+    # no blank line after the HTML <img>, so the Markdown CI badge is absorbed as literal text.
+    (tmp_path / ".github/workflows").mkdir(parents=True)
+    (tmp_path / ".github/workflows/ci.yml").write_text("name: CI\n", encoding="utf-8")
+    ctx = profile_context(make_ctx, tmp_path, license=None)
+    profile_cli(ctx, tmp_path, "readme", "--mode", "scaffold", "--badges", "local", "--write")
+    path = tmp_path / "README.md"
+    text = path.read_text(encoding="utf-8")
+    assert "docs/images/badges/type-github-profile.svg" in text
+    text = re.sub(r"!\[([^\]]+)\]\((docs/images/badges/[^)]+)\)",
+                  r'<img src="\2" alt="\1">', text)
+    assert ">\n[![CI]" in text
+    path.write_text(text, encoding="utf-8")
+    result = profile_cli(ctx, tmp_path, "lint", "readme", expected_code=1)
+    assert "R7 2-4 header badges required (found 1)" in result["fails"]
 
 
 @pytest.mark.parametrize("mention", ["docs/images/badges/type-github-profile.svg",
