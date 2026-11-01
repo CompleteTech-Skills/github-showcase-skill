@@ -1642,7 +1642,7 @@ def _png_trailing_empty_iccp() -> bytes:
             + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"iCCP", b"") + chunk(b"IEND", b""))
 
 
-def test_icon_trailing_empty_iccp_is_structured_failure_in_api_check_and_normalize(tmp_path, capsys, monkeypatch):
+def test_icon_trailing_empty_iccp_is_structured_failure_in_api_check_and_normalize(tmp_path, capsys, monkeypatch, brand):
     # validate_png accepts the sequence, but Pillow raises IndexError while loading the trailing empty iCCP chunk:
     # icon_qa, `icon check` and `icon normalize` (with and without --ocr) must report the structured PNG failure
     from ctshowcase.pnglint import validate_png
@@ -1676,3 +1676,23 @@ def test_icon_trailing_empty_iccp_is_structured_failure_in_api_check_and_normali
     code, res = run_content(capsys, *base, "normalize", "--in", tmp_path / "missing.png", "--out", out, *art, *NO_ESTATE)
     assert code == 2, res
     assert out.read_bytes() == sentinel
+    # valid control: a passing icon (same family ink on the configured card) without the malformed trailing iCCP
+    # chunk still passes the API and every CLI path with exit 0
+    card = brand.style(NW)["tokens"]["card_fill"]
+    good_data = C.icon_bytes(C.normalize_icon(_candidate(card, ink=(0, 90, 221)), "transparent", card)[0])[0]
+    validate_png(good_data)
+    for ocr in (False, True):
+        qa = C.icon_qa(good_data, card=card, ocr=ocr, source="g.png")
+        assert qa["result"] in ("pass", "warn") and not any(log.startswith("unreadable-image") for log in qa.get("logs", [])), qa
+        assert not any(c["result"] == "fail" for c in qa["checks"]), qa
+    good = tmp_path / "good.png"
+    good.write_bytes(good_data)
+    for extra in ((), ("--ocr",)):
+        code, res = run_content(capsys, *base, "check", "--out", good, *extra, *art, *NO_ESTATE)
+        assert code == 0 and res["result"] in ("pass", "warn"), (extra, res)
+        assert not any(c["result"] == "fail" for c in res["qa"]["checks"]), res
+    good_out = out.parent / "good-norm.png"
+    for extra in ((), ("--ocr",)):
+        good_out.unlink(missing_ok=True)
+        code, res = run_content(capsys, *base, "normalize", "--in", good, "--out", good_out, *extra, *art, *NO_ESTATE)
+        assert code == 0 and res["result"] in ("pass", "warn") and good_out.is_file(), (extra, res)
