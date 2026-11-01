@@ -1537,6 +1537,98 @@ def test_icon_ocr_cli_logs(capsys, tmp_path, brand, monkeypatch):
     assert "needs-input:ocr-unavailable" in res["logs"], res
 
 
+# real-engine controls: these call the installed tesseract binary (no monkeypatching of _tesseract, _ocr_words
+# or subprocess.run). They are skipped with an explicit reason when tesseract is not on PATH.
+def _real_tesseract():
+    return C._tesseract()
+
+
+needs_tesseract = pytest.mark.skipif(
+    C._tesseract() is None,
+    reason="tesseract not installed: real-OCR controls skipped (they run on the VM and hosted CI where it is installed)")
+
+
+def _font(size):
+    from PIL import ImageFont
+    for name in ("DejaVuSans-Bold.ttf", "arialbd.ttf", "Arial Bold.ttf"):
+        try:
+            return ImageFont.truetype(name, size)
+        except OSError:
+            continue
+    return ImageFont.load_default(size=size)
+
+
+def _text_icon(text, fg, bg=None):
+    from PIL import Image
+    from PIL import ImageDraw
+    img = Image.new("RGBA", (1024, 1024), bg if bg is not None else (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    font = _font(220)
+    left, top, right, bottom = draw.textbbox((0, 0), text, font=font)
+    draw.text(((1024 - (right - left)) / 2 - left, (1024 - (bottom - top)) / 2 - top), text, fill=fg, font=font)
+    return img
+
+
+def _ellipse_icon():
+    from PIL import Image
+    from PIL import ImageDraw
+    img = Image.new("RGBA", (1024, 1024), (0, 0, 0, 0))
+    ImageDraw.Draw(img).ellipse((180, 180, 844, 844), fill=(0, 90, 221, 255))
+    return img
+
+
+@needs_tesseract
+def test_real_tesseract_reads_dark_text_on_light():
+    img = _text_icon("HELLO", (0, 0, 0, 255), (255, 255, 255, 255))
+    exe = _real_tesseract()
+    words = C._ocr_words(_png(img), exe)
+    assert words is not None and any("HELLO" in w.upper() for w in words), words
+
+
+@needs_tesseract
+def test_real_tesseract_text_free_control_finds_nothing():
+    exe = _real_tesseract()
+    words = C._ocr_words(_png(_ellipse_icon()), exe)
+    assert words == [], words
+
+
+@needs_tesseract
+def test_real_tesseract_icon_qa_warns_on_white_lettering_on_dark_card():
+    # white text on a transparent canvas is only seen if the icon is flattened on the card colour, not on white
+    card = "#0B1020"
+    img = _text_icon("HELLO", (255, 255, 255, 255))
+    qa = C.icon_qa(_png(img), card=card, ocr=True)
+    no_text = _no_text(qa)
+    assert no_text["result"] == "warn" and no_text["detail"].startswith("OCR found text:") \
+        and "HELLO" in no_text["detail"].upper(), qa
+    assert "logs" not in qa or ("needs-input:ocr-unavailable" not in qa["logs"]
+                                and "needs-input:ocr-failed" not in qa["logs"]), qa
+    strict = C.icon_qa(_png(img), card=card, ocr=True, strict=True)
+    assert _no_text(strict)["result"] == "fail", strict
+
+
+@needs_tesseract
+def test_real_tesseract_icon_qa_text_free_icon_passes():
+    card = "#0B1020"
+    qa = C.icon_qa(_png(_ellipse_icon()), card=card, ocr=True)
+    assert _no_text(qa) == {"check": "no-text", "result": "pass", "detail": "OCR found no text"}, qa
+
+
+@needs_tesseract
+def test_real_tesseract_cli_icon_check_finds_text(capsys, tmp_path):
+    # the CLI takes the card colour from the meta family, so the text icon is flattened on the real card fill
+    out = write(tmp_path, {"repo/assets/icon.png": _png(_text_icon("HELLO", (255, 255, 255, 255)))}) \
+        / "repo" / "assets" / "icon.png"
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    check = ("--meta", meta, "--no-repo-dir", "content", "icon", "check", "--out", out,
+             "--art-direction", FIX / "ART_DIRECTION.min.md", *NO_ESTATE)
+    code, res = run_content(capsys, *check, "--ocr")
+    no_text = next(c for c in res["qa"]["checks"] if c["check"] == "no-text")
+    assert no_text["result"] == "warn", res
+    assert "needs-input:ocr-unavailable" not in res.get("logs", []), res
+
+
 def test_icon_ocr_malformed_png_keeps_logs_key(monkeypatch):
     # an unreadable PNG returns before the OCR step; `logs` names the image with and without ocr
     monkeypatch.setattr(C, "_tesseract", lambda: None)
