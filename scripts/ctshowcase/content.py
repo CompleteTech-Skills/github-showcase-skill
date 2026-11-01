@@ -20,7 +20,6 @@ import hashlib
 import html
 import io
 import json
-import math
 import re
 import shutil
 import subprocess
@@ -2093,9 +2092,7 @@ def normalize_icon(img, ground: str = "auto", card: str | None = None, pixel_art
     from .color import rgb as hexrgb
     from .iconbox import DARK_PLATE, GROUND_DE, corner_ground, corner_spread, native_pixels
     from .color import luminance
-    tol = GROUND_DE if tolerance is None else float(tolerance)
-    if not math.isfinite(tol) or tol < 0:
-        raise ShowcaseError(f"--ground-tolerance must be a finite number >= 0 (got {tolerance!r})", log="usage")
+    tol = GROUND_DE if tolerance is None else icon_ground_tolerance(tolerance)
     im = img.convert("RGBA")
     info: dict = {"source_px": list(im.size)}
     corners = [im.getpixel(p) for p in ((0, 0), (im.width - 1, 0), (0, im.height - 1), (im.width - 1, im.height - 1))]
@@ -2261,6 +2258,16 @@ def icon_contrast_floor(cli_value, family_value) -> float:
     return float(value)
 
 
+def icon_ground_tolerance(value) -> float:
+    """`--ground-tolerance`: a finite corner dE from 0 to CONTENT_DE (12). NaN would make every `spread > tol` test
+    false (any four opaque corners become one averaged ground) and a huge value widens the key (KEY_DE + tol) until it
+    keys the whole image, so both are refused as usage errors, as `--min-contrast` is (review A, epic #51). Above 12
+    the corners may differ by more than what icon_qa counts as content, so they are no longer one ground."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= CONTENT_DE:
+        raise ShowcaseError(f"--ground-tolerance must be a dE between 0 and {CONTENT_DE:g}, got {value}", log="usage")
+    return float(value)
+
+
 def _tesseract() -> str | None:
     """The `tesseract` executable on PATH, or None. OCR is optional: this tool never installs it."""
     return shutil.which("tesseract")
@@ -2302,14 +2309,19 @@ def _ocr_words(png: bytes, exe: str) -> list[str] | None:
 
 def icon_qa(data: bytes, *, card: str, ink: list[str] | None = None, org_mark: Path | None = None,
             siblings: list[str] | None = None, strict: bool = False, min_contrast: float = 3.0,
-            ocr: bool = False, source: str | None = None) -> dict:
+            ocr: bool = False, source: str | None = None, exact_contrast: bool = False) -> dict:
     """Automated icon checks (f.3, art QA): size, budget, alpha, live area, coverage, contrast on the card, family
     inks, not the org glyph, one file. The 48 px set sheet stays manual. `strict` makes a failing family-ink
     check fail the icon (default: warn); with no `ink` the family-ink check is not emitted at all. `min_contrast` is
-    the contrast floor of the dominant ink on the card (default 3.0; see icon_contrast_floor). `ocr` (opt-in, off by
-    default) reads the icon with tesseract on PATH: words of 2+ alphanumerics are text, warn (fail with `strict`);
-    without tesseract, or when it fails, no-text stays manual and `logs` names needs-input:ocr-unavailable or
-    needs-input:ocr-failed. A `logs` key is returned with `ocr`, and always on a png failure, where it is
+    the contrast floor of the dominant ink on the card (default 3.0; see icon_contrast_floor). The dominant ink is the
+    most common 16-level colour bucket; by default its contrast is measured at the bucket midpoint (legacy). With
+    `exact_contrast` (set when a floor was explicitly configured) it is measured at the most common actual RGB in that
+    bucket, because the midpoint can be up to 8 levels per channel off: grey 128 on a dark teal card is really 4.06:1
+    but its midpoint (grey 136) measures 4.52:1, a false pass at 4.5; grey 112 on a pale card is 4.73:1 but its
+    midpoint (grey 120) measures 4.22:1, a false fail.
+    `ocr` (opt-in, off by default) reads the icon with tesseract on PATH: words of 2+ alphanumerics are text, warn (fail
+    with `strict`); without tesseract, or when it fails, no-text stays manual and `logs` names needs-input:ocr-unavailable
+    or needs-input:ocr-failed. A `logs` key is returned with `ocr`, and always on a png failure, where it is
     ["unreadable-image:<source>"] naming the unreadable image (`source` is the file path when known, else <bytes>)."""
     from PIL import Image
     from .color import contrast, hexstr, rgb as hexrgb
@@ -2371,10 +2383,18 @@ def icon_qa(data: bytes, *, card: str, ink: list[str] | None = None, org_mark: P
         for p in ink_px:
             key = (p[0] // 16 * 16 + 8, p[1] // 16 * 16 + 8, p[2] // 16 * 16 + 8)
             counts[key] = counts.get(key, 0) + 1
-        dom = hexstr(max(counts, key=counts.get))
-        cr = contrast(dom, card)
+        bucket = max(counts, key=counts.get)
+        dom = hexstr(bucket)
+        measured = dom
+        if exact_contrast:
+            exact: dict = {}
+            for p in ink_px:
+                if (p[0] // 16 * 16 + 8, p[1] // 16 * 16 + 8, p[2] // 16 * 16 + 8) == bucket:
+                    exact[p[:3]] = exact.get(p[:3], 0) + 1
+            measured = hexstr(max(exact, key=exact.get))
+        cr = contrast(measured, card)
         floor = float(min_contrast)
-        add("contrast-on-card", cr >= floor, f"dominant ink {dom} on {card}: {cr:.2f}:1 (>= {floor:g}:1)")
+        add("contrast-on-card", cr >= floor, f"dominant ink {measured} on {card}: {cr:.2f}:1 (>= {floor:g}:1)")
         if ink:
             near = min(_de(lab(hexrgb(dom)), lab(hexrgb(x))) for x in ink)
             add("family-ink", near <= 12, f"dominant ink {dom}, nearest family ink ΔE {near:.1f}",
@@ -2464,7 +2484,8 @@ def add_parser(sub, cli=None):
     a.add_argument("--in", dest="src", help="normalize: the returned candidate PNG")
     a.add_argument("--ground", choices=("auto", "transparent", "keep"), default="auto")
     a.add_argument("--ground-tolerance", type=float, default=3.0, metavar="DE",
-                   help="normalize: corners within this dE are one ground (default 3.0; try 5 for a vignetted ground)")
+                   help="normalize: corners within this dE are one ground (default 3.0; try 5 for a vignetted ground; "
+                        "0 to 12)")
     a.add_argument("--out", help="prompt: the prompt file (art/prompts/<org>/<repo>/icon.md); normalize: the icon "
                                  "(default assets/icon.png in the checkout); check: the icon to check")
     a.add_argument("--preview", help="normalize: also write a 48 px preview on the card colour")
@@ -2800,6 +2821,9 @@ def _cmd_icon(args, cli, resolver, head):
                    logs=logs, note=note)
         return obj, _code(result)
     floor = icon_contrast_floor(getattr(args, "min_contrast", None), ctx.style.get("icon_min_contrast"))
+    # an explicitly configured floor is measured on the actual ink, not the bucket midpoint (review B, epic #51); the
+    # unconfigured default keeps the legacy midpoint measurement so existing pass/fail results do not move
+    exact = getattr(args, "min_contrast", None) is not None or ctx.style.get("icon_min_contrast") is not None
     ink = []
     try:
         art = load_art_direction(args.art_direction)
@@ -2811,6 +2835,7 @@ def _cmd_icon(args, cli, resolver, head):
     if args.icon_action == "normalize":
         if not args.src:
             raise ShowcaseError("content icon normalize needs --in CANDIDATE.png", log="usage")
+        tolerance = icon_ground_tolerance(args.ground_tolerance)
         try:
             raw = Path(args.src).read_bytes()
         except OSError as exc:
@@ -2821,7 +2846,7 @@ def _cmd_icon(args, cli, resolver, head):
         except (OSError, ValueError, SyntaxError, IndexError, Image.DecompressionBombError):
             # readable but undecodable source: the structured png failure from icon_qa, nothing written
             qa = icon_qa(raw, card=card, ink=ink, org_mark=mark, siblings=siblings, strict=strict,
-                         min_contrast=floor, ocr=ocr, source=str(args.src))
+                         min_contrast=floor, ocr=ocr, source=str(args.src), exact_contrast=exact)
             if qa["result"] != "fail":
                 qa["result"] = "fail"
                 qa["checks"].append({"check": "png", "result": "fail", "detail": "undecodable image data"})
@@ -2833,10 +2858,10 @@ def _cmd_icon(args, cli, resolver, head):
                         logs=ctx.logs + qa_logs + ["art-fail:icon-qa"],
                         note="nothing written"), CHECK_FAILED
         img, info = normalize_icon(src, args.ground, card, pixel_art=bool(ctx.style.get("icon_pixel_art")),
-                                  tolerance=args.ground_tolerance)
+                                  tolerance=tolerance)
         data, qlogs = icon_bytes(img)
         qa = icon_qa(data, card=card, ink=ink, org_mark=mark, siblings=siblings, strict=strict, min_contrast=floor,
-                     ocr=ocr, source=str(args.src))
+                     ocr=ocr, source=str(args.src), exact_contrast=exact)
         out = Path(args.out) if args.out else cli.default_out(args, "assets/icon.png")
         if qa["result"] == "fail":
             return dict(head, result="fail", out=None, info=info, qa=qa,
@@ -2855,7 +2880,7 @@ def _cmd_icon(args, cli, resolver, head):
         return dict(head, result="fail", file=str(path) if path else None, logs=ctx.logs + ["needs-input:repo-icon"]), \
             CHECK_FAILED
     qa = icon_qa(path.read_bytes(), card=card, ink=ink, org_mark=mark, siblings=siblings, strict=strict,
-                 min_contrast=floor, ocr=ocr, source=str(path))
+                 min_contrast=floor, ocr=ocr, source=str(path), exact_contrast=exact)
     return dict(head, result=qa["result"], file=str(path), qa=qa, logs=ctx.logs + qa.get("logs", [])), _code(qa["result"])
 
 
