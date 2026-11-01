@@ -1074,7 +1074,7 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
     # repository before the filter mutation goes out. A filter that names a denied repository is held (its job is
     # removed); a permitted one carries the sign-off ids of the repositories it names. Bare names that do not resolve
     # to an owner/name pair are left alone.
-    for fj, flt in filter_jobs:
+    for fj, flt in (filter_jobs if resolver is not None else []):  # no resolver: nothing to authorize against, unchanged
         refs = [r for r in _normalize_repo_entries(_filter_repo_refs(flt), owner, role, resolver, []) if "/" in r]
         if not refs:
             continue
