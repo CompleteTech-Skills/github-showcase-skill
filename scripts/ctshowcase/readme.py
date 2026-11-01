@@ -233,12 +233,18 @@ def badges_html(ctx) -> str:
     return '<p align="center">\n' + "\n".join(parts) + "\n</p>"
 
 
+def _eol_normalized(body: str) -> str:
+    """Line endings unified to LF and only the surrounding newline separators removed; spaces and tabs are kept
+    because they are significant (an indented row is Markdown code, not the inherited template)."""
+    return body.replace("\r\n", "\n").replace("\r", "\n").strip("\n")
+
+
 def badge_body(ctx: RepoContext, existing: str | None = None) -> str:
     """Refresh owned rows; a missing or changed digest makes a J block authored."""
     if ctx.det["variant"] != "J":
         return badges_html(ctx) if ctx.det["variant"] == "F" else badges_md(ctx)
     is_legacy = (legacy_profile_badges(ctx.brand, existing or "", ctx.style)
-                 or (existing or "").strip() in template_badge_bodies(ctx.brand))
+                 or _eol_normalized(existing or "") in template_badge_bodies(ctx.brand))
     has_license_row = "![License " in (existing or "") or "![AGPL-3.0 or commercial license]" in (existing or "")
     if is_legacy and has_license_row and ctx.public and (ctx.meta.get("license") or "").upper() in ("", "NOASSERTION", "OTHER"):
         return existing  # missing metadata cannot disprove an authored license claim
@@ -270,7 +276,7 @@ def legacy_profile_badges(brand, body: str, style: dict | None = None) -> bool:
     A type row, custom markup, altered alt/URL pair or duplicate kind makes the block authored.
     Both historical remote and local badge paths are accepted.
     """
-    lines = body.splitlines()
+    lines = _eol_normalized(body).split("\n")
     if not 1 <= len(lines) <= 3:
         return False
     kinds = []
