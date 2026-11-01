@@ -319,6 +319,29 @@ def test_backtick_in_a_resolved_reference_label_does_not_pair_with_later_code(ma
     assert "R7 off-palette badge colour FF0000" in _badge_fails(make_ctx, second, brand, type_off)
 
 
+# GFM expectation (test data): orphan junction renders 1 image, raw comment boundary 1, both controls 0 images.
+IMAGE_IN_CODE = "`![Shot](<docs/images/missing.png>)`"
+REF_DEF = "\n\n[ref`x]: https://example.test/"
+ORPHAN_JUNCTION_CASES = {
+    "orphan_reference_junction": ("][ref`x] " + IMAGE_IN_CODE + REF_DEF, True),
+    "raw_comment_boundary": ("See [open\n<!-- note -->\n](a`b) " + IMAGE_IN_CODE, True),
+    "inline_comment_control": ("[open <!-- note -->](a`b) " + IMAGE_IN_CODE, False),
+    "valid_reference_control": ("[text][ref`x] " + IMAGE_IN_CODE + REF_DEF, False),
+}
+
+
+@pytest.mark.parametrize("extra,reported", list(ORPHAN_JUNCTION_CASES.values()), ids=list(ORPHAN_JUNCTION_CASES))
+def test_orphan_reference_junction_and_comment_controls(make_ctx, tmp_path, brand, extra, reported):
+    ctx = good_readme(make_ctx, tmp_path, brand)
+    readme = tmp_path / "README.md"
+    readme.write_text(readme.read_text(encoding="utf8").replace("## Usage", extra + "\n\n## Usage"), encoding="utf8")
+    fails = readmelint.lint(ctx, readme)["fails"]
+    if reported:
+        assert MISSING in fails
+    else:
+        assert fails == []
+
+
 def test_backtick_in_an_unresolved_reference_label_still_opens_code(make_ctx, tmp_path, brand):
     # no `[docs`ref]:` definition: the label is not a reference, so its backtick pairs with the one before `help`
     body = REF_LABEL_LAYOUT.format(type="005ADD", license="FF0000")

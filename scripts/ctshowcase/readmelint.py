@@ -522,6 +522,8 @@ def _reference_label_spans(document: str) -> tuple[tuple[int, int], ...]:
         at = junction.start()
         if _escaped(document, at) or _span_at(fences, at) is not None or _span_at(definitions, at) is not None:
             continue
+        if at not in _active_openers(document):
+            continue  # the first `]` closes no link text (an orphan junction): `[label]` is a shortcut, not a full reference
         open_ = at + 1
         close = _closing_bracket(document, open_)
         if close is None:
