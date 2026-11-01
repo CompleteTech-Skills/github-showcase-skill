@@ -219,6 +219,47 @@ def test_dedent_below_the_content_column_ends_an_item_fence():
     assert images(t) == [("x", "docs/images/missing.png")]
 
 
+ITEM_MARKERS = [("- ", 2), ("* ", 2), ("+ ", 2), ("1. ", 3)]
+
+
+@pytest.mark.parametrize("marker,indent", ITEM_MARKERS, ids=["dash", "star", "plus", "ordered"])
+def test_dedented_quote_after_item_fence_ends_the_fence(marker, indent):
+    pad = " " * indent
+    t = f"{marker}```text\n{pad}example\n> ![Shot](<docs/images/missing.png>)\n\nOrdinary paragraph.\n"
+    assert len(mdcode.fence_spans(t)) == 1
+    (a, b), = mdcode.fence_spans(t)
+    assert b == t.index("> ![Shot]")
+    assert images(t) == [("Shot", "docs/images/missing.png")]
+
+
+@pytest.mark.parametrize("marker,indent", ITEM_MARKERS, ids=["dash", "star", "plus", "ordered"])
+def test_indented_quote_inside_item_fence_is_control_content(marker, indent):
+    pad = " " * indent
+    t = f"{marker}```text\n{pad}example\n{pad}> ![Shot](<docs/images/missing.png>)\n{pad}```\n"
+    (a, b), = mdcode.fence_spans(t)
+    assert b == len(t)
+    assert images(t) == []
+
+
+def test_blank_line_does_not_end_item_fence_but_dedented_quote_does():
+    t = "- ```text\n  example\n\n> ![Shot](<docs/images/missing.png>)\n"
+    (a, b), = mdcode.fence_spans(t)
+    assert b == t.index("> ![Shot]")
+    assert images(t) == [("Shot", "docs/images/missing.png")]
+
+
+def test_two_angle_delimited_badges_after_item_fence_are_both_counted():
+    t = "- ```text\n  example\n> ![A](<https://img.shields.io/badge/a-b-005ADD>) ![B](<https://img.shields.io/badge/c-d-64748B>)\n"
+    assert len(images(t)) == 2
+
+
+def test_deeper_quote_inside_quoted_item_fence_stays_content():
+    t = "> - ```text\n>   a\n>   > ![x](docs/images/missing.png)\n>   ```\n"
+    (a, b), = mdcode.fence_spans(t)
+    assert b == len(t)
+    assert images(t) == []
+
+
 @pytest.mark.parametrize("t", ["- > ```text\n  > a\n  > ```\n", "> - ```text\n>   a\n>   ```\n"],
                          ids=["item-quote", "quote-item"])
 def test_composed_item_and_quote_fences_are_one_span(t):
