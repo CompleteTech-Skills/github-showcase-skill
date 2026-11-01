@@ -99,16 +99,16 @@ This recipe does not rely on a documented image path: OpenAI documentation cover
 
 1. After the run, search the `run.jsonl` events (or the final message) for the image file path Codex reports for the generated image, and use exactly that path.
 2. Never pick the newest file in the generated-images folder. Parallel sessions write into the same place, so the newest file can belong to another run and the wrong image gets normalized.
-3. If the run output names no image path, treat the attempt as failed. Do not fall back to the newest file or to a directory listing.
+3. If the run output names no readable image path, treat the attempt as an empty run (see Retry and attempt limits). Do not fall back to the newest file or to a directory listing.
 4. Pass the chosen path to `content icon normalize --in PATH`. In the `PROMPTS.md` provenance block, record the Codex session id and only the image file name, or the path written relative to `$CODEX_HOME` (for example `$CODEX_HOME/generated_images/<file>`), in the prose beside the record. Never record the absolute path: it contains the local user name. The Provenance record fenced template itself does not change.
-5. One invocation may report between zero and four image paths. Every DISTINCT path the run output reports is one candidate; use exactly the reported paths, never a directory listing or the newest file. A run that reports no path is an empty run. Parallel sessions write into the same place, so do not run candidates for several repositories in the same working directory at once unless you can tell their outputs apart.
+5. One invocation may report between zero and four image paths. Every DISTINCT path the run output reports is one candidate; use exactly the reported paths, never a directory listing or the newest file. A run that reports no readable path is an empty run: either it reports no path, or every path it reports is unreadable (unreadable-only output). An unreadable path fills no slot, and readable paths in the same run still fill their slots. Parallel sessions write into the same place, so do not run candidates for several repositories in the same working directory at once unless you can tell their outputs apart.
 
 ### Retry and attempt limits
 
-- The limit applies per candidate, not per candidate set. The fixed prompt asks for four candidates, so there are four candidate slots, and the cap applies to each slot. A run that returns k distinct paths fills k slots (up to the unfilled ones); make further runs, with the same unchanged prompt, only for unfilled slots.
-- A run that finishes with no image path is an empty run. Retry it as a NEW run with the same prompt, at most 2 retries (3 attempts total) for that slot. Parallel runs can finish without a path, which is why a retry is allowed. Retries never alter the prompt.
-- Successful candidates never count toward the cap, so the four-candidate round of pipeline rule 7 (then 4 more once, then log `art-fail`) is still reachable. Only empty runs count toward the 3 attempts, and they are not candidates.
-- After 3 empty attempts for any one slot, stop and log `art-fail` with a one-line reason. Do not loop.
+- The limit applies per candidate, not per candidate set. The fixed prompt asks for four candidates, so there are four candidate slots, and the cap applies to each slot. A run that returns k distinct readable paths fills k slots (up to the unfilled ones); make further runs, with the same unchanged prompt, only for unfilled slots.
+- An empty run (no path, or unreadable-only output) is retried as a NEW run with the same unchanged prompt, at most 2 retries (3 attempts total) for each slot that is still unfilled. Each empty run counts as one attempt against every slot that is still unfilled. Parallel runs can finish without a path, which is why a retry is allowed. Retries never alter the prompt.
+- Successful candidates never count toward the cap, so the four-candidate round of pipeline rule 7 (then 4 more once, then log `art-fail`) is still reachable. Only empty runs count toward the 3 attempts, and they are not candidates. An unreadable path is not a successful candidate, so unreadable-only output is counted as an empty run and cannot loop forever.
+- After 3 empty attempts for any one slot, including attempts that returned only unreadable paths, stop and log `art-fail` with a one-line reason. Do not loop.
 
 ### Privacy: only public facts go into prompts
 
@@ -124,7 +124,7 @@ These are OBSERVED runtime notes from issue #64 and the Pick Your AI evidence, n
 
 - (a) Observed: Codex stored generated images in its `generated_images` folder inside `$CODEX_HOME` (default: the `.codex` folder in the user's home, `~`). Read the image from the path named in the run output, which points there.
 - (b) Observed: files that Codex writes into its own sandbox, for example a copy it saves into the working directory it was given, can be locked against the user account (access denied). Do not rely on them, and do not try to chmod or take ownership of them.
-- (c) If a path is unreadable, copy nothing from the sandbox. Re-take the image from the generated-images folder path in the run output, or retry the run under the retry limit above.
+- (c) If a path is unreadable, copy nothing from the sandbox and do not retry the same path. Treat that path as returning nothing: if the same run reports another readable path in the generated-images folder, use that; otherwise the run is an empty run and counts as one attempt under the retry limit above, ending in `art-fail` after 3 empty attempts for the slot.
 - (d) Copy the chosen image to a scratch location outside the repository before `content icon normalize --in`, and commit only the normalized `assets/icon.png`. Never commit the raw candidate. Do not write any real absolute local path or user name; use `$CODEX_HOME` and `~` only.
 
 ## Repository glyph prompt template
