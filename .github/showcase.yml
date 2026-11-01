@@ -1,3 +1,7 @@
 # Showcase overrides for this repository (content only; colours and fonts come from references/brand.yaml).
 # The full description does not fit the banner's one-line subtitle, so a short factual subtitle is set here.
 subtitle: "Hero banners, repo cards and estate standard checks"
+# Persisted key chip and attribute chips. chips.attrs replaces the topic-derived attrs on both the banner and the card, so the runtime chip (Claude · Codex) is not repeated next to the key chip.
+chips:
+  key: ["Claude + Codex"]
+  attrs: ["Python", "Offline"]
