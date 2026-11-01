@@ -626,8 +626,10 @@ def test_link_opener_lookup_work_is_linear():
     "~~~text\nfenced\n~~~",
     "### heading",
     "## heading",
+    "1. item",
+    "***",
     "",
-], ids=["quote", "list", "fence", "heading", "heading-h2", "blank-control"])
+], ids=["quote", "list", "fence", "heading", "heading-h2", "ordered-list", "thematic-break", "blank-control"])
 def test_opener_resets_at_block_boundary(make_ctx, tmp_path, brand, block):
     readmelint._active_openers.cache_clear()
     text = f"See [open\n{block}\n](a`b) ![Shot](<docs/images/missing.png>)"

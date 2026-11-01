@@ -350,7 +350,6 @@ def _active_openers(text: str) -> frozenset[int]:
         fence = _span_at(fences, pos)
         if fence is not None:  # fenced code is inert and a block boundary: no opener before it can match a closer after it
             _OPENER_STEPS += 1
-            stack.clear()
             pos = fence[1]
             stack.clear()
             continue
