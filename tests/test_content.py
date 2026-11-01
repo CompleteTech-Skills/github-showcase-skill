@@ -1564,3 +1564,30 @@ def test_icon_ocr_undecodable_idat_is_structured_failure(monkeypatch):
     assert any(c["check"] == "png" and c["result"] == "fail" and "undecodable" in c["detail"] for c in qa["checks"]), qa
     plain = C.icon_qa(data, card="#0B1020")
     assert plain["result"] == "fail" and "logs" not in plain, plain
+
+
+def test_icon_check_cli_undecodable_idat_exits_1_with_logs_and_bad_args_exit_2(tmp_path, capsys, monkeypatch):
+    # valid arguments plus a structurally valid PNG with corrupt IDAT: a QA failure (exit 1, JSON with a `logs` list),
+    # distinct from bad arguments, which stay a usage error (exit 2)
+    import struct
+    import zlib
+
+    def chunk(kind, body):
+        return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body) & 0xFFFFFFFF)
+    data = (bytes.fromhex("89504e470d0a1a0a") + chunk(b"IHDR", struct.pack(">IIBBBBB", 1024, 1024, 8, 6, 0, 0, 0))
+            + chunk(b"IDAT", b"this is not a zlib stream") + chunk(b"IEND", b""))
+    monkeypatch.setattr(C, "_tesseract", lambda: None)
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    bad = tmp_path / "repo" / "assets" / "icon.png"
+    bad.parent.mkdir(parents=True)
+    bad.write_bytes(data)
+    check = ("--meta", meta, "--no-repo-dir", "content", "icon", "check")
+    art = ("--art-direction", FIX / "ART_DIRECTION.min.md")
+    for extra in ((), ("--ocr",)):
+        code, res = run_content(capsys, *check, "--out", bad, *extra, *art, *NO_ESTATE)
+        assert code == 1 and res["result"] == "fail" and isinstance(res["logs"], list), (extra, res)
+        assert any(c["check"] == "png" and c["result"] == "fail" and "undecodable" in c["detail"]
+                   for c in res["qa"]["checks"]), res
+    code, res = run_content(capsys, *check, "--out", bad, "--min-contrast", "0.5", *art, *NO_ESTATE)
+    assert code == 2, res
