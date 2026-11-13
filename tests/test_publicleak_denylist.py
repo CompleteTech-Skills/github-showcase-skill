@@ -75,3 +75,41 @@ def test_cli_denylist_rejects_registry_inputs(tmp_path):
     result = run_cli("lint", "public-leak", source, "--denylist", denied, "--registry", tmp_path / "missing.yml")
     assert result.returncode == 2
     assert "use --denylist without" in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("encoding", ["utf-8", "utf-8-sig"])
+def test_cli_first_entry_matches_and_redacts_path_with_optional_bom(tmp_path, monkeypatch, encoding):
+    from conftest import run_cli
+    monkeypatch.setenv("SHOWCASE_ESTATE_ROOT", str(tmp_path / "absent"))
+    denied = tmp_path / "deny.txt"
+    denied.write_text("northwind-private-demo\nsecond-synthetic-secret\n", encoding=encoding)
+    source = tmp_path / "NORTHWIND-PRIVATE-DEMO.md"
+    source.write_text("Public\nnorthwind-private-demo\n", encoding="utf-8")
+    before = {path: path.read_bytes() for path in (source, denied)}
+
+    result = run_cli("lint", "public-leak", source, "--denylist", denied)
+
+    assert result.returncode == 1
+    payload = json.loads(result.stdout)
+    assert payload["result"] == "fail"
+    assert payload["hits"] == [{"line": 2}]
+    assert payload["file"] == "[redacted path]"
+    assert "northwind-private-demo" not in (result.stdout + result.stderr).casefold()
+    assert "second-synthetic-secret" not in (result.stdout + result.stderr).casefold()
+    assert all(path.read_bytes() == content for path, content in before.items())
+
+
+@pytest.mark.parametrize("text", ["", " \n\t\r\n"])
+def test_cli_bom_only_or_blank_denylist_refuses_without_privacy_claim(tmp_path, text):
+    from conftest import run_cli
+    denied = tmp_path / "deny.txt"
+    denied.write_text(text, encoding="utf-8-sig")
+    source = tmp_path / "README.md"
+    source.write_text("Public\n", encoding="utf-8")
+
+    result = run_cli("lint", "public-leak", source, "--denylist", denied)
+
+    assert result.returncode == 4
+    payload = json.loads(result.stdout)
+    assert "needs-input:denylist" in payload["logs"]
+    assert "no privacy check was performed" in result.stdout + result.stderr

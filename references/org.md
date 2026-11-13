@@ -60,8 +60,9 @@ The synthetic `examples/estate/` tree runs every action offline: `SHOWCASE_ESTAT
 ### Registry-free public leak check
 
 `python3 $S lint public-leak README.md --denylist /private/denylist.txt` checks
-public files without a registry. The UTF-8 denylist contains one literal name,
-slug, domain or other forbidden string per line. Blank lines are ignored;
+public files without a registry. The UTF-8 denylist may include a leading
+byte-order mark and contains one literal name, slug, domain or other forbidden
+string per line. Blank lines are ignored;
 matching is case-insensitive and treats punctuation literally. Keep this file
 outside repositories and never populate examples with real private names.
 

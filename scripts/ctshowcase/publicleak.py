@@ -13,7 +13,7 @@ def check_files(files: list[str], denylist: str | Path) -> list[dict]:
     function. File names are redacted too when they contain an entry.
     """
     try:
-        entries = {line.strip().casefold() for line in Path(denylist).read_text(encoding="utf-8").splitlines()
+        entries = {line.strip().casefold() for line in Path(denylist).read_text(encoding="utf-8-sig").splitlines()
                    if line.strip()}
     except (OSError, UnicodeError) as exc:
         raise ShowcaseError("cannot read denylist as UTF-8", log="usage") from exc
