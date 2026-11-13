@@ -80,7 +80,7 @@ Run every command **from inside the target repository's checkout**, with the ski
 | 5 | `banner`, then `card` (and `content social`) | `art-fail` (exit 3) writes nothing. `needs-input` (exit 4) names the missing fact, including fewer than two fact chips (`needs-input:banner-chips`; add `chips:` to `.github/showcase.yml` or pass `--key-chip`/`--chip`). |
 | 6 | `readme`, then `readme --write` | Dry run prints a unified diff first. `readme-shrink` (exit 1) writes nothing. |
 | 7 | `footer --check README.md`, `lint all` | Every applicable check passes; `incomplete` is allowed for logged `needs-input` omissions. |
-| 8 | `doctor --header` | One coverage row. `done` only when every applicable cell is `pass`, `warn`, `incomplete` or `n/a`, and the banner has two to four chips. |
+| 8 | `doctor --header` | One coverage row with `skill_complete` for locally generated surfaces and `owner_pending` listing unresolved owner-controlled cells. `--allow-unmeasured` is accepted for CLI consistency; it does not relax the checks on existing outputs. `done` only when every applicable cell is `pass`, `warn`, `incomplete` or `n/a`, and the banner has two to four chips. |
 | 9 | `contact-sheet` | A human (or an independent verifier) views the set on both GitHub page colours before rollout. Pass PNGs: `card --png`, `org-tile --png` previews, or install the optional `resvg_py` (`requirements-preview.txt`) so SVG inputs (the intro's static frame) render too; otherwise an SVG input exits 2. |
 
 **Who applies GitHub changes.** Under the estate orchestrator, every proposal (description, topics, labels, README) goes to its single writer queue as change records. Used standalone, with no orchestrator: show the user the `--gh` command lines (or the `argv` of `labels --plan`) and the README diff; the user runs them after approving that repository's changes. The skill itself never runs a write.
@@ -197,7 +197,7 @@ contact-sheet INPUT... --out PATH [--mode grid|stack|avatar] [--tile W] [--cols 
               [--widths 1012,390] [--mask none|circle|rounded] [--labels] [--title TEXT]
 contact-sheet --org OWNER --cross-surface --out PATH [--avatar PNG] [--banner PNG] [--card SVG|PNG] [--social PNG]
               [--org-banner JPG]
-doctor [--format tsv|json|md] [--header]
+doctor [--format tsv|json|md] [--header] [--allow-unmeasured]
 doctor --estate --meta-dir DIR [--registry FILE] [--template-dir DIR --checkouts DIR] [--out NEW_PROPOSALS.yaml]
 new OWNER/NAME --type TYPE [--description TEXT] [--template OWNER/REPO] [--records FILE] [--jobs FILE] [--approval-id ID]
 adopt OWNER/REPO [--records FILE] [--jobs FILE] [--approval-id ID]

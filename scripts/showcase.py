@@ -1156,6 +1156,8 @@ def parser() -> argparse.ArgumentParser:
     s = sub.add_parser("doctor", help="definition-of-done coverage row; --estate: intake proposals and template drift")
     s.add_argument("--format", dest="doctor_format", choices=("tsv", "json", "md"), default="tsv")
     s.add_argument("--header", action="store_true")
+    s.add_argument("--allow-unmeasured", action="store_true",
+                   help="accepted for consistency; doctor checks existing outputs and does not render art")
     s.add_argument("--estate", action="store_true",
                    help="classify repositories missing from the registry with POLICY.md into NEW_PROPOSALS entries and "
                         "diff template-managed files against the template (read only)")
