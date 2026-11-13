@@ -261,3 +261,18 @@ The default is a dry run that prints a unified diff; `--write` writes `README.md
 ## What `lint readme` checks
 
 The hero banner first, then the nav line (or the nav line first with `readme.nav_first: true`); the banner block is the first image and a plain `<img>` (a preserve-list README is exempt only when q57 `pres` is "Leave them unchanged"); G and H: the banner block, then the callout, the footer last; exactly one H1 outside fenced code (```` ``` ```` and `~~~` fences alike; except F); 2–4 badges in palette tokens; the bold tagline equals the description (with metadata); H2 order per variant, License last; footer last and exact, and no second footer-like block before it (`D18 footer fail:duplicate`); literal alt text on every image; local images resolve (URL-encoded paths such as `My%20Shot.png` are decoded) and stay within size; no placeholder tokens outside code and HTML comments; no emoji; info strings on code fences; size under 512,000 B; brand strings outside URLs and code. The result is `incomplete` when only logged `needs-input` omissions remain.
+
+## Footer applicability
+
+`footer --check` resolves the repository owner from `--meta` or the target checkout
+when `--org` is absent. It uses the same applicability as `doctor`: exempt footers
+are `exempt`, held footers are `hold`, and applicable footers are inspected. The
+watching organization's forks are exempt, its `.github` needs the footer, and its
+other non-fork repositories remain held. An explicit `--org` must agree with
+supplied repository metadata. Without repository context, a watching organization's
+`--check` stays conservative and inspects the file because its name alone cannot
+distinguish a fork from `.github`.
+
+The decision 18 footer remains the explicitly configured cross-brand credit and
+the only generated `<picture>`. Its published logo URLs, markup and safe legacy
+migration are unchanged.
