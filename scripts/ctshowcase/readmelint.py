@@ -53,19 +53,63 @@ def _search_unescaped(pattern, text: str, pos: int, html_spans=None):
     return match
 
 
-def _search_comment(text: str, pos: int, html_spans):
-    """First valid HTML comment match at or after `pos` whose opener is not backslash-escaped.
+@functools.lru_cache(maxsize=16)
+def _comment_matches(text: str, html_spans):
+    """Index comment candidates without rescanning rejected opener suffixes.
 
-    An inline (mid-line) HTML comment cannot span a paragraph boundary (CommonMark/GFM), while a comment opening at the
-    start of an HTML block (inside `html_spans`) may span blank lines. An invalid match leaves `<!--` as literal text
-    and the search resumes one character on, so each iteration advances and the loop stays linear."""
-    while True:
-        match = _search_unescaped(HTML_COMMENT, text, pos, html_spans)
-        if match is None:
-            return None
-        if _span_at(html_spans, match.start()) is not None or re.search(r'\n[ \t\x00\r]*\n', match.group()) is None:
-            return match
-        pos = match.start() + 1
+    Each delimiter/paragraph pass visits the document once. Closer and paragraph
+    cursors advance monotonically across openers. Keep nested candidates too:
+    an outer opener can belong to a literal tag attribute or reference label,
+    leaving an inner opener live when a caller resumes beyond that literal.
+    Inline comments may not cross paragraphs; raw HTML-block comments may.
+    """
+    mdcode.WORK['comment_builds'] += 1
+    mdcode.WORK['comment_scan_chars'] += 3 * len(text)
+    closers = [m.start() for m in re.finditer(r"-->", text)]
+    paragraphs = [m.start() for m in re.finditer(r'\n[ \t\x00\r]*\n', text)]
+    matches, starts = [], []
+    closer = paragraph = 0
+    for opener in re.finditer(r"<!--", text):
+        start = opener.start()
+        in_block = _span_at(html_spans, start) is not None
+        if not in_block and _escaped(text, start):
+            continue
+        while closer < len(closers) and closers[closer] < opener.end():
+            closer += 1
+        if closer == len(closers):
+            break
+        while paragraph < len(paragraphs) and paragraphs[paragraph] < start:
+            paragraph += 1
+        end = closers[closer] + 3
+        if not in_block and paragraph < len(paragraphs) and paragraphs[paragraph] < end:
+            continue
+        matches.append((start, end))
+        starts.append(start)
+    return tuple(starts), tuple(matches)
+
+
+class _CommentMatch:
+    """The span-only match interface the HTML scans consume, with no body rescan."""
+    __slots__ = ("_start", "_end")
+
+    def __init__(self, start: int, end: int):
+        self._start, self._end = start, end
+
+    def start(self):
+        return self._start
+
+    def end(self):
+        return self._end
+
+    def span(self):
+        return self._start, self._end
+
+
+def _search_comment(text: str, pos: int, html_spans):
+    """First indexed, unescaped valid HTML comment at or after `pos`."""
+    starts, matches = _comment_matches(text, tuple(html_spans))
+    index = bisect.bisect_left(starts, pos)
+    return _CommentMatch(*matches[index]) if index < len(matches) else None
 
 
 def _span_at(spans, index: int, strict: bool = False):
