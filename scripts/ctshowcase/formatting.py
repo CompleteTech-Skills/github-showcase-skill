@@ -69,7 +69,10 @@ def discover(repo_dir: Path | None) -> dict:
             for job, details in jobs.items():
                 if not isinstance(details, dict):
                     continue
-                for step in details.get("steps") or []:
+                steps = details.get("steps") or []
+                if not isinstance(steps, list):
+                    continue
+                for step in steps:
                     if isinstance(step, dict) and isinstance(step.get("run"), str):
                         validators.append({"source": f"{path.relative_to(root).as_posix()}#jobs.{job}",
                                            "command": step["run"].strip(), "status": "not run"})
@@ -120,8 +123,11 @@ def format_text(repo_dir: Path | None, destination: Path, text: str) -> str:
     cli = (package_root / binary).resolve()
     if not cli.is_relative_to(package_root.resolve()) or not cli.is_file():
         raise NeedsInput("formatter", "the installed Prettier CLI is unavailable")
+    argv = [node, str(cli), "--stdin-filepath", str(relative)]
+    if destination.suffix.lower() == ".svg":
+        argv += ["--parser", "html"]
     try:
-        result = subprocess.run([node, str(cli), "--stdin-filepath", str(relative)], cwd=root, input=text,
+        result = subprocess.run(argv, cwd=root, input=text,
                                 text=True, encoding="utf-8", capture_output=True, timeout=60, check=False)
     except (OSError, subprocess.SubprocessError) as error:
         raise NeedsInput("formatter", "the target's pinned Prettier could not run") from error

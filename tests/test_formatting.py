@@ -72,6 +72,14 @@ def test_malformed_metadata_is_reported_without_crash(tmp_path):
     assert discover(tmp_path)["validators"] == []
 
 
+def test_malformed_workflow_steps_do_not_break_passive_preflight(tmp_path):
+    workflow = tmp_path / ".github/workflows/check.yml"
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text('jobs:\n  malformed:\n    steps: 42\n  valid:\n    steps:\n      - run: make verify\n')
+    assert discover(tmp_path)["validators"] == [{
+        "source": ".github/workflows/check.yml#jobs.valid", "command": "make verify", "status": "not run"}]
+
+
 def test_npm_lock_pin_is_supported(tmp_path, monkeypatch):
     local_prettier(tmp_path, pin="^3.6.2")
     (tmp_path / "package-lock.json").write_text(json.dumps({"packages": {"node_modules/prettier": {"version": "3.6.2"}}}))
