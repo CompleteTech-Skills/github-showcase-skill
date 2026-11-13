@@ -31,7 +31,9 @@ is still required by the usual consent gate. No sign-off record is created.
 
 Add `--mark path/to/authorized-mark.png` to either command to copy a valid PNG,
 byte for byte, to `assets/orgs/ORG/mark.png` under the config's package root (the
-parent of `references/`). Existing assets are never overwritten. Use only artwork
+parent of `references/`). The selected config's package-local asset takes precedence when present; bundled
+fonts and fallback assets remain available from the installed skill. Existing
+assets are never overwritten. Use only artwork
 you are authorized to keep in this package. No asset is downloaded, cropped,
 recoloured or published. Without a mark, existing family wordmark fallback behavior
 applies; this is not a repository icon.
