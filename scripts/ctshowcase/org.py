@@ -1610,11 +1610,13 @@ def star_list_plan(estate: Estate, org: str, *, lists_capture: dict | None = Non
 # =====================================================================================================
 # labels (STANDARD §6.1): the labels module per repository, dry-run plans only
 # =====================================================================================================
-def _label_checkout_evidence(directory: Path, meta: dict | None, *, defaults_only: bool = False) -> tuple[Path | None, dict]:
+def _label_checkout_evidence(directory: Path, meta: dict | None, *, defaults_only: bool = False,
+                             include_defaults: bool = False) -> tuple[Path | None, dict]:
     """Use a checkout only when its captured and indexed reference files are actually present.
 
     Sparse checkouts and local deletions must not turn a missing form into evidence that no form exists.
     Unrelated omitted files do not matter; package.json matters for a member's Renovate configuration.
+    A `.github` repository additionally needs its root and docs default issue templates present.
     """
     from . import labels as labelsmod
     evidence = dict(meta or {})
@@ -1629,7 +1631,8 @@ def _label_checkout_evidence(directory: Path, meta: dict | None, *, defaults_onl
     except (OSError, subprocess.SubprocessError):
         indexed = False
     relevant = (labelsmod.default_form_file if defaults_only
-                else lambda p: labelsmod.reference_file(p) or p.lower() == "package.json")
+                else lambda p: labelsmod.reference_file(p) or p.lower() == "package.json"
+                or include_defaults and labelsmod.default_form_file(p))
     try:
         complete = indexed and all((directory / p).is_file() for p in paths if relevant(p))
     except OSError:
@@ -1811,7 +1814,7 @@ def labels_plan(estate: Estate, org: str, *, allow_t3: bool = False, checkouts: 
                 if (not origin or origin[1].lower() != current_name.lower()
                         or not estate.resolver.same(origin[0], current_owner)):
                     raise ShowcaseError(f"--checkouts entry for {full} must have its matching GitHub origin", log="usage")
-                repo_dir, member_meta = _label_checkout_evidence(repo_dir, m)
+                repo_dir, member_meta = _label_checkout_evidence(repo_dir, m, include_defaults=current_name == ".github")
             else:
                 repo_dir = None
             repo_defaults = defaults
