@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from ctshowcase import signoff
+from ctshowcase import doctor, signoff
 from ctshowcase.config import Brand, reset_t3_signed_off, set_t3_signed_off
 from ctshowcase.content import social_job
 from ctshowcase.context import RepoContext
@@ -147,3 +147,15 @@ def test_cli_t3_refuses_before_render_or_job_write(tmp_path, case):
     assert result.returncode == 2, result.stdout + result.stderr
     assert json.loads(result.stdout)["result"] == "refused"
     assert not out.exists() and not jobs.exists()
+
+
+@pytest.mark.parametrize("captured,expected", [(True, "pass"), (False, "fail"), (None, "unknown")])
+def test_doctor_r10_matches_live_t3_job_applicability(brand, tmp_path, captured, expected):
+    path = record_file(tmp_path)
+    with scoped(path):
+        ctx = context(brand, uses_custom_og_image=captured)
+        assert doctor.row(ctx)["cells"]["R10"] == expected
+        assert social_job(ctx, brand.resolver(), "assets/social-preview.png") is not None
+        record_file(tmp_path, approved=False)
+        assert doctor.row(ctx)["cells"]["R10"] == "n/a"
+        assert social_job(ctx, brand.resolver(), "assets/social-preview.png") is None
