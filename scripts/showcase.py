@@ -301,6 +301,8 @@ def cmd_intro(args):
         raise ShowcaseError("pass --profile CompleteDotTech or --org OWNER", log="usage")
     b.check_owner(owner)
     org = b.org(owner)
+    if not org.get("known"):
+        raise ShowcaseError(f"no brand.yaml org row for {owner}", log="needs-input:org-row", code=NEEDS_INPUT)
     logs = []
     prof = org.get("profile") or {}
     if args.profile:
@@ -315,6 +317,9 @@ def cmd_intro(args):
         if st.get("eyebrow_case") == "upper":
             eyebrow = eyebrow.upper()
         chips_raw = args.chip or []
+    for field, value in (("name", name), ("eyebrow", eyebrow)):
+        if not value or not value.strip():
+            raise ShowcaseError(f"supply this profile's --{field}", log=f"needs-input:{field}", code=NEEDS_INPUT)
     chips = []
     for c in chips_raw:
         kind, _, text = c.partition(":")
@@ -324,14 +329,25 @@ def cmd_intro(args):
     static = args.static or not org.get("flagship")
     if static and not args.static:
         logs.append("static:not-flagship")
+    complete_tech = org.get("family") == "completetech"
     if args.mark:
         mark = Path(args.mark)
-    else:
+    elif complete_tech:
         mark = b.mark_dark()
         if not mark:
             mark = b.dark_master()
             logs.append("needs-input:mark-dark")
-    svg = intro.build(b, Fonts(b), owner=owner, name=name, eyebrow=eyebrow, tagline=args.tagline or b.strings["tagline"],
+    else:
+        mark = b.asset(org.get("mark"))
+        if not mark or not mark.is_file():
+            raise ShowcaseError("supply this organization's own --mark", log="needs-input:org-mark", code=NEEDS_INPUT)
+    tagline = args.tagline or prof.get("tagline")
+    if not tagline:
+        if complete_tech:
+            tagline = b.strings["tagline"]
+        else:
+            raise ShowcaseError("supply this organization's own --tagline", log="needs-input:tagline", code=NEEDS_INPUT)
+    svg = intro.build(b, Fonts(b), owner=owner, name=name, eyebrow=eyebrow, tagline=tagline,
                       chips=chips, mark_path=mark, height=args.height, static=static)
     lint = svglint.lint_bytes("intro", svg.encode(), args.out)
     if lint["result"] != "PASS":
