@@ -81,6 +81,24 @@ def _quotes(body: str) -> tuple[int, str]:
     return depth, body
 
 
+def block_line(body: str) -> str:
+    """Block syntax in four-column tab stops, before any container is peeled.
+
+    Callers retain the original text for offsets and literal inline content.
+    """
+    return body.expandtabs(4)
+
+
+def source_prefix_chars(body: str, columns: int) -> int:
+    """Source characters covering a visual prefix (including a partially used tab)."""
+    column = 0
+    for index, char in enumerate(body):
+        if column >= columns:
+            return index
+        column = (column // 4 + 1) * 4 if char == "\t" else column + 1
+    return len(body)
+
+
 def _strip_quotes(body: str, depth: int) -> str:
     """`body` with at most `depth` leading block-quote markers removed: deeper `>` characters stay content."""
     for _ in range(depth):
@@ -286,7 +304,7 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
         # container lets a tab supply the optional quote space AND residual
         # indentation, including nested quotes/list prefixes. Source rows and
         # offsets below remain untouched for inline spans and marker matches.
-        body = raw.rstrip("\r\n").expandtabs(4)
+        body = block_line(raw.rstrip("\r\n"))
         depth, rest = _quotes(body)
         quote_column = len(body[:len(body) - len(rest)].expandtabs(4))
         if fence is not None:
@@ -356,8 +374,10 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
         added, crest = _container_path(content)
         path = inherited + added
         item_indices = [i for i, (kind, _) in enumerate(added) if kind == "item"]
-        if item_indices:
-            lists.append(inherited + added[:item_indices[-1] + 1])
+        for item_index in item_indices:
+            # Each item can survive when a deeper quote/item ends. Retaining
+            # only the deepest path would also discard a still-live ancestor.
+            lists.append(inherited + added[:item_index + 1])
         opener = FENCE_OPEN.match(crest)
         if opener:
             fence, fstart = (opener.group(1), path), at

@@ -64,11 +64,13 @@ def _comment_matches(text: str, html_spans):
     Inline comments may not cross paragraphs; raw HTML-block comments may.
     """
     mdcode.WORK['comment_builds'] += 1
-    mdcode.WORK['comment_scan_chars'] += 3 * len(text)
+    mdcode.WORK['comment_scan_chars'] += 4 * len(text)
     closers = [m.start() for m in re.finditer(r"-->", text)]
+    doubles = [m.start() for m in re.finditer(r"(?=--)", text)]
     paragraphs = [m.start() for m in re.finditer(r'\n[ \t\x00\r]*\n', text)]
+    regions = mdcode._layout(text)[0]
     matches, starts = [], []
-    closer = paragraph = 0
+    closer = paragraph = double = 0
     for opener in re.finditer(r"<!--", text):
         start = opener.start()
         in_block = _span_at(html_spans, start) is not None
@@ -83,6 +85,22 @@ def _comment_matches(text: str, html_spans):
         end = closers[closer] + 3
         if not in_block and paragraph < len(paragraphs) and paragraphs[paragraph] < end:
             continue
+        if not in_block:
+            # CommonMark inline comments have stricter lexical rules than
+            # HTML block comments. A delimiter-looking body is ordinary text
+            # if it begins > or ->, contains --, or ends in a hyphen.
+            begin = opener.end()
+            while double < len(doubles) and doubles[double] < begin:
+                double += 1
+            if begin != closers[closer] and (
+                    text[begin:begin + 1] == ">" or text[begin:begin + 2] == "->"
+                    or double < len(doubles) and doubles[double] != closers[closer]):
+                continue
+            # Inline markup cannot join separate blocks (including headings,
+            # list items and table cells), even without a blank line.
+            region = _span_at(regions, start)
+            if region is None or end > region[1]:
+                continue
         matches.append((start, end))
         starts.append(start)
     return tuple(starts), tuple(matches)
@@ -180,6 +198,8 @@ def _definition_candidates(document: str) -> str:
     label_spans = []
     previous_end = None
     for match in REF_DEFINITION.finditer(candidate):
+        if not _label_key(match.group(1)):
+            continue
         if match.group(3) is not None and not _balanced_destination(match.group(3)):
             continue
         if match.start() in continuation and previous_end != match.start():
@@ -236,33 +256,31 @@ def _peel_definition_containers(document: str, out: list[str]) -> str:
     # column of the deepest open item (within the same block quote) is inside that item, so that many columns are peeled.
     # A blank line keeps the items open; a line indented less closes the items it does not reach.
     pos = 0
-    items: list[tuple[int, int]] = []  # open list items, outermost first: (block-quote depth, content column)
+    items: list[tuple[tuple[str, int], ...]] = []
     for raw in re.findall(r"[^\n]*\n|[^\n]+", document):
         body = raw.rstrip("\r\n")
         end = pos + len(body)
-        line = "".join(out[pos:end])
-        doc_depth, doc_rest = mdcode._quotes(document[pos:end])  # structure is read from the source, not the blanking
-        blank = not doc_rest.strip()
-        quoted = len(line) - len(mdcode._quotes(line)[1])  # the block-quote markers are peeled first, as before
-        _, col, rest = mdcode._containers(line[quoted:])
-        indent = _whitespace_columns(doc_rest)[1]
-        if col or not blank:
-            while items and (items[-1][0] > doc_depth or items[-1][1] > indent):
-                items.pop()
-        if col:  # an item marker: its content column is the new innermost item
-            prefix = len(line) - len(rest)
-            items.append((doc_depth, col))
-        else:
-            prefix = quoted
-            if items and not blank:
-                chars, cols = _whitespace_columns(line[quoted:], items[-1][1])
-                # a tab that crosses the content column keeps its residual columns: with the spaces that follow, four
-                # or more make indented code, so that tab is left unpeeled and the line cannot match as a definition
-                if cols > items[-1][1] and line[quoted + chars - 1] == "\t" and (
-                        cols - items[-1][1] + _whitespace_columns(line[quoted + chars:])[1] >= 4):
-                    chars -= 1
-                prefix += chars
-        out[pos:pos + prefix] = ["\x00"] * prefix
+        source = mdcode.block_line(body)
+        line = mdcode.block_line("".join(out[pos:end]))
+        while items and mdcode._continue_containers(source, items[-1]) is None:
+            items.pop()
+        inherited = items[-1] if items else ()
+        inner = mdcode._continue_containers(line, inherited) if inherited else line
+        # Blanking code/comments can remove a structural prefix, in which case
+        # the line itself contains no live definition to peel.
+        if inner is not None:
+            added, rest = mdcode._container_path(inner)
+            for index, (kind, _) in enumerate(added):
+                if kind == "item":
+                    items.append(inherited + added[:index + 1])
+            # Four residual columns mean indented code, not a definition. For
+            # 0..3 columns, a partially consumed tab can be blanked whole:
+            # both spellings remain legal, and source offsets stay unchanged.
+            indent = mdcode._indent_columns(rest)
+            if indent < 4:
+                columns = len(line) - len(rest) + indent
+                prefix = mdcode.source_prefix_chars(body, columns)
+                out[pos:pos + prefix] = ["\x00"] * prefix
         pos += len(raw)
     return "".join(out)
 
@@ -342,6 +360,8 @@ def _definitions(document: str) -> tuple:
     continuation = mdcode.continuation_starts(document)
     live: list = []
     for match in REF_DEFINITION.finditer(_definition_candidates(document)):
+        if not _label_key(match.group(1)):
+            continue
         if match.group(3) is not None and not _balanced_destination(match.group(3)):
             continue  # a malformed bare destination is not a definition: the line stays ordinary Markdown
         if match.start() in continuation and not (live and live[-1].end() + 1 == match.start()):
@@ -788,6 +808,8 @@ def _has_link_opener(text: str, close: int) -> bool:
 
 def _label_key(value: str) -> str:
     """CommonMark reference matching folds case and whitespace, keeping escapes and entities literal."""
+    if len(value) > 999:
+        return ""  # CommonMark labels are at most 999 source characters.
     return " ".join(value.split()).casefold()
 
 
