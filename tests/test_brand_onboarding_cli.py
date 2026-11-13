@@ -1,5 +1,8 @@
 """Exercise onboarding through the installed public CLI with synthetic local data."""
+import io
 import json
+import struct
+import zlib
 
 import pytest
 from PIL import Image
@@ -121,3 +124,37 @@ def test_cli_rejects_reserved_owner_without_reclassification(copied_config):
     assert result.returncode == 2
     assert "reserved" in result.stdout
     assert copied_config.read_bytes() == before
+
+
+@pytest.mark.parametrize("image_data", [b"not-a-zlib-stream", zlib.compress(b"\x00")],
+                         ids=["invalid-zlib", "incomplete-pixels"])
+@pytest.mark.parametrize("action", ["add-family", "add-org"])
+def test_invalid_png_pixels_refuse_before_onboarding_writes(copied_config, tmp_path, image_data, action):
+    """CRC-valid PNG containers must also have decodable pixel data."""
+    def chunk(kind, payload):
+        return (struct.pack(">I", len(payload)) + kind + payload
+                + struct.pack(">I", zlib.crc32(kind + payload)))
+    data = (b"\x89PNG\r\n\x1a\n"
+            + chunk(b"IHDR", struct.pack(">IIBBBBB", 16, 16, 8, 6, 0, 0, 0))
+            + chunk(b"IDAT", image_data) + chunk(b"IEND", b""))
+    # Structure-only verification accepts both inputs; pixel decoding rejects them.
+    with Image.open(io.BytesIO(data)) as image:
+        image.verify()
+    with Image.open(io.BytesIO(data)) as image, pytest.raises(OSError):
+        image.load()
+    mark = tmp_path / "crc-valid-but-broken.png"
+    mark.write_bytes(data)
+    lock = copied_config.with_name("brand.lock.json")
+    lock.write_bytes(b"previous lock bytes\n")
+    before = {path: path.read_bytes() for path in (copied_config, lock, mark)}
+    if action == "add-family":
+        arguments = family_args(copied_config, "--mark", mark, "--write")
+    else:
+        arguments = ("--config", copied_config, "brand", "add-org", "--family", "completetech",
+                     "--org", "Northwind-Onboard", "--tier", "T2", "--display-name", "Northwind Onboard",
+                     "--footer", "no", "--mark", mark, "--write")
+    result = run_cli(*arguments)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "readable, valid PNG" in result.stdout
+    assert all(path.read_bytes() == value for path, value in before.items())
+    assert not (copied_config.parent.parent / "assets").exists()

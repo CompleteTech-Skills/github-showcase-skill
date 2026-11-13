@@ -162,6 +162,10 @@ def _new_org(brand: Brand, raw: dict, args) -> tuple[dict, tuple[Path, bytes] | 
                 if im.format != "PNG":
                     raise ConfigError("mark must be a PNG; it is copied without conversion")
                 im.verify()
+            # verify() checks container chunks and CRCs, not compressed pixels.
+            # Reopen the same bytes for decoding; the original bytes remain the copy.
+            with Image.open(io.BytesIO(data)) as im:
+                im.load()
         except (OSError, ValueError) as exc:
             raise ConfigError("mark must be a readable, valid PNG") from exc
         target = brand.path.resolve().parent.parent / "assets" / "orgs" / org / "mark.png"
