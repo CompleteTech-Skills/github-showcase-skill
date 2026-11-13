@@ -538,7 +538,8 @@ def test_child_context_grant_does_not_leak_into_parent(tmp_path, monkeypatch):
     assert grants == {} and aliases == {} and "signoff_id" not in job and "approval_id" not in job
 
 
-def test_star_list_jobs_for_a_t3_org_carry_its_signoff(tmp_path, monkeypatch, brand):
+@pytest.mark.parametrize("existing", [False, True])
+def test_star_list_jobs_for_a_t3_org_carry_its_signoff(tmp_path, monkeypatch, brand, existing):
     """`org pins` for a T3 org plans its star-List jobs on the personal account (org=CompleteDotTech); the grant is the
     org's, so target-based stamping missed them. star_list_plan now passes the gated owner explicitly."""
     from ctshowcase import org as O, signoff
@@ -548,14 +549,51 @@ def test_star_list_jobs_for_a_t3_org_carry_its_signoff(tmp_path, monkeypatch, br
     reg = {"orgs": {OWNER: {"star_list": {"name": "Pick Your AI: built on", "description": "x"}, "favorites": []}}}
     est = O.Estate(brand, Resolver(brand, reg, {"rows": set(), "ids": set(), "answers": {}, "actions": [], "extra": []}))
     lists = json.loads((fix / "star-lists.json").read_text(encoding="utf-8"))
+    if existing:
+        lists["data"]["viewer"]["lists"]["nodes"].append({
+            "id": "UL_existing", "name": "Pick Your AI: built on", "description": "old description",
+            "items": {"nodes": [], "totalCount": 0}})
+        lists["data"]["viewer"]["lists"]["totalCount"] += 1
     monkeypatch.setenv("SHOWCASE_T3_SIGNOFF_FILE", str(_file(_bundle(tmp_path, [{"id": "t3s-sl"}]))))
-    t3 = set_t3_signed_off(True)
+    t3 = set_t3_signed_off(False)
     run = signoff.reset()
     try:
-        signoff.require(OWNER)
+        # Public direct entry must register its own grant, without a CLI gate or
+        # a caller's earlier require(). Explicit allow_t3 is sufficient opt-in.
+        assert signoff._granted() == {}
+        held = O.star_list_plan(est, OWNER, lists_capture=lists)
+        assert held["result"] == "hold" and held["jobs"] == []
+        assert signoff._granted() == {}
         res = O.star_list_plan(est, OWNER, lists_capture=lists, allow_t3=True)
         assert res["jobs"] and all(j["org"] == O.USER_LOGIN for j in res["jobs"]), res
         assert all(j["signoff_id"] == "t3s-sl" and "approval_id" not in j for j in res["jobs"]), res["jobs"]
+        # A cached grant must not bypass a withdrawal on the next direct call.
+        record_path = _file(tmp_path / "bundle")
+        record_path.write_text(record_path.read_text(encoding="utf-8").replace("approved: true", "approved: false"),
+                               encoding="utf-8")
+        held = O.star_list_plan(est, OWNER, lists_capture=lists, allow_t3=True)
+        assert held["result"] == "hold" and held["jobs"] == []
+    finally:
+        signoff.restore(run)
+        reset_t3_signed_off(t3)
+
+
+def test_direct_org_about_returns_verified_target_provenance(tmp_path, monkeypatch, brand):
+    """The callable planner must preserve its gate's record without the CLI emitter."""
+    from ctshowcase import org as O, signoff
+    from ctshowcase.config import reset_t3_signed_off, set_t3_signed_off
+    from ctshowcase.resolver import Resolver
+    reg = {"orgs": {OWNER: {"profile": {"name": "Synthetic collaborative org"}}}}
+    est = O.Estate(brand, Resolver(brand, reg, {"rows": set(), "ids": set(), "answers": {}, "actions": [], "extra": []}))
+    monkeypatch.setenv("SHOWCASE_T3_SIGNOFF_FILE", str(_file(_bundle(tmp_path, [{"id": "t3s-about"}]))))
+    t3 = set_t3_signed_off(False)
+    run = signoff.reset()
+    try:
+        assert signoff._granted() == {}
+        result, code = O.about(est, OWNER, allow_t3=True)
+        assert code == 0 and result["jobs"], result
+        assert all(job["signoff_id"] == "t3s-about" for job in result["jobs"])
+        assert all("approval_id" not in job for job in result["jobs"])
     finally:
         signoff.restore(run)
         reset_t3_signed_off(t3)

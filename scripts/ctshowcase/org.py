@@ -261,6 +261,10 @@ def job(jid: str, phase: str, kind: str, argv: list[str] | None = None, *, org: 
     j.update(extra)
     if kind == "labels" and repo:
         j.setdefault("group", f"labels:{repo}")
+    # Public planners also return jobs directly, without cmd_org/append_jobs.
+    # Stamp only an already verified target grant; this never authorizes a job.
+    from . import signoff
+    signoff.stamp([j])
     return j
 
 
@@ -1635,12 +1639,18 @@ def _estate_list_targets(estate: Estate, nodes: list[dict], *, allow_t3: bool = 
 
 def star_list_plan(estate: Estate, org: str, *, lists_capture: dict | None = None, repo_ids: dict | None = None,
                    planned_new: int | None = None, allow_t3: bool = False) -> dict:
-    """See _star_list_plan. Its jobs target the personal account (USER_LOGIN), not the org, so the org's
-    grant is carried onto them explicitly (target-based stamping would miss it)."""
+    """See _star_list_plan. Its jobs target the personal account (USER_LOGIN), not the org, so resolve and
+    carry the org's grant explicitly, including for callers that did not enter through cmd_org."""
     from . import signoff
     out = _star_list_plan(estate, org, lists_capture=lists_capture, repo_ids=repo_ids, planned_new=planned_new,
                           allow_t3=allow_t3)
-    signoff.stamp(out.get("jobs"), owner=estate.resolver.canonical(org))
+    login = estate.resolver.canonical(org)
+    if out.get("jobs") and estate.resolver.owner_status(login) == "t3":
+        # This public planner can be called without cmd_org's earlier owner gate.
+        # Its read-only eligibility checks do not register the granting record,
+        # so resolve it here before stamping jobs targeting the personal account.
+        signoff.require(login, None, estate.resolver.aliases(login))
+    signoff.stamp(out.get("jobs"), owner=login)
     return out
 
 
