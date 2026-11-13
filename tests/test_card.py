@@ -58,3 +58,15 @@ def test_card_matches_banner_eyebrow(make_ctx, fonts):
     from ctshowcase import banner
     ctx = make_ctx(owner="CompleTetech-Security", repo="x-cve-2026-11111-check", description="Check CVE-2026-11111.")
     assert card.render(ctx, fonts)[2]["eyebrow"] == banner.eyebrow_text(ctx)
+
+
+def test_long_chip_card_budget_and_bounds(make_ctx, fonts):
+    ctx = make_ctx(repo="northwind-customer-support-email-triage-agent",
+                   description="Run the customer support triage agent offline.")
+    ctx.override["chips"] = {"key": ["Support automation"], "attrs": ["Read-only operation"]}
+    raw, _, info = card.render(ctx, fonts)
+    lint = svglint.lint_bytes("card", raw.encode("utf-8"))
+    assert lint["result"] == "PASS" and not lint["fails"]
+    assert len(raw.encode("utf-8")) <= 40_000
+    assert all(item["x"] + item["w"] <= 384.5 for item in info["items"])
+    assert [item["label"] for item in info["items"]] == ["Support automation", "Read-only operation"]
