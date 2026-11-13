@@ -28,7 +28,7 @@ Use synthetic fixtures and new output paths instead of overwriting committed pre
 The full gate for this repository adds the test suite and the showcase quality gates to the package baseline:
 
 ```bash
-python -m pip install -r requirements.txt ruff==0.17.2 pytest==9.1.1
+python -m pip install -r requirements.txt ruff==0.17.2 pytest==9.1.1 jsonschema==4.25.1
 python -m pytest -q
 python scripts/validate_quality.py
 ```
