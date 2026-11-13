@@ -53,19 +53,63 @@ def _search_unescaped(pattern, text: str, pos: int, html_spans=None):
     return match
 
 
-def _search_comment(text: str, pos: int, html_spans):
-    """First valid HTML comment match at or after `pos` whose opener is not backslash-escaped.
+@functools.lru_cache(maxsize=16)
+def _comment_matches(text: str, html_spans):
+    """Index comment candidates without rescanning rejected opener suffixes.
 
-    An inline (mid-line) HTML comment cannot span a paragraph boundary (CommonMark/GFM), while a comment opening at the
-    start of an HTML block (inside `html_spans`) may span blank lines. An invalid match leaves `<!--` as literal text
-    and the search resumes one character on, so each iteration advances and the loop stays linear."""
-    while True:
-        match = _search_unescaped(HTML_COMMENT, text, pos, html_spans)
-        if match is None:
-            return None
-        if _span_at(html_spans, match.start()) is not None or re.search(r'\n[ \t\x00\r]*\n', match.group()) is None:
-            return match
-        pos = match.start() + 1
+    Each delimiter/paragraph pass visits the document once. Closer and paragraph
+    cursors advance monotonically across openers. Keep nested candidates too:
+    an outer opener can belong to a literal tag attribute or reference label,
+    leaving an inner opener live when a caller resumes beyond that literal.
+    Inline comments may not cross paragraphs; raw HTML-block comments may.
+    """
+    mdcode.WORK['comment_builds'] += 1
+    mdcode.WORK['comment_scan_chars'] += 3 * len(text)
+    closers = [m.start() for m in re.finditer(r"-->", text)]
+    paragraphs = [m.start() for m in re.finditer(r'\n[ \t\x00\r]*\n', text)]
+    matches, starts = [], []
+    closer = paragraph = 0
+    for opener in re.finditer(r"<!--", text):
+        start = opener.start()
+        in_block = _span_at(html_spans, start) is not None
+        if not in_block and _escaped(text, start):
+            continue
+        while closer < len(closers) and closers[closer] < opener.end():
+            closer += 1
+        if closer == len(closers):
+            break
+        while paragraph < len(paragraphs) and paragraphs[paragraph] < start:
+            paragraph += 1
+        end = closers[closer] + 3
+        if not in_block and paragraph < len(paragraphs) and paragraphs[paragraph] < end:
+            continue
+        matches.append((start, end))
+        starts.append(start)
+    return tuple(starts), tuple(matches)
+
+
+class _CommentMatch:
+    """The span-only match interface the HTML scans consume, with no body rescan."""
+    __slots__ = ("_start", "_end")
+
+    def __init__(self, start: int, end: int):
+        self._start, self._end = start, end
+
+    def start(self):
+        return self._start
+
+    def end(self):
+        return self._end
+
+    def span(self):
+        return self._start, self._end
+
+
+def _search_comment(text: str, pos: int, html_spans):
+    """First indexed, unescaped valid HTML comment at or after `pos`."""
+    starts, matches = _comment_matches(text, tuple(html_spans))
+    index = bisect.bisect_left(starts, pos)
+    return _CommentMatch(*matches[index]) if index < len(matches) else None
 
 
 def _span_at(spans, index: int, strict: bool = False):
@@ -128,6 +172,20 @@ def _definition_candidates(document: str) -> str:
     fences = mdcode.fence_spans(document)
     html_spans = mdcode.html_block_spans(document)
     links = _inline_link_spans(document, fences)  # resolved link destinations and titles: literal text, computed once
+    # Reference labels are parsed before inline HTML. A comment-looking string
+    # inside a syntactically valid definition label is literal label text, even
+    # though the same string in a paragraph would be an actual HTML comment.
+    candidate = _peel_definition_containers(document, out.copy())
+    continuation = mdcode.continuation_starts(document)
+    label_spans = []
+    previous_end = None
+    for match in REF_DEFINITION.finditer(candidate):
+        if match.group(3) is not None and not _balanced_destination(match.group(3)):
+            continue
+        if match.start() in continuation and previous_end != match.start():
+            continue
+        label_spans.append(match.span(1))
+        previous_end = match.end() + 1
     # Left-to-right scan over the next HTML open tag and the next comment, as in `_outside_code`: a comment opener that
     # sits inside a complete open tag (for example an attribute value) is attribute text, so the tag is consumed whole.
     pos = 0
@@ -142,6 +200,10 @@ def _definition_candidates(document: str) -> str:
             break
         nxt = min(found, key=lambda m: m.start())
         start = nxt.start()
+        literal_label = _span_at(label_spans, start)
+        if literal_label is not None:
+            pos = literal_label[1]
+            continue
         inside = _span_at(links, start)
         if inside is not None:  # an opener inside a link destination or title is text: resume after that span
             pos = inside[1]
@@ -163,6 +225,10 @@ def _definition_candidates(document: str) -> str:
             if out[i] != "\n":
                 out[i] = " "
         pos = nxt.end()
+    return _peel_definition_containers(document, out)
+
+
+def _peel_definition_containers(document: str, out: list[str]) -> str:
     # Quote and list-item markers are container syntax: a definition inside `> ` or `- ` is still a definition and is
     # global to the document. Each peeled prefix becomes NUL (same length), so offsets are unchanged and the pattern
     # sees an ordinary line start. Fenced lines are already blanked; blanked comment text has no prefix to peel.
@@ -944,8 +1010,9 @@ def _images(text: str, document: str) -> list[tuple[str, str]]:
         return span is not None and end <= span[1]
 
     link_spans = _link_literal_spans(document)  # tags and images inside a link destination or title are literal text
+    label_spans = _reference_label_spans(document)  # a resolved full reference's second label is not rendered
     tags = [(start, end) for start, end in parser.tags if not inside(image_spans, start, end)
-            and _span_at(link_spans, start) is None]
+            and _span_at(link_spans, start) is None and _span_at(label_spans, start) is None]
     def written_alt(alt, start):
         # `text` has Markdown code masked to spaces (same length): read code-formatted alt text from the document
         begin = start + 2
