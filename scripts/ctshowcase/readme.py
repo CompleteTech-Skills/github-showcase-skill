@@ -1104,7 +1104,8 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
 
 def header_only(ctx: RepoContext, text: str, *, preserve_structure: bool = False) -> str:
     """Replace only existing marker blocks (what the Action runs)."""
-    text = normalize_text(text)
+    if not preserve_structure:
+        text = normalize_text(text)
     desc = (ctx.meta.get("description") or "").strip()
     gen = {"nav": nav_line(ctx), "banner": banner_html(ctx), "footer": footermod.markup(ctx.brand)}
     if ctx.repo_dir is not None and not (ctx.repo_dir / "docs" / "images" / "banner.png").is_file():

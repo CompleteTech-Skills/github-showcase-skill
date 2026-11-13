@@ -68,3 +68,8 @@ def test_supplied_section_facts_fill_missing_sections_only(make_ctx):
     assert "Keep my instructions." in after
     assert "Run `demo --help`." not in after
     assert readme.preservation(before, after, removed) == []
+
+
+def test_no_regroup_preserves_authored_crlf_bytes(make_ctx):
+    text = "# Title\r\n\r\n## Details\r\n  Exact body.\r\n"
+    assert readme.header_only(make_ctx(), text, preserve_structure=True) == text
