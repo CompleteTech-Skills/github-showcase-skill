@@ -159,3 +159,73 @@ def test_doctor_r10_matches_live_t3_job_applicability(brand, tmp_path, captured,
         record_file(tmp_path, approved=False)
         assert doctor.row(ctx)["cells"]["R10"] == "n/a"
         assert social_job(ctx, brand.resolver(), "assets/social-preview.png") is None
+
+
+def test_direct_public_adopt_accepts_omitted_resolver(brand):
+    from ctshowcase.intake import adopt
+
+    ctx = context(brand, owner="CompleteTech-Skills")
+    result = adopt(ctx, fresh=True)
+    social = [job for job in result["jobs"] if job.get("ui_action") == "social-preview"]
+    assert len(social) == 1
+    assert social[0]["repo"] == f"CompleteTech-Skills/{REPO}"
+    assert "signoff_id" not in social[0]
+
+
+def test_direct_public_t3_adopt_preserves_scoped_provenance_without_resolver(brand, tmp_path):
+    from ctshowcase.intake import adopt
+
+    with scoped(record_file(tmp_path)):
+        result = adopt(context(brand), fresh=True, approval_id="synthetic-writer-approval")
+        social = [job for job in result["jobs"] if job.get("ui_action") == "social-preview"]
+        assert len(social) == 1
+        assert social[0]["repo"] == f"{OWNER}/{REPO}"
+        assert social[0]["signoff_id"] == "t3s-social"
+        assert "approval_id" not in social[0]
+        assert all(job["signoff_id"] == "t3s-social" for job in result["jobs"])
+
+
+@pytest.mark.parametrize("case", ["no-flag", "wrong-repo", "revoked", "missing"])
+def test_direct_public_adopt_without_resolver_keeps_consent_boundary(brand, tmp_path, case):
+    from ctshowcase.errors import Refused
+    from ctshowcase.intake import adopt
+
+    path = (tmp_path / "missing.yaml" if case == "missing" else
+            record_file(tmp_path, repos=["unapproved-repo"] if case == "wrong-repo" else None,
+                        approved=case != "revoked"))
+    with scoped(path, enabled=case != "no-flag"):
+        with pytest.raises(Refused):
+            adopt(context(brand), fresh=True)
+
+
+def test_optional_resolver_job_uses_selected_brand_aliases(brand, tmp_path):
+    raw = deepcopy(brand.raw)
+    old_login = "Northwind-Former-CoOwned"
+    raw["orgs"][OWNER]["former_slugs"] = [old_login]
+    selected = Brand(raw, brand.path)
+    with scoped(record_file(tmp_path)):
+        ctx = context(selected, owner=old_login)
+        job = social_job(ctx, None, "assets/social-preview.png")
+        assert job["repo"] == f"{OWNER}/{REPO}"
+        assert job["signoff_id"] == "t3s-social"
+        record_file(tmp_path, approved=False)
+        assert social_job(ctx, None, "assets/social-preview.png") is None
+
+
+def test_optional_resolver_fallback_does_not_replace_explicit_falsey_resolver(brand):
+    checked = []
+
+    class ExplicitResolver:
+        def __bool__(self):
+            return False
+
+        def owner_status(self, owner):
+            checked.append(owner)
+            return None
+
+        def canonical(self, owner):
+            return owner
+
+    job = social_job(context(brand, owner="CompleteTech-Skills"), ExplicitResolver(), "assets/social-preview.png")
+    assert job["repo"] == f"CompleteTech-Skills/{REPO}"
+    assert checked == ["CompleteTech-Skills"]

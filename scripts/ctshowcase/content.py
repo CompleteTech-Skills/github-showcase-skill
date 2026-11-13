@@ -2708,10 +2708,12 @@ def cmd_content(args, cli=None):
     raise ShowcaseError(f"unknown content action {act}", log="usage")
 
 
-def social_job(ctx, resolver: Resolver, out: str) -> dict | None:
+def social_job(ctx, resolver: Resolver | None, out: str) -> dict | None:
     """Browser upload job for an applicable public repository, with scoped T3 provenance."""
     if not ctx.social_applicable():
         return None
+    if resolver is None:
+        resolver = ctx.brand.resolver()
     # Re-check at the planning boundary, including direct library callers, so a T3
     # grant is scoped to this repository and registered for provenance stamping.
     if resolver.owner_status(ctx.owner) == "t3":
