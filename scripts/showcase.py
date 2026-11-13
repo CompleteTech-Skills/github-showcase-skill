@@ -360,19 +360,31 @@ def cmd_intro(args):
 def cmd_footer(args):
     from ctshowcase import footer
     b = brand(args)
-    # the watching org's exemption covers only its forks, which `--org` cannot tell from its `.github` (which gets the
-    # footer): `--check` reads the README there instead of answering `exempt` (fail closed)
-    if args.org and not (args.check and b.owner_status(args.org) == "watching"):
-        status = b.owner_status(args.org)
-        if status in ("excluded", "hold", "t3"):
-            b.check_owner(args.org)
-        if status == "watching":
+    # Use the same repository applicability as doctor, including fork status.
+    # An explicit --org remains useful for raw markup without a checkout.
+    ctx = None
+    if args.meta or args.repo_dir is not None or (args.check and not args.org and _origin_slug(Path("."))):
+        ctx = context(args, b)
+        if args.org and not b.resolver().same(args.org, ctx.owner):
+            raise ShowcaseError("--org does not match the repository metadata", log="usage")
+        b.check_owner(ctx.owner, repo=ctx.repo)
+        reason = ctx.footer_status()
+        if reason:
+            result = "exempt" if reason.startswith("exempt") else "hold"
+            return {"command": "footer", "owner": ctx.owner, "repo": ctx.repo,
+                    "result": result, "logs": [reason]}, OK
+    elif args.org:
+        status = b.check_owner(args.org)
+        # Without repository metadata a watching owner can describe a fork or
+        # its own .github; --check must inspect the footer conservatively.
+        if status == "watching" and not args.check:
             return {"command": "footer", "owner": args.org, "result": "exempt", "logs": ["exempt"]}, OK
-        fv = b.org(args.org).get("footer", True)
-        if fv == "hold":
-            return {"command": "footer", "owner": args.org, "result": "hold", "logs": ["hold"]}, OK
-        if fv is False:
-            return {"command": "footer", "owner": args.org, "result": "exempt", "logs": ["exempt:footer"]}, OK
+        if status != "watching":
+            fv = b.org(args.org).get("footer", True)
+            if fv == "hold":
+                return {"command": "footer", "owner": args.org, "result": "hold", "logs": ["hold"]}, OK
+            if fv is False:
+                return {"command": "footer", "owner": args.org, "result": "exempt", "logs": ["exempt:footer"]}, OK
     if args.online and not args.check:
         raise ShowcaseError("--online goes with --check README.md", log="usage")
     if args.check:
