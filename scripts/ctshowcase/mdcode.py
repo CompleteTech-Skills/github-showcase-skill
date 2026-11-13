@@ -100,7 +100,22 @@ def _containers(body: str) -> tuple[int, int, str]:
         if m := _QUOTE.match(rest):
             depth += 1
         elif m := _ITEM_PREFIX.match(rest):
-            col += m.end()
+            # Tabs are expanded at four-column stops, not counted as one byte.
+            # Consume the complete 1..4-column padding, including mixed spaces
+            # and tabs; otherwise a fence is assigned to the wrong container.
+            marker = re.match(r"^ {0,3}(?:[-+*]|\d{1,9}[.)])", rest)
+            marker_end = marker.end()
+            marker_col = col + marker_end
+            end, padded_col = marker_end, marker_col
+            while end < len(rest) and rest[end] in " \t":
+                padded_col = ((padded_col // 4 + 1) * 4 if rest[end] == "\t" else padded_col + 1)
+                end += 1
+            if 0 < padded_col - marker_col <= 4 and end < len(rest):
+                col = padded_col
+                rest = rest[end:]
+                continue
+            for char in rest[:m.end()]:
+                col = (col // 4 + 1) * 4 if char == "\t" else col + 1
         else:
             return depth, col, rest
         rest = rest[m.end():]
