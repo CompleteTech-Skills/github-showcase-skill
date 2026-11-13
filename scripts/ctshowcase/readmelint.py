@@ -399,27 +399,44 @@ def _outside_code(text: str, mask_inline: bool = True) -> str:
 _BLANK_LINE_AT = re.compile(r"\n[ \t\x00]*(?:\n|\Z)")  # a newline that starts a blank line (or ends the text)
 
 
-def _closing_bracket(text: str, start: int) -> int | None:
-    """Find a balanced closing bracket, respecting escaped and nested brackets. None when the scan crosses a blank line
-    first: a link text or label cannot span a paragraph boundary (CommonMark), so the bracket is not closed there."""
-    depth, pos = 1, start + 1
+# Count inspected characters in bracket pairing so malformed-input regressions can
+# assert bounded work without relying on machine-dependent timing.
+_BRACKET_STEPS = 0
+
+
+@functools.lru_cache(maxsize=16)
+def _bracket_pairs(text: str) -> dict[int, int]:
+    """Pair unescaped brackets once per text, clearing openers at paragraph boundaries.
+
+    Keeping inner pairs when an outer opener never closes allows a failed outer
+    image to leave a valid nested image visible. Unmatched openers take the same
+    single pass as matched ones rather than rescanning each remaining suffix.
+    """
+    global _BRACKET_STEPS
+    pairs: dict[int, int] = {}
+    stack: list[int] = []
+    pos = 0
     while pos < len(text):
+        _BRACKET_STEPS += 1
         char = text[pos]
-        # the newline that a backslash escapes is still a line end: a blank line after it is a boundary too
+        # A backslash before a newline does not erase a following paragraph break.
         newline = pos if char == "\n" else pos + 1 if char == "\\" else -1
         if newline >= 0 and text[newline:newline + 1] == "\n" and _BLANK_LINE_AT.match(text, newline):
-            return None
+            stack.clear()
         if char == "\\":
             pos += 2
             continue
         if char == "[":
-            depth += 1
-        elif char == "]":
-            depth -= 1
-            if not depth:
-                return pos
+            stack.append(pos)
+        elif char == "]" and stack:
+            pairs[stack.pop()] = pos
         pos += 1
-    return None
+    return pairs
+
+
+def _closing_bracket(text: str, start: int) -> int | None:
+    """Find a balanced closing bracket without rescanning unmatched suffixes."""
+    return _bracket_pairs(text).get(start)
 
 
 # work counter of the opener pass: one per position advanced (an inert-region skip counts one) and one per call of
@@ -704,8 +721,7 @@ def _has_link_opener(text: str, close: int) -> bool:
 
 
 def _label_key(value: str) -> str:
-    """Normalised reference label: backslash escapes and entities resolved, whitespace collapsed, case folded."""
-    value = html.unescape(re.sub(r"\\([^\w\s])", r"\1", value))
+    """CommonMark reference matching folds case and whitespace, keeping escapes and entities literal."""
     return " ".join(value.split()).casefold()
 
 
@@ -860,14 +876,10 @@ def _link_literal_spans(document: str) -> tuple[tuple[int, int], ...]:
 
 def _markdown_images(text: str, document: str) -> list[tuple[str, str, int, int]]:
     """Read inline and reference images with balanced alt text; definitions use first-wins labels."""
-    def label(value):
-        value = html.unescape(re.sub(r"\\([^\w\s])", r"\1", value))
-        return " ".join(value.split()).casefold()
-
     definitions = {}
     for match in _definitions(document):
         target = html.unescape(re.sub(r"\\([^\w\s])", r"\1", match.group(2) or match.group(3)))
-        definitions.setdefault(label(match.group(1)), target)
+        definitions.setdefault(_label_key(match.group(1)), target)
     spans = _definition_spans(document)  # definition titles are never rendered as images
     html_spans = mdcode.html_block_spans(document)  # raw HTML blocks are literal: Markdown image syntax there is text
     link_spans = _link_literal_spans(document)  # a link destination or title is literal text, never a rendered image
@@ -905,12 +917,12 @@ def _markdown_images(text: str, document: str) -> list[tuple[str, str, int, int]
                 continue
             # not an inline destination (for example, a space-containing label): try a shortcut reference
         # `text` masks inline code to spaces (a prefix-aligned copy): labels are matched on the written source, literal backticks included
-        key = label(document[match.end():close] if len(document) >= len(text) else alt)
+        key = _label_key(document[match.end():close] if len(document) >= len(text) else alt)
         if after < len(text) and text[after] == "[":
             ref_close = _closing_bracket(text, after)
             # a label holding a block boundary is no label: the shortcut form below still applies, as CommonMark has it
             if ref_close is not None and not _crosses_block(text, after + 1, ref_close, fences):
-                key = label((document if len(document) >= len(text) else text)[after + 1:ref_close]) or key
+                key = _label_key((document if len(document) >= len(text) else text)[after + 1:ref_close]) or key
                 after = ref_close + 1
         if key in definitions:
             sources.append((alt, definitions[key], match.start(), after))
