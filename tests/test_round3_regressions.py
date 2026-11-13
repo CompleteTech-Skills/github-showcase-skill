@@ -158,11 +158,13 @@ def test_empty_short_description_is_one_clear_note():
     assert sd == ["short description D1: empty (set the §13.2 short description)"]
 
 
-def test_files_dir_inputs_point_at_the_written_files(tmp_path):
+def test_files_dir_keeps_snapshots_but_jobs_have_no_file_dependency(tmp_path):
     jobs, files = tmp_path / "jobs.jsonl", tmp_path / "bodies"
     p = run_cli("project", "copy-plan", "--target", N, "--copied", PFIX / "copy-capture.json", "--files-dir", files,
                 "--jobs", jobs, "--approved", tmp_path / "none.tsv")
     assert p.returncode == 0, p.stderr
-    inputs = [j["argv"][j["argv"].index("--input") + 1] for j in map(json.loads, jobs.read_text().splitlines())
-              if "--input" in (j.get("argv") or [])]
-    assert inputs and all(json.loads(open(i).read()) for i in inputs)
+    snapshots = list(files.rglob("*.json"))
+    assert snapshots and all(json.loads(path.read_text(encoding="utf-8")) for path in snapshots)
+    planned = list(map(json.loads, jobs.read_text().splitlines()))
+    assert all("--input" not in j.get("argv", []) for j in planned)
+    assert any("name=My items" in j.get("argv", []) for j in planned)
