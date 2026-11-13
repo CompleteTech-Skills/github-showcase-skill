@@ -123,9 +123,11 @@ def test_doctor_shows_the_signoff_id(tmp_path):
 def test_writer_jobs_carry_the_signoff_id(tmp_path):
     from ctshowcase import signoff
     from ctshowcase.records import append
-    rec = {"id": "t3s-8", "owner": OWNER, "repos": ["*"], "approved": True, "expires": "2099-12-31"}
+    bundle = _bundle(tmp_path, [{"id": "t3s-8", "repos": ["*"]}])
+    file_token = signoff.set_file(_file(bundle))
+    run_token = signoff.reset()
     try:
-        signoff._grant(OWNER.lower(), rec)
+        signoff.require(OWNER)
         out = tmp_path / "jobs.jsonl"
         append(out, [{"id": "a", "phase": "p", "kind": "repo-settings", "repo": f"{OWNER}/x", "argv": []},
                      {"id": "b", "phase": "p", "kind": "repo-settings", "repo": f"{OWNER}/y", "argv": [],
@@ -136,7 +138,8 @@ def test_writer_jobs_carry_the_signoff_id(tmp_path):
         assert b["signoff_id"] == "t3s-8" and b["approval_id"] == "ent-009"  # a pre-existing approval_id is preserved
         assert "signoff_id" not in c
     finally:
-        signoff.reset()
+        signoff.restore(run_token)
+        signoff.reset_file(file_token)
 
 
 def test_state_does_not_outlive_the_invocation(tmp_path, capsys):
@@ -281,10 +284,11 @@ def test_adopt_and_content_links_honour_repo_scoped_record(tmp_path):
 
 def test_report_jobs_carry_signoff_id(tmp_path):
     from ctshowcase import signoff
-    signoff.reset()
+    bundle = _bundle(tmp_path, [{"id": "t3s-8", "repos": ["*"]}])
+    file_token = signoff.set_file(_file(bundle))
+    run_token = signoff.reset()
     try:
-        rec = {"id": "t3s-8", "owner": OWNER, "repos": ["*"], "approved": True, "expires": "2099-12-31"}
-        signoff._grant(OWNER.lower(), rec)
+        signoff.require(OWNER)
         from ctshowcase.content import _finish
         import argparse
         rp = tmp_path / "report.json"
@@ -293,7 +297,8 @@ def test_report_jobs_carry_signoff_id(tmp_path):
         saved = json.loads(rp.read_text(encoding="utf-8"))["job"]
         assert saved["signoff_id"] == "t3s-8" and "approval_id" not in saved
     finally:
-        signoff.reset()
+        signoff.restore(run_token)
+        signoff.reset_file(file_token)
 
 
 # --- review round 3 ---
