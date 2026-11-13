@@ -161,6 +161,19 @@ def _gql_job(jid: str, owner: str, mutation: str, note: str, variables: dict | N
     return _job(jid, "project", argv, owner, note, **extra)
 
 
+def _stamp_owner_jobs(jobs: list[dict], owner: str) -> None:
+    """Direct planner callers receive the same owner provenance as CLI consumers.
+
+    Keep repository-specific records already attached to a job; the board owner's
+    grant is additional provenance, not a replacement for those narrower grants.
+    """
+    from . import signoff
+    rec = signoff.record_for(owner)
+    if rec is not None:
+        for job in jobs:
+            signoff.stamp_associations(job, [str(rec["id"])])
+
+
 def is_user(owner: str) -> bool:
     return owner in ("@me", USER_LOGIN) or owner.lower() == USER_LOGIN.lower()
 
@@ -964,6 +977,7 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
         reads.append({"name": "node-ids", "argv": read_command("node_ids", o=src_owner if owner == "@me" else owner)})
         pending.append({"why": "re-capture the copy to learn its number, field and view ids",
                         "next": f"project capture-query --owner {owner} --number N, then copy-plan --copied FILE"})
+        _stamp_owner_jobs(jobs, owner)
         return {"command": "project", "action": "copy-plan", "owner": owner, "role": role, "stage": 1, "title": title,
                 "short_description": short, "result": "ok", "jobs": jobs, "reads": reads, "pending": pending,
                 "files": files, "logs": logs}
@@ -1030,7 +1044,10 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
     vlist = [dict(v) for v in (views or (ESTATE_VIEWS if role == "estate" else VIEWS))]
     base = (f"users/{user_id}/projectsV2/{num}/views" if owner == "@me" and user_id else
             f"orgs/{owner}/projectsV2/{num}/views")
-    filter_jobs: list[tuple[dict, str]] = []  # (view-filter job, its new filter): authorized after the README repos
+    # Updates and creates share one authorization pass. New views also own a
+    # body file and UI steps, which must not escape when their filter is held.
+    filter_jobs: list[tuple[dict, str, str | None, str]] = []
+    held_views: set[str] = set()
     for i, want in enumerate(vlist):
         have = _view(spec, want["name"])
         if have is not None:
@@ -1042,18 +1059,34 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
                 fj = _gql_job(f"{pid}-{num}-view-{have.get('number')}-filter", owner, m_view_filter(have["id"], new),
                               f"View '{want['name']}' filter (§13.5{'; renamed options' if renames else ''}).")
                 jobs.append(fj)
-                filter_jobs.append((fj, new))
+                filter_jobs.append((fj, new, None, want["name"]))
             continue
         if owner == "@me" and not user_id:
             pending.append({"view": want["name"], "why": "numeric user id (gh api user --jq .id) for the user views path"})
             reads.append({"name": "user-id", "argv": ["gh", "api", "user", "--jq", ".id"]})
             continue
         body, ui = view_body(want, spec)
+        # gh cannot express the API's nested sort tuples through inline field
+        # flags. Preserve that setting as an exact browser step instead of
+        # hiding a mutation body behind --input.
+        if body.get("sort_by"):
+            ui.append("Sort: " + ", then ".join(f"{n} {d}" for n, d in want.get("sort_by") or []))
+        argv = ["gh", "api", "-X", "POST", base]
+        for key, value in body.items():
+            if key == "sort_by":
+                continue
+            if isinstance(value, list):
+                for entry in value:
+                    argv += ["-F", f"{key}[]={entry}"]
+            else:
+                argv += ["-f", f"{key}={value}"]
         rel = f"work/projects/{sid}-{num}/view-{i + 1}-{_k(want['name'])}.json"
         files[rel] = body
-        jobs.append(_job(f"{pid}-{num}-view-{_k(want['name'])}", "project",
-                         ["gh", "api", "-X", "POST", base, "--input", rel], owner,
-                         f"§13.5 view {i + 1} '{want['name']}' through REST (integer field ids). Read the view number back."))
+        fj = _job(f"{pid}-{num}-view-{_k(want['name'])}", "project",
+                  argv, owner,
+                  f"§13.5 view {i + 1} '{want['name']}' through REST (integer field ids). Read the view number back.")
+        jobs.append(fj)
+        filter_jobs.append((fj, str(body.get("filter") or ""), rel, want["name"]))
         if ui:
             want = dict(want, ui=list(want.get("ui") or []) + ui)
         vlist[i] = want
@@ -1115,7 +1148,7 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
     # repository before the filter mutation goes out. A filter that names a denied repository is held (its job is
     # removed); a permitted one carries the sign-off ids of the repositories it names. Bare names that do not resolve
     # to an owner/name pair are left alone.
-    for fj, flt in (filter_jobs if resolver is not None else []):  # no resolver: nothing to authorize against, unchanged
+    for fj, flt, body_path, view_name in (filter_jobs if resolver is not None else []):
         refs = [r for r in _normalize_repo_entries(_filter_repo_refs(flt), owner, role, resolver, []) if "/" in r]
         if not refs:
             continue
@@ -1123,6 +1156,9 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
         kept_keys = {_grant_key(resolver, *r.split("/", 1)) for r in kept if "/" in r}
         if any(_grant_key(resolver, *r.split("/", 1)) not in kept_keys for r in refs):
             jobs[:] = [j for j in jobs if j is not fj]
+            if body_path is not None:
+                files.pop(body_path, None)
+            held_views.add(view_name)
             logs.append(f"view-filter-held:{fj['id']} (a repository in the proposed filter has no valid T3 sign-off or "
                         "is not authorized)")
             pending.append({"why": "view filter held: it names a repository without a valid T3 sign-off",
@@ -1133,7 +1169,7 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
                and g.get("id")]
         if ids:
             from . import signoff
-            signoff.stamp_associations(fj, list(dict.fromkeys(ids)), owner)
+            signoff.stamp_associations(fj, list(dict.fromkeys(ids)))
     # 4. text: short description and README (README needs every view number)
     nums = view_numbers(spec)
     edit = ["gh", "project", "edit", num, "--owner", own_flag, "--description", short]
@@ -1182,6 +1218,8 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
     # 6. browser: UI-only view settings, workflows, insights, default repo, auto-add, recommended template
     url = project_url(owner, number)
     for v in vlist:
+        if v["name"] in held_views:
+            continue
         if v.get("ui"):
             nv = nums.get(v["name"])
             jobs.append(_browser(f"{pid}-{num}-ui-{_k(v['name'])}", owner, f"{url}/views/{nv}" if nv else url,
@@ -1284,6 +1322,7 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
         if j["id"] in seen_ids:
             raise ShowcaseError(f"refused to plan: job id {j['id']} is used twice", log="usage")
         seen_ids.add(j["id"])
+    _stamp_owner_jobs(jobs, owner)
     return {"command": "project", "action": "copy-plan", "owner": owner, "role": role, "stage": 2, "number": number,
             "title": title, "short_description": short, "result": "ok", "jobs": jobs, "reads": reads, "pending": pending,
             "files": files, "readme": text, "logs": sorted(set(logs))}
@@ -1723,18 +1762,7 @@ def cmd_project(args):
                         copied=copied, workstreams=ws, repositories=_parse_repos_arg(args.repos) or None,
                         approval_id=args.approval_id, resolver=r, user_id=args.user_id, out_of_scope=args.out_of_scope,
                         reviewed=args.reviewed, status_update=not args.no_status_update, allow_t3=getattr(args, "allow_t3", False))
-    if args.jobs and res.get("files") and not args.files_dir:
-        # each REST view job reads its body with --input; the writer's guard refuses a body it cannot read
-        raise ShowcaseError("copy-plan writes REST view bodies: pass --files-dir DIR with --jobs so each view job's --input "
-                            "names a file that exists (nothing was appended)", log="usage")
     if args.files_dir and res.get("files"):
         res["written"] = write_files(res["files"], args.files_dir)
-        # the writer and its guard must read each body from where it was written, whatever --files-dir was
-        base = Path(args.files_dir).resolve()
-        for j in res.get("jobs") or []:
-            argv = j.get("argv") or []
-            for i, a in enumerate(argv[:-1]):
-                if a == "--input" and argv[i + 1] in res["files"]:
-                    argv[i + 1] = str(base / argv[i + 1])
     append_jobs(args.jobs, res.get("jobs") or [])
     return res, OK

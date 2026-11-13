@@ -276,10 +276,12 @@ def defaults_for(owner: str, repo: str, *, repo_dir=None, meta: dict | None = No
     """The owner's `.github` repository for rule 0 in R = owner/repo: R itself when R is `.github`, else `path` (a
     checkout of it, or its metadata JSON from `meta --from-gh OWNER/.github`), else unknown (renames then hold).
     `path` must be the OWNER's `.github` (old and new logins resolve alike through `resolver`): one that names another
-    org or repository is refused (usage); one whose owner cannot be read holds the renames (`needs-input:label-references`)."""
+    org or repository is refused (usage); one whose owner cannot be read holds the renames (`needs-input:label-references`).
+    An indexed or captured default form missing from the checkout also holds renames, even with a matching origin."""
     full = f"{owner}/.github"
     if repo == ".github":
-        return defaults_source(full, repo_dir=repo_dir, meta=meta)
+        from .org import _covered_label_defaults
+        return _covered_label_defaults(defaults_source(full, repo_dir=repo_dir, meta=meta), meta)
     if not path:
         return defaults_source(full)
     from .errors import ShowcaseError
@@ -290,7 +292,8 @@ def defaults_for(owner: str, repo: str, *, repo_dir=None, meta: dict | None = No
             return defaults_source(full, repo_dir=p, verified=False)
         if origin[1].lower() != ".github" or not _same_owner(_owner_resolver(resolver), origin[0], owner):
             raise ShowcaseError(f"--org-defaults {p} is a checkout of {origin[0]}/{origin[1]}, not {full}", log="usage")
-        return defaults_source(full, repo_dir=p)
+        from .org import _covered_label_defaults
+        return _covered_label_defaults(defaults_source(full, repo_dir=p), None)
     try:
         raw = json.loads(p.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -434,7 +437,8 @@ def _rename_or_hold(rd: Path | None, files, complete: bool, defaults: dict | Non
         ref, hits = None, []
     else:
         ref, hits = _referenced(rd, cur)
-    if ref != "block" and _own_forms(rd, files, complete) is not True:
+    if ref != "block" and ((defaults or {}).get("incomplete_target")
+                           or _own_forms(rd, files, complete) is not True):
         dref, got = _default_forms(defaults, cur)
         if dref == "rewrite":
             ref, hits = "rewrite", hits + got
@@ -463,6 +467,15 @@ def plan(existing: list[dict], repo_dir: str | Path | None = None, files=None, *
     (`defaults_source`); None means it is unknown, so a rename in a repository without forms of its own is held."""
     std = standard_labels()
     rd = Path(repo_dir) if repo_dir else None
+    incomplete_dir = (defaults or {}).get("incomplete_dir")
+    if rd is not None and incomplete_dir is not None and rd.resolve() == Path(incomplete_dir).resolve():
+        # The defaults and target are one incomplete .github checkout. Use its
+        # captured/indexed evidence for all reference checks, not only inherited
+        # defaults: an unrelated visible own form cannot prove a missing one safe.
+        rd = None
+        files = defaults.get("files")
+        complete = False
+        defaults = dict(defaults, incomplete_target=True)
     by_low = {lb["name"].lower(): dict(lb) for lb in existing}
     ops: list[dict] = []
     logs: list[str] = []

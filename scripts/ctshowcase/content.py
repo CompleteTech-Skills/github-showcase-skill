@@ -111,6 +111,10 @@ def writer_job(jid: str, phase, kind: str, target: str, argv: list, note: str, a
     j["argv"] = [str(a) for a in argv]
     j["note"] = note
     j.update(extra)
+    # Direct library consumers receive the same verified target provenance as
+    # serialized CLI jobs; stamping never registers or authorizes a grant.
+    from .signoff import stamp
+    stamp([j])
     return j
 
 

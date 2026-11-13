@@ -222,7 +222,7 @@ project normalize --capture FILE [--rest-fields FILE] [--out FILE]
 project lint --capture FILE --owner OWNER [--role org|template|estate] [--display-name TEXT]
 project copy-plan --target ORG|@me [--role org|template|estate] [--source OWNER/N] [--copied FILE]
     [--workstreams FILE] [--repos OWNER/REPO,...] [--approval-id ID] [--files-dir DIR] [--no-status-update] [--jobs FILE]
-    (stage 2 with --jobs needs --files-dir: the REST view bodies the jobs' --input names)
+    (stage 2 mutations are inline; --files-dir optionally writes view review snapshots)
 project readme --capture FILE --owner OWNER [--out FILE]
 project estate-plan [--copied FILE] [--user-id ID] [--source OWNER/N] [--jobs FILE]
 content social [--out PATH] [--title TEXT] [--icon PATH] [--job] [--allow-unmeasured] [--allow-hold]

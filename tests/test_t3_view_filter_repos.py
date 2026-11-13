@@ -266,3 +266,78 @@ def test_grouped_t1_only_repo_emits_one_unstamped_job(tmp_path, monkeypatch, bra
     assert len(jobs) == 1, [j["id"] for j in plan["jobs"]]
     assert "signoff_id" not in jobs[0], jobs[0]
     assert not _held(plan), plan["logs"]
+
+
+# New views must pass the same scope checks as updateProjectV2View jobs.
+def _new_view_plan(brand, flt, *, allow_t3=True, owner=T1):
+    from ctshowcase import project as PJ
+    view = {"name": "New scoped view", "layout": "table", "filter": flt,
+            "group_by": [], "sort_by": [], "ui": ["Group: Workstream"]}
+    return PJ.copy_plan(owner, copied=_capture(owner, BASE_FILTER), resolver=_resolver(brand),
+                        views=[view], allow_t3=allow_t3, reviewed="2026-10-25")
+
+
+def _new_view_jobs(plan):
+    return [j for j in plan["jobs"] if j["id"].endswith("-view-new-scoped-view")]
+
+
+@pytest.mark.parametrize("allow_t3", [True, False])
+def test_new_view_with_denied_repository_emits_no_mutation_or_body(tmp_path, monkeypatch, brand, allow_t3):
+    with _Strict(monkeypatch, _file(tmp_path, WILD)):
+        plan = _new_view_plan(brand, f"repo:{OWNER}/withdrawn-x", allow_t3=allow_t3)
+    assert not _new_view_jobs(plan)
+    assert not plan["files"]
+    assert not any(j["id"].endswith("-ui-new-scoped-view") for j in plan["jobs"])
+    assert _held(plan) and _t3_codes(plan)
+
+
+def test_new_view_with_permitted_repository_carries_provenance_inline(tmp_path, monkeypatch, brand):
+    with _Strict(monkeypatch, _file(tmp_path, WILD)):
+        plan = _new_view_plan(brand, f"repo:{OWNER}/kept-y")
+    jobs = _new_view_jobs(plan)
+    assert len(jobs) == 1 and jobs[0]["signoff_id"] == "t3s-all"
+    assert f"filter=repo:{OWNER}/kept-y" in jobs[0]["argv"]
+    assert "--input" not in jobs[0]["argv"]
+    assert not _held(plan)
+
+
+def test_new_view_with_mixed_scopes_holds_the_whole_mutation(tmp_path, monkeypatch, brand):
+    with _Strict(monkeypatch, _file(tmp_path, WILD)):
+        plan = _new_view_plan(brand, f"repo:{OWNER}/kept-y,{OWNER}/withdrawn-x")
+    assert not _new_view_jobs(plan) and not plan["files"] and _held(plan)
+
+
+def test_new_view_after_regrant_retains_all_repository_records(tmp_path, monkeypatch, brand):
+    records = [*WILD, {"id": "t3s-regrant", "repos": ["withdrawn-x"], "approved_on": "2026-10-02"}]
+    with _Strict(monkeypatch, _file(tmp_path, records)):
+        plan = _new_view_plan(brand, f"repo:{OWNER}/withdrawn-x,{OWNER}/kept-y")
+    job, = _new_view_jobs(plan)
+    assert set(job["signoff_ids"]) == {"t3s-regrant", "t3s-all"}
+
+
+def test_new_view_for_non_t3_repository_is_unstamped(tmp_path, monkeypatch, brand):
+    with _Strict(monkeypatch, _file(tmp_path, WILD)):
+        plan = _new_view_plan(brand, "repo:Northwind-Trading-Co/site")
+    job, = _new_view_jobs(plan)
+    assert "signoff_id" not in job and "--input" not in job["argv"]
+
+
+@pytest.mark.parametrize("stage", [1, 2])
+def test_direct_copy_plan_returns_owner_provenance_without_cli_stamping(tmp_path, monkeypatch, brand, stage):
+    from ctshowcase import project as PJ
+    with _Strict(monkeypatch, _file(tmp_path, WILD)):
+        plan = PJ.copy_plan(OWNER, resolver=_resolver(brand), allow_t3=True,
+                            copied=_capture(OWNER, BASE_FILTER) if stage == 2 else None)
+    assert plan["stage"] == stage and plan["jobs"]
+    assert all(j.get("signoff_id") == "t3s-all" for j in plan["jobs"])
+    if stage == 1:
+        assert plan["jobs"][0]["approval_id"] == "q41.orgs"
+
+
+def test_direct_copy_plan_merges_owner_and_scoped_provenance(tmp_path, monkeypatch, brand):
+    records = [*WILD, {"id": "t3s-regrant", "repos": ["withdrawn-x"], "approved_on": "2026-10-02"}]
+    with _Strict(monkeypatch, _file(tmp_path, records)):
+        plan = _new_view_plan(brand, f"repo:{OWNER}/withdrawn-x", owner=OWNER)
+    job, = _new_view_jobs(plan)
+    assert job["signoff_id"] == "t3s-regrant"
+    assert set(job["signoff_ids"]) == {"t3s-regrant", "t3s-all"}

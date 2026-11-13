@@ -317,7 +317,8 @@ def test_copy_plan_without_repositories_readme_and_workflows_unchanged(tmp_path,
     wf = _workflows(plan)
     assert len(wf) == 1, [j["id"] for j in plan["jobs"]]
     assert any("auto-add" in s.lower() for s in wf[0]["steps"]), wf[0]["steps"]
-    assert "signoff_id" not in wf[0], wf[0]
+    # The workflow still changes the T3 board, even without repository links.
+    assert wf[0]["signoff_id"] == "t3s-all", wf[0]
     assert not any(str(x).startswith("settings-held:") for x in plan["logs"]), plan["logs"]
 
 
