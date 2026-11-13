@@ -111,3 +111,14 @@ Excluded owners and T3 orgs without `--allow-t3` (co-owner sign-off) exit 2 in e
 - Never pin before everything else in the org is final; pins are browser steps.
 - Never create `.github-private`, and never list a private repository on a public profile.
 - Never commit a public file the run wrote without `showcase.py lint public-leak FILE... --meta-dir DIR`: the same leak check `profile` runs, against every registry org's private set (or `--org ORG[,ORG]`); without metadata every repository counts as private, so it fails closed.
+
+## A checkout whose repository name changed
+
+A metadata/checkout identity mismatch still refuses the operation before writing.
+An unrecorded repository rename is not proof that two repositories are the same:
+check the identity first, then update the local checkout's `origin` with the
+`git -C ... remote set-url origin https://github.com/OWNER/REPO.git` command named
+in the diagnostic, or select the correct checkout. The skill never rewrites a
+remote and does not make a redirect lookup implicitly. Recorded organization
+aliases keep resolving through the shared resolver. `--no-repo-dir` is only for
+metadata-only use and does not authenticate a mismatched checkout.
