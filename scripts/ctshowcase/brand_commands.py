@@ -103,6 +103,8 @@ def cmd_brand(args):
     raw = copy.deepcopy(brand.raw)
     text = original
     mark = None
+    if not args.org and any(getattr(args, key, None) for key in ("tier", "display_name", "mark", "footer")):
+        raise ConfigError("org-specific options require --org")
     if args.brand_action == "add-family":
         if not re.fullmatch(r"[a-z][a-z0-9-]*", args.name):
             raise ConfigError("family name must use lowercase letters, digits and hyphens")

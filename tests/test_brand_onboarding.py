@@ -129,3 +129,11 @@ def test_existing_family_never_replaced(local_config):
     with pytest.raises(ConfigError, match='already exists'):
         cmd_brand(args)
     assert local_config.read_bytes() == before
+
+
+def test_org_options_are_not_silently_ignored(local_config):
+    args = family_args(local_config, '--footer', 'no', '--write')
+    before = local_config.read_bytes()
+    with pytest.raises(ConfigError, match='require --org'):
+        cmd_brand(args)
+    assert local_config.read_bytes() == before
