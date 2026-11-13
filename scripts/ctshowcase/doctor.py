@@ -89,7 +89,7 @@ def row(ctx: RepoContext) -> dict:
         logs += rl.get("logs", [])
     else:
         cells["R7"] = "unknown" if not rd else "fail"
-    if ctx.brand.owner_status(ctx.owner) == "t3" and not t3_signed_off():
+    if ctx.brand.owner_status(ctx.owner) == "t3" and not t3_signed_off(ctx.owner, ctx.repo):
         cells["R7"] = "hold"  # T3: no README change before co-owner sign-off (lint readme refuses)
     lic = ctx.meta.get("license")
     cells["R8"] = "pass" if lic or not ctx.public else "warn"
@@ -162,18 +162,37 @@ def row(ctx: RepoContext) -> dict:
         if re.search(r"<!-- showcase:checklist:start -->.*- \[ \].*<!-- showcase:checklist:end -->",
                      (rd / "README.md").read_text(encoding="utf-8"), re.S):
             logs.append("checklist: open")
-    return {"repo": f"{ctx.owner}/{ctx.repo}", "type": ctx.det["type"], "variant": ctx.det["variant"], "cells": cells,
-            "done": "yes" if done else "no", "logs": sorted(set(logs + ctx.logs))}
+    row = {"repo": f"{ctx.owner}/{ctx.repo}", "type": ctx.det["type"], "variant": ctx.det["variant"], "cells": cells,
+           "done": "yes" if done else "no", "logs": sorted(set(logs + ctx.logs))}
+    from . import signoff
+    rec = None
+    if ctx.brand.owner_status(ctx.owner) == "t3" and t3_signed_off(ctx.owner, ctx.repo):
+        # evaluated directly (not via the gate's cache) so `doctor --estate` rows, which never run check_owner, show it too
+        rec, _ = signoff.evaluate(ctx.brand.aliases(ctx.owner), ctx.repo)
+    if rec is not None:  # only with a valid record: show which sign-off lifted the hold
+        row["signoff_id"] = str(rec.get("id") or "")
+        row["signoff_expires"] = str(rec.get("expires") or "")
+    return row
+
+
+def _signoff_cols() -> list[str]:
+    # extra column only when --allow-t3 is passed; the documented row shape is unchanged otherwise
+    return ["signoff_id"] if t3_signed_off() else []
+
+
+def _signoff_vals(r: dict) -> list[str]:
+    return [r.get("signoff_id", "")] if _signoff_cols() else []
 
 
 def as_tsv(r: dict, header: bool = False) -> str:
-    cols = ["owner/repo", "type", "variant", *COLUMNS, "done"]
-    line = "\t".join([r["repo"], r["type"], r["variant"], *[r["cells"][c] for c in COLUMNS], r["done"]])
+    cols = ["owner/repo", "type", "variant", *COLUMNS, "done", *_signoff_cols()]
+    line = "\t".join([r["repo"], r["type"], r["variant"], *[r["cells"][c] for c in COLUMNS], r["done"],
+                      *_signoff_vals(r)])
     return ("\t".join(cols) + "\n" if header else "") + line
 
 
 def as_md(r: dict, header: bool = False) -> str:
-    cols = ["owner/repo", "type", "variant", *COLUMNS, "done"]
-    vals = [r["repo"], r["type"], r["variant"], *[r["cells"][c] for c in COLUMNS], r["done"]]
+    cols = ["owner/repo", "type", "variant", *COLUMNS, "done", *_signoff_cols()]
+    vals = [r["repo"], r["type"], r["variant"], *[r["cells"][c] for c in COLUMNS], r["done"], *_signoff_vals(r)]
     head = ("| " + " | ".join(cols) + " |\n|" + "---|" * len(cols) + "\n") if header else ""
     return head + "| " + " | ".join(vals) + " |"

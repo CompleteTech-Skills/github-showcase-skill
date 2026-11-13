@@ -282,7 +282,7 @@ def _gate(estate: Estate, org: str, *, allow_t3=False, allow_hold=False,
     r.check_owner(org, allow_t3=allow_t3, allow_hold=allow_hold)
     login = r.canonical(org)
     row = r.brand_org(org)
-    if row.get("tier") == "T3" and not allow_t3:
+    if row.get("tier") == "T3" and not (allow_t3 and _t3_granted(login)):
         from .errors import Refused
         raise Refused(f"{login} is T3; needs co-owner sign-off", log="t3-signoff")
     if r.family_hold(org) and not allow_hold:
@@ -290,6 +290,12 @@ def _gate(estate: Estate, org: str, *, allow_t3=False, allow_hold=False,
         raise Refused(f"{login} is on HOLD (STANDARD §12.5 #4): only the decision 18 footer is built", log="hold")
     reg = r.registry_org(org) if require_registry or r.registry else {}
     return login, row, reg
+
+
+def _t3_granted(owner: str, repo: str | None = None) -> bool:
+    """True when a valid sign-off record covers the owner (signoff.py)."""
+    from . import signoff
+    return signoff.granted(owner, repo)
 
 
 def _tier(row: dict) -> str:
@@ -311,7 +317,7 @@ def _star_entry(estate: Estate, org: str, reg: dict) -> dict | None:
 def _star_held(estate: Estate, org: str, allow_t3: bool = False) -> str | None:
     from .config import t3_signed_off
     st = estate.resolver.owner_status(org)
-    if st == "t3" and (allow_t3 or t3_signed_off()):
+    if st == "t3" and (allow_t3 or t3_signed_off()) and _t3_granted(org):
         st = None  # co-owner sign-off lifts the T3 hold (decision 12); HOLD and excluded stay held
     if st in ("t3", "hold", "excluded"):
         return st
@@ -360,8 +366,70 @@ def public_favorites(estate: Estate, reg: dict, *, allow_t3: bool = False) -> tu
 
 
 def _t3_held(estate: Estate, full: str, allow_t3: bool) -> bool:
-    """A repository of a T3 org (any of its logins) before co-owner sign-off: never named on a public profile."""
-    return not allow_t3 and "/" in (full or "") and estate.resolver.owner_status(full.split("/")[0]) == "t3"
+    """A repository of a T3 org (any of its logins) before co-owner sign-off: never named on a public profile.
+    The slug as named is checked as before. Only when --allow-t3 is passed (with enforcement on), the slug it has today (estate.current:
+    an approved pending transfer) is checked too (_t3_moved_held)."""
+    if "/" not in (full or ""):
+        return False
+    owner, _, name = full.partition("/")
+    if estate.resolver.owner_status(owner) == "t3" and not (allow_t3 and _t3_granted(owner, name)):
+        return True
+    return _t3_moved_held(estate, full, allow_t3)
+
+
+def _t3_moved_held(estate: Estate, full: str, allow_t3: bool) -> bool:
+    """When the T3 flag (--allow-t3) is passed with enforcement on: FULL is named under one org but a T3 org holds it today (an approved pending
+    transfer, estate.current), and that T3 org has no --allow-t3 plus valid record covering the repository.
+
+    Opt-in only: without --allow-t3 this is always False (enforcement being default-on does not change that), so the default (base 2be04ac) behaviour of profiles, star
+    Lists and `org labels` is unchanged; no issue of epic #22 asks for a default-on tightening
+    (tests/test_t3_signoff_require.py::test_transfer_to_a_t3_org_is_unchanged_without_the_flag). With the flag:
+    ::test_favorite_transferred_to_a_t3_org_is_held_without_its_record and
+    ::test_home_repository_held_by_a_t3_org_is_omitted_without_its_record."""
+    from .config import t3_signed_off
+    if not (allow_t3 or t3_signed_off()) or "/" not in (full or ""):
+        return False
+    r = estate.resolver
+    cur = estate.current(r.slug(full))
+    owner, _, name = cur.partition("/")
+    if r.same(owner, full.split("/")[0]):
+        # same org: the named slug was checked by _t3_held, but a pending rename emits the slug it has today, so that
+        # name needs the record too (tests/test_t3_signoff_require.py::test_pending_rename_is_gated_on_the_emitted_name)
+        if name.lower() == full.partition("/")[2].lower():
+            return False
+        return r.owner_status(owner) == "t3" and not (allow_t3 and _t3_granted(owner, name))
+    return r.owner_status(owner) == "t3" and not (allow_t3 and _t3_granted(owner, name))
+
+
+def _pin_signoff(estate: Estate, login: str, pin: str, allow_t3: bool) -> str | None:
+    """The id of the sign-off record that authorizes LOGIN/PIN (signoff.evaluate with the repository: the per-repository
+    veto applies), else None. For a wildcard grant, a later withdrawal of PIN and a still-later repository-scoped
+    regrant this is the regrant, so a pin job never carries a wildcard grant that no longer authorizes that
+    repository. None without --allow-t3 or for an org that is not T3."""
+    r = estate.resolver
+    if not allow_t3 or r.owner_status(login) != "t3":
+        return None
+    from . import signoff
+    rec = signoff.record(login, pin, r.aliases(login))
+    return str(rec["id"]) if rec and rec.get("id") else None
+
+
+def _t3_repo_refusal(estate: Estate, login: str, name: str, allow_t3: bool) -> str | None:
+    """The refusal code (`revoked`, `scope`, ...) when LOGIN is a T3 org, --allow-t3 is passed and NAME has no valid
+    sign-off of its own, else None. The command gate checks the owner-wide record, which a wildcard grant satisfies even
+    after a later withdrawal of one repository; every repository the org's own profile or pins would name or act on is
+    therefore checked again here (signoff.evaluate with the repository), so a withdrawn repository is held while the
+    org's unrelated repositories stay authorized. No-op without --allow-t3 (the base behaviour is unchanged) and for
+    owners that are not T3. Callers log `t3-signoff:<code>:<login>/<name>`
+    (tests/test_t3_signoff_require.py::test_wildcard_grant_with_a_repo_withdrawal_holds_that_repo_in_profile_and_pins)."""
+    r = estate.resolver
+    if not allow_t3 or not name or r.owner_status(login) != "t3":
+        return None
+    from . import signoff
+    rec, why = signoff.evaluate([login, *r.aliases(login)], name)
+    if rec is not None:
+        return None
+    return (why or "missing").partition(":")[0]
 
 
 def public_slice(estate: Estate, org: str, lists_capture: dict | None = None, *,
@@ -381,6 +449,19 @@ def public_slice(estate: Estate, org: str, lists_capture: dict | None = None, *,
         logs.append("needs-input:org-description")
     names = estate.repos_of(org)
     public = [n for n in names if n != ".github" and estate.is_public(f"{login}/{n}")]
+    # A home repository that a T3 org holds today (approved pending transfer) needs that
+    # org's record before the profile names it; held ones are omitted from featured, sections, forks and archives.
+    # Only the moved slug is checked here: the home org itself already passed _gate, and the callers that pass no
+    # allow_t3 (leak scope, doctor) must keep seeing the org's own repositories. No-op without --allow-t3.
+    moved_held = [n for n in public if _t3_moved_held(estate, f"{login}/{n}", allow_t3)]
+    for n in moved_held:
+        logs.append(f"t3-signoff:{estate.current(r.slug(f'{login}/{n}'))}")
+    public = [n for n in public if n not in moved_held]
+    # A repository whose own sign-off was withdrawn (a wildcard grant stays valid org-wide) is never named either.
+    repo_held = {n: c for n in public if (c := _t3_repo_refusal(estate, login, n, allow_t3))}
+    for n, c in repo_held.items():
+        logs.append(f"t3-signoff:{c}:{login}/{n}")
+    public = [n for n in public if n not in repo_held]
     for n in names:
         if n != ".github" and estate.visibility(f"{login}/{n}") == "unknown":
             moving = estate.pending_move(f"{login}/{n}")
@@ -847,6 +928,13 @@ def profile(estate: Estate, org: str, *, out_dir: str | Path | None = None, rend
             allow_unmeasured: bool = False, lists_capture: dict | None = None, meta_dir: str | None = None) -> tuple[dict, int]:
     """`org profile`: README + data.json + the asset list; writes only under out_dir, and only when the leak check passes."""
     login, row, reg = _gate(estate, org, allow_t3=allow_t3)
+    # public_slice excludes `.github`, so its repository check never sees the profile's own destination. A later
+    # withdrawal scoped to `.github` (a wildcard grant stays valid org-wide) must hold the generated README/data.json
+    # before anything is built or written (tests/test_t3_emission_scope.py::test_profile_holds_a_github_scoped_withdrawal).
+    if (code := _t3_repo_refusal(estate, login, ".github", allow_t3)):
+        from .errors import Refused
+        raise Refused(f"{login}/.github sign-off is {code}: the org profile is not generated or written",
+                      log=f"t3-signoff:{code}:{login}/.github")
     data, logs = public_slice(estate, org, lists_capture, allow_t3=allow_t3)
     email = _email(estate, login, reg, email_approved)[0]
     flagship = _tier(row) == "T1" and row.get("flagship")
@@ -1022,7 +1110,7 @@ def user_slice(estate: Estate, login: str, *, allow_t3: bool = False) -> tuple[d
             st = r.owner_status(o)
             if r.is_placeholder(o) or st == "excluded":
                 continue  # q71: placeholder orgs are left out
-            if st == "t3" and not allow_t3:
+            if st == "t3" and not (allow_t3 and _t3_granted(o)):
                 logs.append(f"t3-signoff:{o}")
                 continue
             try:
@@ -1048,6 +1136,9 @@ def user_slice(estate: Estate, login: str, *, allow_t3: bool = False) -> tuple[d
     for m in estate.metas.values():
         full = m["_full"]
         if m["_owner"].lower() not in shown_orgs or not estate.is_public(full) or m.get("fork"):
+            continue
+        if _t3_held(estate, full, allow_t3):  # a wildcard-granted org still holds a repository whose sign-off was withdrawn
+            logs.append(f"t3-signoff:{full}")
             continue
         for lang, n in (m.get("languages") or {}).items():
             if isinstance(n, int):
@@ -1389,6 +1480,8 @@ def pins(estate: Estate, org: str, *, allow_t3: bool = False, lists_capture: dic
          repo_ids: dict | None = None) -> tuple[dict, int]:
     login, row, reg = _gate(estate, org, allow_t3=allow_t3, allow_hold=True)
     checks, jobs, logs, order = [], [], [], {"public": [], "members": []}
+    pin_records: dict[str, list[str]] = {}
+    t3_held: set[str] = set()  # targets with a pin held for co-owner sign-off (see the order-job loop below)
     held = _star_held(estate, org) == "hold"  # STANDARD §12.5 #4: a HOLD org's pins only report, as `profile` refuses
     if held:
         logs.append("pins:hold")
@@ -1438,6 +1531,10 @@ def pins(estate: Estate, org: str, *, allow_t3: bool = False, lists_capture: dic
                 logs.append(f"pin-gated:{pin}:{dep or (hit or ('', ''))[1]}")
             if held:
                 res, detail = "hold", "org on HOLD (STANDARD §12.5 #4): pins only report"
+            elif (t3c := _t3_repo_refusal(estate, login, pin, allow_t3)):
+                t3_held.add(target)
+                res, detail = "hold", f"t3-signoff:{t3c}:{login}/{pin}"
+                logs.append(f"t3-signoff:{t3c}:{login}/{pin}")
             checks.append({"target": target, "position": i, "repo": pin, "result": res, "detail": detail,
                            "depends_on": dep or None, "gate": gate})
             order[target].append(pin)
@@ -1452,10 +1549,21 @@ def pins(estate: Estate, org: str, *, allow_t3: bool = False, lists_capture: dic
                  f"Open https://github.com/{login} and check that {pin} now shows in the {label.lower()} row."],
                 org=login, ui_action="org-pin", depends_on=dep or None,
                 note=f"Decision 14 pin {i} of {len(entries)} ({target}); {gate or 'no dependency'}."))
+            _pin_rec = _pin_signoff(estate, login, pin, allow_t3)  # the record that covers THIS repository, not the owner-wide first grant
+            if _pin_rec:
+                jobs[-1]["signoff_id"] = _pin_rec
+                pin_records.setdefault(target, []).append(_pin_rec)
+    # The exact-set order job below tells the writer to make the ticked set EXACTLY the kept list and untick every
+    # other repository. That would also withdraw a pin held for co-owner sign-off (withdrawn or unauthorized), so
+    # for a target with any such held pin the exact-set job is held and logged. The individual authorized pin jobs
+    # above (each adds one repository and keeps the others) are still emitted, so authorized kept pins remain.
     for target, label, view in (("public", "Public pins", "Public"), ("members", "Members-only pins", "Member")):
         bad = ("fail", "blocked", "unknown", "hold") if target == "public" else ("fail", "blocked", "hold")
         keep = [c["repo"] for c in checks if c.get("target") == target and c.get("repo") and c["result"] not in bad]
         if not keep:
+            continue
+        if target in t3_held:
+            logs.append(f"pins-order-held:{target}:t3-signoff")
             continue
         listing = "; ".join(f"{i}. {n}" for i, n in enumerate(keep, 1))
         jobs.append(browser_job(
@@ -1466,6 +1574,9 @@ def pins(estate: Estate, org: str, *, allow_t3: bool = False, lists_capture: dic
              "Drag the pins into that order, then click 'Save pins'.",
              f"Reload 'View as: {view}' and screenshot the pinned row into state/screens/{login}/."],
             org=login, ui_action="org-pin-order", note=f"Final {target} pin order from the registry (VER-01 check)."))
+        if pin_records.get(target):  # the order job names every repository record behind the pins it sets
+            from . import signoff
+            signoff.stamp_associations(jobs[-1], pin_records[target])
     lists = star_list_plan(estate, org, lists_capture=lists_capture, repo_ids=repo_ids, allow_t3=allow_t3)
     failed = any(c["result"] == "fail" for c in checks)
     res = {"command": "org", "action": "pins", "owner": login,
@@ -1495,7 +1606,8 @@ def _list_complete(node: dict) -> bool:
     return isinstance(total, int) and total <= len([x for x in items["nodes"] if x])
 
 
-def _estate_list_targets(estate: Estate, nodes: list[dict], *, allow_t3: bool = False) -> dict[str, set[str]]:
+def _estate_list_targets(estate: Estate, nodes: list[dict], *, allow_t3: bool = False,
+                         signoffs: dict[str, str] | None = None) -> dict[str, set[str]]:
     """{favorite (lower): ids of every captured estate star List that some org's plan puts it on}. An
     updateUserListsForItem job replaces the item's whole set, so each org's job carries every estate List the item
     belongs on, and two orgs sharing a favorite never undo each other whichever job runs last."""
@@ -1511,6 +1623,11 @@ def _estate_list_targets(estate: Estate, nodes: list[dict], *, allow_t3: bool = 
         node = by_name.get(ent["name"].lower())
         if node is None:
             continue  # created later: its own plan, after a re-capture, adds the item with the union then
+        if signoffs is not None and r.owner_status(key) == "t3":  # list id -> the record that admitted this T3 org
+            from . import signoff
+            rec = signoff.record(key, None, r.aliases(key))
+            if rec is not None and rec.get("id"):
+                signoffs[node["id"]] = str(rec["id"])
         for f in public_favorites(estate, reg or {}, allow_t3=allow_t3)[0]:
             out.setdefault(f.lower(), set()).add(node["id"])
     return out
@@ -1518,6 +1635,17 @@ def _estate_list_targets(estate: Estate, nodes: list[dict], *, allow_t3: bool = 
 
 def star_list_plan(estate: Estate, org: str, *, lists_capture: dict | None = None, repo_ids: dict | None = None,
                    planned_new: int | None = None, allow_t3: bool = False) -> dict:
+    """See _star_list_plan. Its jobs target the personal account (USER_LOGIN), not the org, so the org's
+    grant is carried onto them explicitly (target-based stamping would miss it)."""
+    from . import signoff
+    out = _star_list_plan(estate, org, lists_capture=lists_capture, repo_ids=repo_ids, planned_new=planned_new,
+                          allow_t3=allow_t3)
+    signoff.stamp(out.get("jobs"), owner=estate.resolver.canonical(org))
+    return out
+
+
+def _star_list_plan(estate: Estate, org: str, *, lists_capture: dict | None = None, repo_ids: dict | None = None,
+                    planned_new: int | None = None, allow_t3: bool = False) -> dict:
     """Per-org star List (decision 14, SOC-01): read the existing lists first, reuse a same-named list, keep the 32-list
     cap, and add each favorite with the **union** of its current lists, this one and every other estate org's star List
     that also takes it (never only the new id). A capture whose lists or List items are cut short proves nothing about
@@ -1578,7 +1706,8 @@ def star_list_plan(estate: Estate, org: str, *, lists_capture: dict | None = Non
                                "needs": "a complete star_lists capture (every List's items.totalCount captured)"})
         return dict(out, result="needs-input", list_id=list_id,
                     logs=sorted(set(fav_logs) | {"needs-input:star-lists-items-paged"}))
-    targets = _estate_list_targets(estate, nodes, allow_t3=allow_t3)
+    list_signoffs: dict[str, str] = {}
+    targets = _estate_list_targets(estate, nodes, allow_t3=allow_t3, signoffs=list_signoffs)
     member_of: dict[str, set[str]] = {}
     ids: dict[str, str] = {k.lower(): v for k, v in (repo_ids or {}).items()}
     for n in nodes:
@@ -1600,10 +1729,28 @@ def star_list_plan(estate: Estate, org: str, *, lists_capture: dict | None = Non
         union = sorted(have | {list_id} | targets.get(f.lower(), set()))
         q = (f"mutation {{ updateUserListsForItem(input: {{itemId: {_gql(rid)}, listIds: [{', '.join(_gql(x) for x in union)}]}}) "
              "{ lists { id name } } }")
-        out["jobs"].append(job(f"p{phase}-{login}-list-item-{f.replace('/', '__')}", phase, "star-list",
-                               ["gh", "api", "graphql", "-f", f"query={q}"], org=USER_LOGIN,
-                               note=f"Add {f} to '{name}', keeping its {len(have)} other list(s) and every estate star "
-                                    "List that also takes it (union; never unstar)."))
+        item = job(f"p{phase}-{login}-list-item-{f.replace('/', '__')}", phase, "star-list",
+                   ["gh", "api", "graphql", "-f", f"query={q}"], org=USER_LOGIN,
+                   note=f"Add {f} to '{name}', keeping its {len(have)} other list(s) and every estate star "
+                        "List that also takes it (union; never unstar).")
+        from . import signoff
+        if r.owner_status(f.split("/")[0]) == "t3":  # a T3 favorite carries its own record (signoff.stamp_source)
+            signoff.stamp_source(item, f, r.aliases(f.split("/")[0]))
+        added = sorted(i for i in targets.get(f.lower(), set()) - have - {list_id} if i in list_signoffs)
+        # Every grant the job needs is kept: the T3 favorite's own record (stamped above), the List org's record when
+        # that org is T3 (the destination of this item job), and the record of each newly added T3 destination List.
+        # One grant never suppresses another; the ids are kept in signoff_id/signoff_ids (signoff.stamp_associations), and approval_id is left as the job had it.
+        sids = [item["signoff_id"]] if "signoff_id" in item else []
+        if r.owner_status(login) == "t3":
+            own = signoff.record(login, None, r.aliases(login))
+            if own and own.get("id"):
+                sids.append(str(own["id"]))
+        sids += [list_signoffs[i] for i in added]
+        sids = list(dict.fromkeys(sids))
+        if len(sids) > 1 or (sids and "signoff_id" not in item):
+            item.pop("signoff_id", None)
+            signoff.stamp_associations(item, sids)
+        out["jobs"].append(item)
     return dict(out, result="incomplete" if incomplete else "ok", list_id=list_id)
 
 
@@ -1777,6 +1924,22 @@ def labels_plan(estate: Estate, org: str, *, allow_t3: bool = False, checkouts: 
         m = estate.meta(f"{login}/{n}")
         full = estate.current(f"{login}/{n}")  # labels are written where the repository is today
         current_owner, current_name = full.split("/", 1)
+        from .config import t3_signed_off
+        if ((allow_t3 or t3_signed_off()) and not estate.resolver.same(current_owner, login)
+                and estate.resolver.owner_status(current_owner) == "t3"):
+            # An approved pending transfer whose label jobs target the T3 org that
+            # holds the repository today passes that org's gate (--allow-t3 and its record; check_owner also
+            # registers the grant that stamps signoff_id on these jobs). The org gate above only saw LOGIN.
+            # Without --allow-t3 the base behaviour is kept (no issue of epic #22 asks for a default-on change):
+            # tests/test_t3_signoff_require.py::test_org_labels_gate_the_t3_owner_a_transfer_resolves_to (with the flag)
+            # and ::test_transfer_to_a_t3_org_is_unchanged_without_the_flag (without it).
+            from .errors import Refused
+            try:
+                estate.resolver.check_owner(current_owner, allow_t3=allow_t3, repo=current_name)
+            except Refused as exc:
+                repos.append({"repo": full, "result": "held", "log": exc.log})
+                logs.append(f"{exc.log}:{full}")
+                continue
         if m is None or m.get("error") and "labels" not in m:
             repos.append({"repo": full, "result": "unknown", "log": "needs-input:metadata"})
             continue
@@ -1863,7 +2026,7 @@ def labels_plan(estate: Estate, org: str, *, allow_t3: bool = False, checkouts: 
     if unknown:
         logs.append(f"needs-input:metadata:{len(unknown)}")
     # a rename rule 0 could not check, or labels that were not captured, is never a pass
-    held = any(x.get("held") or x.get("log") == "needs-input:labels" for x in repos)
+    held = any(x.get("held") or x.get("result") == "held" or x.get("log") == "needs-input:labels" for x in repos)
     return {"command": "org", "action": "labels", "owner": login, "result": "incomplete" if held else "plan" if jobs else "pass",
             "repos": repos, "jobs": jobs, "logs": sorted(set(logs))}, OK
 
