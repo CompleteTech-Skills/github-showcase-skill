@@ -117,8 +117,9 @@ def layout(ctx: RepoContext, fonts: Fonts, icon: str | None = None, *, keys=None
     # chip row, in the banner's order: key chips (both CVE ids when they fit), then the attributes, where a bare
     # language is drawn as the language dot in its place; stars last. Overflow drops stars, then attributes from the
     # end, then folds the second key into "+1".
-    explicit_keys, explicit_attrs = bool(keys), bool(attrs)
     keys, attrs = chipmod.derive(ctx, keys, attrs)
+    explicit_keys = any(source in ("cli", "override") for _, source in keys)
+    explicit_attrs = any(source in ("cli", "override") for _, source in attrs)
     lang = ctx.meta.get("language")
     stars = ctx.meta.get("stargazers_count") or 0
     stars = stars if stars >= 10 else 0

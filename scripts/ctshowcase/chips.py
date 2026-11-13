@@ -131,15 +131,22 @@ def attr_chips(ctx: RepoContext) -> list[tuple[str, str]]:
 
 
 def derive(ctx: RepoContext, cli_keys=None, cli_attrs=None, category: str | None = None):
-    for name, values, maximum in (("--key-chip", cli_keys, 2), ("--chip", cli_attrs, 3)):
+    configured = ctx.override.get("chips") or {}
+    selected_keys = cli_keys or configured.get("key")
+    selected_attrs = cli_attrs or configured.get("attrs")
+    for name, values, maximum in (("--key-chip" if cli_keys else "chips.key", selected_keys, 2),
+                                  ("--chip" if cli_attrs else "chips.attrs", selected_attrs, 3)):
         if values is not None:
+            if not isinstance(values, (list, tuple)):
+                raise ConfigError(f"{name} must be a list of single-line values")
             if len(values) > maximum:
                 raise ConfigError(f"{name} accepts at most {maximum} values")
             if any(not isinstance(value, str) or not value.strip() or "\n" in value or "\r" in value for value in values):
                 raise ConfigError(f"{name} values must be nonempty single-line text")
-    if cli_keys and cli_attrs and len(cli_keys) + len(cli_attrs) > 4:
-        raise ConfigError("at most four fact chips are supported")
     keys = [(k, "cli") for k in cli_keys] if cli_keys else key_chips(ctx, category)
     attrs = [(a, "cli") for a in cli_attrs] if cli_attrs else attr_chips(ctx)
-    keys = keys[:2]
+    if selected_attrs and len(keys) + len(attrs) > 4:
+        # Automatic attributes may be selected by priority, but operator-authored
+        # facts must not disappear to make room for configured or inferred keys.
+        raise ConfigError("at most four fact chips are supported; supplied attribute chips would be omitted")
     return keys, attrs[:min(3, 4 - len(keys))]

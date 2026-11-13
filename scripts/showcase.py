@@ -189,7 +189,7 @@ def cmd_banner(args):
         return base("banner", ctx, result="exempt", logs=[why]), OK
     gate_watching(ctx, args.allow_hold)
     ctx.require_measured(args.allow_unmeasured)
-    if args.subtitle or ctx.override.get("subtitle"):
+    if banner.selected_subtitle(ctx, args.subtitle) is not None:
         if not (ctx.meta.get("description") or "").strip():
             ctx.log("description-missing")
     else:
