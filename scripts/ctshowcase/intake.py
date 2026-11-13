@@ -50,7 +50,7 @@ def adopt(ctx, resolver=None, *, approval_id: str | None = None, fresh: bool = F
     from .content import sidebar_plan, social_job
     from .org import label_ops_argv
     owner, repo = ctx.owner, ctx.repo
-    status = ctx.brand.check_owner(owner)  # excluded, HOLD and T3 owners refuse (exit 2)
+    status = ctx.brand.check_owner(owner, repo=repo)  # excluded, HOLD and T3 owners refuse (exit 2)
     if ctx.style.get("hold") or (resolver.family_hold(owner) if resolver else False):  # as showcase.cmd_adopt refuses
         raise Refused(f"{owner} family is on hold: adopt plans nothing for it", log="hold")
     full = f"{resolver.canonical(owner) if resolver else owner}/{repo}"
@@ -99,6 +99,11 @@ def adopt(ctx, resolver=None, *, approval_id: str | None = None, fresh: bool = F
         jobs.append(_job(_jid("p3", "topics", sid), argv, full, "§5.6 topics (full ordered list; PUT replaces the set).",
                          approval_id, kind="topics"))
         recs.append(records.record(owner, repo, "topics", "topics", tp["current"], tp["proposed"], "§5.6 merge"))
+        # a T3 `also_in` membership topic: carry the record(s) that let it in, as cmd_topics does (a job's existing
+        # approval_id is kept)
+        from .signoff import stamp_associations
+        for item in (jobs[-1], recs[-1]):
+            stamp_associations(item, tp.get("signoff_ids"), owner, repo)
     # §6 labels --------------------------------------------------------------------------------------------------
     if fork or archived or ctx.tier in ("T2-R", "T3") or watching:
         logs.append("labels:n/a")
@@ -193,7 +198,7 @@ def new_plan(brand, slug: str, type_: str, *, template: str = TEMPLATE_REPO, des
     if not m:
         raise ShowcaseError("new needs OWNER/NAME", log="usage")
     owner, name = m.group(1), m.group(2)
-    status = brand.check_owner(owner)
+    status = brand.check_owner(owner, repo=name)
     if status == "watching":
         raise ShowcaseError(f"{owner} is the watching org: it holds forks only, never new repositories", log="exempt")
     if resolver is not None and resolver.is_placeholder(owner):

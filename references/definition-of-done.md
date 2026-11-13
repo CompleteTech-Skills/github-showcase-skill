@@ -1,12 +1,37 @@
 # Definition of done
 
-A repository is done when every check that applies is `pass` (R3 may be `warn`; R7 may be `incomplete`) and the decision columns pass. `showcase.py doctor` prints one row per repository with exactly these columns, so rows from the whole estate concatenate into the coverage matrix:
+A repository is done when every check that applies is `pass` (R3 may be `warn`; R7 may be `incomplete`) and the decision columns pass. `showcase.py doctor` prints one row per repository with these columns, so rows from the whole estate concatenate into the coverage matrix:
 
 ```text
-owner/repo  type  variant  R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11  banner icon card footer  done
+owner/repo  type  variant  R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11  banner icon card footer  done skill_complete owner_pending
 ```
 
 Each cell is `pass`, `warn`, `incomplete`, `fail`, `n/a` or `unknown`. The `done` cell reports done only when every applicable cell is `pass`, `warn` or `incomplete`. `doctor` reads `--repo-dir` and `--meta` only and makes no network calls; live-only checks are `unknown` without the metadata fields they need. Exit 1 when any cell is `fail`.
+
+## Skill delivery and owner decisions
+
+`done` keeps its existing whole-repository meaning. The additional `skill_complete`
+field is `yes` only when R9, banner, icon, card and footer are all `pass` or `n/a`.
+Warnings, missing evidence, incomplete art and holds do not certify a local output.
+`owner_pending` lists the remaining owner-controlled cells: R1 through R8, R10 and
+R11 whose status is not `pass` or `n/a`. Those cells concern naming, descriptions,
+topics, URLs, GitHub settings, labels, authored README content, licensing, social
+preview upload and health metadata. The skill can prepare proposals and generated
+README blocks; the owner supplies missing facts and authorizes their application.
+R9 and the four decision columns describe local skill-controlled assets. These
+classifications identify the next work, and do not grant permissions or change
+which existing checks pass.
+
+For example, reviewed local assets with a pending description, incomplete authored
+README sections and an unconfirmed upload can report `skill_complete: yes`,
+`owner_pending: [R2, R7, R10]` and `done: no`. A missing icon still makes
+`skill_complete: no`. JSON emits a list for `owner_pending`; TSV and Markdown use
+comma-separated cell IDs or `none`. Both new fields follow `done`, preserving the
+original column order. The CLI exit status still follows failing cells.
+
+`doctor --allow-unmeasured` is accepted for consistency with the generators. It
+never skips asset checks or declares an unmeasured palette approved: doctor reads
+existing outputs and performs no rendering, so the flag has no effect.
 
 ## Repository checks
 

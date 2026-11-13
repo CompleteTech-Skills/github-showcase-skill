@@ -59,19 +59,16 @@ def test_create_project_jobs_carry_the_q41_approval_ids(tmp_path):
     assert json.loads(p.stdout)["jobs"][0]["approval_id"] == "q41.custom"
 
 
-def test_stage_two_jobs_need_files_dir_and_log_no_copy_approval(tmp_path):
+def test_stage_two_jobs_are_inline_without_files_dir_and_log_no_copy_approval(tmp_path):
     jobs = tmp_path / "jobs.jsonl"
     cap = PFIX / "copy-capture.json"
     p = cli("project", "copy-plan", "--target", N, "--copied", cap, "--jobs", jobs)
-    assert p.returncode == 2 and not jobs.exists() and "--files-dir" in json.loads(p.stdout)["error"]
-    p = cli("project", "copy-plan", "--target", N, "--copied", cap, "--jobs", jobs, "--files-dir", tmp_path / "bodies")
     res = json.loads(p.stdout)
     assert p.returncode == 0 and jobs.is_file()
     assert not any(x.startswith(("needs-approval:create-project", "fallback:direct-copy")) for x in res["logs"])
-    for j in res["jobs"]:
-        argv = j.get("argv") or []
-        if "--input" in argv:
-            assert os.path.isabs(argv[argv.index("--input") + 1]) and os.path.isfile(argv[argv.index("--input") + 1])
+    assert not (tmp_path / "bodies").exists()
+    assert all("--input" not in j.get("argv", []) for j in res["jobs"])
+    assert any("name=My items" in j.get("argv", []) for j in res["jobs"])
 
 
 def test_workflow_toggle_names_the_workflow_file(brand):
