@@ -40,3 +40,34 @@ def test_unmatched_image_openers_have_bounded_work_and_keep_nested_images(tail):
         assert readmelint._BRACKET_STEPS <= len(text) * 3
         counts.append(readmelint._BRACKET_STEPS)
     assert counts[2] <= counts[1] * 2.1
+
+
+@pytest.mark.parametrize("link_text", ["Docs", "![Visible](visible.png)"])
+def test_html_image_in_resolved_full_reference_label_is_literal(link_text):
+    label = '<img src="missing.png" alt="Shot">'
+    text = f"[{link_text}][{label}]\n\n[{label}]: /docs\n"
+    expected = [("Visible", "visible.png")] if link_text.startswith("![") else []
+    assert readmelint._images(readmelint._outside_code(text), text) == expected
+
+
+def test_html_image_in_unresolved_full_reference_label_remains_visible():
+    text = '[Docs][<img src="missing.png" alt="Shot">]'
+    assert readmelint._images(readmelint._outside_code(text), text) == [("Shot", "missing.png")]
+
+
+def test_html_image_in_full_reference_link_text_remains_visible():
+    text = '[<img src="missing.png" alt="Shot">][Docs]\n\n[Docs]: /docs\n'
+    assert readmelint._images(readmelint._outside_code(text), text) == [("Shot", "missing.png")]
+
+
+@pytest.mark.parametrize("resolved", [False, True])
+def test_reference_label_html_only_reports_a_rendered_missing_image(make_ctx, tmp_path, resolved):
+    ctx = make_ctx(repo_dir=tmp_path, description="Run the Northwind customer support email triage agent from the command line.")
+    label = '<img src="missing.png" alt="Shot">'
+    text = readme.scaffold(ctx, "") + f"\n[Docs][{label}]\n"
+    if resolved:
+        text += f"\n[{label}]: /docs\n"
+    path = tmp_path / "README.md"
+    path.write_text(text, encoding="utf-8")
+    failures = readmelint.lint(ctx, path)["fails"]
+    assert ("R7 local image does not resolve: missing.png" in failures) is not resolved
