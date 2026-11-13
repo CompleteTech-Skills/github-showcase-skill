@@ -2,6 +2,12 @@
 
 `--allow-t3` is enforced by default: the tool verifies the operator's claim that a co-owner signed off against a record file. There is no opt-out: no flag or environment variable turns the check off. A T3 run therefore needs a valid, unexpired record that covers the owner and, when the record is scoped, the repository.
 
+Direct `project.copy_plan()` callers receive the same target and repository checks.
+When its optional resolver is omitted, the planner builds one from the committed
+brand identity data; it does not discover or read the private registry or approval
+files. Supply a resolver explicitly for custom organization identities, aliases or
+approval context. Omitting it never disables consent checks for committed T3 owners.
+
 ## Where the file lives
 
 The canonical private path is `<estate_root>/decisions/t3-signoffs.yaml`, where the estate root is `resolver.estate_root()`: `SHOWCASE_ESTATE_ROOT` when set, otherwise the skill's parent bundle. The order is the explicit `--t3-signoff-file PATH`, then `SHOWCASE_T3_SIGNOFF_FILE=PATH`, then the canonical path. When no estate root resolves there is no default path and the refusal is `t3-signoff:no-file` saying so; the flag is never trusted instead. The tool reads the file and never creates it. The records belong in the private estate bundle (issue 24: tracked there, never copied into target repositories). Never copy a record into a repository. Real records come only from the estate bundle; the files under `tests/fixtures/t3-signoff/` are synthetic.

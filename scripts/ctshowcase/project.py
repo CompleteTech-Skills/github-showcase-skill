@@ -187,12 +187,10 @@ def _slug(owner: str) -> str:
     return "me" if is_user(owner) else owner
 
 
-def _gate_target(resolver: Resolver | None, owner: str, *, allow_t3: bool = False) -> str:
+def _gate_target(resolver: Resolver, owner: str, *, allow_t3: bool = False) -> str:
     """Targets of a write: never T3 without sign-off, never excluded or HOLD. Returns the resolved login."""
     if is_user(owner):
         return "@me"
-    if resolver is None:
-        return owner
     st = resolver.owner_status(owner)
     if st == "excluded":
         raise Refused(f"{owner} is out of scope; no project writes", log="exempt")
@@ -937,6 +935,14 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
     post-copy capture): fields, options, views, filters, text, links, status update and the browser steps."""
     if role not in ("org", "template", "estate"):
         raise ShowcaseError("role is org, template or estate", log="usage")
+    if resolver is None:
+        # Library callers must not bypass target or repository consent by omitting
+        # the CLI's resolver. Use only committed identity data by default; custom
+        # aliases, registry entries and approvals still require a supplied resolver.
+        from .config import load_brand
+        brand = load_brand(prefer_lock=True)
+        resolver = Resolver(brand)
+        brand._resolver = resolver  # keep nested Brand lookups on the same committed identity view
     owner = _gate_target(resolver, target, allow_t3=allow_t3)
     src = source or (f"{REFERENCE[0]}/{REFERENCE[1]}" if role == "template" else None)
     logs, jobs, reads, pending, files = [], [], [], [], {}
