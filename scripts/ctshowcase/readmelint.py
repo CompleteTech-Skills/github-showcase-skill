@@ -12,7 +12,7 @@ from . import footer as footermod
 from . import mdcode
 from .mdcode import find_inline_code
 from .context import RepoContext
-from .detect import standard
+from .detect import required_sections, standard
 from .readme import BANNER_BLOCK, EMOJI, MARK, is_footer_like, masked, normalize_text, nav_first, preserved, split_sections
 
 IMG_MD = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)[^)]*\)")
@@ -1134,12 +1134,12 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
         warns.append("tagline not checked (no description in meta)")
     # H2 order, License last
     pre, sections = split_sections(plain)
-    order = [h for h, _ in rv["variants"].get(variant, [])]
+    order = [h for h, _ in required_sections(ctx.det, variant)]
     # "License" and "Licensing" are one slot: a private repository reads "## License" (proprietary) even in variant F
     lic_slot = next((h for h in order if h in ("License", "Licensing")), "License")
     names = [EMOJI.sub("", h).strip() for h, _ in sections]
     names = [lic_slot if n in ("License", "Licensing") else n for n in names]
-    req = [h for h, r in rv["variants"].get(variant, []) if r == "R"]
+    req = [h for h, r in required_sections(ctx.det, variant) if r == "R"]
     pos = [order.index(n) for n in names if n in order]
     if pos != sorted(pos) and not preserve:
         fails.append("R7 H2 order does not follow the variant")

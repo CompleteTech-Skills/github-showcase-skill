@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import re
 from functools import lru_cache
+from pathlib import PurePosixPath
 
 from . import REFERENCES
 from .facts import RepoFacts
@@ -37,9 +38,12 @@ def is_fork(meta: dict) -> bool:
     return bool(meta.get("fork")) or (meta.get("repo") or "").endswith("-fork")
 
 
-def detect_type(meta: dict, facts: RepoFacts | None = None) -> tuple[str, int]:
+def detect_type(meta: dict, facts: RepoFacts | None = None, same_owner=None) -> tuple[str, int]:
     """Return (type, rule number). Rules that need files are skipped when the tree is unknown."""
     t = standard("types")
+    if same_owner is None:
+        from .config import load_brand
+        same_owner = load_brand().resolver().same
     facts = facts or RepoFacts(meta)
     owner, slug = meta.get("owner", ""), meta.get("repo", "")
     tlds = "|".join(t["domain_tlds"])
@@ -56,7 +60,7 @@ def detect_type(meta: dict, facts: RepoFacts | None = None) -> tuple[str, int]:
         return "fork", 1
     if re.search(r"-backup-\d{8}$", slug):
         return "backup", 2
-    if slug == ".github" or (_same_login(owner, "CompleteDotTech") and _same_login(slug, "CompleteDotTech")):
+    if slug == ".github" or (same_owner(owner, "CompleteDotTech") and _same_login(slug, "CompleteDotTech")):
         return "github-profile", 3
     if meta.get("is_template"):
         return "template", 4
@@ -65,7 +69,7 @@ def detect_type(meta: dict, facts: RepoFacts | None = None) -> tuple[str, int]:
     if not facts.known and re.search(r"\]\((?:\./)?SKILL\.md\)", meta.get("readme_head") or ""):
         # tree unknown (partial metadata): the README links a root SKILL.md, the rule 5 evidence available
         return "agent-skills", 5
-    if owner.lower() == t["security_owner"].lower():
+    if same_owner(owner, t["security_owner"]):
         return "security-check", 6
     if dep("mcp-server") or "mcp server" in h1.lower() or "mcp server" in desc.lower():
         return "mcp-server", 7
@@ -77,7 +81,7 @@ def detect_type(meta: dict, facts: RepoFacts | None = None) -> tuple[str, int]:
         return "discord-bot", 10
     if dep("bot"):
         return "bot", 11
-    if owner.lower() in {o.lower() for o in t["game_owners"]}:
+    if any(same_owner(owner, other) for other in t["game_owners"]):
         return "game", 12
     if any(f.endswith("AndroidManifest.xml") or ".xcodeproj/" in f or f.endswith(".xcodeproj") for f in files):
         return "mobile-app", 13
@@ -98,17 +102,55 @@ def detect_type(meta: dict, facts: RepoFacts | None = None) -> tuple[str, int]:
     if facts.known and facts.is_library():
         return "library", 21
     nb = [f for f in files if f.endswith(".ipynb")]
-    if owner.lower() == t["research_owner"].lower() or (files and len(nb) * 2 >= len(files)):
+    if same_owner(owner, t["research_owner"]) or (files and len(nb) * 2 >= len(files)):
         return "research", 22
     if re.search(r"-in-\d+-steps$", slug):
         return "tutorial", 23
-    sizes = meta.get("file_sizes") or {}
+    sizes = substantive_sizes(facts)
     if sizes:
         data = sum(v for k, v in sizes.items() if k.endswith((".csv", ".json", ".parquet")))
-        if data * 2 >= sum(sizes.values()):
+        if data and data * 2 >= sum(sizes.values()):
             return "dataset", 24
+    substantive = [f for f in files if substantive_path(f)]
+    if substantive and all(PurePosixPath(f).suffix.lower() in (".md", ".rst", ".txt", ".adoc")
+                           or PurePosixPath(f).name in ("LICENSE", "COPYING") for f in substantive):
+        return "documentation", 25
     return "workspace", 25
 
+
+
+def substantive_path(path: str) -> bool:
+    """Exclude administrative/generated inputs from the dataset byte-share heuristic."""
+    parts = PurePosixPath(path).parts
+    excluded = set(standard("types").get("dataset_exclude_dirs", []))
+    names = set(standard("types").get("dataset_exclude_files", []))
+    return bool(parts) and not any(p in excluded for p in parts[:-1]) and parts[-1] not in names
+
+
+def substantive_sizes(facts: RepoFacts) -> dict[str, int]:
+    sizes = facts.meta.get("file_sizes") or {}
+    if facts.dir is not None:
+        sizes = {}
+        for path in facts.files:
+            if not substantive_path(path):
+                continue
+            try:
+                sizes[path] = (facts.dir / path).stat().st_size
+            except OSError:
+                continue
+    return {k: v for k, v in sizes.items() if isinstance(k, str) and substantive_path(k)
+            and isinstance(v, int) and not isinstance(v, bool) and v >= 0}
+
+
+def required_sections(det: dict, variant: str | None = None) -> list:
+    """Type-specific sections preserve the public A-J variant names and explicit overrides."""
+    rv = standard("readme-variants")
+    variant = variant or det["variant"]
+    if variant == standard("types")["types"][det["type"]]["variant"]:
+        specific = rv.get("type_sections", {}).get(det["type"])
+        if specific is not None:
+            return specific
+    return rv["variants"].get(variant, [])
 
 def _same_login(a, b) -> bool:
     return bool(a and b) and str(a).lower() == str(b).lower()
@@ -140,9 +182,12 @@ def detect(meta: dict, facts: RepoFacts | None = None, override: dict | None = N
             raise ShowcaseError(f"unknown type {type_override!r}", log="usage")
         type_, rule = type_override, 0
     else:
-        type_, rule = detect_type(meta, facts)
+        type_, rule = detect_type(meta, facts, same_owner)
     variant = (override or {}).get("variant") or variant_for(type_, meta, same_owner)
     out = {"type": type_, "rule": rule, "variant": variant, "category": card_category(type_)}
+    if not type_override and (rule in (24, 25) or not facts.known):
+        out["confidence"] = "low"
+        out["suggestion"] = f"type-suggestion:{type_}:set type: in .github/showcase.yml or pass --type"
     if not facts.known and not type_override:
         # rules 5, 8-11 and 13-24 need the file tree; without it the type is provisional
         out["provisional"] = True

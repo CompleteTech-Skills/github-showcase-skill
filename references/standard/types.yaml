@@ -12,6 +12,9 @@ deps:
   bot: [python-telegram-bot, slack_bolt, slack-bolt, "@slack/bolt", telegraf, tmi.js]
   web-app: [react, next, vue, svelte, astro, streamlit]
   api: [fastapi, flask, express]
+# Planning and issue exports are administration, not repository datasets.
+dataset_exclude_dirs: [planning, .planning, issues, .github, node_modules, vendor, dist, build]
+dataset_exclude_files: [package.json, package-lock.json, tsconfig.json, composer.json, composer.lock]
 types:
   fork:             {variant: G, category: null}
   backup:           {variant: H, category: null}
@@ -36,4 +39,5 @@ types:
   research:         {variant: D, category: Research}
   tutorial:         {variant: C, category: Tutorial}
   dataset:          {variant: D, category: Dataset}
+  documentation:     {variant: C, category: Documentation}
   workspace:        {variant: C, variant_private: I, category: Workspace}

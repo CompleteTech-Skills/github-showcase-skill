@@ -4,7 +4,7 @@ brand_topics: [completetech, ai-ascension, jev, libreevolve, touchedbyanagent, p
 family_topics: [claude-skill, codex-skill, agentic-ai, security, cve, ai-research, homelab, sts2, browser-game]
 type_topics: [agent-skills, website, web-app, mobile-app, chrome-extension, cli, library, api, mcp-server, bot, discord-bot,
               plugin, template, tutorial, research, dataset, game, security-check, fork, backup, github-profile,
-              infrastructure, hardware, workspace]
+              infrastructure, hardware, documentation, workspace]
 featured: [ai, llm, mcp, ai-agent, agentic-ai, claude, claude-code, openai, chatgpt, generative-ai, prompt-engineering,
            machine-learning, rag, langchain, python, javascript, typescript, nodejs, rust, cpp, react, nextjs, astro, tailwind,
            fastapi, docker, devops, actions, sdk, automation, security, privacy, vscode-extension, jupyter-notebook]

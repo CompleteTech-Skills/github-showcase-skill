@@ -12,7 +12,7 @@ from urllib.parse import quote
 
 from . import footer as footermod
 from .context import RepoContext
-from .detect import standard
+from .detect import required_sections, standard
 from .mdcode import code_spans, find_blocks, masked  # noqa: F401  (code_spans: re-exported for callers)
 
 MARK = re.compile(r"<!-- showcase:([a-z-]+):start -->\n?(.*?)\n?<!-- showcase:\1:end -->", re.S)
@@ -492,7 +492,7 @@ def callout(ctx) -> str | None:
 # ------------------------------------------------------------------------------------------------
 def scaffold(ctx: RepoContext, existing: str = "") -> str:
     variant = ctx.det["variant"]
-    order = standard("readme-variants")["variants"].get(variant, [])
+    order = required_sections(ctx.det, variant)
     parts = [header(ctx)]
     co = callout(ctx)
     if co:
@@ -1011,7 +1011,7 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
     intro = "\n".join(keep_pre).strip()
     # sections: renames, mapping, Notes demotion, License last
     renames = rv["renames"]
-    order = [h for h, _ in rv["variants"].get(variant, [])]
+    order = [h for h, _ in required_sections(ctx.det, variant)]
     low_order = {h.lower(): h for h in order}
     placed: dict[str, str] = {}
     notes: list[str] = []
@@ -1076,7 +1076,7 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
             continue
         if h in placed:
             out.append(f"## {h}\n\n{placed[h].strip()}" if placed[h].strip() else f"## {h}")
-        elif dict(rv["variants"][variant]).get(h) == "R" and not preserve:
+        elif dict(required_sections(ctx.det, variant)).get(h) == "R" and not preserve:
             body = section_facts(ctx, h)
             if body:
                 out.append(f"## {h}\n\n{body}")
@@ -1240,7 +1240,7 @@ def bootstrap(ctx: RepoContext, text: str) -> str:
     if ctx.meta.get("is_template") or bootstrap_state(text) != "pristine":
         return text
     variant = ctx.det["variant"]
-    order = standard("readme-variants")["variants"].get(variant, [])
+    order = required_sections(ctx.det, variant)
     secs = []
     for h2, req in order:
         if h2 in ("License", "Licensing"):
