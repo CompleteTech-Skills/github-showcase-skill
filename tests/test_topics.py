@@ -9,8 +9,10 @@ def test_invoice_worked_example(make_ctx, tmp_path):
                    topics=["agentic-development", "agentic-workflows", "billing", "claude-skill", "codex-skill", "completetech",
                            "invoice", "pdf-generator"])
     r = merge(ctx)
-    assert r["proposed"] == ["completetech", "claude-skill", "codex-skill", "agentic-ai", "agent-skills", "invoice", "billing",
-                             "python", "reportlab", "pdf-generator"]
+    assert r["proposed"] == ctx.meta["topics"] + ["agentic-ai", "agent-skills"]
+    assert r["remove"] == []
+    assert "review-remove:agentic-development" in r["logs"]
+    assert "needs-input:topics-capacity" in r["logs"]
 
 
 def test_security_example(make_ctx):
@@ -31,13 +33,16 @@ def test_fork_path(make_ctx):
     assert merge(ctx)["proposed"] == ["fork", "llm", "cpp"]
 
 
-def test_drops_aliases_and_private_safety(make_ctx):
+def test_private_safety_requires_review_without_silently_deleting(make_ctx):
     ctx = make_ctx(owner="CompleteTech-Pokemon", repo="card-shop", visibility="private",
                    topics=["pokemon", "wip", "completetech-pokemon", "2024", "reactjs", "trading-cards"],
                    description="Trading-card shop inventory tools.")
-    p = merge(ctx)["proposed"]
-    assert "pokemon" not in p and "wip" not in p and "2024" not in p and "completetech-pokemon" not in p
-    assert "react" in p and "trading-cards" in p and len(p) <= 8
+    r = merge(ctx)
+    assert set(ctx.meta["topics"]) <= set(r["proposed"])
+    assert r["remove"] == [] and not r["plan_allowed"]
+    assert not r["equal_as_set"]
+    assert "needs-review:topic-safety" in r["logs"]
+    assert "review-remove:pokemon" in r["logs"]
 
 
 def test_truncate_and_equal(make_ctx):

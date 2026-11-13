@@ -1,6 +1,10 @@
-# Topic taxonomy (closed vocabulary)
+# Topic taxonomy and additive proposals
 
-Condensed from `ct-std-v1` §5, verbatim where it matters. `showcase.py topics` runs the merge algorithm below and prints `{current, proposed, equal_as_set, add[], remove[], logs[]}`; `--also-in ORG[,ORG]` (or `--registry [FILE]`, which reads the repo's `also_in` from `registry/estate.yaml`, read only; or an `also_in` list in the metadata) adds the org membership topics; `--gh` prints the single `gh api -X PUT repos/OWNER/REPO/topics -f names[]=…` command without running it. The machine-readable lists are `references/standard/topics.yaml` and `references/standard/types.yaml`.
+Condensed from `ct-std-v1` §5, verbatim where it matters. `showcase.py topics` runs the merge algorithm below and prints `{current, proposed, equal_as_set, add[], remove[], review_remove[], plan_allowed, logs[]}`; `--also-in ORG[,ORG]` (or `--registry [FILE]`, which reads the repo's `also_in` from `registry/estate.yaml`, read only; or an `also_in` list in the metadata) adds the org membership topics; `--gh` prints the single `gh api -X PUT repos/OWNER/REPO/topics -f names[]=…` command without running it. The machine-readable lists are `references/standard/topics.yaml` and `references/standard/types.yaml`.
+
+Proposals are additive. Existing topics keep their exact spelling and order, including topics outside the standard vocabulary. Cleanup candidates appear in `review_remove` and `review-remove:<topic>` logs, never in `remove` or as implicit deletions. Operators review them separately. A full existing set stays intact; `needs-input:topics-capacity` means there is no room for every suggested addition without an explicit owner decision.
+
+An org may extend its domain vocabulary with `topics_extra` in its row in `references/brand.yaml`. Entries must be lowercase GitHub topic strings, 1–50 characters, using letters, digits and hyphens and starting with a letter or digit. The extension is scoped to that org (including its resolver aliases), participates in domain derivation, and is accepted by R3. It does not add every vocabulary word automatically or relax private-topic safety. No private identity or vocabulary is inferred.
 
 GitHub limits: lowercase `[a-z0-9-]`, at most 50 characters each and 20 per repository (the estate uses at most 10). `PUT` replaces the whole set and rejects the whole set if one topic is invalid. **Topics are public even on private repositories.**
 
@@ -10,7 +14,7 @@ A topic belongs to the first layer it matches: brand (Brand topic) → family (F
 
 | Repo kind | Required set |
 |---|---|
-| Non-fork, non-`.github` | Exactly 1 brand; all applicable family topics; one org membership topic per `also_in` org; exactly 1 type; 0–3 domain; 0–3 tech. Every topic is in the brand, family, type and tech lists or Domain vocabulary, or is the Security vendor token (Domain vocabulary). **5–10 topics if public, 3–8 if private**; org membership topics count toward the maximum but not as brand topics. If the set is below the minimum after the merge algorithm, write it anyway, log `topics-short`, and report R3 as `warn`. |
+| Non-fork, non-`.github` | Exactly 1 brand; all applicable family topics; one org membership topic per `also_in` org; exactly 1 type; 0–3 domain; 0–3 tech. Suggested additions come from the brand, family, type, tech and domain lists, the org-approved `topics_extra`, or the Security vendor token. Existing authored topics are retained for review. **5–10 topics if public, 3–8 if private**; org membership topics count toward the maximum but not as brand topics. If the set is below the minimum after the merge algorithm, write it anyway, log `topics-short`, and report R3 as `warn`. |
 | Fork | `fork` plus 0–4 tech topics taken from the parent's topics (Tech vocabulary only, after aliasing). No brand, no family. A fork listed in `also_in` also carries that org membership topic (counted toward the maximum of 10). |
 | `.github` and `CompleteDotTech/CompleteDotTech` | Exactly `[<brand>, github-profile]` |
 
@@ -85,7 +89,7 @@ A private repo on variants A–E keeps that variant, adds the I callout and the 
 
 A repo has one home org and may be cross-listed on other orgs through `also_in` in `registry/estate.yaml` (never a fork). Each `also_in` org adds its org membership topic, so a topic search for that org finds its cross-listed repos. The values are the `org_topics` map in `references/standard/topics.yaml`, generated from the registry's `org_topic` (the registry wins if they differ; an org rename updates both).
 
-- Placed after the family topics and before the type topic, in `also_in` order. The home org's own topic is never added; an existing one is dropped as outside the repo's vocabulary (so `completetech-llc` is no longer an alias of `completetech`).
+- Placed after the family topics and before the type topic, in `also_in` order. The home org's own topic is never added; an existing one is retained with a `review-remove` log when outside the repo's vocabulary (so `completetech-llc` is no longer an alias of `completetech`).
 - Counts toward the 10/8 maximum, not as a brand topic. If brand + family + org + type alone exceed the maximum, org topics drop from the end of the `also_in` list, logged `topics-over:ORG`; the profile cross-listing stays.
 - The two romgenie utility orgs have none (`null`; logged `org-topic-none:ORG`). T3 org topics (`pick-your-ai`; `ticketstub` is HOLD) are added only after co-owner sign-off (logged `t3-signoff:also-in:ORG`). An org with no `org_topics` row logs `needs-input:org-topic:ORG`.
 
@@ -159,18 +163,11 @@ aliases:
 
 ## Merge algorithm
 
-1. `GET /repos/{o}/{r}/topics`; lowercase; apply the alias map.
-2. **Drop:**
-   - topics not matching `^[a-z0-9][a-z0-9-]{0,49}$`;
-   - topics matching `^(wip|todo|beta|alpha|deprecated|archived|latest|stable|experimental|v\d+(\.\d+)*|(19|20)\d{2})$`;
-   - topics equal to the lowercased owner or starting with `<lowercased owner>-`, except the brand topic;
-   - any Type type topic that is not this repo's type;
-   - topics outside the vocabulary (Layers and counts), and topics that fail Topic safety.
-3. Required set: brand + family + org membership (from `also_in`, never from existing topics) + type.
-4. Domain: derive per Domain vocabulary (≤ 3).
-5. Tech: the mapped top language, then the mapped framework, then surviving existing Tech vocabulary topics in GitHub's returned order; deduplicate; ≤ 3.
-6. **Output order:** brand, family (Family topics order), org membership (`also_in` order), type, domain (derivation order), tech. Truncate from the end to 10 (public) or 8 (private).
-7. Compare with the current topics **as sets**. If equal, skip. Otherwise `PUT /repos/{o}/{r}/topics` with the full ordered list.
+1. Read the current topics and derive recommendations using the standard alias map, required brand/family/org/type layers, up to three domain topics (including org-approved `topics_extra`) and up to three technology topics.
+2. Preserve the current topics exactly. Topics the recommendation would omit become `review_remove` entries and `review-remove:<topic>` logs. The `remove` list is always empty.
+3. Append recommended additions in layer order, only within the estate limit (10 public, 8 private/internal). Never truncate the existing set. If required additions do not fit, log `needs-input:topics-capacity`; resolve the full set separately with its owner.
+4. Compare the additive proposal to the current set. With `--gh`, print a replacement command only if it changes the set and `plan_allowed` is true. `--records` obeys the same gate; no command executes here.
+5. Invalid current topic syntax and private/internal topics banned by the safety rules set `plan_allowed: false`, log `needs-review:topic-safety` and hold replacement commands and records. The current values remain visible as evidence, not as approved additions. Fix the unsafe topics through the owner's separately reviewed cleanup before requesting a new plan.
 
 ## Topic safety (MUST)
 
@@ -183,16 +180,16 @@ aliases:
 
 | Repo | Before | After |
 |---|---|---|
-| Skills/agentic-invoice-skill | agentic-development, agentic-workflows, billing, claude-skill, codex-skill, completetech, invoice, pdf-generator | `completetech`, `claude-skill`, `codex-skill`, `agentic-ai`, `agent-skills`, `invoice`, `billing`, `python`, `reportlab`, `pdf-generator` (10) |
+| Skills/agentic-invoice-skill | agentic-development, agentic-workflows, billing, claude-skill, codex-skill, completetech, invoice, pdf-generator | Existing eight topics, then `agentic-ai`, `agent-skills`; alias cleanup is review-only and remaining additions log `needs-input:topics-capacity`. |
 | Skills/creative-studio | 12 topics, no `claude-skill` | `completetech`, `codex-skill`, `agentic-ai`, `agent-skills`, `sprite-animation`, `character-animation`, `rigging`, `python`, `blender`, `gltf` (10) |
 | Security/netscaler-cve-2026-19489-check | — | `completetech`, `security`, `cve`, `security-check`, `netscaler`, `python` (6) |
 | jevplay-games/jev-connect-four | — | `jev`, `browser-game`, `game`, `board-game` (if "board game" is in the description), `<language>` (5) |
 | Research/llama.cpp (fork) | upstream | `fork` plus ≤ 4 parent topics that are in Tech vocabulary (for example `llm`, `cpp`); no brand |
 | Northwind-Trading-Co/ledger-sandbox (private) | — | `completetech`, `<detected type>`, `trading`, `finance` (if in the description), `python` (5; private minimum 3) |
 
-In the invoice row, existing Domain vocabulary topics rank first (`invoice` occurs in the description; `billing` does not), and the tech layer is the language (`python`), the framework (`reportlab`), then the surviving `pdf-generator`.
+In the invoice row, alias suggestions never delete the two authored spellings. The existing eight topics leave room for two additions; the capacity log records the remaining recommendations.
 
-## Domain vocabulary (closed; only the standard owner edits it)
+## Domain vocabulary (standard plus org-approved additions)
 
 Every entry is public-safe:
 
