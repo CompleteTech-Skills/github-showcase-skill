@@ -1767,11 +1767,13 @@ def _star_list_plan(estate: Estate, org: str, *, lists_capture: dict | None = No
 # =====================================================================================================
 # labels (STANDARD §6.1): the labels module per repository, dry-run plans only
 # =====================================================================================================
-def _label_checkout_evidence(directory: Path, meta: dict | None, *, defaults_only: bool = False) -> tuple[Path | None, dict]:
+def _label_checkout_evidence(directory: Path, meta: dict | None, *, defaults_only: bool = False,
+                             include_defaults: bool = False) -> tuple[Path | None, dict]:
     """Use a checkout only when its captured and indexed reference files are actually present.
 
     Sparse checkouts and local deletions must not turn a missing form into evidence that no form exists.
     Unrelated omitted files do not matter; package.json matters for a member's Renovate configuration.
+    A `.github` repository additionally needs its root and docs default issue templates present.
     """
     from . import labels as labelsmod
     evidence = dict(meta or {})
@@ -1786,7 +1788,8 @@ def _label_checkout_evidence(directory: Path, meta: dict | None, *, defaults_onl
     except (OSError, subprocess.SubprocessError):
         indexed = False
     relevant = (labelsmod.default_form_file if defaults_only
-                else lambda p: labelsmod.reference_file(p) or p.lower() == "package.json")
+                else lambda p: labelsmod.reference_file(p) or p.lower() == "package.json"
+                or include_defaults and labelsmod.default_form_file(p))
     try:
         complete = indexed and all((directory / p).is_file() for p in paths if relevant(p))
     except OSError:
@@ -1803,7 +1806,13 @@ def _covered_label_defaults(defaults: dict, meta: dict | None) -> dict:
     if defaults.get("dir") is None:
         return defaults
     directory, evidence = _label_checkout_evidence(defaults["dir"], meta, defaults_only=True)
-    return defaults if directory is not None else labelsmod.defaults_source(defaults["repo"], meta=evidence)
+    if directory is not None:
+        return defaults
+    # Keep the identity of the incomplete checkout internally. If this is also
+    # the target of a direct label plan, a visible sibling form must not make
+    # the same incomplete checkout trusted as the member's own forms.
+    return dict(labelsmod.defaults_source(defaults["repo"], meta=evidence),
+                incomplete_dir=defaults["dir"])
 
 
 def _label_api(path: str, *, pages: bool = False, optional: bool = False):
@@ -1984,12 +1993,14 @@ def labels_plan(estate: Estate, org: str, *, allow_t3: bool = False, checkouts: 
                 if (not origin or origin[1].lower() != current_name.lower()
                         or not estate.resolver.same(origin[0], current_owner)):
                     raise ShowcaseError(f"--checkouts entry for {full} must have its matching GitHub origin", log="usage")
-                repo_dir, member_meta = _label_checkout_evidence(repo_dir, m)
+                repo_dir, member_meta = _label_checkout_evidence(repo_dir, m, include_defaults=current_name == ".github")
             else:
                 repo_dir = None
             repo_defaults = defaults
             if current_name == ".github":
                 repo_defaults = labelsmod.defaults_source(full, repo_dir=repo_dir, meta=member_meta)
+                if repo_dir is None:
+                    repo_defaults["incomplete_target"] = True
             elif not estate.resolver.same(current_owner, login):
                 # A pending transfer is still governed by its current owner's inherited forms.
                 source_dir = checkout_root / current_owner / ".github" if checkout_root is not None else None
