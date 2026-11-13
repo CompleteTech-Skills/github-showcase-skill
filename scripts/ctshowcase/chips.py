@@ -8,6 +8,7 @@ from __future__ import annotations
 import re
 
 from .context import RepoContext
+from .errors import ConfigError
 
 CVE = re.compile(r"CVE-\d{4}-\d{4,}", re.I)
 HTTP_CLIENTS = {"requests", "httpx", "aiohttp", "urllib3", "axios", "node-fetch", "got", "undici"}
@@ -130,6 +131,15 @@ def attr_chips(ctx: RepoContext) -> list[tuple[str, str]]:
 
 
 def derive(ctx: RepoContext, cli_keys=None, cli_attrs=None, category: str | None = None):
+    for name, values, maximum in (("--key-chip", cli_keys, 2), ("--chip", cli_attrs, 3)):
+        if values is not None:
+            if len(values) > maximum:
+                raise ConfigError(f"{name} accepts at most {maximum} values")
+            if any(not isinstance(value, str) or not value.strip() or "\n" in value or "\r" in value for value in values):
+                raise ConfigError(f"{name} values must be nonempty single-line text")
+    if cli_keys and cli_attrs and len(cli_keys) + len(cli_attrs) > 4:
+        raise ConfigError("at most four fact chips are supported")
     keys = [(k, "cli") for k in cli_keys] if cli_keys else key_chips(ctx, category)
     attrs = [(a, "cli") for a in cli_attrs] if cli_attrs else attr_chips(ctx)
-    return keys[:2], attrs[:3]
+    keys = keys[:2]
+    return keys, attrs[:min(3, 4 - len(keys))]
