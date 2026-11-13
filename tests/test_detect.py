@@ -101,3 +101,25 @@ def test_owner_detection_uses_resolver(canonical, want, rule):
     def same(a, b):
         return a == "Northwind-Former" and b == canonical
     assert detect_type(meta, same_owner=same) == (want, rule)
+
+
+def test_context_reports_low_confidence_type(make_ctx):
+    ctx = make_ctx(files=["README.md", "docs/guide.md"])
+    assert ctx.det["type"] == "documentation"
+    assert any(log.startswith("type-suggestion:documentation:") for log in ctx.logs)
+
+
+def test_mobile_scaffold_uses_mobile_sections(make_ctx):
+    from ctshowcase import readme
+    ctx = make_ctx(files=["app/AndroidManifest.xml"])
+    assert ctx.det["type"] == "mobile-app"
+    readme.scaffold(ctx)
+    assert "needs-input:B:Platforms" in ctx.logs
+    assert "needs-input:B:Install" in ctx.logs
+
+
+def test_mobile_explicit_variant_keeps_variant_contract():
+    from ctshowcase.detect import required_sections
+    mobile = {"type": "mobile-app", "variant": "C"}
+    assert "Platforms" not in dict(required_sections(mobile))
+    assert "Install" in dict(required_sections(mobile))

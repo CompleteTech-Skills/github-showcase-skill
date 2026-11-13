@@ -146,7 +146,7 @@ def required_sections(det: dict, variant: str | None = None) -> list:
     """Type-specific sections preserve the public A-J variant names and explicit overrides."""
     rv = standard("readme-variants")
     variant = variant or det["variant"]
-    if variant == det["variant"]:
+    if variant == standard("types")["types"][det["type"]]["variant"]:
         specific = rv.get("type_sections", {}).get(det["type"])
         if specific is not None:
             return specific

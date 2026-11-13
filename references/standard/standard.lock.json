@@ -211,6 +211,10 @@
      "R"
     ],
     [
+     "Install",
+     "O"
+    ],
+    [
      "Usage",
      "R"
     ],
@@ -798,6 +802,7 @@
    "github-profile",
    "infrastructure",
    "hardware",
+   "documentation",
    "workspace"
   ]
  },

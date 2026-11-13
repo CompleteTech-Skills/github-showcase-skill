@@ -42,6 +42,8 @@ class RepoContext:
             self.log(f"type-config:{self.override['type']}")
         if self._scoped_away:
             self.log(f"override-for:{self._scoped_away}")
+        if self.det.get("suggestion"):
+            self.log(self.det["suggestion"])
         if self.det.get("provisional"):
             self.log("needs-input:file-tree")
         if meta.get("visibility") not in ("public", "private", "internal"):
