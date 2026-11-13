@@ -40,7 +40,10 @@ fonts and fallback assets remain available from the installed skill. Existing
 assets are never overwritten. Both PNG structure and pixel decoding are validated
 before any writes; validation does not modify the copied bytes. Use only artwork
 you are authorized to keep in this package. No asset is downloaded, cropped,
-recoloured or published. Without a mark, existing family wordmark fallback behavior
+recoloured or published. Chunk checksums and decoded pixels must be valid; Pillow's
+oversized-image warning and error limits are refused before pixel decoding. Invalid
+marks return a controlled configuration error before any output is written.
+Without a mark, existing family wordmark fallback behavior
 applies; this is not a repository icon.
 
 The palette requires six-digit hex values. The canvas must be dark. Text and chip

@@ -1,6 +1,7 @@
 """Exercise onboarding through the installed public CLI with synthetic local data."""
 import io
 import json
+import math
 import struct
 import zlib
 
@@ -157,4 +158,74 @@ def test_invalid_png_pixels_refuse_before_onboarding_writes(copied_config, tmp_p
     assert result.returncode == 2, result.stdout + result.stderr
     assert "readable, valid PNG" in result.stdout
     assert all(path.read_bytes() == value for path, value in before.items())
+    assert not (copied_config.parent.parent / "assets").exists()
+
+
+@pytest.mark.parametrize("action", ["add-family", "add-org"])
+@pytest.mark.parametrize("write", [False, True])
+def test_bad_png_crc_is_controlled_and_valid_bytes_allow_retry(copied_config, tmp_path, action, write):
+    original = io.BytesIO()
+    Image.new("RGBA", (16, 16), (30, 80, 140, 255)).save(original, format="PNG")
+    valid = original.getvalue()
+    broken = bytearray(valid)
+    position = 8
+    while position < len(broken):
+        length = struct.unpack(">I", broken[position:position + 4])[0]
+        if broken[position + 4:position + 8] == b"IDAT":
+            broken[position + 8 + length] ^= 1
+            break
+        position += 12 + length
+    else:
+        pytest.fail("synthetic PNG has no IDAT")
+    with Image.open(io.BytesIO(broken)) as image, pytest.raises(SyntaxError):
+        image.verify()
+    mark = tmp_path / "authorized.png"
+    mark.write_bytes(broken)
+    lock = copied_config.with_name("brand.lock.json")
+    lock.write_bytes(b"previous lock bytes\n")
+    before = {path: path.read_bytes() for path in (copied_config, lock, mark)}
+    if action == "add-family":
+        arguments = family_args(copied_config, "--mark", mark)
+    else:
+        arguments = ("--config", copied_config, "brand", "add-org", "--family", "completetech",
+                     "--org", "Northwind-Onboard", "--display-name", "Northwind Onboard",
+                     "--tier", "T2", "--footer", "no", "--mark", mark)
+    refused = run_cli(*arguments, *(["--write"] if write else []))
+    assert refused.returncode == 2, refused.stdout + refused.stderr
+    assert "readable, valid PNG" in refused.stdout
+    assert "Traceback" not in refused.stdout + refused.stderr
+    assert "DecompressionBomb" not in refused.stderr
+    assert all(path.read_bytes() == data for path, data in before.items())
+    assert not (copied_config.parent.parent / "assets").exists()
+
+    # Correct the same authorized source and retry the same identity. Validation
+    # must not reserve it or re-encode valid artwork.
+    mark.write_bytes(valid)
+    written = run_cli(*arguments, "--write")
+    assert written.returncode == 0, written.stdout + written.stderr
+    target = copied_config.parent.parent / "assets" / "orgs" / "Northwind-Onboard" / "mark.png"
+    assert mark.read_bytes() == valid == target.read_bytes()
+
+
+@pytest.mark.parametrize("factor", [1, 2], ids=["warning-limit", "error-limit"])
+def test_png_pixel_safety_limits_refuse_without_allocating_or_writing(copied_config, tmp_path, factor):
+    # Only a PNG header and tiny IDAT are constructed; no large image is allocated.
+    dimension = math.isqrt(factor * Image.MAX_IMAGE_PIXELS) + 1
+
+    def chunk(kind, payload):
+        return (struct.pack(">I", len(payload)) + kind + payload
+                + struct.pack(">I", zlib.crc32(kind + payload)))
+
+    mark = tmp_path / "too-large.png"
+    mark.write_bytes(b"\x89PNG\r\n\x1a\n"
+                     + chunk(b"IHDR", struct.pack(">IIBBBBB", dimension, dimension, 8, 6, 0, 0, 0))
+                     + chunk(b"IDAT", zlib.compress(b"\x00")) + chunk(b"IEND", b""))
+    before = {path: path.read_bytes() for path in (copied_config, mark)}
+    refused = run_cli(*family_args(copied_config, "--mark", mark, "--write"))
+    assert refused.returncode == 2, refused.stdout + refused.stderr
+    assert "readable, valid PNG" in refused.stdout
+    assert "Traceback" not in refused.stdout + refused.stderr
+    assert "DecompressionBomb" not in refused.stderr
+    assert all(path.read_bytes() == data for path, data in before.items())
+    assert not copied_config.with_name("brand.lock.json").exists()
     assert not (copied_config.parent.parent / "assets").exists()

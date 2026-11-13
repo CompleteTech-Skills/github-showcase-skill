@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import copy
 import errno
+import io
 import re
 import stat
+import warnings
 from pathlib import Path
 
 from .color import best_fg, contrast, luminance
@@ -153,20 +155,24 @@ def _new_org(brand: Brand, raw: dict, args) -> tuple[dict, tuple[Path, bytes] | 
            "footer": {"yes": True, "no": False, "hold": "hold"}[args.footer]}
     mark = None
     if args.mark:
+        from PIL import Image
         source = Path(args.mark)
         try:
             data = source.read_bytes()
-            from PIL import Image
-            import io
-            with Image.open(io.BytesIO(data)) as im:
-                if im.format != "PNG":
-                    raise ConfigError("mark must be a PNG; it is copied without conversion")
-                im.verify()
-            # verify() checks container chunks and CRCs, not compressed pixels.
-            # Reopen the same bytes for decoding; the original bytes remain the copy.
-            with Image.open(io.BytesIO(data)) as im:
-                im.load()
-        except (OSError, ValueError) as exc:
+            with warnings.catch_warnings():
+                # Refuse Pillow's oversized-image warning before decoding pixels,
+                # rather than allocate them merely to validate a local mark.
+                warnings.simplefilter("error", Image.DecompressionBombWarning)
+                with Image.open(io.BytesIO(data)) as im:
+                    if im.format != "PNG":
+                        raise ConfigError("mark must be a PNG; it is copied without conversion")
+                    im.verify()
+                # verify() checks container chunks and CRCs, not compressed pixels.
+                # Reopen the same bytes for decoding; the original bytes remain the copy.
+                with Image.open(io.BytesIO(data)) as im:
+                    im.load()
+        except (OSError, ValueError, SyntaxError, Image.DecompressionBombError,
+                Image.DecompressionBombWarning) as exc:
             raise ConfigError("mark must be a readable, valid PNG") from exc
         target = brand.path.resolve().parent.parent / "assets" / "orgs" / org / "mark.png"
         if target.exists():
