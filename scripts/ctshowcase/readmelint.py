@@ -944,8 +944,9 @@ def _images(text: str, document: str) -> list[tuple[str, str]]:
         return span is not None and end <= span[1]
 
     link_spans = _link_literal_spans(document)  # tags and images inside a link destination or title are literal text
+    label_spans = _reference_label_spans(document)  # a resolved full reference's second label is not rendered
     tags = [(start, end) for start, end in parser.tags if not inside(image_spans, start, end)
-            and _span_at(link_spans, start) is None]
+            and _span_at(link_spans, start) is None and _span_at(label_spans, start) is None]
     def written_alt(alt, start):
         # `text` has Markdown code masked to spaces (same length): read code-formatted alt text from the document
         begin = start + 2
