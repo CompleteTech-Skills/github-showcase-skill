@@ -57,6 +57,30 @@ Forks, archived repositories, disabled-Issues members, HOLD/co-owned organizatio
 
 The synthetic `examples/estate/` tree runs every action offline: `SHOWCASE_ESTATE_ROOT=examples/estate python3 scripts/showcase.py org profile Northwind-Trading-Co --meta-dir examples/estate/meta`.
 
+### Registry-free public leak check
+
+`python3 $S lint public-leak README.md --denylist /private/denylist.txt` checks
+public files without a registry. The UTF-8 denylist contains one literal name,
+slug, domain or other forbidden string per line. Blank lines are ignored;
+matching is case-insensitive and treats punctuation literally. Keep this file
+outside repositories and never populate examples with real private names.
+
+The report returns only matching line numbers, never the private entry or source
+line. Input paths containing an entry are redacted too. An empty, unreadable or
+invalid UTF-8 denylist cannot pass the check; unreadable input files fail. It reads
+no registry, metadata or approval files and cannot be combined with those inputs.
+`privacy:denylist-only` records the limited evidence: this proves absence of the
+supplied strings, not that the operator's list covers every private fact. A
+registry-backed full privacy assessment remains available with the existing
+`--registry` and `--meta-dir` workflow.
+
+| Check | Registry-free evidence | Remaining limitation |
+|---|---|---|
+| `lint public-leak --denylist FILE` | Literal strings in the supplied private denylist; reports matching line numbers only | Cannot discover private names omitted from the list |
+| `org health` / `org doctor` | Local files and supplied captures (coverage below) | No registry coverage or complete public-profile privacy certification |
+| `org labels --repos-from-gh` | Accessible repositories and live labels/tree | Requires authenticated read access and sufficient reference evidence |
+| `org profile`, `about`, `pins` | No substitute for the registry's explicit content and membership | Registry remains required; the denylist never authorizes a rollout |
+
 ### Registry-free health and doctor
 
 For an org known to `brand.yaml`, `org health ORG --dot-github CHECKOUT` checks O4 without an estate registry. `--meta-dir` may instead supply a `.github` capture with `files` and `files_complete`. Without either source, health reports unknown file coverage; it does not infer that `.github` is absent or propose creating it. Org alias resolution and excluded/HOLD/T3 rules still apply.
