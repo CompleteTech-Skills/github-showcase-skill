@@ -17,6 +17,10 @@ variants:
   H: []
   I: [[About, R], [Setup, R], [Usage, R], [Runbook, O], [Ownership, R], [License, R]]
   J: [[About, R], [Files, R], [License, R]]
+# Type-sensitive sections retain the established A-J variants.
+type_sections:
+  mobile-app: [[About, R], [Installation, R], [Features, R], [Platforms, R], [Quick Start, R], [Build, O], [Status, O], [License, R]]
+  documentation: [[About, R], [Contents, R], [Usage, R], [Contributing, O], [License, R]]
 aliases_for_status: {D: {Findings: [Status]}}
 renames:
   installation: Install

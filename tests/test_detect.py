@@ -44,3 +44,60 @@ def test_variant_table():
     assert variant_for("workspace", {"visibility": "public"}) == "C"
     assert variant_for("security-check", {}) == "F" and card_category("security-check") == "CVE checker"
     assert card_category("fork") is None
+
+
+@pytest.mark.parametrize("planning", ["planning/export.json", "issues/issue-42.json", ".github/issues/42.json"])
+def test_administrative_json_is_not_a_dataset(planning):
+    m = {"owner": "Northwind-Trading-Co", "repo": "pipeline", "files": [planning, "pipeline.py"],
+         "file_sizes": {planning: 50_000, "pipeline.py": 100}}
+    assert detect_type(m) == ("workspace", 25)
+
+
+def test_docs_only_and_mobile_shapes(tmp_path):
+    from ctshowcase.detect import detect, required_sections
+    docs = {"owner": "Northwind-Trading-Co", "repo": "handbook", "files": ["README.md", "docs/guide.md"]}
+    assert detect_type(docs) == ("documentation", 25)
+    for f in ("README.md", "app/src/main/AndroidManifest.xml"):
+        p = tmp_path / f
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("mobile")
+    mobile = detect({"owner": "Northwind-Trading-Co", "repo": "client"}, RepoFacts({}, tmp_path))
+    names = [x[0] for x in required_sections(mobile)]
+    assert mobile["type"] == "mobile-app" and mobile["variant"] == "B"
+    assert "Platforms" in names and "Installation" in names
+    assert "Live Site" not in names
+
+
+def test_dataset_local_and_metadata_agree(tmp_path):
+    files = {"dataset.csv": "a,b\n" * 100, "README.md": "A dataset.", "planning/issues.json": "[]" * 2000}
+    for name, content in files.items():
+        p = tmp_path / name
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content)
+    m = {"owner": "Northwind-Trading-Co", "repo": "sample", "files": list(files),
+         "file_sizes": {k: len(v) for k, v in files.items()}}
+    assert detect_type(m) == detect_type(m, RepoFacts(m, tmp_path)) == ("dataset", 24)
+
+
+def test_low_confidence_suggests_explicit_override():
+    from ctshowcase.detect import detect
+    meta = {"owner": "Northwind-Trading-Co", "repo": "sample", "files": ["main.py"]}
+    guessed = detect(meta)
+    assert guessed["confidence"] == "low"
+    assert "type:" in guessed["suggestion"] and "--type" in guessed["suggestion"]
+    assert "suggestion" not in detect(meta, type_override="cli")
+
+
+def test_empty_or_malformed_sizes_do_not_claim_dataset():
+    m = {"files": ["main.py"], "file_sizes": {"data.json": 0, "other.txt": "bad"}}
+    assert detect_type(m) == ("workspace", 25)
+
+
+@pytest.mark.parametrize("canonical,want,rule", [("CompleteTech-Security", "security-check", 6),
+                                                ("CompleteTech-Games", "game", 12),
+                                                ("CompleteTech-LLC-AI-Research", "research", 22)])
+def test_owner_detection_uses_resolver(canonical, want, rule):
+    meta = {"owner": "Northwind-Former", "repo": "sample", "files": ["probe.py"]}
+    def same(a, b):
+        return a == "Northwind-Former" and b == canonical
+    assert detect_type(meta, same_owner=same) == (want, rule)

@@ -200,6 +200,64 @@
    "via",
    "vs"
   ],
+  "type_sections": {
+   "documentation": [
+    [
+     "About",
+     "R"
+    ],
+    [
+     "Contents",
+     "R"
+    ],
+    [
+     "Usage",
+     "R"
+    ],
+    [
+     "Contributing",
+     "O"
+    ],
+    [
+     "License",
+     "R"
+    ]
+   ],
+   "mobile-app": [
+    [
+     "About",
+     "R"
+    ],
+    [
+     "Installation",
+     "R"
+    ],
+    [
+     "Features",
+     "R"
+    ],
+    [
+     "Platforms",
+     "R"
+    ],
+    [
+     "Quick Start",
+     "R"
+    ],
+    [
+     "Build",
+     "O"
+    ],
+    [
+     "Status",
+     "O"
+    ],
+    [
+     "License",
+     "R"
+    ]
+   ]
+  },
   "variants": {
    "A": [
     [
@@ -744,6 +802,23 @@
   ]
  },
  "types": {
+  "dataset_exclude_dirs": [
+   "planning",
+   ".planning",
+   "issues",
+   ".github",
+   "node_modules",
+   "vendor",
+   "dist",
+   "build"
+  ],
+  "dataset_exclude_files": [
+   "package.json",
+   "package-lock.json",
+   "tsconfig.json",
+   "composer.json",
+   "composer.lock"
+  ],
   "deps": {
    "api": [
     "fastapi",
@@ -830,6 +905,10 @@
    },
    "discord-bot": {
     "category": "Discord bot",
+    "variant": "C"
+   },
+   "documentation": {
+    "category": "Documentation",
     "variant": "C"
    },
    "fork": {

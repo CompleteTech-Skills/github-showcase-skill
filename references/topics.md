@@ -61,16 +61,16 @@ Family topics apply only to non-fork repos other than `.github`, in this order:
 | 21 | `pyproject.toml` or `setup.py`, or `package.json` with `main` or `exports` | `library` |
 | 22 | owner `CompleteTech-LLC-AI-Research`, or `*.ipynb` ≥ 50% of files | `research` |
 | 23 | slug matches `-in-\d+-steps$` | `tutorial` |
-| 24 | `*.csv`, `*.json` and `*.parquet` ≥ 50% of bytes | `dataset` |
-| 25 | otherwise | `workspace` |
+| 24 | `*.csv`, `*.json` and `*.parquet` ≥ 50% of substantive bytes (excluding planning, issue exports and package/config JSON) | `dataset` |
+| 25 | only documentation files after administrative exclusions; otherwise | `documentation`; otherwise `workspace` |
 
-**The 24 type topics are reserved.** A repo carries exactly one of them, and only as its type topic.
+**The type topics are reserved.** A repo carries exactly one of them, and only as its type topic.
 
 | Type topic | README variant ([readme-variants.md](readme-variants.md)) | Card category ([banner-layout.md](banner-layout.md)) |
 |---|---|---|
 | `agent-skills` | A in CompleteTech-Skills; C elsewhere | Agent skill |
 | `website`, `web-app`, `mobile-app`, `chrome-extension` | B | Website, Web app, Mobile app, Chrome extension |
-| `cli`, `library`, `api`, `mcp-server`, `bot`, `discord-bot`, `plugin`, `template`, `tutorial` | C | CLI tool, Library, API service, MCP server, Bot, Discord bot, Plugin, Template, Tutorial |
+| `cli`, `library`, `api`, `mcp-server`, `bot`, `discord-bot`, `plugin`, `template`, `tutorial`, `documentation` | C | CLI tool, Library, API service, MCP server, Bot, Discord bot, Plugin, Template, Tutorial, Documentation |
 | `research`, `dataset` | D | Research, Dataset |
 | `game` | E | Game |
 | `security-check` | F | CVE checker |
@@ -204,3 +204,5 @@ Every entry is public-safe:
 2. Existing topics that are in Domain vocabulary rank first: those found in the text in occurrence order, then the rest alphabetically.
 3. CompleteTech-Security repos whose slug matches `-cve-\d{4}-\d+-check$` put the slug's first token (the vendor, for example `netscaler`) first, and keep that vendor topic through step 2's vocabulary drop. The owner is matched through the shared resolver (CQ-03), so after the approved rename to `CompleteTech-Security` (or under any letter case) the same repository keeps the same topics; the TouchedByAnAgent domain list below is matched the same way.
 4. Keep at most 3. No match means no domain topic; log `needs-input:domain-topic`.
+
+Dataset and fallback detection are low confidence. Their logs suggest setting `type:` in `.github/showcase.yml` or passing `--type`. Explicit overrides suppress that suggestion. Local checkouts and captured `file_sizes` use the same substantive-byte rule. Mobile apps retain variant B, with Installation and Platforms replacing web-only Live Site and Tech Stack sections; documentation uses variant C with About, Contents, Usage and License.
