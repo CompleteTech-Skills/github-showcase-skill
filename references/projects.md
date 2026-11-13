@@ -58,3 +58,5 @@ Jobs follow the shared contract `{id, phase: "6.3", kind, org, approval_id?, arg
 Settings pass (§13.9 step 7): with `--allow-t3`, the Default repository and auto-add steps use only sign-off-authorized repositories, are held with `settings-held:` when none remain, and the settings job carries `signoff_id`/`signoff_ids` (see t3-signoff.md).
 
 New-view creation and existing-view filter updates use the same repository sign-off check. A held new view produces no POST job, review snapshot or view-specific browser job. Direct `copy_plan` callers receive the board owner's `signoff_id` on every job, with narrower repository and association ids retained.
+
+Direct `copy_plan` callers use the same Org-field association boundary as `estate_plan`: captured and proposed T3 options require the explicit flag and a current owner-wide record. A held association produces no Org-field mutation or README, without dropping captured option ids. Authorized option/update, create-field and README jobs carry the association record id only when their payload names it; existing board-owner/repository provenance and writer approval ids are preserved.

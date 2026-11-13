@@ -187,12 +187,10 @@ def _slug(owner: str) -> str:
     return "me" if is_user(owner) else owner
 
 
-def _gate_target(resolver: Resolver | None, owner: str, *, allow_t3: bool = False) -> str:
+def _gate_target(resolver: Resolver, owner: str, *, allow_t3: bool = False) -> str:
     """Targets of a write: never T3 without sign-off, never excluded or HOLD. Returns the resolved login."""
     if is_user(owner):
         return "@me"
-    if resolver is None:
-        return owner
     st = resolver.owner_status(owner)
     if st == "excluded":
         raise Refused(f"{owner} is out of scope; no project writes", log="exempt")
@@ -827,8 +825,9 @@ def _captured_spec(copied: dict | None) -> dict | None:
 
 
 def captured_t3(resolver: Resolver | None, spec: dict | None, allow_t3: bool) -> tuple[list[str], list[dict]]:
-    """Sign-off check of the T3 orgs that the CAPTURED Estate Org field names (an option whose description is
-    `T3: <login>`, or whose name is a T3 org's display name) while --allow-t3 is passed. Returns (refusals, retained):
+    """Sign-off check of T3 associations in an Org field (an option whose description is `T3: <login>`, or whose
+    name is a T3 org's display name). Both the explicit flag and a current record are required.
+    Returns (refusals, retained):
     refusals are `t3-signoff:<code>:<login>` for each such org with no valid sign-off record, and retained are
     {login, name, tier, signoff_id, labels} for each such org whose record is valid. The description remainder and the
     option name are resolved independently: the remainder is tried first, and the option name only when the remainder
@@ -839,8 +838,8 @@ def captured_t3(resolver: Resolver | None, spec: dict | None, allow_t3: bool) ->
     no longer in registry.orgs is still checked. copy_plan keeps every captured option (ids are never dropped) and the
     README documents them, so a withdrawn association would otherwise survive into the option-update job and the README
     (tests/test_t3_signoff_require.py::test_estate_replan_holds_a_captured_t3_org_after_withdrawal). This only reads.
-    Empty without --allow-t3 or without a resolver."""
-    if not allow_t3 or resolver is None:
+    Empty without a resolver. Recognition alone does not read or grant a record when the flag is absent."""
+    if resolver is None:
         return [], []
     have = _field(spec or {}, "Org")
     if not have:
@@ -903,9 +902,19 @@ def captured_t3(resolver: Resolver | None, spec: dict | None, allow_t3: bool) ->
             if key is not None:
                 break
         if key is None:
+            if desc.startswith(TIER_PREFIX_T3):
+                # A declared co-owned association does not become safe merely
+                # because its old login and label cannot be resolved. Preserve
+                # its captured ids, but require identity input before planning
+                # a mutation or README that would carry it forward.
+                unresolved = desc[len(TIER_PREFIX_T3):].strip() or "<empty>"
+                refusals.append(f"needs-input:org-identity:{unresolved}")
             continue
         labels = list(dict.fromkeys(x for x in (name.strip().lower(), desc.strip().lower()) if x))
         login = resolver.canonical(key)
+        if not allow_t3:
+            refusals.append(f"t3-signoff:missing-opt-in:{login}")
+            continue
         rec, why = signoff.evaluate([key, *resolver.aliases(key)])
         if rec is None:
             refusals.append(f"t3-signoff:{(why or 'missing').partition(':')[0]}:{login}")
@@ -921,10 +930,33 @@ def captured_t3(resolver: Resolver | None, spec: dict | None, allow_t3: bool) ->
 
 
 def held_captured_t3(resolver: Resolver | None, spec: dict | None, allow_t3: bool) -> list[str]:
-    """The refusals (`t3-signoff:<code>:<login>`) for the captured T3 orgs that have no valid sign-off record while
-    --allow-t3 is passed. Identities resolve through references/brand.yaml as well as the registry; see captured_t3,
-    whose refusals this returns. Empty without --allow-t3 or without a resolver."""
+    """The refusals (`t3-signoff:<code>:<login>`) for captured T3 associations without current authorization.
+    Identities resolve through references/brand.yaml as well as the registry; see captured_t3,
+    whose refusals this returns. Without --allow-t3, recognized T3 associations are held without reading a record."""
     return captured_t3(resolver, spec, allow_t3)[0]
+
+
+def _org_associations(resolver: Resolver, spec: dict, fields: list[dict], allow_t3: bool
+                      ) -> tuple[list[str], list[dict]]:
+    """Check captured and proposed Org options at the public planner boundary.
+
+    A direct copy_plan caller can supply Org options without estate_plan's registry-derived list. Checking their
+    union also covers a missing Org field: a create-field mutation must not introduce an unchecked association.
+    Captured option dictionaries are only read, and their ids remain untouched by this check.
+    """
+    options = list((_field(spec, "Org") or {}).get("options") or [])
+    for field in fields:
+        if field["name"] == "Org":
+            options += [{"name": name, "color": color, "description": description}
+                        for name, color, description in field.get("options") or []]
+    held, retained = captured_t3(resolver, {"fields": [{"name": "Org", "options": options}]}, allow_t3)
+    labels = {label for org in retained for label in org["labels"]}
+    # Other option names are context for exact association matching, not owner
+    # identities. They prevent a T3 short name matching inside a longer unrelated
+    # name in custom README text (the same rule estate_plan applies to its orgs).
+    others = [{"login": "", "name": str(option.get("name") or "")}
+              for option in options if str(option.get("name") or "").strip().lower() not in labels]
+    return held, [*retained, *others]
 
 
 def copy_plan(target: str, *, role: str = "org", source: str | None = None, title: str | None = None,
@@ -937,6 +969,14 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
     post-copy capture): fields, options, views, filters, text, links, status update and the browser steps."""
     if role not in ("org", "template", "estate"):
         raise ShowcaseError("role is org, template or estate", log="usage")
+    if resolver is None:
+        # Library callers must not bypass target or repository consent by omitting
+        # the CLI's resolver. Use only committed identity data by default; custom
+        # aliases, registry entries and approvals still require a supplied resolver.
+        from .config import load_brand
+        brand = load_brand(prefer_lock=True)
+        resolver = Resolver(brand)
+        brand._resolver = resolver  # keep nested Brand lookups on the same committed identity view
     owner = _gate_target(resolver, target, allow_t3=allow_t3)
     src = source or (f"{REFERENCE[0]}/{REFERENCE[1]}" if role == "template" else None)
     logs, jobs, reads, pending, files = [], [], [], [], {}
@@ -991,15 +1031,15 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
     # 1. fields: create what is missing, fix standard options keeping ids
     std_fields = list(FIELDS) + list(extra_fields or [])
     planned: dict[str, list] = {}  # the options each field will have once these jobs run (for the README)
-    held_t3, retained_t3 = captured_t3(resolver, spec, allow_t3) if role == "estate" else ([], [])
+    held_t3, association_orgs = _org_associations(resolver, spec, std_fields, allow_t3)
     logs += held_t3
     for f in std_fields:
         have = _field(spec, f["name"])
-        if held_t3 and f["name"] == "Org" and have is not None:
-            # a captured T3 association lost its sign-off: leave the option list as captured (no ids dropped) and plan
-            # no option write or README that would carry it on
-            logs.append("hold:org-options (a captured T3 org option has no valid sign-off)")
-            planned[f["name"]] = have.get("options") or []
+        if held_t3 and f["name"] == "Org":
+            # Leave captured ids untouched and do not introduce or retain an
+            # unauthorized association through an option mutation or README.
+            logs.append("hold:org-options (a T3 Org option has no current authorization)")
+            planned[f["name"]] = (have or {}).get("options") or []
             continue
         if have is None:
             if not f.get("required") and f["dataType"] == "MULTI_SELECT":
@@ -1176,8 +1216,8 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
     text = readme_text
     if held_t3:
         text = None
-        pending.append({"why": "README held: the Org field names a T3 org with no valid sign-off record",
-                        "needs": "a valid record in the sign-off file, or remove the option on the board"})
+        pending.append({"why": "README held: an Org association has unresolved identity or no current T3 authorization",
+                        "needs": "resolved Org identity and a current matching record; keep captured option ids unchanged"})
     elif text is None:
         try:
             text, lg = readme(owner, name, number, nums, repositories=readme_repos,
@@ -1201,14 +1241,6 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
                 rec = grants.get(_grant_key(resolver, *r.split("/", 1)))
                 if rec and rec.get("id"):
                     ids.append(str(rec["id"]))
-        if ids:
-            from . import signoff
-            signoff.stamp_associations(text_job, list(dict.fromkeys(ids)), owner)
-    if text is not None and retained_t3:
-        # the README documents every retained captured Org option, so the job carries the granting ids of retained_t3
-        # directly instead of rediscovering them from the rendered text (a former login with a different captured label
-        # has no match in the text) (tests/test_t3_emission_scope.py::test_captured_org_option_under_former_login_and_other_label_carries_signoff_id)
-        ids = [str(o["signoff_id"]) for o in retained_t3 if o.get("signoff_id")]
         if ids:
             from . import signoff
             signoff.stamp_associations(text_job, list(dict.fromkeys(ids)), owner)
@@ -1322,6 +1354,7 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
         if j["id"] in seen_ids:
             raise ShowcaseError(f"refused to plan: job id {j['id']} is used twice", log="usage")
         seen_ids.add(j["id"])
+    _stamp_estate_orgs(jobs, association_orgs)
     _stamp_owner_jobs(jobs, owner)
     return {"command": "project", "action": "copy-plan", "owner": owner, "role": role, "stage": 2, "number": number,
             "title": title, "short_description": short, "result": "ok", "jobs": jobs, "reads": reads, "pending": pending,
@@ -1543,14 +1576,15 @@ def _readme_signoff_ids(orgs: list[dict], text: str, others: tuple[str, ...] = (
     """The signoff_id of every org in ORGS that carries one and whose login or display name appears in TEXT
     (a README Markdown table, say). Case-insensitive, on word boundaries: a name inside a longer word or a
     hyphenated name (`Acme` in `Acme-Tools`) does not match. OTHERS are the names of non-T3 orgs: they are blanked out of
-    TEXT first, so `Acme` does not match inside the longer `Acme Tools`. An empty name matches nothing."""
+    TEXT first, so `Acme` does not match inside the longer `Acme Tools`. Captured option labels count too, preserving
+    provenance under a former login or a label different from the current display name. An empty name matches nothing."""
     out: list[str] = []
     for x in sorted((x for x in others if x), key=len, reverse=True):
         text = re.sub(r"(?<![\w-])" + re.escape(str(x)) + r"(?![\w-])", " ", text, flags=re.IGNORECASE)
     for o in orgs:
         if not o.get("signoff_id"):
             continue
-        for name in (o.get("login"), o.get("name")):
+        for name in (o.get("login"), o.get("name"), *o.get("labels", [])):
             if not name:
                 continue
             if re.search(r"(?<![\w-])" + re.escape(str(name)) + r"(?![\w-])", text, re.IGNORECASE):

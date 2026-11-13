@@ -1093,11 +1093,11 @@ def test_duplicate_record_ids_refuse_invalid(tmp_path):
 
 
 def test_doctor_row_shape_is_unchanged_without_allow_t3(tmp_path):
-    """The documented row (R1-R11, banner, icon, card, footer, done) gains signoff_id only when --allow-t3 is passed."""
+    """Completion columns remain stable; only --allow-t3 appends signoff_id."""
     bundle = _bundle(tmp_path, [])
     r = _run(tmp_path, bundle, "doctor", "--header", owner="CompleteTech-Skills")
     head = r.stdout.splitlines()[0].split("\t")
-    assert head[-1] == "done" and "signoff_id" not in head, r.stdout
+    assert head[-3:] == ["done", "skill_complete", "owner_pending"] and "signoff_id" not in head, r.stdout
 
 
 # --- review fix round 1: optional expiry, withdrawal, estate README stamping ---
@@ -1510,3 +1510,17 @@ def test_estate_replan_holds_a_captured_option_written_under_a_former_login(tmp_
     with _Strict(monkeypatch, _file(_bundle(tmp_path, withdrawn))):
         held = PJ.held_captured_t3(res, PJ.normalize(cap), True)
     assert held and held[0].startswith("t3-signoff:revoked:"), held
+
+
+def test_doctor_completion_and_consent_columns_coexist(tmp_path):
+    bundle = _bundle(tmp_path, [{"id": "t3s-doctor"}])
+    result = _run(tmp_path, bundle, "--allow-t3", "doctor", "--header")
+    headings, values = [line.split("\t") for line in result.stdout.splitlines()]
+    assert headings[-3:] == ["skill_complete", "owner_pending", "signoff_id"], result.stdout
+    row = dict(zip(headings, values, strict=True))
+    assert row["signoff_id"] == "t3s-doctor"
+    assert row["skill_complete"] == "no" and row["done"] == "no"
+    assert row["owner_pending"]
+    markdown = _run(tmp_path, bundle, "--allow-t3", "doctor", "--format", "md", "--header")
+    assert markdown.stdout.splitlines()[0].endswith("| skill_complete | owner_pending | signoff_id |")
+    assert markdown.stdout.splitlines()[-1].endswith("| t3s-doctor |")
