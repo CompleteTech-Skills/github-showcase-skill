@@ -24,8 +24,8 @@ _ATX_HEADING = re.compile(r"^ {0,3}#{1,6}(?:[ \t\r\n]|$)")
 _THEMATIC = re.compile(r"^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$")
 _SETEXT = re.compile(r"^ {0,3}(?:=+|-+)[ \t]*$")
 _BULLET_ITEM = re.compile(r"^ {0,3}[-+*][ \t]+\S")
-_ORDERED_ITEM = re.compile(r"^ {0,3}(\d{1,9})[.)][ \t]+\S")
-_ITEM_PREFIX = re.compile(r"^ {0,3}(?:[-+*]|\d{1,9}[.)])(?: {1,4}(?=\S)|[ \t]|$)")
+_ORDERED_ITEM = re.compile(r"^ {0,3}([0-9]{1,9})[.)][ \t]+\S")
+_ITEM_PREFIX = re.compile(r"^ {0,3}(?:[-+*]|[0-9]{1,9}[.)])(?: {1,4}(?=\S)|[ \t]|$)")
 _QUOTE = re.compile(r" {0,3}> ?")
 _DELIMITER_CELLS = re.compile(r"\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*")
 _TYPE_6 = ("address article aside base basefont blockquote body caption center col colgroup dd details dialog dir div dl "
@@ -153,7 +153,7 @@ def _containers(body: str) -> tuple[int, int, str]:
             # Tabs are expanded at four-column stops, not counted as one byte.
             # Consume the complete 1..4-column padding, including mixed spaces
             # and tabs; otherwise a fence is assigned to the wrong container.
-            marker = re.match(r"^ {0,3}(?:[-+*]|\d{1,9}[.)])", rest)
+            marker = re.match(r"^ {0,3}(?:[-+*]|[0-9]{1,9}[.)])", rest)
             marker_end = marker.end()
             marker_col = cursor + marker_end
             end, padded_col = marker_end, marker_col
@@ -185,14 +185,19 @@ def _container_path(body: str) -> tuple[tuple[tuple[str, int], ...], str]:
         if match := _QUOTE.match(body):
             path.append(("quote", 0))
             body = body[match.end():]
-        elif match := _ITEM_PREFIX.match(body):
-            marker = re.match(r"^ {0,3}(?:[-+*]|\d{1,9}[.)])", body)
+        elif not _THEMATIC.match(body) and (match := _ITEM_PREFIX.match(body)):
+            marker = re.match(r"^ {0,3}(?:[-+*]|[0-9]{1,9}[.)])", body)
             end = marker.end()
             while end < len(body) and body[end] == " ":
                 end += 1
-            width = end if 0 < end - marker.end() <= 4 and end < len(body) else match.end()
+            # CommonMark 5.2: a marker with blank content has one virtual
+            # padding column, regardless of its trailing whitespace. For a
+            # nonempty item, 1..4 spaces are padding; greater indentation
+            # uses one padding column and retains the excess as content.
+            empty = end == len(body)
+            width = end if not empty and 0 < end - marker.end() <= 4 else marker.end() + 1
             path.append(("item", width))
-            body = body[width:]
+            body = "" if empty else body[width:]
         else:
             return tuple(path), body
 
@@ -292,7 +297,7 @@ def _paragraph_interrupts(content: str, matched: bool) -> bool:
     """
     if _QUOTE.match(content):
         return True
-    if not matched and re.fullmatch(r" {0,3}(?:[-+*]|\d{1,9}[.)]) *", content):
+    if not matched and re.fullmatch(r" {0,3}(?:[-+*]|[0-9]{1,9}[.)]) *", content):
         return True  # an empty sibling item ends the old item; it is not lazy paragraph text
     if not matched and _ORDERED_ITEM.match(content):
         return True

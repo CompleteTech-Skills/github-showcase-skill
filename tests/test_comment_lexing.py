@@ -33,7 +33,7 @@ def test_inline_comments_cannot_cross_a_new_markdown_block(boundary):
 def test_html_block_comment_retains_its_distinct_permissive_extent():
     # At a block start, <!-- starts a raw HTML block even when it would not be
     # a valid inline HTML token. Markdown inside the block remains literal.
-    assert images("<!-->\n## Heading " + IMAGE + "\n-->\n") == []
+    assert images("<!-- -- body\n## Heading " + IMAGE + "\n-->\n") == []
 
 
 def test_invalid_inline_comments_are_reported_by_real_linter(make_ctx, tmp_path):

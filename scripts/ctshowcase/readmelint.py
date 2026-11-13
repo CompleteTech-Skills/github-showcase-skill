@@ -85,11 +85,20 @@ def _comment_matches(text: str, html_spans):
     closer = paragraph = double = 0
     for opener in re.finditer(r"<!--", text):
         start = opener.start()
-        in_block = _span_at(html_spans, start) is not None
+        block = _span_at(html_spans, start)
+        in_block = block is not None
         if not in_block and _escaped(text, start):
             continue
         while closer < len(closers) and closers[closer] < opener.end():
             closer += 1
+        if in_block:
+            # Raw comments can be unterminated when their container ends.
+            # Their literal extent stops there, even if an unrelated later
+            # block contains a closer. Inline comment rules do not apply.
+            end = min(closers[closer] + 3, block[1]) if closer < len(closers) else block[1]
+            matches.append((start, end))
+            starts.append(start)
+            continue
         if closer == len(closers):
             break
         while paragraph < len(paragraphs) and paragraphs[paragraph] < start:
