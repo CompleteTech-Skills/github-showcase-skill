@@ -93,8 +93,11 @@ def repo_dir(args) -> Path | None:
         want = f"{m.get('owner')}/{m.get('repo')}"
         have = _origin_slug(rd)
         if have and not _same_slug(args, want, have):
+            import shlex
             raise ShowcaseError(f"metadata describes {want} but {rd.resolve()} is a checkout of {have}; pass the right "
-                                "--repo-dir, or --no-repo-dir to use the metadata alone", log="usage")
+                                "--repo-dir, or --no-repo-dir to use the metadata alone. If this is a verified rename, "
+                                f"update this checkout locally with git -C {shlex.quote(str(rd))} remote set-url origin "
+                                f"https://github.com/{want}.git; the skill never changes remotes", log="usage")
         if not explicit and have is None:
             raise ShowcaseError(f"--meta {want} without --repo-dir: run from inside that repository's checkout, or pass "
                                 "--repo-dir DIR or --no-repo-dir", log="usage")
