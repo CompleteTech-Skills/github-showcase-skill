@@ -189,7 +189,11 @@ def cmd_banner(args):
         return base("banner", ctx, result="exempt", logs=[why]), OK
     gate_watching(ctx, args.allow_hold)
     ctx.require_measured(args.allow_unmeasured)
-    ctx.require_description()
+    if args.subtitle or ctx.override.get("subtitle"):
+        if not (ctx.meta.get("description") or "").strip():
+            ctx.log("description-missing")
+    else:
+        ctx.require_description()
     out = Path(args.out) if args.out else default_out(args, "docs/images/banner.png")
     fonts = Fonts(ctx.brand)
     data, info = banner.render(ctx, fonts, scale=args.scale, budget=args.png_budget, subtitle=args.subtitle,
@@ -218,7 +222,7 @@ def cmd_card(args):
     ctx.require_measured(args.allow_unmeasured)
     out = Path(args.out) if args.out else default_out(args, "docs/images/card.svg")
     fonts = Fonts(ctx.brand)
-    svg, scene, info = card.render(ctx, fonts, args.icon)
+    svg, scene, info = card.render(ctx, fonts, args.icon, keys=args.key_chip or None, attrs=args.chip or None)
     lint = svglint.lint_bytes("card", svg.encode(), str(out))
     if lint["result"] != "PASS":
         return base("card", ctx, result="fail", lint=lint), CHECK_FAILED
@@ -245,7 +249,8 @@ def cmd_social(args):
     ctx.require_measured(args.allow_unmeasured)
     r = getattr(args, "_content_resolver", None)  # set by `content social` from its --registry/--approved* flags
     data, fmt, info = social.social_render(ctx, Fonts(ctx.brand), args.title, args.icon,
-                                           login=r.canonical(ctx.owner) if r else None)
+                                           login=r.canonical(ctx.owner) if r else None,
+                                           keys=args.key_chip or None, attrs=args.chip or None)
     out = Path(args.out) if args.out else default_out(args, "assets/social-preview.png")
     if fmt == "jpg":
         out = out.with_suffix(".jpg")
@@ -996,6 +1001,8 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--icon")
     s.add_argument("--allow-unmeasured", action="store_true")
     s.add_argument("--allow-hold", action="store_true")
+    s.add_argument("--key-chip", action="append", default=[])
+    s.add_argument("--chip", action="append", default=[])
     s.set_defaults(func=cmd_card)
 
     # deprecated alias of the contract name `content social` (same options, same file); added without `help`, so
@@ -1006,6 +1013,8 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--icon")
     s.add_argument("--allow-unmeasured", action="store_true")
     s.add_argument("--allow-hold", action="store_true")
+    s.add_argument("--key-chip", action="append", default=[])
+    s.add_argument("--chip", action="append", default=[])
     s.set_defaults(func=cmd_social)
 
     s = sub.add_parser("org-banner", help="1600x400 org profile banner JPG (.github/profile/assets/banner.jpg)")

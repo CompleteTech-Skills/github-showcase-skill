@@ -180,6 +180,7 @@ banner [--out docs/images/banner.png] [--scale 2] [--icon PATH] [--subtitle TEXT
        [--key-chip TEXT]... [--chip TEXT]... [--category TEXT] [--allow-unmeasured] [--allow-hold]
        [--allow-few-chips] [--png-budget 300000]
 card [--out docs/images/card.svg] [--png PATH] [--icon PATH] [--allow-unmeasured] [--allow-hold]
+     [--key-chip TEXT]... [--chip TEXT]...
 org-banner --org OWNER --out PATH [--illustration PATH]
 org-tile --org OWNER [--avatar PATH] [--illustration PATH] [--out PATH] [--png PATH]
 intro (--profile CompleteDotTech | --org OWNER) [--name TEXT] [--eyebrow TEXT] [--tagline TEXT]
@@ -224,6 +225,7 @@ project copy-plan --target ORG|@me [--role org|template|estate] [--source OWNER/
 project readme --capture FILE --owner OWNER [--out FILE]
 project estate-plan [--copied FILE] [--user-id ID] [--source OWNER/N] [--jobs FILE]
 content social [--out PATH] [--title TEXT] [--icon PATH] [--job] [--allow-unmeasured] [--allow-hold]
+    [--key-chip TEXT]... [--chip TEXT]...
 content icon prompt|normalize|check [--option A|B] [--glyph FILE] [--art-direction FILE] [--in PNG]
     [--ground auto|transparent|keep] [--ground-tolerance DE (0 to 12)] [--seed N] [--out PATH] [--preview PATH]
     [--strict] [--min-contrast RATIO] [--ocr]
@@ -264,6 +266,8 @@ content sidebar --facts FILE [--packages FILE]... [--current FILE] [--repo OWNER
 `--type` replaces type detection with a §5.4 type (logged `type-override:<type>`); use it only when neither a checkout nor a captured file tree is available, for example with registry metadata. Without a tree, the type is provisional (`needs-input:file-tree`); a README link to a root `SKILL.md` still counts as rule 5.
 
 `lint readme` and `lint all` refuse excluded, hold and T3 owners like every other repository command. `lint all` fails an applicable banner or card that is missing; an exempt one is linted only if it exists. Forks outside the watching org, backups, archived and `.github` repositories need the banner (they have no card); a preserve-list README is exempt from the banner only when review q57 `pres` is "Leave them unchanged".
+
+`banner` accepts an explicit `--subtitle` or configured `subtitle:` when the captured description is empty, and logs `description-missing` so that metadata work remains visible. `card` and `content social` accept repeatable `--key-chip` and `--chip` with the same validation and ordering as the banner; an explicit chip that cannot fit causes `art-fail` instead of disappearing. The deprecated social alias accepts the same inputs.
 
 Banner refusals: a watching-org fork returns `exempt` and writes nothing; the watching org's `.github` gets the banner and icon like any `.github`; another watching-org repository that is not a fork is refused (exit 2, `hold:watching-non-fork`) until decided, then `--allow-hold`; `CompleteDotTech/CompleteDotTech` (it opens with the intro) and a placeholder org's `.github` return `exempt:*`. Every other repository gets the hero banner (decisions 12, 13 and 18): forks outside the watching org (G), backups and archived repositories (H) and `.github` repositories (J) included, while `card` returns `exempt:no-card` for forks, backups and `.github`. AI-Ascension (`banner: keep-existing`) gets the hero in its own palette above its existing banner (q57 `aia` and `pres` defaults) and returns `exempt:keep-existing` only when `readme.preserve_banner` is `unchanged`; TouchedByAnAgent (`hold: true`) needs `--allow-hold`; families marked `measured: false` need `--allow-unmeasured` (otherwise exit 4, `needs-input:palette-v1.1`).
 
