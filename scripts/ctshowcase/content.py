@@ -2708,10 +2708,16 @@ def cmd_content(args, cli=None):
     raise ShowcaseError(f"unknown content action {act}", log="usage")
 
 
-def social_job(ctx, resolver: Resolver, out: str) -> dict | None:
-    """Browser job for the repository social preview upload (STANDARD §12.4; public T1/T2 repos only)."""
+def social_job(ctx, resolver: Resolver | None, out: str) -> dict | None:
+    """Browser upload job for an applicable public repository, with scoped T3 provenance."""
     if not ctx.social_applicable():
         return None
+    if resolver is None:
+        resolver = ctx.brand.resolver()
+    # Re-check at the planning boundary, including direct library callers, so a T3
+    # grant is scoped to this repository and registered for provenance stamping.
+    if resolver.owner_status(ctx.owner) == "t3":
+        resolver.check_owner(ctx.owner, repo=ctx.repo)
     full = f"{current_login(resolver, ctx.owner)}/{ctx.repo}"
     steps = [f"Open https://github.com/{full}/settings (the General page).",
              "Scroll to \"Social preview\" and click \"Edit\", then \"Upload an image…\".",
@@ -2719,8 +2725,11 @@ def social_job(ctx, resolver: Resolver, out: str) -> dict | None:
              "Wait until the preview shows the new image; do not change any other setting on this page.",
              f"Verify with the read-only query: gh api graphql -f query='{{repository(owner:\"{full.split('/')[0]}\","
              f"name:\"{ctx.repo}\"){{usesCustomOpenGraphImage openGraphImageUrl}}}}' (usesCustomOpenGraphImage is true)."]
-    return browser_job(job_id("p5", "social-preview", full), "5", full, f"https://github.com/{full}/settings",
-                       "social-preview", steps, "Upload the repository social preview (R10; STANDARD §9.5, §12.4).")
+    job = browser_job(job_id("p5", "social-preview", full), "5", full, f"https://github.com/{full}/settings",
+                      "social-preview", steps, "Upload the repository social preview (R10; STANDARD §9.5, §12.4).")
+    from .signoff import stamp
+    stamp([job])
+    return job
 
 
 def _cmd_sidebar(args, cli, resolver, head):
