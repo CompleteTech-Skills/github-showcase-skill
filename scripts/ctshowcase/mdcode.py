@@ -91,31 +91,66 @@ def _strip_quotes(body: str, depth: int) -> str:
     return body
 
 
+def _indent_columns(body: str, start: int = 0) -> int:
+    """Leading indentation width; tabs use four-column stops on the original line.
+
+    `start` includes stripped quote markers, so a tab after `> ` supplies two
+    columns inside the quote, rather than incorrectly restarting at column zero.
+    """
+    column = start
+    for char in body:
+        if char == " ":
+            column += 1
+        elif char == "\t":
+            column = (column // 4 + 1) * 4
+        else:
+            break
+    return column - start
+
+
+def _dedent_columns(body: str, width: int, start: int = 0) -> str:
+    """Remove at most `width` indentation columns, preserving a partially consumed tab.
+
+    Used only for block recognition, never source offsets: a tab crossing the
+    container boundary leaves its remaining columns as spaces in the content.
+    """
+    column, end = start, 0
+    limit = start + width
+    while end < len(body) and column < limit and body[end] in " \t":
+        column = (column // 4 + 1) * 4 if body[end] == "\t" else column + 1
+        end += 1
+    return " " * max(0, column - limit) + body[end:]
+
+
 def _containers(body: str) -> tuple[int, int, str]:
     """(block-quote depth, list-item content column, remainder): quote and item markers are peeled in any order, so
     `- ```x`, `1. ```x`, `- > ```x` and `> - ```x` all reach the same remainder. The column is the summed width of the
     item prefixes, measured on the quote-stripped line; it is 0 when the line has no item marker."""
-    depth, col, rest = 0, 0, body
+    depth, col, cursor, rest = 0, 0, 0, body
     while True:
         if m := _QUOTE.match(rest):
             depth += 1
+            cursor += len(rest[:m.end()])
         elif m := _ITEM_PREFIX.match(rest):
             # Tabs are expanded at four-column stops, not counted as one byte.
             # Consume the complete 1..4-column padding, including mixed spaces
             # and tabs; otherwise a fence is assigned to the wrong container.
             marker = re.match(r"^ {0,3}(?:[-+*]|\d{1,9}[.)])", rest)
             marker_end = marker.end()
-            marker_col = col + marker_end
+            marker_col = cursor + marker_end
             end, padded_col = marker_end, marker_col
             while end < len(rest) and rest[end] in " \t":
                 padded_col = ((padded_col // 4 + 1) * 4 if rest[end] == "\t" else padded_col + 1)
                 end += 1
             if 0 < padded_col - marker_col <= 4 and end < len(rest):
-                col = padded_col
+                col += padded_col - cursor
+                cursor = padded_col
                 rest = rest[end:]
                 continue
+            previous = cursor
             for char in rest[:m.end()]:
-                col = (col // 4 + 1) * 4 if char == "\t" else col + 1
+                cursor = (cursor // 4 + 1) * 4 if char == "\t" else cursor + 1
+            col += cursor - previous
         else:
             return depth, col, rest
         rest = rest[m.end():]
@@ -156,15 +191,15 @@ def _is_delimiter_row(rest: str) -> bool:
     return bool(_DELIMITER_CELLS.fullmatch(row))
 
 
-def _interrupts(rest: str, depth: int, para_depth: int, base: int) -> bool:
+def _interrupts(rest: str, depth: int, para_depth: int, base: int, start: int = 0) -> bool:
     """True when a line (block-quote markers removed) starts a block that ends the open paragraph. A continued quote
     line (same depth) and a lazy continuation (lower depth) stay in the paragraph, as GitHub renders them; a deeper
     quote, a fence, an ATX heading, a thematic break, a list item and an HTML block of type 1-6 end it. `base` is the
     content column of the list item holding the paragraph, so an item nested under it is still seen."""
     if depth > para_depth:
         return True
-    lead = len(rest) - len(rest.lstrip(" "))
-    line = rest[min(lead, base):]
+    lead = _indent_columns(rest, start)
+    line = _dedent_columns(rest, base, start)
     if FENCE_OPEN.match(line) or _ATX_HEADING.match(line) or _THEMATIC.match(line) or _HTML_BLOCK.match(line):
         return True
     if _BULLET_ITEM.match(line):
@@ -208,13 +243,15 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
         at, pos = pos, pos + len(raw)
         body = raw.rstrip("\r\n")
         depth, rest = _quotes(body)
+        quote_column = len(body[:len(body) - len(rest)].expandtabs(4))
         if fence is not None:
             run, fdepth, col, outer = fence
             # an item whose marker precedes its quote marker (`- > ```x`) is indented before the quote marker, so its
             # indentation is the raw one; otherwise it is the indentation left after the quote markers (`> - ```x`)
             # only the fence's own quote depth is container syntax: extra `>` characters inside it are code content
             inner = _strip_quotes(body, fdepth)
-            lead = len(body) - len(body.lstrip(" ")) if outer else len(inner) - len(inner.lstrip(" "))
+            inner_column = len(body[:len(body) - len(inner)].expandtabs(4))
+            lead = _indent_columns(body) if outer else _indent_columns(inner, inner_column)
             if depth < fdepth or (col and depth >= fdepth and rest.strip(" \t") and lead < col):
                 # the quote container of an open fence ended, or a non-blank line at the fence's quote depth OR DEEPER
                 # (a new quote opened by the line) that is indented below the item content column ends the fence
@@ -226,7 +263,7 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
                 # item fence by the line after its content column is removed
                 closer = inner if fdepth else body
                 if col:
-                    closer = closer[min(len(closer) - len(closer.lstrip(" ")), col):]
+                    closer = _dedent_columns(closer, col, inner_column if fdepth else 0)
                 close = _FENCE_CLOSE.match(closer)
                 if close and close.group(1)[0] == run[0] and len(close.group(1)) >= len(run):
                     fences.append((fstart, pos))
@@ -235,7 +272,8 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
         if html is not None:
             end, hdepth, hcol, houter = html
             inner = _strip_quotes(body, hdepth)
-            lead = len(body) - len(body.lstrip(" ")) if houter else len(inner) - len(inner.lstrip(" "))
+            inner_column = len(body[:len(body) - len(inner)].expandtabs(4))
+            lead = _indent_columns(body) if houter else _indent_columns(inner, inner_column)
             if depth < hdepth or (hcol and depth >= hdepth and rest.strip(" \t") and lead < hcol):
                 # its quote or list item ended (a dedented line may open a new, deeper quote): no lazy continuation
                 html = None
@@ -247,7 +285,7 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
                 html_blocks.append((hstart, at))
             else:
                 # an item's indentation is container syntax, so a terminator (`</pre>`, `-->`) is found after it is removed
-                if end.search(inner[min(lead, hcol):] if hcol else rest):
+                if end.search(_dedent_columns(inner, hcol, inner_column) if hcol else rest):
                     html = None
                     html_blocks.append((hstart, pos))
                 continue
@@ -256,13 +294,13 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
             seg, table, base = [], False, 0
             continue
         if table:
-            if not _interrupts(rest, depth, para_depth, 0):
+            if not _interrupts(rest, depth, para_depth, 0, quote_column):
                 row_cells(at, raw)
                 conts.add(at)
                 continue
             table = False
         elif seg:
-            lead = len(rest) - len(rest.lstrip(" "))
+            lead = _indent_columns(rest, quote_column)
             if _is_delimiter_row(rest) and _cell_count(_quotes(seg[-1][1].rstrip("\r\n"))[1]) == _cell_count(rest):
                 flush(seg[:-1])
                 # the header row (the last paragraph line) starts the table, so it is not a continuation
@@ -271,11 +309,11 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
                 conts.add(at)
                 seg, table = [], True
                 continue
-            if _SETEXT.match(rest[min(lead, base):]):
+            if _SETEXT.match(_dedent_columns(rest, base, quote_column)):
                 flush(seg)
                 seg, base = [], 0
                 continue
-            if not _interrupts(rest, depth, para_depth, base):
+            if not _interrupts(rest, depth, para_depth, base, quote_column):
                 seg.append((at, raw))
                 conts.add(at)
                 continue
@@ -290,7 +328,7 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
         # container syntax for the item's indentation)
         cdepth, col, crest = _containers(body)
         inner = _strip_quotes(body, depth)
-        ilead = len(inner) - len(inner.lstrip(" "))
+        ilead = _indent_columns(inner, quote_column)
         while lists and (depth < lists[-1][0] or (depth == lists[-1][0] and ilead < lists[-1][1])):
             lists.pop()
         if col:
@@ -298,8 +336,8 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
         opener = FENCE_OPEN.match(crest)
         # an unmarked line indented into an open item may open a fence or raw HTML block at that item's content column
         in_item = col == 0 and bool(lists) and depth == lists[-1][0] and ilead >= lists[-1][1]
-        item_opener = FENCE_OPEN.match(inner[lists[-1][1]:]) if in_item else None
-        item_html = _html_block(inner[lists[-1][1]:]) if in_item and not item_opener else None
+        item_opener = FENCE_OPEN.match(_dedent_columns(inner, lists[-1][1], quote_column)) if in_item else None
+        item_html = _html_block(_dedent_columns(inner, lists[-1][1], quote_column)) if in_item and not item_opener else None
         if item_opener:
             fence, fstart = (item_opener.group(1), cdepth, lists[-1][1], not cdepth), at
         elif opener:
@@ -308,7 +346,7 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
             # raw HTML indented into an item: its content column is removed before the block's own tests and
             # terminators, and it ends when a line leaves the item (a dedented line starts Markdown again)
             hstart, icol = at, lists[-1][1]
-            stripped = inner[icol:]
+            stripped = _dedent_columns(inner, icol, quote_column)
             if item_html is not True and item_html.search(stripped):
                 html_blocks.append((at, pos))   # the block closes on its own opening line
             else:
