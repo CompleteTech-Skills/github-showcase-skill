@@ -30,7 +30,7 @@ class RepoContext:
         else:
             self._scoped_away = None
         self.org = brand.org(self.owner)
-        self.style = brand.style(self.owner)
+        self.style = brand.style(self.owner, repo=self.repo)
         self.det = detect(meta if self.owner == meta.get("owner") else dict(meta, owner=self.owner), self.facts,
                           self.override, type_override, same_owner=self.same_owner)
         self.logs: list[str] = []

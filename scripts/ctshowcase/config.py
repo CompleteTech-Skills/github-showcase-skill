@@ -166,10 +166,10 @@ class Brand:
                 c["fg"] = best_fg(c["bg"], [tokens["title"], *cands])
         return fam
 
-    def style(self, owner: str) -> dict:
+    def style(self, owner: str, *, repo: str | None = None) -> dict:
         org = self.org(owner)
         if (self.raw.get("families", {}).get(org.get("family")) or {}).get("identity_pending"):
-            self.check_owner(owner)  # Missing consent still refuses before missing design inputs.
+            self.check_owner(owner, repo=repo)  # Missing consent still refuses before missing design inputs.
         fam = self.family(org.get("family", "completetech"))
         if org.get("banner"):
             fam["banner"] = org["banner"]

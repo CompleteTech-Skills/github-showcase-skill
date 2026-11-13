@@ -5,6 +5,8 @@ run a command does not supply a missing palette or mark. The TicketStub family i
 marked `identity_pending: true`: its generators return `needs-input:brand-identity`
 until owner-supplied identity data is configured, even with `--allow-unmeasured`.
 Without T3 sign-off, the existing consent refusal still takes precedence.
+Repository commands check the grant against that repository before reporting
+missing identity inputs; organization surfaces require an organization-wide grant.
 
 Each organization has optional legal wording fields in `references/brand.yaml`:
 
