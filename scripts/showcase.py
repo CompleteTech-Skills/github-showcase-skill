@@ -394,7 +394,17 @@ def cmd_readme(args):
     if rd is None:
         raise ShowcaseError("readme needs the repository checkout (--repo-dir DIR, or run inside it)", log="usage")
     path = rd / "README.md"
+    if args.no_regroup and (args.bootstrap or args.mode == "scaffold"):
+        raise ShowcaseError("--no-regroup cannot be combined with --bootstrap or --mode scaffold", log="usage")
     before = readme.read_text(path)
+    if args.no_regroup and path.is_file():
+        with path.open(encoding="utf-8", newline="") as stream:
+            before = stream.read().removeprefix("\ufeff")
+    reason = readme.managed_reason(ctx, before)
+    if reason:
+        proposed = readme.header(ctx)
+        return base("readme", ctx, result="needs-input", reason=reason, proposed_header=proposed, written=False,
+                    logs=ctx.logs + ["needs-input:readme-managed"]), NEEDS_INPUT if args.write else OK
     if ctx.watching_status() == "exempt:watching-fork":
         return base("readme", ctx, result="exempt", logs=["exempt"]), OK
     # a watching-org non-fork other than `.github`: held until decided (no README change, no --allow-hold)
@@ -437,13 +447,15 @@ def cmd_readme(args):
         else:
             after = readme.header_only(ctx, before)
     else:
+        if args.no_regroup:
+            mode = "header"
         if mode == "auto":
             mode = "scaffold" if len([ln for ln in before.splitlines() if ln.strip()]) < 3 else "upgrade"
         removed = []
         if mode == "scaffold":
             after = readme.scaffold(ctx, before)
         elif mode == "header":
-            after = readme.header_only(ctx, before)
+            after = readme.header_only(ctx, before, preserve_structure=args.no_regroup)
         else:
             after, removed = readme.upgrade(ctx, before)
             problems = readme.preservation(before, after, removed)
@@ -459,14 +471,16 @@ def cmd_readme(args):
         for rel, (label, message, colour) in sorted(ctx.badge_files.items()):
             write_bytes(rd / rel, badge.svg(ctx.brand, fonts, label, message, colour).encode())
     if args.write and changed:
-        path.write_text(after, encoding="utf-8")
+        with path.open("w", encoding="utf-8", newline="" if args.no_regroup else None) as stream:
+            stream.write(after)
         if contrib_new is not None:
             (rd / "CONTRIBUTING.md").write_text(contrib_new, encoding="utf-8")
     if args.records and changed:
         records.append(args.records, [records.record(ctx.owner, ctx.repo, "readme", "README.md", before, after,
                                                      f"§7 variant {ctx.det['variant']} ({mode})")])
     res = base("readme", ctx, result="changed" if changed else "unchanged", mode="bootstrap" if args.bootstrap else mode,
-               variant=ctx.det["variant"], written=bool(args.write and changed))
+               variant=ctx.det["variant"], written=bool(args.write and changed),
+               heading_moves=readme.heading_moves(before, after))
     if args.diff or not args.write:
         if args.format == "text":
             sys.stdout.write(diff)
@@ -1051,6 +1065,7 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--diff", action="store_true")
     s.add_argument("--records")
     s.add_argument("--bootstrap", action="store_true")
+    s.add_argument("--no-regroup", action="store_true", help="refresh existing marker blocks without regrouping headings")
     s.add_argument("--badges", choices=("shields", "local"), default="shields",
                    help="local renders badges offline to docs/images/badges/*.svg (profile READMEs)")
     s.set_defaults(func=cmd_readme)

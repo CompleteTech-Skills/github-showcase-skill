@@ -425,7 +425,10 @@ def license_section(ctx: RepoContext) -> tuple[str, str] | None:
 
 
 def section_facts(ctx: RepoContext, h2: str) -> str | None:
-    """Body for a scaffolded section, only from repo facts; None means omit + needs-input."""
+    """Body for a scaffolded section, only from supplied or captured facts."""
+    supplied = (ctx.override.get("readme") or {}).get("sections") or {}
+    if isinstance(supplied.get(h2), str) and supplied[h2].strip():
+        return supplied[h2].strip()
     f = ctx.facts
     if h2 == "Workflow Diagram" and f.read("assets/diagrams/workflow.mmd"):
         return ("Source: [assets/diagrams/workflow.mmd](assets/diagrams/workflow.mmd).\n\n```mermaid\n"
@@ -1099,9 +1102,10 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
     return "\n\n".join(x for x in out if x) + "\n", removed
 
 
-def header_only(ctx: RepoContext, text: str) -> str:
+def header_only(ctx: RepoContext, text: str, *, preserve_structure: bool = False) -> str:
     """Replace only existing marker blocks (what the Action runs)."""
-    text = normalize_text(text)
+    if not preserve_structure:
+        text = normalize_text(text)
     desc = (ctx.meta.get("description") or "").strip()
     gen = {"nav": nav_line(ctx), "banner": banner_html(ctx), "footer": footermod.markup(ctx.brand)}
     if ctx.repo_dir is not None and not (ctx.repo_dir / "docs" / "images" / "banner.png").is_file():
@@ -1122,6 +1126,14 @@ def header_only(ctx: RepoContext, text: str) -> str:
         if b in gen:
             return wrap(b, re.sub(r"\n{3,}", "\n\n", gen[b]))
         return m.group(0)
+    if preserve_structure:
+        # --no-regroup replaces existing managed blocks without normalizing
+        # whitespace, moving headings, adding sections or changing outside text.
+        out, pos = [], 0
+        for block in find_blocks(MARK, text):
+            out.extend((text[pos:block.start()], sub(block)))
+            pos = block.end()
+        return "".join(out) + text[pos:]
     return license_block(ctx, reorder_lead(ctx, _sub_blocks(text, sub)))
 
 
@@ -1289,6 +1301,39 @@ def bootstrap_contributing(ctx: RepoContext, text: str) -> str:
 # ------------------------------------------------------------------------------------------------
 # Safety checks
 # ------------------------------------------------------------------------------------------------
+def managed_reason(ctx: RepoContext, text: str) -> str | None:
+    """Respect another generator's ownership before any README or badge write."""
+    if (ctx.override.get("readme") or {}).get("managed"):
+        return "readme.managed is true in the repository configuration"
+    # Restrict heuristics to the introductory ownership notice, including YAML
+    # front matter and HTML comments. A later usage example is not an owner.
+    for line in text.splitlines()[:20]:
+        if re.search(r"\b(?:generated\s+by|do\s+not\s+edit)\b", line, re.I):
+            return "generator ownership notice in the first 20 lines"
+    return None
+
+
+def heading_moves(before: str, after: str) -> list[dict]:
+    """Report authored heading changes separately from added scaffold sections."""
+    def headings(text):
+        clean = masked(text)
+        return [(len(m.group(1)), m.group(2).strip())
+                for m in re.finditer(r"(?m)^ {0,3}(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$", clean)]
+    old, new = headings(before), headings(after)
+    used, moves = set(), []
+    renames = standard("readme-variants")["renames"]
+    for level, title in old:
+        normalized = EMOJI.sub("", title).strip()
+        normalized = renames.get(normalized.lower(), normalized)
+        for i, (new_level, new_title) in enumerate(new):
+            if i not in used and new_title.casefold() == normalized.casefold():
+                used.add(i)
+                if (level, title) != (new_level, new_title):
+                    moves.append({"heading": title, "from": level, "to": new_level, "new_heading": new_title})
+                break
+    return moves
+
+
 def nonws(s: str) -> int:
     return len(re.sub(r"\s", "", s))
 
@@ -1306,8 +1351,16 @@ def preservation(before: str, after: str, removed: list[str]) -> list[str]:
 
     def omit_owned_badges(m):
         # The digest must preserve significant whitespace (badge_sha), matching badge_body's replaces=.
-        owned = generated_badges(m.group(2)) or badge_sha(m.group(2)) in replacements
-        return wrap("badges", "") if m.group(1) == "badges" and owned else m.group(0)
+        body = m.group(2)
+        owned = generated_badges(body) or badge_sha(body) in replacements
+        if m.group(1) == "badges" and owned:
+            return wrap("badges", "")
+        # Only the exact generated tagline shape is owned: never exempt an
+        # arbitrary paragraph, comment, duplicate or extra line inside markers.
+        if m.group(1) == "tagline" and re.fullmatch(
+                r"(?:\*\*[^\n*]+\*\*|<p align=\"center\"><b>[^\n<>]+</b></p>)", body):
+            return wrap("tagline", "")
+        return m.group(0)
 
     before = _sub_blocks(before, omit_owned_badges)
     problems = []
