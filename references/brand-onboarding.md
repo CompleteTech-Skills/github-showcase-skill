@@ -47,9 +47,12 @@ The palette requires six-digit hex values. The canvas must be dark. Text and chi
 foregrounds meet 4.5:1 contrast; optional `--icon-ink` and `--icon-spark` must also
 meet 4.5:1 on the derived icon-card ground. Other tokens derive from those inputs,
 so a new family does not inherit CompleteTech colours. Fonts use the installed
-package's defaults. Schema validation completes before writing, existing config
-comments and unrelated rows are retained, and the lock is regenerated from the
-same validated data.
+package's defaults. Schema validation and UTF-8 JSON lock serialization complete
+before writing, existing config comments and unrelated rows are retained, and the
+lock is regenerated from the same validated data. Schema-valid YAML values that
+JSON cannot represent (such as an unquoted date in an extra field) are refused
+without changing the configuration, lock or mark; quote the value if it is meant
+to be text before retrying.
 
 Existing configuration and lock files must be writable regular files before any
 output is created. If a later write fails, restoration of the configuration,
@@ -61,3 +64,9 @@ certify the artwork. Render with `--allow-unmeasured` for review, inspect the se
 and record the appropriate decision before marking the palette measured. This
 command supplies no license wording, topic vocabulary or repository facts; those
 remain explicit follow-up inputs. Generation and review do not authorize rollout.
+For an organization's `.github` repository without a configured `brand_topic`,
+`topics` preserves existing topics, suggests the known `github-profile` type and
+logs `needs-input:brand-topic`; it never substitutes a CompleteTech affiliation.
+The command exits 4 and emits no topic command or change record until that input
+is supplied. `adopt` holds the topic job with a pending-input step, while `doctor`
+reports R3 as `hold`. Existing explicitly configured brand topics continue to apply.

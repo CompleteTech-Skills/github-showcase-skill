@@ -52,7 +52,7 @@ def _restore_file(path: Path, previous: bytes | None) -> None:
 
 
 def _write_onboarding(brand: Brand, original: bytes, text: str, lock: Path,
-                      raw: dict, mark: tuple[Path, bytes] | None) -> None:
+                      serialized_lock: str, mark: tuple[Path, bytes] | None) -> None:
     if _writable_file(brand.path, "configuration") != original:
         raise ConfigError("configuration changed during onboarding; re-run before writing")
     old_lock = _writable_file(lock, "lock")
@@ -70,7 +70,7 @@ def _write_onboarding(brand: Brand, original: bytes, text: str, lock: Path,
                 mark_created = True
                 stream.write(mark[1])
         brand.path.write_text(text, encoding="utf-8")
-        lock.write_text(lock_text(raw), encoding="utf-8")
+        lock.write_text(serialized_lock, encoding="utf-8")
     except OSError as exc:
         # Each recovery is independent: a failed lock restoration must never
         # prevent removing the newly copied mark or restoring the configuration.
@@ -228,10 +228,19 @@ def cmd_brand(args):
     errs = schema_errors(raw)
     if errs:
         raise ConfigError("brand schema validation failed: " + "; ".join(errs))
+    # Schema-valid YAML can contain extra date or binary scalars that JSON cannot
+    # represent. Validate both output encodings before copying a mark or changing
+    # any file, and give dry runs the same validation as writes.
+    try:
+        serialized_lock = lock_text(raw)
+        text.encode("utf-8")
+        serialized_lock.encode("utf-8")
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ConfigError("configuration cannot be represented in the UTF-8 JSON lock") from exc
     lock = brand.path.with_name("brand.lock.json")
     if args.write:
         # All input/schema checks finish before preflight or the first write.
-        _write_onboarding(brand, original_bytes, text, lock, raw, mark)
+        _write_onboarding(brand, original_bytes, text, lock, serialized_lock, mark)
     return {"command": "brand", "action": args.brand_action, "result": "written" if args.write else "planned",
             "family": args.name if args.brand_action == "add-family" else args.family, "org": args.org,
             "config": str(brand.path), "lock": str(lock), "logs": ["palette-unmeasured"],

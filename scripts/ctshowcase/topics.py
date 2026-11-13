@@ -135,7 +135,15 @@ def merge(ctx: RepoContext, also_in: list[str] | None = None) -> dict:
         proposed = list(dict.fromkeys(["fork"] + m_topics + list(dict.fromkeys(tech))[:4]))[:limit]
         return _with_signoffs(_result(current, proposed, logs), ctx, m_orgs, m_topics, proposed)
     if typ == "github-profile":
-        proposed = [org.get("brand_topic") or "completetech", "github-profile"]
+        brand = org.get("brand_topic")
+        if not brand:
+            logs.append("needs-input:brand-topic")
+            # Existing topics are evidence, not permission to replace an unknown
+            # organization's identity. Keep a safe type suggestion for review,
+            # but hold every topic write until its vocabulary is supplied.
+            proposed = list(dict.fromkeys(current + ["github-profile"]))
+            return dict(_result(current, proposed, logs), plan_allowed=False)
+        proposed = ([brand] if brand else []) + ["github-profile"]
         return _result(current, proposed, logs)
 
     brand = org.get("brand_topic")
