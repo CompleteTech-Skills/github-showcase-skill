@@ -9,8 +9,13 @@ from ctshowcase import mdcode, readme, readmelint
 def test_tabbed_item_fence_uses_visual_content_column(prefix, column, indent):
     quote = "> " if prefix.startswith(">") else ""
     text = prefix + "```\n" + quote + " " * indent + "![Shot](docs/images/missing.png)\n"
-    expected = [("Shot", "docs/images/missing.png")] if indent < column else []
+    # Leaving the item ends its fence. Four remaining columns still form a
+    # separate indented code block in the quote, rather than a rendered image.
+    expected = [("Shot", "docs/images/missing.png")] if indent < min(column, 4) else []
     assert readmelint._images(readmelint._outside_code(text), text) == expected
+    if 4 <= indent < column:
+        assert mdcode.fence_spans(text) == ((0, len(prefix + "```\n")),)
+        assert len(mdcode.code_block_spans(text)) == 2
     _, measured, rest = mdcode._containers(prefix + "```")
     assert (measured, rest) == (column, "```")
 

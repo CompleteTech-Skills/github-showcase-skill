@@ -292,23 +292,32 @@ def _paragraph_interrupts(content: str, matched: bool) -> bool:
     """
     if _QUOTE.match(content):
         return True
+    if not matched and re.fullmatch(r" {0,3}(?:[-+*]|\d{1,9}[.)]) *", content):
+        return True  # an empty sibling item ends the old item; it is not lazy paragraph text
     if not matched and _ORDERED_ITEM.match(content):
+        return True
+    if not matched and _HTML_TYPE_7.match(content):
+        # Type 7 cannot interrupt the paragraph in its own containers. Once a
+        # required ancestor is absent it starts a new HTML block outside them.
         return True
     return _interrupts(content, 0, 0, 0)
 
 
 @functools.lru_cache(maxsize=16)
 def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, int], ...], tuple[int, ...],
-                                tuple[tuple[int, int], ...]]:
-    """(inline regions, fenced spans, continuation starts, raw HTML block spans). An inline region is a stretch in which
+                                tuple[tuple[int, int], ...], tuple[tuple[int, int], ...]]:
+    """(inline regions, fenced spans, continuation starts, raw HTML spans, indented spans). An inline region is a stretch in which
     one inline code span can live: a paragraph, a heading line, an HTML block start line or one table cell. A
     continuation start is the source offset of a line that continues an open paragraph or table (not the first line of
     a block, not a heading, not a line inside a fence). An HTML block span runs from its first line to just past its
-    last line, excluding a terminating blank line or the line that ended its container."""
+    last line, excluding a terminating blank line or the line that ended its container. The final tuple records
+    indented code blocks, which cannot interrupt a paragraph and are never inline regions."""
     WORK['layout_builds'] += 1
     regions: list[tuple[int, int]] = []
     fences: list[tuple[int, int]] = []
     html_blocks: list[tuple[int, int]] = []
+    indented_blocks: list[tuple[int, int]] = []
+    indented = None  # (source start, ordered container ancestors)
     hstart = 0
     conts: set[int] = set()
     seg: list[tuple[int, str]] = []
@@ -365,9 +374,22 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
                     html = None
                     html_blocks.append((hstart, pos))
                 continue
+        if indented is not None:
+            start, path = indented
+            inner = _continue_containers(body, path)
+            if inner is not None and (not inner.strip(" ") or _indent_columns(inner) >= 4):
+                continue
+            indented_blocks.append((start, at))
+            indented = None
         if not rest.strip(" \t"):
             flush(seg)
             seg, table = [], False
+            if body.strip(" "):
+                # An explicitly empty quote can leave an existing list even
+                # though it has no paragraph content. A truly blank line
+                # instead keeps the item open for an indented continuation.
+                while lists and _continue_containers(body, lists[-1]) is None:
+                    lists.pop()
             continue
         if table:
             if not _interrupts(rest, depth, para_depth, 0, quote_column):
@@ -377,6 +399,12 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
             table = False
         elif seg:
             para_content, matched = _paragraph_line(body, para_path)
+            if not para_content.strip(" "):
+                # A blank line can carry item/quote prefixes. It is still a
+                # paragraph boundary after those ancestors have been peeled.
+                flush(seg)
+                seg, table = [], False
+                continue
             if matched and _is_delimiter_row(para_content) and _cell_count(_quotes(seg[-1][1].rstrip("\r\n"))[1]) == _cell_count(para_content):
                 flush(seg[:-1])
                 # the header row (the last paragraph line) starts the table, so it is not a continuation
@@ -409,6 +437,13 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
             # Each item can survive when a deeper quote/item ends. Retaining
             # only the deepest path would also discard a still-live ancestor.
             lists.append(inherited + added[:item_index + 1])
+        if not crest.strip(" "):
+            continue  # empty items/quotes open containers, never a paragraph
+        if _indent_columns(crest) >= 4:
+            # Indented code cannot interrupt an open paragraph (handled
+            # above), but starts here when there is no paragraph to continue.
+            indented = (at, path)
+            continue
         opener = FENCE_OPEN.match(crest)
         if opener:
             fence, fstart = (opener.group(1), path), at
@@ -430,7 +465,14 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
         flush(seg)
     if html is not None:
         html_blocks.append((hstart, len(text)))
-    return tuple(regions), tuple(fences), tuple(sorted(conts)), tuple(html_blocks)
+    if indented is not None:
+        indented_blocks.append((indented[0], len(text)))
+    return tuple(regions), tuple(fences), tuple(sorted(conts)), tuple(html_blocks), tuple(indented_blocks)
+
+
+def inline_regions(text: str) -> tuple[tuple[int, int], ...]:
+    """Canonical, source-aligned blocks in which one inline construct may live."""
+    return _layout(text)[0]
 
 
 @functools.lru_cache(maxsize=16)
@@ -503,6 +545,13 @@ def fence_spans(text: str) -> tuple[tuple[int, int], ...]:
 
 
 @functools.lru_cache(maxsize=16)
+def code_block_spans(text: str) -> tuple[tuple[int, int], ...]:
+    """All inert Markdown code blocks; the fenced-only API remains unchanged."""
+    layout = _layout(text)
+    return tuple(sorted(layout[1] + layout[4]))
+
+
+@functools.lru_cache(maxsize=16)
 def html_block_spans(text: str) -> tuple[tuple[int, int], ...]:
     """Sorted, non-overlapping (start, end) of every raw HTML block (the cached `_layout` HTML spans)."""
     return tuple(sorted(_layout(text)[3]))
@@ -521,8 +570,8 @@ def inline_code_spans(text: str) -> tuple[tuple[int, int], ...]:
 
 
 def code_spans(text: str) -> list[tuple[int, int]]:
-    """(start, end) offsets of fenced code (``` and ~~~, an unclosed fence runs to the end) and inline code spans."""
-    return sorted(fence_spans(text) + inline_code_spans(text))
+    """Source offsets of fenced/indented code blocks and inline code spans."""
+    return sorted(code_block_spans(text) + inline_code_spans(text))
 
 
 def masked(text: str) -> str:
