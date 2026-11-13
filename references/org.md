@@ -14,7 +14,7 @@ python3 $S org health  ORG [--dot-github CHECKOUT]                  # O4: §8.1 
 python3 $S org doctor  ORG --snapshot org-snapshot.json [--dot-github CHECKOUT] [--avatar avatar.png] [--doctor-format tsv|json|md] [--header]
 ```
 
-Every action takes `ORG` (any former login resolves, see below), `--registry`, `--meta-dir`, `--decisions`, `--approved`, `--approved-yaml`, `--actions`, `--allow-t3` and `--jobs FILE` (append the writer jobs as JSON lines).
+Every action takes `ORG` (any former login resolves, see below), `--registry`, `--meta-dir`, `--decisions`, `--approved`, `--approved-yaml`, `--actions`, `--allow-t3` and `--jobs FILE` (append the writer jobs as JSON lines). The global `--allow-t3` (before the command) is equivalent. Either needs a valid sign-off record by default (`<estate root>/decisions/t3-signoffs.yaml` or `--t3-signoff-file`; `t3-signoff:no-file|missing|invalid|expired|scope|revoked` otherwise, see [t3-signoff.md](t3-signoff.md)); there is no opt-out.
 
 | Action | Reads | Emits | Writes |
 |---|---|---|---|
@@ -56,6 +56,31 @@ Forks, archived repositories, disabled-Issues members, HOLD/co-owned organizatio
 | Approvals | `decisions/approved.tsv`, `decisions/APPROVED_ACTIONS.yaml`, `decisions/estate-actions.json` | `--approved`, `--approved-yaml`, `--actions`; missing files mean "nothing approved" |
 
 The synthetic `examples/estate/` tree runs every action offline: `SHOWCASE_ESTATE_ROOT=examples/estate python3 scripts/showcase.py org profile Northwind-Trading-Co --meta-dir examples/estate/meta`.
+
+### Registry-free public leak check
+
+`python3 $S lint public-leak README.md --denylist /private/denylist.txt` checks
+public files without a registry. The UTF-8 denylist may include a leading
+byte-order mark and contains one literal name, slug, domain or other forbidden
+string per line. Blank lines are ignored;
+matching is case-insensitive and treats punctuation literally. Keep this file
+outside repositories and never populate examples with real private names.
+
+The report returns only matching line numbers, never the private entry or source
+line. Input paths containing an entry are redacted too. An empty, unreadable or
+invalid UTF-8 denylist cannot pass the check; unreadable input files fail. It reads
+no registry, metadata or approval files and cannot be combined with those inputs.
+`privacy:denylist-only` records the limited evidence: this proves absence of the
+supplied strings, not that the operator's list covers every private fact. A
+registry-backed full privacy assessment remains available with the existing
+`--registry` and `--meta-dir` workflow.
+
+| Check | Registry-free evidence | Remaining limitation |
+|---|---|---|
+| `lint public-leak --denylist FILE` | Literal strings in the supplied private denylist; reports matching line numbers only | Cannot discover private names omitted from the list |
+| `org health` / `org doctor` | Local files and supplied captures (coverage below) | No registry coverage or complete public-profile privacy certification |
+| `org labels --repos-from-gh` | Accessible repositories and live labels/tree | Requires authenticated read access and sufficient reference evidence |
+| `org profile`, `about`, `pins` | No substitute for the registry's explicit content and membership | Registry remains required; the denylist never authorizes a rollout |
 
 ### Registry-free health and doctor
 
@@ -111,3 +136,14 @@ Excluded owners and T3 orgs without `--allow-t3` (co-owner sign-off) exit 2 in e
 - Never pin before everything else in the org is final; pins are browser steps.
 - Never create `.github-private`, and never list a private repository on a public profile.
 - Never commit a public file the run wrote without `showcase.py lint public-leak FILE... --meta-dir DIR`: the same leak check `profile` runs, against every registry org's private set (or `--org ORG[,ORG]`); without metadata every repository counts as private, so it fails closed.
+
+## A checkout whose repository name changed
+
+A metadata/checkout identity mismatch still refuses the operation before writing.
+An unrecorded repository rename is not proof that two repositories are the same:
+check the identity first, then update the local checkout's `origin` with the
+`git -C ... remote set-url origin https://github.com/OWNER/REPO.git` command named
+in the diagnostic, or select the correct checkout. The skill never rewrites a
+remote and does not make a redirect lookup implicitly. Recorded organization
+aliases keep resolving through the shared resolver. `--no-repo-dir` is only for
+metadata-only use and does not authenticate a mismatched checkout.

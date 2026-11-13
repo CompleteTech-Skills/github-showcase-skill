@@ -65,7 +65,7 @@ def membership_topics(ctx: RepoContext, also_in: list[str]) -> tuple[list[str], 
         if status in ("excluded", "hold"):
             logs.append(f"exempt:also-in:{org}")
             continue
-        if status == "t3" and not t3_signed_off():
+        if status == "t3" and not t3_signed_off(org):
             logs.append(f"t3-signoff:also-in:{org}")
             continue
         known, topic = org_topic(ctx.brand, org)
@@ -133,7 +133,7 @@ def merge(ctx: RepoContext, also_in: list[str] | None = None) -> dict:
         tech = [alias(x) for x in parent if alias(x) in set(t["featured"]) | set(t["allowed"])]
         # a fork listed in also_in also carries that org membership topic (§5.1), counted toward the maximum
         proposed = list(dict.fromkeys(["fork"] + m_topics + list(dict.fromkeys(tech))[:4]))[:limit]
-        return _result(current, proposed, logs)
+        return _with_signoffs(_result(current, proposed, logs), ctx, m_orgs, m_topics, proposed)
     if typ == "github-profile":
         proposed = [org.get("brand_topic") or "completetech", "github-profile"]
         return _result(current, proposed, logs)
@@ -188,7 +188,25 @@ def merge(ctx: RepoContext, also_in: list[str] | None = None) -> dict:
     minimum = t["min_private"] if private else t["min_public"]
     if len(proposed) < minimum:
         logs.append("topics-short")
-    return _result(current, proposed, logs)
+    return _with_signoffs(_result(current, proposed, logs), ctx, m_orgs, m_topics, proposed)
+
+
+def _with_signoffs(res: dict, ctx: RepoContext, orgs: list[str], topics_: list[str], proposed: list[str]) -> dict:
+    """Name the records that let a T3 org's membership topic into `proposed` as
+    `signoff_ids`, so cmd_topics carries them onto the change record. membership_topics only asks granted(), which
+    registers no grant, and records.append stamps by the target owner (often T1), so without this the record that
+    authorized the T3 association was lost (tests/test_t3_signoff_require.py
+    ::test_t3_also_in_association_carries_its_signoff_id). No key at all when no T3 org applies."""
+    from . import signoff
+    resolver = ctx.brand.resolver()
+    ids: list[str] = []
+    for org, topic in zip(orgs, topics_):
+        if topic not in proposed or ctx.brand.owner_status(org) != "t3":
+            continue
+        rec, _ = signoff.evaluate([org, *resolver.aliases(org)])
+        if rec is not None and rec.get("id") and str(rec["id"]) not in ids:
+            ids.append(str(rec["id"]))
+    return dict(res, signoff_ids=ids) if ids else res
 
 
 def _result(current, proposed, logs):
