@@ -84,6 +84,10 @@ def row(ctx: RepoContext) -> dict:
         cells["R6"] = "pass" if all(o["op"] == "skip" and not o.get("log") for o in ops) else "fail"
     readme = rd / "README.md" if rd else None
     if readme and readme.is_file():
+        from .staged import tagline_drift
+        if tagline_drift(ctx, readmemod.read_text(readme)):
+            cells["R2"] = "fail"
+            logs.append("description-drift:readme")
         rl = readmelint.lint(ctx, readme)
         cells["R7"] = rl["result"]
         logs += rl.get("logs", [])

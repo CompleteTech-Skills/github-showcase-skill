@@ -2468,6 +2468,7 @@ def add_parser(sub, cli=None):
                                                     "social-preview), plus the browser upload job")
     a.add_argument("--out")
     a.add_argument("--title")
+    a.add_argument("--description", help="render a staged description and record its provenance")
     a.add_argument("--icon")
     a.add_argument("--allow-unmeasured", action="store_true")
     a.add_argument("--allow-hold", action="store_true")

@@ -83,6 +83,8 @@ Run every command **from inside the target repository's checkout**, with the ski
 | 8 | `doctor --header` | One coverage row. `done` only when every applicable cell is `pass`, `warn`, `incomplete` or `n/a`, and the banner has two to four chips. |
 | 9 | `contact-sheet` | A human (or an independent verifier) views the set on both GitHub page colours before rollout. Pass PNGs: `card --png`, `org-tile --png` previews, or install the optional `resvg_py` (`requirements-preview.txt`) so SVG inputs (the intro's static frame) render too; otherwise an SVG input exits 2. |
 
+**Staged descriptions.** `banner`, `card`, `content social` and `readme` accept `--description TEXT` to render a proposed sentence without editing the captured metadata or GitHub. Each reports `staged-description`; written outputs record the text and hashes per output in `docs/images/.showcase.json` (beside external outputs). `doctor` fails R2 and logs `description-drift:readme` when the managed tagline differs from the captured live description. See [staged descriptions](references/staged-descriptions.md) for dry runs and provenance.
+
 **Who applies GitHub changes.** Under the estate orchestrator, every proposal (description, topics, labels, README) goes to its single writer queue as change records. Used standalone, with no orchestrator: show the user the `--gh` command lines (or the `argv` of `labels --plan`) and the README diff; the user runs them after approving that repository's changes. The skill itself never runs a write.
 
 **Install.** System Python on Ubuntu 24.04, Debian 12 and Homebrew refuses `pip install` ("externally managed environment"). Use a virtual environment (or `uv`):
@@ -178,15 +180,16 @@ labels --emit-yml
 labels --plan [--references] [--records FILE] [--gh] [--jobs FILE] [--allow-hold]
 banner [--out docs/images/banner.png] [--scale 2] [--icon PATH] [--subtitle TEXT]
        [--key-chip TEXT]... [--chip TEXT]... [--category TEXT] [--allow-unmeasured] [--allow-hold]
-       [--allow-few-chips] [--png-budget 300000]
+       [--allow-few-chips] [--png-budget 300000] [--description TEXT]
 card [--out docs/images/card.svg] [--png PATH] [--icon PATH] [--allow-unmeasured] [--allow-hold]
+     [--description TEXT]
 org-banner --org OWNER --out PATH [--illustration PATH]
 org-tile --org OWNER [--avatar PATH] [--illustration PATH] [--out PATH] [--png PATH]
 intro (--profile CompleteDotTech | --org OWNER) [--name TEXT] [--eyebrow TEXT] [--tagline TEXT]
       [--chip key:TEXT] [--chip attr:TEXT]... [--mark PATH] [--height 320|360] [--static] [--out assets/intro.svg]
 footer [--check README.md [--online]] [--org OWNER] [--raw]
 readme [--mode auto|scaffold|upgrade|header] [--variant auto|A|B|C|D|E|F|G|H|I|J]
-       [--write] [--diff] [--records FILE] [--bootstrap]
+       [--write] [--diff] [--records FILE] [--bootstrap] [--description TEXT]
 lint svg --kind intro|card|tile|plate|divider FILE...
 lint readme [README.md] [--variant auto]
 lint banner [docs/images/banner.png]
@@ -224,6 +227,7 @@ project copy-plan --target ORG|@me [--role org|template|estate] [--source OWNER/
 project readme --capture FILE --owner OWNER [--out FILE]
 project estate-plan [--copied FILE] [--user-id ID] [--source OWNER/N] [--jobs FILE]
 content social [--out PATH] [--title TEXT] [--icon PATH] [--job] [--allow-unmeasured] [--allow-hold]
+    [--description TEXT]
 content icon prompt|normalize|check [--option A|B] [--glyph FILE] [--art-direction FILE] [--in PNG]
     [--ground auto|transparent|keep] [--ground-tolerance DE (0 to 12)] [--seed N] [--out PATH] [--preview PATH]
     [--strict] [--min-contrast RATIO] [--ocr]

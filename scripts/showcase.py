@@ -121,7 +121,13 @@ def context(args, b=None):
     b = b or brand(args)
     rd = repo_dir(args)
     meta = merged(args.meta, str(rd) if rd else None)
-    return RepoContext(b, meta, rd, type_override=getattr(args, "type_override", None))
+    from ctshowcase.staged import prepare
+    meta, staged = prepare(meta, getattr(args, "description", None))
+    ctx = RepoContext(b, meta, rd, type_override=getattr(args, "type_override", None))
+    if staged is not None:
+        ctx.staged_description = staged
+        ctx.log("staged-description")
+    return ctx
 
 
 def base(cmd, ctx=None, **kw) -> dict:
@@ -131,6 +137,8 @@ def base(cmd, ctx=None, **kw) -> dict:
     d.update(kw)
     if ctx is not None:
         d.setdefault("logs", ctx.logs)
+        if getattr(ctx, "staged_description", None) is not None:
+            d.setdefault("staged_description", ctx.staged_description)
     d.setdefault("logs", [])
     return d
 
@@ -160,6 +168,9 @@ def gate_watching(ctx, allow_hold=False, remedy=HOLD_REMEDY) -> None:
 
 def maybe_sidecar(ctx, out: Path, record: dict) -> None:
     from ctshowcase import fingerprint as fp
+    from ctshowcase.staged import record_output
+    if record_output(ctx, out, record) is not None:
+        return
     if out.parent.name == "images" and out.parent.parent.name == "docs":
         inp = fp.inputs(ctx.meta, ctx.repo_dir)
         # the repository's immutable id (`meta --from-gh`): `action_prepare.py foreign` tells a rename or transfer
@@ -250,6 +261,9 @@ def cmd_social(args):
     if fmt == "jpg":
         out = out.with_suffix(".jpg")
     write_bytes(out, data)
+    from ctshowcase.staged import record_output
+    from ctshowcase.fingerprint import file_record
+    record_output(ctx, out, file_record(out))
     res = base("social-preview", ctx, result="ok", out=str(out), bytes=len(data), format=fmt, **info)
     if args.command == "social-preview":  # the hidden, deprecated top-level alias of `content social`
         res["logs"] = list(res["logs"]) + ["deprecated:social-preview (use content social)"]
@@ -462,6 +476,10 @@ def cmd_readme(args):
         path.write_text(after, encoding="utf-8")
         if contrib_new is not None:
             (rd / "CONTRIBUTING.md").write_text(contrib_new, encoding="utf-8")
+    if args.write:
+        from ctshowcase.staged import record_output
+        from ctshowcase.fingerprint import file_record
+        record_output(ctx, path, file_record(path))
     if args.records and changed:
         records.append(args.records, [records.record(ctx.owner, ctx.repo, "readme", "README.md", before, after,
                                                      f"§7 variant {ctx.det['variant']} ({mode})")])
@@ -469,6 +487,8 @@ def cmd_readme(args):
                variant=ctx.det["variant"], written=bool(args.write and changed))
     if args.diff or not args.write:
         if args.format == "text":
+            if getattr(ctx, "staged_description", None) is not None:
+                sys.stderr.write("staged-description\n")
             sys.stdout.write(diff)
             return None, OK
         res["diff"] = diff
@@ -988,6 +1008,7 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--png-budget", type=int, default=300_000)
     s.add_argument("--allow-few-chips", action="store_true",
                    help="render with fewer than 2 chips (result incomplete, needs-input:banner-chips) instead of exit 4")
+    s.add_argument("--description", help="render a staged description; log and record it without changing GitHub")
     s.set_defaults(func=cmd_banner)
 
     s = sub.add_parser("card", help="repo card SVG (dark only)")
@@ -996,6 +1017,7 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--icon")
     s.add_argument("--allow-unmeasured", action="store_true")
     s.add_argument("--allow-hold", action="store_true")
+    s.add_argument("--description", help="render a staged description; log and record it without changing GitHub")
     s.set_defaults(func=cmd_card)
 
     # deprecated alias of the contract name `content social` (same options, same file); added without `help`, so
@@ -1006,6 +1028,7 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--icon")
     s.add_argument("--allow-unmeasured", action="store_true")
     s.add_argument("--allow-hold", action="store_true")
+    s.add_argument("--description", help="render a staged description; log and record it without changing GitHub")
     s.set_defaults(func=cmd_social)
 
     s = sub.add_parser("org-banner", help="1600x400 org profile banner JPG (.github/profile/assets/banner.jpg)")
@@ -1053,6 +1076,7 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--bootstrap", action="store_true")
     s.add_argument("--badges", choices=("shields", "local"), default="shields",
                    help="local renders badges offline to docs/images/badges/*.svg (profile READMEs)")
+    s.add_argument("--description", help="render a staged description; log and record it without changing GitHub")
     s.set_defaults(func=cmd_readme)
 
     s = sub.add_parser("describe", help="lint a description against §4.1 and propose keep/edit")
