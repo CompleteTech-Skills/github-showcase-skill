@@ -543,12 +543,16 @@ def _bracket_pairs(text: str, document: str | None = None) -> dict[int, int]:
 
     The masked copy keeps original offsets but cannot classify blocks itself:
     code masks may erase the syntax that caused a boundary in the source.
+    Complete HTML tags bind more tightly than description brackets; their
+    attribute text cannot open or close a description. Full reference labels
+    use a separate raw lexical scan.
     """
     global _BRACKET_STEPS
     pairs: dict[int, int] = {}
     source = document if document is not None else text
     autolinks = mdcode.autolink_candidates(source)
     code = mdcode.inline_code_spans(source)
+    tags = _HTMLTokens(text, source).tags
     for lo, hi in mdcode.inline_regions(source):
         stack: list[int] = []
         pos, limit = lo, min(hi, len(text))
@@ -557,6 +561,10 @@ def _bracket_pairs(text: str, document: str | None = None) -> dict[int, int]:
             link = _span_at(autolinks, pos)
             if link is not None and _span_at(code, link[0]) is None:
                 pos = link[1]
+                continue
+            tag = _span_at(tags, pos)
+            if tag is not None:
+                pos = tag[1]
                 continue
             char = text[pos]
             if char == "\\":
@@ -848,8 +856,11 @@ def _reference_label_spans(document: str) -> tuple[tuple[int, int], ...]:
         if at not in _active_openers(document):
             continue  # the first `]` closes no link text (an orphan junction): `[label]` is a shortcut, not a full reference
         open_ = at + 1
-        close = _closing_bracket(document, open_)
-        if close is None:
+        # Full reference labels are raw lexical text: HTML-looking brackets
+        # close or invalidate them even though HTML is inert in descriptions.
+        region = _span_at(mdcode.inline_regions(document), open_)
+        close = _next_unescaped_bracket(document, open_ + 1, min(region[1], open_ + 1001)) if region else -1
+        if close < 0 or document[close] != "]":
             continue
         label = document[open_ + 1:close]
         if not label.strip() or re.search(r"\n[ \t]*\n", label):
