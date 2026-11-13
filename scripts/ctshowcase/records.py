@@ -12,8 +12,14 @@ def record(owner: str, repo: str, kind: str, target: str, before, after, rule: s
     b = before if isinstance(before, (bytes, str)) else json.dumps(before, sort_keys=True)
     if isinstance(b, str):
         b = b.encode("utf-8")
-    return {"std": STANDARD, "owner": owner, "repo": repo, "kind": kind, "target": target,
-            "before_sha256": hashlib.sha256(b).hexdigest(), "after": after, "rule": rule}
+    rec = {"std": STANDARD, "owner": owner, "repo": repo, "kind": kind, "target": target,
+           "before_sha256": hashlib.sha256(b).hexdigest(), "after": after, "rule": rule}
+    # Public planners return these dictionaries before append()/CLI serialization.
+    # Carry only a previously gated, still-valid target grant at that common seam;
+    # constructing a record does not authorize the owner or register a new grant.
+    from .signoff import stamp
+    stamp([rec])
+    return rec
 
 
 def append(path: str | Path | None, recs: list[dict]) -> None:
