@@ -319,6 +319,16 @@
       "pattern": "^[A-Za-z0-9][A-Za-z0-9-]*$"
      },
      "uniqueItems": true
+    },
+    "topics_extra": {
+     "type": "array",
+     "uniqueItems": true,
+     "items": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 50,
+      "pattern": "^[a-z0-9][a-z0-9-]{0,49}$"
+     }
     }
    }
   }
@@ -363,7 +373,10 @@
    "properties": {
     "legacy_logo_urls": {
      "type": "array",
-     "items": {"type": "string", "pattern": "^https://"},
+     "items": {
+      "type": "string",
+      "pattern": "^https://"
+     },
      "uniqueItems": true
     }
    },

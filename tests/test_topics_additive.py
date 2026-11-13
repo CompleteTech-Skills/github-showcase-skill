@@ -92,3 +92,43 @@ def test_org_extras_cannot_propose_private_banned_topics(make_ctx):
     result = merge(ctx)
     assert not result["plan_allowed"]
     assert "needs-review:topic-safety" in result["logs"]
+
+
+def test_unsafe_topics_withhold_cli_command_and_change_record(tmp_path):
+    from conftest import run_cli
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps({"owner": "Northwind-Trading-Co", "repo": "support-triage-agent",
+                               "description": "Research compatibility.", "topics": ["pokemon"],
+                               "visibility": "private", "language": "Python"}), encoding="utf-8")
+    records = tmp_path / "records.jsonl"
+    result = run_cli("--meta", meta, "--no-repo-dir", "topics", "--gh", "--records", records)
+    payload = json.loads(result.stdout)
+    assert result.returncode == 1
+    assert payload["plan_allowed"] is False
+    assert "gh" not in payload
+    assert not records.exists()
+
+
+def test_unsafe_topics_withhold_adopt_job_and_record(make_ctx):
+    from ctshowcase.intake import adopt
+    result = adopt(make_ctx(topics=["pokemon"], visibility="private"))
+    assert "needs-review:topic-safety" in result["logs"]
+    assert not any(job["kind"] == "topics" for job in result["jobs"])
+    assert not any(record.get("kind") == "topics" for record in result["records"])
+
+
+def test_topic_capacity_is_visible_in_doctor(make_ctx):
+    from ctshowcase.doctor import row
+    result = row(make_ctx(topics=[f"subject-{n}" for n in range(10)]))
+    assert result["cells"]["R3"] == "fail"
+    assert "needs-input:topics-capacity" in result["logs"]
+
+
+def test_org_extension_schema_matches_runtime(brand):
+    from pathlib import Path
+    from jsonschema import Draft202012Validator
+    schema = json.loads((Path(__file__).resolve().parents[1] / "references/brand.schema.json").read_text())
+    validator = Draft202012Validator(schema["$defs"]["org"]["properties"]["topics_extra"])
+    assert not list(validator.iter_errors(["compatibility", "research-area"]))
+    for invalid in (["Upper"], [""], ["a" * 51], ["with space"], ["duplicate", "duplicate"]):
+        assert list(validator.iter_errors(invalid))
