@@ -714,7 +714,7 @@ def lint_public_leak(args) -> list[dict]:
     from ctshowcase.resolver import Resolver
     if not args.files:
         raise ShowcaseError("lint public-leak needs FILE...", log="usage")
-    if getattr(args, "denylist", None):
+    if getattr(args, "denylist", None) is not None:
         if any((args.registry, args.meta_dir, args.decisions, args.org, args.approved, args.approved_yaml, args.actions)):
             raise ShowcaseError("use --denylist without registry, metadata, org or approval inputs", log="usage")
         from ctshowcase.publicleak import check_files

@@ -77,6 +77,19 @@ def test_cli_denylist_rejects_registry_inputs(tmp_path):
     assert "use --denylist without" in result.stdout + result.stderr
 
 
+def test_cli_empty_denylist_never_falls_back_to_estate(tmp_path, monkeypatch):
+    from conftest import run_cli, ROOT
+    monkeypatch.setenv("SHOWCASE_ESTATE_ROOT", str(ROOT / "examples" / "estate"))
+    source = tmp_path / "README.md"
+    source.write_text("Northwind-Trading-Co/support-triage-agent\n", encoding="utf-8")
+    result = run_cli("lint", "public-leak", source, "--denylist", "")
+    assert result.returncode == 2
+    payload = json.loads(result.stdout)
+    assert payload["logs"] == ["usage"]
+    assert "cannot read denylist" in payload["error"]
+    assert "Northwind-Trading-Co" not in result.stdout + result.stderr
+
+
 @pytest.mark.parametrize("encoding", ["utf-8", "utf-8-sig"])
 def test_cli_first_entry_matches_and_redacts_path_with_optional_bom(tmp_path, monkeypatch, encoding):
     from conftest import run_cli
