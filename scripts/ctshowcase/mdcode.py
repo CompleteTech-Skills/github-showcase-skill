@@ -268,6 +268,35 @@ def _interrupts(rest: str, depth: int, para_depth: int, base: int, start: int = 
     return bool(ordered and (ordered.group(1) == "1" or (base and lead < base)))
 
 
+def _paragraph_line(body: str, path: tuple[tuple[str, int], ...]) -> tuple[str, bool]:
+    """Paragraph content and whether all its ancestors occur on this line.
+
+    Paragraphs permit lazy container continuations, unlike fences and raw
+    HTML. Keep the ordered path so indentation before a nested quote is not
+    confused with quote depth at the beginning of the source line.
+    """
+    for ancestor in path:
+        inner = _continue_containers(body, (ancestor,))
+        if inner is None:
+            return body, False
+        body = inner
+    return body, True
+
+
+def _paragraph_interrupts(content: str, matched: bool) -> bool:
+    """Whether a new line ends the paragraph after matching its ancestors.
+
+    A lazy line cannot start a new block container. In particular any ordered
+    item starts a list after leaving a quote/item, whereas only an item numbered
+    one may interrupt an ordinary paragraph inside matching containers.
+    """
+    if _QUOTE.match(content):
+        return True
+    if not matched and _ORDERED_ITEM.match(content):
+        return True
+    return _interrupts(content, 0, 0, 0)
+
+
 @functools.lru_cache(maxsize=16)
 def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, int], ...], tuple[int, ...],
                                 tuple[tuple[int, int], ...]]:
@@ -284,7 +313,8 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
     conts: set[int] = set()
     seg: list[tuple[int, str]] = []
     # An open fence: (fence run, ordered container ancestors).
-    fence, fstart, table, para_depth, base, pos = None, 0, False, 0, 0, 0
+    fence, fstart, table, para_depth, pos = None, 0, False, 0, 0
+    para_path: tuple[tuple[str, int], ...] = ()
     # Paths through open list items, outermost first. They persist across blank
     # lines; a nonblank line that cannot continue an ancestor leaves that item.
     lists: list[tuple[tuple[str, int], ...]] = []
@@ -337,7 +367,7 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
                 continue
         if not rest.strip(" \t"):
             flush(seg)
-            seg, table, base = [], False, 0
+            seg, table = [], False
             continue
         if table:
             if not _interrupts(rest, depth, para_depth, 0, quote_column):
@@ -346,7 +376,8 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
                 continue
             table = False
         elif seg:
-            if _is_delimiter_row(rest) and _cell_count(_quotes(seg[-1][1].rstrip("\r\n"))[1]) == _cell_count(rest):
+            para_content, matched = _paragraph_line(body, para_path)
+            if matched and _is_delimiter_row(para_content) and _cell_count(_quotes(seg[-1][1].rstrip("\r\n"))[1]) == _cell_count(para_content):
                 flush(seg[:-1])
                 # the header row (the last paragraph line) starts the table, so it is not a continuation
                 conts.discard(seg[-1][0])
@@ -354,16 +385,16 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
                 conts.add(at)
                 seg, table = [], True
                 continue
-            if _SETEXT.match(_dedent_columns(rest, base, quote_column)):
+            if matched and _SETEXT.match(para_content):
                 flush(seg)
-                seg, base = [], 0
+                seg = []
                 continue
-            if not _interrupts(rest, depth, para_depth, base, quote_column):
+            if not _paragraph_interrupts(para_content, matched):
                 seg.append((at, raw))
                 conts.add(at)
                 continue
             flush(seg)
-            seg, base = [], 0
+            seg = []
         # Continue the deepest surviving list before looking for more
         # containers. This retains the ancestor order even when a quoted fence
         # starts on a later line of an item, rather than on the marker line.
@@ -381,7 +412,7 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
         opener = FENCE_OPEN.match(crest)
         if opener:
             fence, fstart = (opener.group(1), path), at
-        elif _ATX_HEADING.match(rest):
+        elif _ATX_HEADING.match(crest):
             regions.append((at, pos))
         elif (kind := _html_block(crest)) is not None:
             # raw HTML: no inline region, so a backtick on these lines never pairs and the block's images stay visible
@@ -390,9 +421,9 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
                 html_blocks.append((at, pos))   # the block closes on its own opening line
             else:
                 html = (None if kind is True else kind, path)
-        elif not _THEMATIC.match(rest):
-            item = _ITEM_PREFIX.match(rest)
-            seg, para_depth, base = [(at, raw)], depth, (item.end() if item else 0)
+        elif not _THEMATIC.match(rest) and not _THEMATIC.match(crest):
+            seg, para_depth = [(at, raw)], depth
+            para_path = path
     if fence is not None:
         fences.append((fstart, len(text)))
     else:

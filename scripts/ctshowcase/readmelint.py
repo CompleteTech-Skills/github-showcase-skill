@@ -5,6 +5,7 @@ import bisect
 import functools
 import html
 import re
+import string
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -28,6 +29,8 @@ _ATTR = r"""\s+[A-Za-z_:][A-Za-z0-9_.:-]*(?:\s*=\s*(?:[^\s"'=<>`]+|'[^']*'|"[^"]
 HTML_OPEN_TAG = re.compile(rf"<([A-Za-z][A-Za-z0-9-]*)((?:{_ATTR})*)\s*/?>")
 HTML_ATTR = re.compile(r"""([A-Za-z_:][A-Za-z0-9_.:-]*)(?:\s*=\s*([^\s"'=<>`]+|'[^']*'|"[^"]*"))?""")
 HTML_COMMENT = re.compile(r"<!--.*?-->", re.S)
+_LINK_SPACE = " \t\r\n"
+_ESCAPABLE = frozenset(string.punctuation)
 SHIELDS_SRC = re.compile(r"https?://img\.shields\.io/badge/", re.I)
 SHIELDS_BADGE = re.compile(r"https?://img\.shields\.io/badge/(.+)", re.I)
 
@@ -878,7 +881,7 @@ def _inline_image_target(text: str, start: int) -> tuple[str, int] | None:
     32 parentheses is no link (CommonMark's limit), which bounds each call and keeps the opener pass linear."""
     global _DEST_STEPS
     pos = start + 1
-    while pos < len(text) and text[pos].isspace():
+    while pos < len(text) and text[pos] in _LINK_SPACE:
         _DEST_STEPS += 1
         pos += 1
     if _blank_between(text, start + 1, pos):  # (a) a paragraph boundary before the destination
@@ -890,7 +893,7 @@ def _inline_image_target(text: str, start: int) -> tuple[str, int] | None:
             _DEST_STEPS += 1
             if text[pos] in "\n<":
                 return None
-            pos += 2 if text[pos] == "\\" else 1
+            pos += 2 if text[pos] == "\\" and text[pos + 1:pos + 2] in _ESCAPABLE else 1
         if pos >= len(text):
             return None
         target = text[begin:pos]
@@ -900,10 +903,10 @@ def _inline_image_target(text: str, start: int) -> tuple[str, int] | None:
         while pos < len(text):
             _DEST_STEPS += 1
             char = text[pos]
-            if char == "\\":
+            if char == "\\" and text[pos + 1:pos + 2] in _ESCAPABLE:
                 pos += 2
                 continue
-            if char.isspace() or char == ")" and depth == 0:
+            if ord(char) <= 32 or ord(char) == 127 or char == ")" and depth == 0:
                 break
             if char == "(":
                 depth += 1
@@ -916,12 +919,17 @@ def _inline_image_target(text: str, start: int) -> tuple[str, int] | None:
             return None
         target = text[begin:pos]
     dest_end = pos
-    while pos < len(text) and text[pos].isspace():
+    while pos < len(text) and text[pos] in _LINK_SPACE:
         _DEST_STEPS += 1
         pos += 1
     if _blank_between(text, dest_end, pos):  # (b) a boundary before the title, or before `)` when there is no title
         return None
     if pos < len(text) and text[pos] in "\"'(":
+        # A title is separated from its destination by whitespace. Without
+        # that separator an angle destination followed by quotes is no link,
+        # so any Markdown inside those quotes remains rendered content.
+        if pos == dest_end:
+            return None
         end = ")" if text[pos] == "(" else text[pos]
         pos += 1
         _DEST_STEPS += 1  # one title lookup, not one step per character it passes over
@@ -937,13 +945,16 @@ def _inline_image_target(text: str, start: int) -> tuple[str, int] | None:
         if _blank_between(text, pos, ends[at]) or _crosses_block(text, pos, ends[at], _fence_spans(text)):
             return None  # (c) a title may span soft line breaks, never a paragraph or block boundary (heading, list, fence)
         title_close = pos = ends[at] + 1
-        while pos < len(text) and text[pos].isspace():
+        while pos < len(text) and text[pos] in _LINK_SPACE:
             _DEST_STEPS += 1
             pos += 1
         if _blank_between(text, title_close, pos):  # (d) the whitespace after the title, up to `)`
             return None
     if pos >= len(text) or text[pos] != ")":
         return None
+    region = _span_at(mdcode._layout(text)[0], start)
+    if region is None or pos >= region[1]:
+        return None  # destination whitespace cannot join separate Markdown blocks either
     return html.unescape(re.sub(r"\\([^\w\s])", r"\1", target)), pos + 1
 
 
