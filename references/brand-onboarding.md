@@ -5,6 +5,10 @@ brand configuration. It makes no GitHub requests or changes. Use a local copy of
 the installed skill and an explicitly selected config. Start with the dry run;
 `--write` writes that config and the adjacent `brand.lock.json`. Existing families,
 organization names, aliases and reserved owners cannot be replaced or reclassified.
+Both the installed brand mapping and the selected configuration protect their
+known identities and refusal policies. Omitting installed rows from an external
+configuration cannot reclassify them. These lookups do not discover private
+estate registry or approval files.
 
 A synthetic example adds both rows with one command:
 
@@ -45,6 +49,11 @@ so a new family does not inherit CompleteTech colours. Fonts use the installed
 package's defaults. Schema validation completes before writing, existing config
 comments and unrelated rows are retained, and the lock is regenerated from the
 same validated data.
+
+Existing configuration and lock files must be writable regular files before any
+output is created. If a later write fails, restoration of the configuration,
+lock and newly copied mark is attempted independently. A restoration failure is
+reported explicitly; it does not prevent cleanup of the other outputs.
 
 A generated family remains `measured: false`: automated contrast checks do not
 certify the artwork. Render with `--allow-unmeasured` for review, inspect the set,

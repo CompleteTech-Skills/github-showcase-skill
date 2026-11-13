@@ -2,12 +2,99 @@
 from __future__ import annotations
 
 import copy
+import errno
 import re
+import stat
 from pathlib import Path
 
 from .color import best_fg, contrast, luminance
 from .config import Brand, load_brand, load_yaml_text, lock_text, schema_errors, yaml
 from .errors import ConfigError
+
+
+def _reserved_org(brand: Brand, org: str) -> bool:
+    """External configs may add policy, never erase installed identity protections.
+
+    These resolvers use only the two brand mappings. Local onboarding has no need
+    to discover the estate registry or approval files.
+    """
+    from .resolver import Resolver
+    for policy in (load_brand(), brand):
+        resolver = Resolver(policy)
+        policy._resolver = resolver
+        if resolver.brand_key(org) is not None or resolver.owner_status(org):
+            return True
+    return False
+
+
+def _writable_file(path: Path, label: str) -> bytes | None:
+    """Snapshot and preflight an existing file without changing its contents."""
+    if not path.exists() and not path.is_symlink():
+        return None
+    try:
+        info = path.stat()
+        if not stat.S_ISREG(info.st_mode) or not info.st_mode & 0o222:
+            raise OSError("not a writable regular file")
+        with path.open("r+b"):
+            pass
+        return path.read_bytes()
+    except OSError as exc:
+        raise ConfigError(f"existing {label} is not a writable regular file") from exc
+
+
+def _restore_file(path: Path, previous: bytes | None) -> None:
+    """Avoid rewriting unchanged files, including the file whose write failed."""
+    if previous is None:
+        if path.exists():
+            path.unlink()
+    elif not path.is_file() or path.read_bytes() != previous:
+        path.write_bytes(previous)
+
+
+def _write_onboarding(brand: Brand, original: bytes, text: str, lock: Path,
+                      raw: dict, mark: tuple[Path, bytes] | None) -> None:
+    if _writable_file(brand.path, "configuration") != original:
+        raise ConfigError("configuration changed during onboarding; re-run before writing")
+    old_lock = _writable_file(lock, "lock")
+    mark_created = False
+    new_dirs = []
+    if mark:
+        parent = mark[0].parent
+        while not parent.exists():
+            new_dirs.append(parent)
+            parent = parent.parent
+    try:
+        if mark:
+            mark[0].parent.mkdir(parents=True, exist_ok=True)
+            with mark[0].open("xb") as stream:
+                mark_created = True
+                stream.write(mark[1])
+        brand.path.write_text(text, encoding="utf-8")
+        lock.write_text(lock_text(raw), encoding="utf-8")
+    except OSError as exc:
+        # Each recovery is independent: a failed lock restoration must never
+        # prevent removing the newly copied mark or restoring the configuration.
+        failures = []
+        for label, path, previous in (("configuration", brand.path, original), ("lock", lock, old_lock)):
+            try:
+                _restore_file(path, previous)
+            except OSError:
+                failures.append(label)
+        if mark_created:
+            try:
+                mark[0].unlink(missing_ok=True)
+            except OSError:
+                failures.append("mark")
+        for directory in new_dirs:
+            try:
+                directory.rmdir()
+            except OSError as cleanup_error:
+                # Preserve directories another writer populated in the meantime.
+                if cleanup_error.errno not in (errno.ENOENT, errno.ENOTEMPTY, errno.EEXIST):
+                    failures.append("mark directory")
+        message = "onboarding write failed; "
+        message += "rollback incomplete for " + ", ".join(failures) if failures else "previous files restored"
+        raise ConfigError(message) from exc
 
 
 def _colour(value: str) -> str:
@@ -52,7 +139,7 @@ def _new_org(brand: Brand, raw: dict, args) -> tuple[dict, tuple[Path, bytes] | 
     if not org or not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?", org):
         raise ConfigError("org must be a GitHub login (1 to 39 letters, numbers or hyphens)")
     # The resolver prevents overwriting an old login or reclassifying a refused owner.
-    if brand.org(org).get("known") or brand.owner_status(org):
+    if _reserved_org(brand, org):
         raise ConfigError("organization already exists or is reserved; onboarding cannot change its policy")
     family = args.name if args.brand_action == "add-family" else args.family
     if family not in raw["families"]:
@@ -99,7 +186,11 @@ def _append_mapping(text: str, key: str, name: str, row: dict) -> str:
 
 def cmd_brand(args):
     brand = load_brand(getattr(args, "config", None))
-    original = brand.path.read_text(encoding="utf-8")
+    errs = schema_errors(brand.raw)
+    if errs:
+        raise ConfigError("brand schema validation failed: " + "; ".join(errs))
+    original_bytes = brand.path.read_bytes()
+    original = original_bytes.decode("utf-8")
     raw = copy.deepcopy(brand.raw)
     text = original
     mark = None
@@ -135,26 +226,8 @@ def cmd_brand(args):
         raise ConfigError("brand schema validation failed: " + "; ".join(errs))
     lock = brand.path.with_name("brand.lock.json")
     if args.write:
-        # All input/schema checks finish before the first write. Roll back on a filesystem failure.
-        old_lock = lock.read_bytes() if lock.exists() else None
-        mark_created = False
-        try:
-            if mark:
-                mark[0].parent.mkdir(parents=True, exist_ok=True)
-                with mark[0].open("xb") as stream:
-                    mark_created = True
-                    stream.write(mark[1])
-            brand.path.write_text(text, encoding="utf-8")
-            lock.write_text(lock_text(raw), encoding="utf-8")
-        except OSError as exc:
-            brand.path.write_text(original, encoding="utf-8")
-            if old_lock is not None:
-                lock.write_bytes(old_lock)
-            elif lock.exists():
-                lock.unlink()
-            if mark_created and mark[0].exists():
-                mark[0].unlink()
-            raise ConfigError("onboarding write failed; previous configuration restored") from exc
+        # All input/schema checks finish before preflight or the first write.
+        _write_onboarding(brand, original_bytes, text, lock, raw, mark)
     return {"command": "brand", "action": args.brand_action, "result": "written" if args.write else "planned",
             "family": args.name if args.brand_action == "add-family" else args.family, "org": args.org,
             "config": str(brand.path), "lock": str(lock), "logs": ["palette-unmeasured"],
