@@ -1,0 +1,50 @@
+# Synthetic, deliberately malformed sign-off records (tests only). Each breaks exactly one schema rule.
+signoffs:
+  - id: t3s-bad-approved-string
+    owner: Pick-Your-AI
+    repos: ["*"]
+    approved: "true"
+    approver: synthetic-co-owner
+    approved_on: 2026-01-15
+    expires: 2099-12-31
+  - owner: Pick-Your-AI
+    repos: ["*"]
+    approved: true
+    approver: synthetic-co-owner
+    approved_on: 2026-01-15
+    expires: 2099-12-31
+  - id: t3s-bad-no-approver
+    owner: Pick-Your-AI
+    repos: ["*"]
+    approved: true
+    approved_on: 2026-01-15
+    expires: 2099-12-31
+  - id: t3s-bad-naive-timestamp
+    owner: Pick-Your-AI
+    repos: ["*"]
+    approved: true
+    approver: synthetic-co-owner
+    approved_on: 2026-01-15
+    expires: "2099-12-31T00:00:00"
+  - id: t3s-bad-empty-repos
+    owner: Pick-Your-AI
+    repos: []
+    approved: true
+    approver: synthetic-co-owner
+    approved_on: 2026-01-15
+    expires: 2099-12-31
+  - id: t3s-bad-extra-field
+    owner: Pick-Your-AI
+    repos: ["*"]
+    approved: true
+    approver: synthetic-co-owner
+    approved_on: 2026-01-15
+    expires: 2099-12-31
+    approvd_by: typo
+  - id: t3s-bad-null-expiry
+    owner: Pick-Your-AI
+    repos: ["*"]
+    approved: true
+    approver: synthetic-co-owner
+    approved_on: 2026-01-15
+    expires: null

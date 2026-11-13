@@ -161,11 +161,14 @@ def test_copy_plan_stage_two(brand):
     assert 'viewId: "PVTV_n5", filter: "status:Backlog,Ready workstream:\\"Pricing research\\""' in f5
     # missing views through REST with integer field ids
     my = jobs[f"{pre}-view-my-items"]
-    assert my["argv"] == ["gh", "api", "-X", "POST", f"orgs/{N}/projectsV2/3/views", "--input",
-                          "work/projects/Northwind-Trading-Co-3/view-6-my-items.json"]
+    assert my["argv"][:5] == ["gh", "api", "-X", "POST", f"orgs/{N}/projectsV2/3/views"]
+    assert "name=My items" in my["argv"] and "filter=assignee:@me -status:Done" in my["argv"]
+    assert all("--input" not in j.get("argv", []) for j in plan["jobs"])
     shipped = plan["files"]["work/projects/Northwind-Trading-Co-3/view-7-shipped.json"]
     assert shipped == {"name": "Shipped", "layout": "table", "filter": "status:Done updated:>=@today-30d",
                        "group_by": [1009], "sort_by": [[1012, "desc"]]}
+    assert "group_by[]=1009" in jobs[f"{pre}-view-shipped"]["argv"]
+    assert any("Sort: Updated desc" in step for step in jobs[f"{pre}-ui-shipped"]["steps"])
     # text: the README waits for the new view numbers; links only for the same owner
     text = next(j for i, j in jobs.items() if re.fullmatch(f"{re.escape(pre)}-text-[0-9a-f]{{8}}", i))["argv"]
     assert text[:6] == ["gh", "project", "edit", "3", "--owner", N] and "--readme" not in text
@@ -335,7 +338,7 @@ def estate_resolver(brand):
     return resolver(b, rows=[("create-project", "@me", "*", "")], registry=reg)
 
 
-def test_estate_plan_stage_one(estate_resolver):
+def test_estate_plan_stage_one(estate_resolver, t3_record):
     plan = PJ.estate_plan(estate_resolver, source="CompleteTech-LLC/4")
     assert plan["action"] == "estate-plan" and plan["owner"] == "@me"
     assert plan["jobs"][0]["argv"] == ["gh", "project", "copy", "4", "--source-owner", "CompleteTech-LLC", "--target-owner",
@@ -382,3 +385,49 @@ def test_register_and_cmd_project(tmp_path):
     assert all(("argv" in j) != (j["kind"] == "browser") for j in lines)
     args = p.parse_args(["project", "capture-query", "--owner", "Pick-Your-AI", "--number", "1"])
     assert args.func(args)[0]["reads"][0]["argv"][-1].endswith("project_capture.graphql")
+
+
+def test_inline_view_job_serializes_correctly_with_real_gh(tmp_path, brand):
+    """Exercise gh's field encoding against a loopback server; no GitHub mutation runs."""
+    import http.server
+    import shutil
+    import subprocess
+    import threading
+
+    gh = shutil.which("gh")
+    if gh is None:
+        pytest.skip("gh CLI is required to verify inline REST field serialization")
+    received = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            received.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, *args):
+            pass
+
+    view = {"name": "Inline encoding", "layout": "table", "filter": 'repo:Northwind-Trading-Co/site label:"a=b"',
+            "group_by": ["Status"], "visible_fields": ["Status", "Workstream"],
+            "sort_by": [["Updated", "desc"]]}
+    plan = PJ.copy_plan(N, copied=cap("copy-capture.json"), resolver=resolver(brand), views=[view])
+    job = next(j for j in plan["jobs"] if j["id"].endswith("-view-inline-encoding"))
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        argv = [gh, *job["argv"][1:]]
+        argv[4] = f"http://127.0.0.1:{server.server_port}/views"
+        env = dict(os.environ, GH_TOKEN="synthetic-loopback-only", GH_CONFIG_DIR=str(tmp_path / "gh"))
+        result = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", env=env, timeout=10)
+        assert result.returncode == 0, result.stderr
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+    assert received == [{"name": view["name"], "layout": "table", "filter": view["filter"],
+                         "group_by": [1003], "visible_fields": [1003, 1009]}]
+    ui = next(j for j in plan["jobs"] if j["id"].endswith("-ui-inline-encoding"))
+    assert any("Sort: Updated desc" in step for step in ui["steps"])
