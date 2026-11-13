@@ -84,14 +84,18 @@ def read_sidecar(out_dir: Path) -> dict:
     return {}
 
 
-def write_sidecar(out_dir: Path, inp: dict, cfg_sha: str, name: str, record: dict) -> Path:
+def sidecar_text(out_dir: Path, inp: dict, cfg_sha: str, name: str, record: dict) -> str:
     data = read_sidecar(out_dir)
     outputs = dict(data.get("outputs") or {})
     outputs[name] = record
     data = {"schema": 1, "skill_version": __version__, "standard": STANDARD, "config_sha256": cfg_sha, "inputs": inp,
             "fingerprint": fingerprint(inp, cfg_sha), "outputs": outputs}
+    return json.dumps(data, sort_keys=True, indent=1, ensure_ascii=False) + "\n"
+
+
+def write_sidecar(out_dir: Path, inp: dict, cfg_sha: str, name: str, record: dict) -> Path:
     p = out_dir / SIDECAR
-    p.write_text(json.dumps(data, sort_keys=True, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    p.write_text(sidecar_text(out_dir, inp, cfg_sha, name, record), encoding="utf-8")
     return p
 
 
