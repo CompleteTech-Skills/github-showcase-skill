@@ -513,11 +513,12 @@ def cmd_topics(args):
     if args.records and r["plan_allowed"] and not r["equal_as_set"]:
         records.append(args.records, [records.record(ctx.owner, ctx.repo, "topics", "topics", r["current"], r["proposed"],
                                                      "§5.6 merge")])
-    out = base("topics", ctx, result="pass" if r["equal_as_set"] else "fail", **{k: v for k, v in r.items() if k != "logs"},
+    complete = r["equal_as_set"] and "needs-input:topics-capacity" not in r["logs"]
+    out = base("topics", ctx, result="pass" if complete else "fail", **{k: v for k, v in r.items() if k != "logs"},
                logs=ctx.logs + r["logs"])
     if args.gh and r["plan_allowed"] and not r["equal_as_set"]:
         out["gh"] = topics.gh_command(ctx.owner, ctx.repo, r["proposed"])
-    return out, OK if r["equal_as_set"] else CHECK_FAILED
+    return out, OK if complete else CHECK_FAILED
 
 
 def cmd_labels(args):

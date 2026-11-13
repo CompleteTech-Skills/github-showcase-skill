@@ -132,3 +132,17 @@ def test_org_extension_schema_matches_runtime(brand):
     assert not list(validator.iter_errors(["compatibility", "research-area"]))
     for invalid in (["Upper"], [""], ["a" * 51], ["with space"], ["duplicate", "duplicate"]):
         assert list(validator.iter_errors(invalid))
+
+
+def test_topic_capacity_cli_does_not_claim_complete(tmp_path):
+    from conftest import run_cli
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps({"owner": "Northwind-Trading-Co", "repo": "support-triage-agent",
+                               "description": "Research compatibility.",
+                               "topics": [f"subject-{n}" for n in range(10)],
+                               "visibility": "public", "language": "Python"}), encoding="utf-8")
+    result = run_cli("--meta", meta, "--no-repo-dir", "topics")
+    payload = json.loads(result.stdout)
+    assert result.returncode == 1
+    assert payload["result"] == "fail"
+    assert "needs-input:topics-capacity" in payload["logs"]
