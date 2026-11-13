@@ -29,6 +29,9 @@ _ATTR = r"""\s+[A-Za-z_:][A-Za-z0-9_.:-]*(?:\s*=\s*(?:[^\s"'=<>`]+|'[^']*'|"[^"]
 HTML_OPEN_TAG = re.compile(rf"<([A-Za-z][A-Za-z0-9-]*)((?:{_ATTR})*)\s*/?>")
 HTML_ATTR = re.compile(r"""([A-Za-z_:][A-Za-z0-9_.:-]*)(?:\s*=\s*([^\s"'=<>`]+|'[^']*'|"[^"]*"))?""")
 HTML_COMMENT = re.compile(r"<!--.*?-->", re.S)
+_RAW_HTML_OPEN = re.compile(r"<\?|<![A-Za-z]|<!\[CDATA\[")
+_INLINE_DECLARATION = re.compile(r"<![A-Z]+\s")
+_HTML_CLOSE_TAG = re.compile(r"</[A-Za-z][A-Za-z0-9-]*\s*>")
 _LINK_SPACE = " \t\r\n"
 _ESCAPABLE = frozenset(string.punctuation)
 SHIELDS_SRC = re.compile(r"https?://img\.shields\.io/badge/", re.I)
@@ -151,6 +154,60 @@ def _search_comment(text: str, pos: int, html_spans):
     return _CommentMatch(*matches[index]) if index < len(matches) else None
 
 
+@functools.lru_cache(maxsize=16)
+def _raw_html_matches(text: str, document: str):
+    """Index PI, declaration, CDATA and closing-tag candidates once.
+
+    Delimiter cursors only advance, including for rejected unterminated or
+    cross-block openers. Keep nested candidates: an earlier apparent opener
+    may be literal text inside code, a tag attribute or a reference label.
+    Comments retain their separate, stricter GitHub lexical rules.
+    """
+    mdcode.WORK['raw_html_scan_chars'] += 6 * len(text)
+    html_blocks = mdcode.html_block_spans(document)
+    regions = mdcode.inline_regions(document)
+    ends = {end: [m.start() for m in re.finditer(re.escape(end), text)] for end in ('?>', '>', ']]>')}
+    cursors = dict.fromkeys(ends, 0)
+    matches = []
+    for opener in _RAW_HTML_OPEN.finditer(text):
+        start = opener.start()
+        end_marker = '?>' if opener.group() == '<?' else ']]>' if opener.group() == '<![CDATA[' else '>'
+        cursor, positions = cursors[end_marker], ends[end_marker]
+        while cursor < len(positions) and positions[cursor] < opener.end():
+            cursor += 1
+        cursors[end_marker] = cursor
+        block = _span_at(html_blocks, start)
+        if (block is None and end_marker == '>' and _INLINE_DECLARATION.match(text, start) is None):
+            # Retain the published GFM inline declaration grammar, like the
+            # existing strict inline-comment rules. HTML blocks independently
+            # allow an ASCII-letter opener without inline name/space rules.
+            continue
+        if block is not None:
+            # A raw HTML block can end with its container before a closer.
+            end = min(positions[cursor] + len(end_marker), block[1]) if cursor < len(positions) else block[1]
+        elif cursor < len(positions):
+            end = positions[cursor] + len(end_marker)
+        else:
+            continue
+        region = block or _span_at(regions, start)
+        if region is not None and end <= region[1] and (block is not None or not _escaped(text, start)):
+            matches.append((start, end))
+    for match in _HTML_CLOSE_TAG.finditer(text):
+        start, end = match.span()
+        block = _span_at(html_blocks, start)
+        region = block or _span_at(regions, start)
+        if region is not None and end <= region[1] and (block is not None or not _escaped(text, start)):
+            matches.append((start, end))
+    matches.sort()
+    return tuple(start for start, _ in matches), tuple(matches)
+
+
+def _search_raw_html(text: str, pos: int, document: str | None = None):
+    starts, matches = _raw_html_matches(text, document if document is not None else text)
+    index = bisect.bisect_left(starts, pos)
+    return _CommentMatch(*matches[index]) if index < len(matches) else None
+
+
 def _span_at(spans, index: int, strict: bool = False):
     """The (a, b) span of a sorted, non-overlapping sequence that holds `index` (a <= index < b; strict: a < index < b),
     found by bisection so membership is a lookup, not a walk from offset 0."""
@@ -241,13 +298,15 @@ def _definition_candidates(document: str) -> str:
     # Left-to-right scan over the next HTML open tag and the next comment, as in `_outside_code`: a comment opener that
     # sits inside a complete open tag (for example an attribute value) is attribute text, so the tag is consumed whole.
     pos = 0
-    tag = comment = None
+    tag = comment = raw_html = None
     while True:
         if tag is not False and (tag is None or tag.start() < pos):
             tag = _search_unescaped(HTML_OPEN_TAG, document, pos, html_spans) or False
         if comment is not False and (comment is None or comment.start() < pos):
             comment = _search_comment(document, pos, html_spans) or False
-        found = [m for m in (tag, comment) if m]
+        if raw_html is not False and (raw_html is None or raw_html.start() < pos):
+            raw_html = _search_raw_html(document, pos) or False
+        found = [m for m in (tag, comment, raw_html) if m]
         if not found:
             break
         nxt = min(found, key=lambda m: m.start())
@@ -260,7 +319,7 @@ def _definition_candidates(document: str) -> str:
         if inside is not None:  # an opener inside a link destination or title is text: resume after that span
             pos = inside[1]
             continue
-        if nxt is tag:
+        if nxt is tag or nxt is raw_html:
             # a tag inside inline code or a fence is text: the search resumes one character on. A real tag is consumed
             # without blanking, so a `<!--` inside its attributes never opens a comment.
             if _in_inline_code(document, start) or _span_at(fences, start) is not None:
@@ -420,7 +479,7 @@ def _definition_spans(document: str) -> tuple[tuple[int, int], ...]:
 
 
 class _HTMLTokens:
-    """Strict CommonMark open tags (never raises): spans let Markdown parsing respect attribute boundaries."""
+    """Raw HTML token spans and real img tags, sharing the inline precedence scan."""
     def __init__(self, text, document: str | None = None):
         self.text = text
         self.tags = []
@@ -428,11 +487,20 @@ class _HTMLTokens:
         source = document if document is not None else text
         html_spans = mdcode.html_block_spans(source)
         pos = 0
-        while match := _search_unescaped(HTML_OPEN_TAG, text, pos, html_spans, source):
+        tag = raw_html = None
+        while True:
+            if tag is not False and (tag is None or tag.start() < pos):
+                tag = _search_unescaped(HTML_OPEN_TAG, text, pos, html_spans, source) or False
+            if raw_html is not False and (raw_html is None or raw_html.start() < pos):
+                raw_html = _search_raw_html(text, pos, source) or False
+            matches = [match for match in (tag, raw_html) if match]
+            if not matches:
+                break
+            match = min(matches, key=lambda match: match.start())
             start, end = match.span()
             pos = end
             self.tags.append((start, end))
-            if match.group(1).lower() == "img":
+            if match is tag and match.group(1).lower() == "img":
                 first = {}
                 for name, value in HTML_ATTR.findall(match.group(2)):
                     value = value[1:-1] if value[:1] in ("'", '"') and value else value
@@ -458,7 +526,7 @@ def _outside_code(text: str, mask_inline: bool = True) -> str:
     labels = _reference_label_spans(text)  # resolved full-reference labels: their backticks are literal too
     html_spans = mdcode.html_block_spans(text)  # raw HTML blocks: tags there are never escaped by a backslash
     out, pos = list(text), 0
-    tag = comment = inline = dest = autolink = None
+    tag = comment = raw_html = inline = dest = autolink = None
 
     def blank(a, b):
         for i in range(a, b):
@@ -497,6 +565,8 @@ def _outside_code(text: str, mask_inline: bool = True) -> str:
             tag = _search_unescaped(HTML_OPEN_TAG, text, pos, html_spans) or False
         if comment is not False and (comment is None or comment.start() < pos):
             comment = _search_comment(text, pos, html_spans) or False
+        if raw_html is not False and (raw_html is None or raw_html.start() < pos):
+            raw_html = _search_raw_html(text, pos) or False
         if autolink is not False and (autolink is None or autolink[0] < pos):
             autolink = mdcode.find_autolink(text, pos) or False
         n = bisect.bisect_left(fences, (pos, -1))
@@ -506,7 +576,7 @@ def _outside_code(text: str, mask_inline: bool = True) -> str:
         lb = bisect.bisect_left(labels, (pos, -1))
         label_span = labels[lb] if lb < len(labels) else None
         code = min([c for c in ((inline if inline else None), fence, autolink) if c], default=None)
-        found = [m for m in (tag, comment) if m]
+        found = [m for m in (tag, comment, raw_html) if m]
         nxt = min(found, key=lambda m: m.start()) if found else None
         if definition and all(definition[0] <= other for other in [c[0] for c in (code, dest) if c]
                               + [m.start() for m in found]):
@@ -543,8 +613,8 @@ def _bracket_pairs(text: str, document: str | None = None) -> dict[int, int]:
 
     The masked copy keeps original offsets but cannot classify blocks itself:
     code masks may erase the syntax that caused a boundary in the source.
-    Complete HTML tags bind more tightly than description brackets; their
-    attribute text cannot open or close a description. Full reference labels
+    Complete raw HTML tokens bind more tightly than description brackets; their
+    literal text cannot open or close a description. Full reference labels
     use a separate raw lexical scan.
     """
     global _BRACKET_STEPS
@@ -675,7 +745,7 @@ def _active_openers(text: str) -> frozenset[int]:
     opened: set[int] = set()
     stack: list[tuple[int, bool]] = []  # (index of `[`, whether it opens an image `![`)
     barrier = 0  # stack positions below this hold inactive link openers (a link was completed after them)
-    inline = tag = comment = autolink = None  # cached next starts: None = not searched yet, False = none left
+    inline = tag = comment = raw_html = autolink = None  # cached next starts: None = not searched yet, False = none left
     n, pos = len(text), 0
     blocks = mdcode.inline_regions(text)
     previous_block = None
@@ -728,6 +798,8 @@ def _active_openers(text: str) -> frozenset[int]:
             tag = _search_unescaped(HTML_OPEN_TAG, text, pos, html_spans) or False
         if comment is not False and (comment is None or comment.start() < pos):
             comment = _search_comment(text, pos, html_spans) or False
+        if raw_html is not False and (raw_html is None or raw_html.start() < pos):
+            raw_html = _search_raw_html(text, pos) or False
         if autolink is not False and (autolink is None or autolink[0] < pos):
             autolink = mdcode.find_autolink(text, pos) or False
         k = bisect.bisect_left(fences, (pos, -1))
@@ -738,6 +810,8 @@ def _active_openers(text: str) -> frozenset[int]:
             regions.append(tag.span())
         if comment:
             regions.append(comment.span())
+        if raw_html:
+            regions.append(raw_html.span())
         if autolink:
             regions.append(autolink)
         if k < len(fences):
