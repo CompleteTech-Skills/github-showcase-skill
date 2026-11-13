@@ -80,3 +80,13 @@ All families use the same plate and pieces with different skins:
 ## Not used, and why
 
 Novelty contribution games, hotlinked stats and typing services (they break rule 1), filter-heavy animated looks (62–90% main-thread cost), jitter or flashing animation, imitation trading cards, more than one perpetual motion per page, anything clickable that exists only inside an image, web-font-first font stacks, symbol glyphs, `feTurbulence` grain, and 9–11 px tracked labels that carry information.
+
+## Intro identity and text fit
+
+Non-CompleteTech profile intros use the organization's configured `mark` or an
+explicit `--mark`, and an explicit `--tagline` (or a configured profile tagline).
+They never fall back to CompleteTech artwork or its tagline. Missing inputs return
+`needs-input:org-mark` or `needs-input:tagline` without writing an image.
+
+Eyebrows, names and taglines must fit their fixed size ladders. An exhausted ladder
+returns `art-fail` (exit 3) without writing an SVG; text is never truncated.

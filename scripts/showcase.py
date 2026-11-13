@@ -321,14 +321,25 @@ def cmd_intro(args):
     static = args.static or not org.get("flagship")
     if static and not args.static:
         logs.append("static:not-flagship")
+    complete_tech = org.get("family") == "completetech"
     if args.mark:
         mark = Path(args.mark)
-    else:
+    elif complete_tech:
         mark = b.mark_dark()
         if not mark:
             mark = b.dark_master()
             logs.append("needs-input:mark-dark")
-    svg = intro.build(b, Fonts(b), owner=owner, name=name, eyebrow=eyebrow, tagline=args.tagline or b.strings["tagline"],
+    else:
+        mark = b.asset(org.get("mark"))
+        if not mark or not mark.is_file():
+            raise ShowcaseError("supply this organization's own --mark", log="needs-input:org-mark", code=NEEDS_INPUT)
+    tagline = args.tagline or prof.get("tagline")
+    if not tagline:
+        if complete_tech:
+            tagline = b.strings["tagline"]
+        else:
+            raise ShowcaseError("supply this organization's own --tagline", log="needs-input:tagline", code=NEEDS_INPUT)
+    svg = intro.build(b, Fonts(b), owner=owner, name=name, eyebrow=eyebrow, tagline=tagline,
                       chips=chips, mark_path=mark, height=args.height, static=static)
     lint = svglint.lint_bytes("intro", svg.encode(), args.out)
     if lint["result"] != "PASS":
