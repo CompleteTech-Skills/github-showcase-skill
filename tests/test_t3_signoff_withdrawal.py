@@ -116,6 +116,39 @@ def test_record_for_honours_the_per_repository_veto(tmp_path, monkeypatch):
         signoff.restore(run)
 
 
+
+@pytest.mark.parametrize("approved", ["false", "true", 0, 1, None])
+def test_cached_wildcard_cannot_stamp_malformed_withdrawal_scope(tmp_path, monkeypatch, approved):
+    """A grant cached for an unrelated repository is not evidence for a held one."""
+    from ctshowcase import signoff
+    records = [_rec("g1", ["*"]), _rec("w1", ["held"], approved=approved, on="2026-06-01")]
+    path = tmp_path / "signoffs.yaml"
+    path.write_text(json.dumps({"signoffs": records}), encoding="utf-8")
+    monkeypatch.setenv("SHOWCASE_T3_SIGNOFF_FILE", str(path))
+    signoff.require(OWN, "kept")
+    assert signoff.record_for(OWN, "kept")["id"] == "g1"
+    assert signoff.record_for(OWN, "held") is None
+    jobs = [{"phase": 3, "repo": f"{OWN}/held", "approval_id": "existing-action"}]
+    signoff.stamp(jobs)
+    assert jobs == [{"phase": 3, "repo": f"{OWN}/held", "approval_id": "existing-action"}]
+
+
+@pytest.mark.parametrize("change", ["remove", "expire", "replace"])
+def test_cached_grant_is_not_stamped_after_record_changes(tmp_path, monkeypatch, change):
+    from ctshowcase import signoff
+    path = tmp_path / "signoffs.yaml"
+    grant = _rec("g1", ["*"])
+    path.write_text(json.dumps({"signoffs": [grant]}), encoding="utf-8")
+    monkeypatch.setenv("SHOWCASE_T3_SIGNOFF_FILE", str(path))
+    signoff.require(OWN, "site")
+    assert signoff.record_for(OWN, "site")["id"] == "g1"
+    if change == "remove":
+        path.unlink()
+    else:
+        grant.update(expires="2020-01-01" if change == "expire" else "2098-01-01")
+        path.write_text(json.dumps({"signoffs": [grant]}), encoding="utf-8")
+    assert signoff.record_for(OWN, "site") is None
+
 def _cli(tmp_path, records, *argv, repo="northwind-synthetic"):
     f = tmp_path / "t3-signoffs.yaml"
     f.write_text(json.dumps({"signoffs": records}), encoding="utf-8")

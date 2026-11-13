@@ -535,17 +535,19 @@ def require(owner: str, repo: str | None = None, aliases: list[str] | None = Non
 
 
 def record_for(owner: str, repo: str | None = None) -> dict | None:
-    """The granted record covering OWNER (and REPO) that no withdrawal in the record file vetoes for REPO, else None.
-    The same per-repository veto as evaluate() applies (a withdrawal that names REPO after the grant still refuses the
-    stamp), so the file's withdrawals are read here, only when this run holds a grant."""
-    logins = _expand([owner or ""])  # a grant cached under a former login still applies once the alias is registered
+    """Return a previously granted record only while it still authorizes this scope.
+
+    Reuse the complete gate rather than checking literal withdrawals alone: a cached
+    wildcard must not stamp a repository covered by a malformed withdrawal, an
+    expired grant or a changed record file. A newly added grant still needs require().
+    """
+    logins = _expand([owner or ""])
     granted = _granted()
-    withdrawals = [r for r in load_records() if r.get("approved") is False] if granted else []
-    for login in dict.fromkeys([_owner_key(owner), *logins]):
-        for rec in granted.get(login, ()):
-            if _covers(rec, repo, logins) and not _withdrawn(rec, withdrawals, logins, repo):
-                return rec
-    return None
+    cached = [rec for login in logins for rec in granted.get(login, ())]
+    if not cached:
+        return None
+    current, _ = evaluate(logins, repo)
+    return current if current is not None and current in cached else None
 
 
 def stamp(items, owner: str | None = None):
