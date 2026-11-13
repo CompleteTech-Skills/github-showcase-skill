@@ -128,6 +128,20 @@ def _definition_candidates(document: str) -> str:
     fences = mdcode.fence_spans(document)
     html_spans = mdcode.html_block_spans(document)
     links = _inline_link_spans(document, fences)  # resolved link destinations and titles: literal text, computed once
+    # Reference labels are parsed before inline HTML. A comment-looking string
+    # inside a syntactically valid definition label is literal label text, even
+    # though the same string in a paragraph would be an actual HTML comment.
+    candidate = _peel_definition_containers(document, out.copy())
+    continuation = mdcode.continuation_starts(document)
+    label_spans = []
+    previous_end = None
+    for match in REF_DEFINITION.finditer(candidate):
+        if match.group(3) is not None and not _balanced_destination(match.group(3)):
+            continue
+        if match.start() in continuation and previous_end != match.start():
+            continue
+        label_spans.append(match.span(1))
+        previous_end = match.end() + 1
     # Left-to-right scan over the next HTML open tag and the next comment, as in `_outside_code`: a comment opener that
     # sits inside a complete open tag (for example an attribute value) is attribute text, so the tag is consumed whole.
     pos = 0
@@ -142,6 +156,10 @@ def _definition_candidates(document: str) -> str:
             break
         nxt = min(found, key=lambda m: m.start())
         start = nxt.start()
+        literal_label = _span_at(label_spans, start)
+        if literal_label is not None:
+            pos = literal_label[1]
+            continue
         inside = _span_at(links, start)
         if inside is not None:  # an opener inside a link destination or title is text: resume after that span
             pos = inside[1]
@@ -163,6 +181,10 @@ def _definition_candidates(document: str) -> str:
             if out[i] != "\n":
                 out[i] = " "
         pos = nxt.end()
+    return _peel_definition_containers(document, out)
+
+
+def _peel_definition_containers(document: str, out: list[str]) -> str:
     # Quote and list-item markers are container syntax: a definition inside `> ` or `- ` is still a definition and is
     # global to the document. Each peeled prefix becomes NUL (same length), so offsets are unchanged and the pattern
     # sees an ordinary line start. Fenced lines are already blanked; blanked comment text has no prefix to peel.
