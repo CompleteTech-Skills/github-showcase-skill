@@ -46,7 +46,7 @@
         "workspace",
         null
       ],
-      "description": "§5.4 type, used instead of detection (for a new repository whose code has not landed yet). Logged type-config:<type>."
+      "description": "\u00a75.4 type, used instead of detection (for a new repository whose code has not landed yet). Logged type-config:<type>."
     },
     "icon": {
       "type": [
@@ -127,6 +127,22 @@
         },
         "footer": {
           "type": "boolean"
+        },
+        "managed": {
+          "type": "boolean",
+          "description": "The README is owned by another generator; never write it."
+        },
+        "sections": {
+          "type": "object",
+          "propertyNames": {
+            "minLength": 1
+          },
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 20000
+          },
+          "description": "Operator-authored Markdown for absent required sections; existing sections always stay."
         }
       }
     },
