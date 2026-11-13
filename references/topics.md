@@ -15,8 +15,8 @@ A topic belongs to the first layer it matches: brand (Brand topic) → family (F
 | Repo kind | Required set |
 |---|---|
 | Non-fork, non-`.github` | Exactly 1 brand; all applicable family topics; one org membership topic per `also_in` org; exactly 1 type; 0–3 domain; 0–3 tech. Suggested additions come from the brand, family, type, tech and domain lists, the org-approved `topics_extra`, or the Security vendor token. Existing authored topics are retained for review. **5–10 topics if public, 3–8 if private**; org membership topics count toward the maximum but not as brand topics. If the set is below the minimum after the merge algorithm, write it anyway, log `topics-short`, and report R3 as `warn`. |
-| Fork | `fork` plus 0–4 tech topics taken from the parent's topics (Tech vocabulary only, after aliasing). No brand, no family. A fork listed in `also_in` also carries that org membership topic (counted toward the maximum of 10). |
-| `.github` and `CompleteDotTech/CompleteDotTech` | Exactly `[<brand>, github-profile]` |
+| Fork | `fork` plus 0–4 tech topics taken from the parent's topics (Tech vocabulary only, after aliasing). No brand, no family; the normal public/private minimum does not apply. A fork listed in `also_in` also carries that org membership topic (counted toward the maximum of 10). |
+| `.github` and `CompleteDotTech/CompleteDotTech` | Exactly `[<brand>, github-profile]`; the normal public/private minimum does not apply. |
 
 ## Brand topic
 
@@ -167,7 +167,7 @@ aliases:
 2. Preserve the current topics exactly. Topics the recommendation would omit become `review_remove` entries and `review-remove:<topic>` logs. The `remove` list is always empty.
 3. Append recommended additions in layer order, only within the estate limit (10 public, 8 private/internal). Never truncate the existing set. If required additions do not fit, log `needs-input:topics-capacity`; resolve the full set separately with its owner.
 4. Compare the additive proposal to the current set. With `--gh`, print a replacement command only if it changes the set and `plan_allowed` is true. `--records` obeys the same gate; no command executes here.
-5. Invalid current topic syntax and private/internal topics banned by the safety rules set `plan_allowed: false`, log `needs-review:topic-safety` and hold replacement commands and records. The current values remain visible as evidence, not as approved additions. Fix the unsafe topics through the owner's separately reviewed cleanup before requesting a new plan.
+5. Invalid topic syntax, explicitly prohibited topics (`nsfw`), and private/internal topics banned by the safety rules set `plan_allowed: false`, log `needs-review:topic-safety` and hold replacement commands and records. This gate also applies to org-approved vocabulary and to fork/profile plans. The current values remain visible as evidence, not as approved additions. Fix the unsafe topics through the owner's separately reviewed cleanup before requesting a new plan.
 
 ## Topic safety (MUST)
 
@@ -181,7 +181,7 @@ aliases:
 | Repo | Before | After |
 |---|---|---|
 | Skills/agentic-invoice-skill | agentic-development, agentic-workflows, billing, claude-skill, codex-skill, completetech, invoice, pdf-generator | Existing eight topics, then `agentic-ai`, `agent-skills`; alias cleanup is review-only and remaining additions log `needs-input:topics-capacity`. |
-| Skills/creative-studio | 12 topics, no `claude-skill` | `completetech`, `codex-skill`, `agentic-ai`, `agent-skills`, `sprite-animation`, `character-animation`, `rigging`, `python`, `blender`, `gltf` (10) |
+| Skills/creative-studio | 12 topics, no `claude-skill` | All twelve authored topics remain; no additions fit the estate limit, so log `needs-input:topics-capacity` and review the complete set with its owner. No replacement set or deletion is inferred. |
 | Security/netscaler-cve-2026-19489-check | — | `completetech`, `security`, `cve`, `security-check`, `netscaler`, `python` (6) |
 | jevplay-games/jev-connect-four | — | `jev`, `browser-game`, `game`, `board-game` (if "board game" is in the description), `<language>` (5) |
 | Research/llama.cpp (fork) | upstream | `fork` plus ≤ 4 parent topics that are in Tech vocabulary (for example `llm`, `cpp`); no brand |

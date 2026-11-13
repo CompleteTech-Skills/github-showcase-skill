@@ -17,6 +17,8 @@ domain: [finance, trading, ecommerce, marketing, sales, content-creation, podcas
          sprite-animation, character-animation, rigging, benchmarks, arxiv, game-agents, observability, data-visualization,
          ble, wearables, smart-ring]
 touchedbyanagent_domain: [ble, wearables, smart-ring]
+# Explicitly prohibited topic from STANDARD Topic safety; owner vocabulary cannot authorize it.
+prohibited: [nsfw]
 private_banned: [pokemon, amongus, nintendo]
 languages:
   Python: python

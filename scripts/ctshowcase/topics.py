@@ -148,10 +148,10 @@ def merge(ctx: RepoContext, also_in: list[str] | None = None) -> dict:
         tech = [alias(x) for x in parent if alias(x) in set(t["featured"]) | set(t["allowed"])]
         # a fork listed in also_in also carries that org membership topic (§5.1), counted toward the maximum
         proposed = list(dict.fromkeys(["fork"] + m_topics + list(dict.fromkeys(tech))[:4]))[:limit]
-        return _result(current, proposed, logs, limit, private, t)
+        return _result(current, proposed, logs, limit, private, t, minimum=0)
     if typ == "github-profile":
         proposed = [org.get("brand_topic") or "completetech", "github-profile"]
-        return _result(current, proposed, logs, limit, private, t)
+        return _result(current, proposed, logs, limit, private, t, minimum=0)
 
     brand = org.get("brand_topic")
     proposed: list[str] = [brand] if brand else []
@@ -201,13 +201,10 @@ def merge(ctx: RepoContext, also_in: list[str] | None = None) -> dict:
     proposed += tech
     proposed = list(dict.fromkeys(proposed))
     proposed = proposed[:limit]
-    minimum = t["min_private"] if private else t["min_public"]
-    if len(proposed) < minimum:
-        logs.append("topics-short")
     return _result(current, proposed, logs, limit, private, t)
 
 
-def _result(current, recommended, logs, limit, private, standard_topics):
+def _result(current, recommended, logs, limit, private, standard_topics, *, minimum=None):
     """Keep authored topics, suggest additions and hold unsafe replacement payloads for review.
 
     GitHub's endpoint replaces the whole set. Never silently turn a cleanup suggestion into a deletion,
@@ -223,10 +220,12 @@ def _result(current, recommended, logs, limit, private, standard_topics):
         logs.append("needs-input:topics-capacity")
     unsafe = [x for x in proposed if not isinstance(x, str)
               or re.fullmatch(r"[a-z0-9][a-z0-9-]{0,49}", x) is None
+              or x in standard_topics.get("prohibited", [])
               or (private and x in standard_topics["private_banned"])]
     if unsafe:
         logs.append("needs-review:topic-safety")
-    minimum = standard_topics["min_private"] if private else standard_topics["min_public"]
+    if minimum is None:
+        minimum = standard_topics["min_private"] if private else standard_topics["min_public"]
     logs = [code for code in logs if code != "topics-short"]
     if len(proposed) < minimum:
         logs.append("topics-short")
