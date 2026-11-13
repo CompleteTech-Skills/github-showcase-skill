@@ -714,6 +714,11 @@ def lint_public_leak(args) -> list[dict]:
     from ctshowcase.resolver import Resolver
     if not args.files:
         raise ShowcaseError("lint public-leak needs FILE...", log="usage")
+    if getattr(args, "denylist", None) is not None:
+        if any((args.registry, args.meta_dir, args.decisions, args.org, args.approved, args.approved_yaml, args.actions)):
+            raise ShowcaseError("use --denylist without registry, metadata, org or approval inputs", log="usage")
+        from ctshowcase.publicleak import check_files
+        return check_files(args.files, args.denylist)
     b = brand(args)
     res = Resolver.from_paths(b, args.registry, args.approved, args.approved_yaml, args.actions, require_registry=True)
     estate = Estate(b, res, flags=load_flags(args.decisions or _default_decisions()))
@@ -1110,6 +1115,7 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("files", nargs="*")
     s.add_argument("--kind", choices=("intro", "card", "tile", "plate", "divider"))
     s.add_argument("--variant", default="auto")
+    s.add_argument("--denylist", help="public-leak: UTF-8 literal names, one per line; case-insensitive; never echoed")
     s.add_argument("--registry", help="public-leak: registry/estate.yaml (default: the bundle beside the skill; read only)")
     s.add_argument("--meta-dir", help="public-leak: per-repository metadata JSONs (visibility; without them every "
                                       "repository counts as private)")
