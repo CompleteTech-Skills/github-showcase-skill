@@ -10,7 +10,7 @@ from pathlib import Path
 from PIL import Image
 
 from .chips import eyebrow_track
-from .errors import ConfigError
+from .errors import ArtFail, ConfigError
 from .scene import Picture, SvgWriter, Text, _esc
 from .typeset import Fonts, ntos
 
@@ -106,15 +106,18 @@ def build(brand, fonts: Fonts, *, owner: str, name: str, eyebrow: str, tagline: 
     # -- type ---------------------------------------------------------------------------------------------
     eb_font, name_font, tag_font = fk["eyebrow"], fk["display"], fk["tagline"]
     track = eyebrow_track(style)
-    eb_size = fonts.fit(eb_font, eyebrow, (18, 16, 14), 1184 - TX, track) or 14
+    eb_size = fonts.fit(eb_font, eyebrow, (18, 16, 14), 1184 - TX, track)
+    if eb_size is None:
+        raise ArtFail("intro-eyebrow", eyebrow)
     eb_svg = w.node(Text(eb_font, eyebrow, eb_size, TX, 74 + dy, tok["eyebrow"], track))
     nsz = fonts.fit(name_font, name, (62, 56, 50, 44), 1184 - TX)
     if nsz is None:
-        from .errors import ArtFail
         raise ArtFail("intro-name", name)
     name_svg = w.node(Text(name_font, name, nsz, TX, 146 + dy, tok["title"]))
     TS, TY, TGX = 32, 206 + dy, TX + 34
-    tsz = fonts.fit(tag_font, tagline, (32, 28, 24), 1184 - TGX) or 24
+    tsz = fonts.fit(tag_font, tagline, (32, 28, 24), 1184 - TGX)
+    if tsz is None:
+        raise ArtFail("intro-tagline", tagline)
     TS = tsz
     glyphs, tag_w = fonts.shape(tag_font, tagline, TS)
     adv = fonts.width(tag_font, "x", TS)
@@ -145,7 +148,6 @@ def build(brand, fonts: Fonts, *, owner: str, name: str, eyebrow: str, tagline: 
         chip_svg.append(w.node(Text(fk["chip"], label, 18, cx + 18, cyc + ch / 2 + fc.cap * 9, c["fg"])))
         cx += cw + 12
     if cx > 1184 + 12:
-        from .errors import ArtFail
         raise ArtFail("intro-chips", " ".join(lb for lb, _ in chips))
 
     gradient = canvas["kind"] == "gradient-grid"
@@ -173,9 +175,10 @@ def build(brand, fonts: Fonts, *, owner: str, name: str, eyebrow: str, tagline: 
     bar_h = bar.get("height", 6)
     edge = (f'<rect x=".5" y=".5" width="{W - 1}" height="{H - 1}" rx="15.5" fill="none" stroke="{tok["edge"]["color"]}" '
             f'stroke-opacity=".3"/>')
-    title = f"{name} · {brand.strings['company']} — {tagline}" if owner == "CompleteDotTech" else f"{name} — {tagline}"
+    title = f"{name} · {brand.strings['company']} — {tagline}" if brand.resolver().same(owner, "CompleteDotTech") else f"{name} — {tagline}"
     chip_text = ", ".join(lb for lb, _ in chips)
-    desc = (f"{'Animated header' if not static else 'Header'}: the {brand.strings['short']} mark on a dark plate"
+    mark_label = brand.strings["short"] if style["name"] == "completetech" else style["company_label"]
+    desc = (f"{'Animated header' if not static else 'Header'}: the {mark_label} mark on a dark plate"
             + (", gold circuit traces drawing out from the mark around the text while signals travel along them" if not static else
                " with gold circuit traces around the text")
             + f". Text: {eyebrow}; {name}; {'typed ' if not static else ''}tagline {tagline}; chips {chip_text}.")
