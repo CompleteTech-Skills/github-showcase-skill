@@ -298,6 +298,8 @@ def cmd_intro(args):
         raise ShowcaseError("pass --profile CompleteDotTech or --org OWNER", log="usage")
     b.check_owner(owner)
     org = b.org(owner)
+    if not org.get("known"):
+        raise ShowcaseError(f"no brand.yaml org row for {owner}", log="needs-input:org-row", code=NEEDS_INPUT)
     logs = []
     prof = org.get("profile") or {}
     if args.profile:
@@ -312,6 +314,9 @@ def cmd_intro(args):
         if st.get("eyebrow_case") == "upper":
             eyebrow = eyebrow.upper()
         chips_raw = args.chip or []
+    for field, value in (("name", name), ("eyebrow", eyebrow)):
+        if not value or not value.strip():
+            raise ShowcaseError(f"supply this profile's --{field}", log=f"needs-input:{field}", code=NEEDS_INPUT)
     chips = []
     for c in chips_raw:
         kind, _, text = c.partition(":")

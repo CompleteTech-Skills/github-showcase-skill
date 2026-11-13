@@ -88,5 +88,10 @@ explicit `--mark`, and an explicit `--tagline` (or a configured profile tagline)
 They never fall back to CompleteTech artwork or its tagline. Missing inputs return
 `needs-input:org-mark` or `needs-input:tagline` without writing an image.
 
+Every intro owner needs a configured organization row; an unresolved owner returns
+`needs-input:org-row` (exit 4), even when explicit text and artwork are supplied.
+Profile mode also needs a configured or explicit name and eyebrow; missing values
+return `needs-input:name` or `needs-input:eyebrow` instead of guessing profile facts.
+
 Eyebrows, names and taglines must fit their fixed size ladders. An exhausted ladder
 returns `art-fail` (exit 3) without writing an SVG; text is never truncated.
