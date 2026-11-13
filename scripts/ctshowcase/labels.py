@@ -437,7 +437,8 @@ def _rename_or_hold(rd: Path | None, files, complete: bool, defaults: dict | Non
         ref, hits = None, []
     else:
         ref, hits = _referenced(rd, cur)
-    if ref != "block" and _own_forms(rd, files, complete) is not True:
+    if ref != "block" and ((defaults or {}).get("incomplete_target")
+                           or _own_forms(rd, files, complete) is not True):
         dref, got = _default_forms(defaults, cur)
         if dref == "rewrite":
             ref, hits = "rewrite", hits + got
@@ -466,6 +467,15 @@ def plan(existing: list[dict], repo_dir: str | Path | None = None, files=None, *
     (`defaults_source`); None means it is unknown, so a rename in a repository without forms of its own is held."""
     std = standard_labels()
     rd = Path(repo_dir) if repo_dir else None
+    incomplete_dir = (defaults or {}).get("incomplete_dir")
+    if rd is not None and incomplete_dir is not None and rd.resolve() == Path(incomplete_dir).resolve():
+        # The defaults and target are one incomplete .github checkout. Use its
+        # captured/indexed evidence for all reference checks, not only inherited
+        # defaults: an unrelated visible own form cannot prove a missing one safe.
+        rd = None
+        files = defaults.get("files")
+        complete = False
+        defaults = dict(defaults, incomplete_target=True)
     by_low = {lb["name"].lower(): dict(lb) for lb in existing}
     ops: list[dict] = []
     logs: list[str] = []

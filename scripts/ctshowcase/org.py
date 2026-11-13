@@ -1649,7 +1649,13 @@ def _covered_label_defaults(defaults: dict, meta: dict | None) -> dict:
     if defaults.get("dir") is None:
         return defaults
     directory, evidence = _label_checkout_evidence(defaults["dir"], meta, defaults_only=True)
-    return defaults if directory is not None else labelsmod.defaults_source(defaults["repo"], meta=evidence)
+    if directory is not None:
+        return defaults
+    # Keep the identity of the incomplete checkout internally. If this is also
+    # the target of a direct label plan, a visible sibling form must not make
+    # the same incomplete checkout trusted as the member's own forms.
+    return dict(labelsmod.defaults_source(defaults["repo"], meta=evidence),
+                incomplete_dir=defaults["dir"])
 
 
 def _label_api(path: str, *, pages: bool = False, optional: bool = False):
@@ -1820,6 +1826,8 @@ def labels_plan(estate: Estate, org: str, *, allow_t3: bool = False, checkouts: 
             repo_defaults = defaults
             if current_name == ".github":
                 repo_defaults = labelsmod.defaults_source(full, repo_dir=repo_dir, meta=member_meta)
+                if repo_dir is None:
+                    repo_defaults["incomplete_target"] = True
             elif not estate.resolver.same(current_owner, login):
                 # A pending transfer is still governed by its current owner's inherited forms.
                 source_dir = checkout_root / current_owner / ".github" if checkout_root is not None else None

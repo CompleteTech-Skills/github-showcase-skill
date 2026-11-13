@@ -136,3 +136,62 @@ def test_direct_github_labels_preserves_index_and_capture_holds(tmp_path, relati
     form.write_text("name: Bug\nlabels: ['type:bug']\n", encoding="utf-8")
     repaired = json.loads(run_cli(*args).stdout)
     assert any(argv[:6] == ["gh", "label", "edit", "bug", "--name", "type:bug"] for argv in repaired["argv"])
+
+
+@pytest.mark.parametrize("relative", FORM_PATHS)
+@pytest.mark.parametrize("missing", ["sparse", "deleted", "capture"])
+@pytest.mark.parametrize("mode", ["direct", "org"])
+def test_visible_sibling_never_hides_missing_own_default_form(tmp_path, relative, missing, mode):
+    defaults, form = default_checkout(tmp_path, relative, "deleted")
+    git(defaults, "restore", "--", relative)
+    sibling = defaults / ".github/ISSUE_TEMPLATE/question.yml"
+    sibling.parent.mkdir(parents=True, exist_ok=True)
+    sibling.write_text("name: Question\nlabels: ['type:question']\n", encoding="utf-8")
+    git(defaults, "add", ".")
+    git(defaults, "-c", "user.name=Synthetic Test", "-c", "user.email=test@example.invalid",
+        "commit", "-qm", "visible sibling")
+    if missing == "sparse":
+        git(defaults, "sparse-checkout", "set", "--no-cone", "/*", "!/" + relative)
+    else:
+        form.unlink()
+        if missing == "capture":
+            git(defaults, "rm", "--cached", relative)
+    assert sibling.is_file() and not form.exists()
+    capture = meta_dict(repo=".github", labels=LIVE,
+                        files=[relative, ".github/ISSUE_TEMPLATE/question.yml"], files_complete=True)
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(capture), encoding="utf-8")
+    if mode == "direct":
+        args = ("--meta", meta, "--repo-dir", defaults, "labels", "--plan")
+    else:
+        registry = tmp_path / "registry.yaml"
+        registry.write_text(f"orgs:\n  {OWNER}:\n    tier: T1\n    final_repos: [.github]\n", encoding="utf-8")
+        metadata = tmp_path / "meta"
+        metadata.mkdir()
+        (metadata / "default.json").write_text(json.dumps(capture), encoding="utf-8")
+        args = ("org", "labels", OWNER, "--registry", registry, "--meta-dir", metadata,
+                "--checkouts", tmp_path, "--dot-github", defaults)
+    result = json.loads(run_cli(*args).stdout)
+    assert_held(result)
+    checks = result.get("needs_checkout", []) if mode == "direct" else result["repos"][0].get("needs_checkout", [])
+    assert any(relative in path for row in checks for path in row["check_files"]), result
+    if missing == "sparse":
+        git(defaults, "sparse-checkout", "disable")
+    form.parent.mkdir(parents=True, exist_ok=True)
+    form.write_text("name: Bug\nlabels: ['type:bug']\n", encoding="utf-8")
+    repaired = json.loads(run_cli(*args).stdout)
+    jobs = repaired.get("argv", []) if mode == "direct" else [j.get("argv", []) for j in repaired["jobs"]]
+    assert any(argv[:6] == ["gh", "label", "edit", "bug", "--name", "type:bug"] for argv in jobs)
+
+
+def test_incomplete_inherited_defaults_do_not_override_complete_member_forms(tmp_path):
+    from ctshowcase import labels
+    defaults, _ = default_checkout(tmp_path, FORM_PATHS[0], "deleted")
+    member = checkout(tmp_path / "member", "support-triage-agent")
+    own = member / ".github/ISSUE_TEMPLATE/question.yml"
+    own.parent.mkdir(parents=True)
+    own.write_text("name: Question\nlabels: ['type:question']\n", encoding="utf-8")
+    source = labels.defaults_for(OWNER, "support-triage-agent", path=defaults)
+    ops, logs = labels.plan(LIVE, member, defaults=source)
+    assert any(op["op"] == "rename" and op["name"] == "bug" for op in ops)
+    assert "needs-input:label-references" not in logs
