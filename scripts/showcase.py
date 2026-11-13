@@ -351,7 +351,7 @@ def cmd_footer(args):
         ctx = context(args, b)
         if args.org and not b.resolver().same(args.org, ctx.owner):
             raise ShowcaseError("--org does not match the repository metadata", log="usage")
-        b.check_owner(ctx.owner)
+        b.check_owner(ctx.owner, repo=ctx.repo)
         reason = ctx.footer_status()
         if reason:
             result = "exempt" if reason.startswith("exempt") else "hold"

@@ -271,7 +271,9 @@ watching organization's forks are exempt, its `.github` needs the footer, and it
 other non-fork repositories remain held. An explicit `--org` must agree with
 supplied repository metadata. Without repository context, a watching organization's
 `--check` stays conservative and inspects the file because its name alone cannot
-distinguish a fork from `.github`.
+distinguish a fork from `.github`. T3 checks with repository context require a
+current sign-off covering that repository; raw `--org` calls without repository
+context require an organization-wide sign-off.
 
 The decision 18 footer remains the explicitly configured cross-brand credit and
 the only generated `<picture>`. Its published logo URLs, markup and safe legacy
