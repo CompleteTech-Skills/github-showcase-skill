@@ -339,6 +339,7 @@ def _inline_link_spans(document: str, fences: tuple[tuple[int, int], ...]) -> tu
     openers: list[int] = []  # unconsumed unescaped `[` of the current paragraph, innermost last
     skip_until = 0  # text inside an accepted span is destination or title text: its brackets open nothing
     regions = mdcode.inline_regions(document)
+    autolinks = mdcode.autolink_candidates(document)
     previous_region = None
     for token in re.finditer(r"\[|\]\(|\]|\n[ \t\x00\r]*\n", document):
         at = token.start()
@@ -355,6 +356,9 @@ def _inline_link_spans(document: str, fences: tuple[tuple[int, int], ...]) -> tu
             continue
         if _escaped(document, at) or _in_inline_code(document, at):
             continue  # an escaped or code-span bracket is literal text
+        autolink = _span_at(autolinks, at)
+        if autolink is not None and not _in_inline_code(document, autolink[0]):
+            continue  # URI/email contents cannot create a link opener or destination
         if token.group() == "[":
             openers.append(at)
         elif token.group() == "]":
@@ -443,17 +447,18 @@ def _fence_spans(text: str) -> tuple[tuple[int, int], ...]:
 
 @functools.lru_cache(maxsize=16)
 def _outside_code(text: str, mask_inline: bool = True) -> str:
-    """Mask Markdown code and comments without reading literal backticks in HTML attributes as code.
+    """Mask Markdown code, comments and autolinks without reading literal attribute backticks as code.
     Constructs are taken left to right, and inline code is looked for again after every HTML tag or comment, so a
     backtick inside an attribute or comment is literal and the next real code span still opens (CommonMark).
     `mask_inline=False` still lets inline code win precedence but leaves its characters readable (reference labels).
+    Autolink contents stay masked; label validity and matching always read the original source.
     The result has the same length (and newline positions) as `text`."""
     fences = _fence_spans(text)
     definitions = _definition_spans(text)  # decided before inline code: a definition destination's backtick is literal
     labels = _reference_label_spans(text)  # resolved full-reference labels: their backticks are literal too
     html_spans = mdcode.html_block_spans(text)  # raw HTML blocks: tags there are never escaped by a backslash
     out, pos = list(text), 0
-    tag = comment = inline = dest = None
+    tag = comment = inline = dest = autolink = None
 
     def blank(a, b):
         for i in range(a, b):
@@ -492,13 +497,15 @@ def _outside_code(text: str, mask_inline: bool = True) -> str:
             tag = _search_unescaped(HTML_OPEN_TAG, text, pos, html_spans) or False
         if comment is not False and (comment is None or comment.start() < pos):
             comment = _search_comment(text, pos, html_spans) or False
+        if autolink is not False and (autolink is None or autolink[0] < pos):
+            autolink = mdcode.find_autolink(text, pos) or False
         n = bisect.bisect_left(fences, (pos, -1))
         fence = fences[n] if n < len(fences) else None
         d = bisect.bisect_left(definitions, (pos, -1))
         definition = definitions[d] if d < len(definitions) else None
         lb = bisect.bisect_left(labels, (pos, -1))
         label_span = labels[lb] if lb < len(labels) else None
-        code = min([c for c in ((inline if inline else None), fence) if c], default=None)
+        code = min([c for c in ((inline if inline else None), fence, autolink) if c], default=None)
         found = [m for m in (tag, comment) if m]
         nxt = min(found, key=lambda m: m.start()) if found else None
         if definition and all(definition[0] <= other for other in [c[0] for c in (code, dest) if c]
@@ -510,7 +517,7 @@ def _outside_code(text: str, mask_inline: bool = True) -> str:
         elif dest and all(dest[0] < other for other in [c[0] for c in (code,) if c] + [m.start() for m in found]):
             pos = dest[1]
         elif code and (nxt is None or code[0] <= nxt.start()):
-            if mask_inline or code is fence:
+            if mask_inline or code is fence or code is autolink:
                 blank(*code)
             pos = code[1]
         elif nxt is not None:
@@ -540,11 +547,17 @@ def _bracket_pairs(text: str, document: str | None = None) -> dict[int, int]:
     global _BRACKET_STEPS
     pairs: dict[int, int] = {}
     source = document if document is not None else text
+    autolinks = mdcode.autolink_candidates(source)
+    code = mdcode.inline_code_spans(source)
     for lo, hi in mdcode.inline_regions(source):
         stack: list[int] = []
         pos, limit = lo, min(hi, len(text))
         while pos < limit:
             _BRACKET_STEPS += 1
+            link = _span_at(autolinks, pos)
+            if link is not None and _span_at(code, link[0]) is None:
+                pos = link[1]
+                continue
             char = text[pos]
             if char == "\\":
                 pos += 2
@@ -632,7 +645,7 @@ def _reference_form(text: str, open_idx: int, close: int, limit: int, keys: set)
 @functools.lru_cache(maxsize=16)
 def _active_openers(text: str) -> frozenset[int]:
     """Indices of every `]` that closes a link text, i.e. has a matching ACTIVE `[` before it in the same paragraph.
-    One left-to-right pass keeps a stack of active `[` indices. Fenced code, inline code, HTML comments and HTML open
+    One left-to-right pass keeps a stack of active `[` indices. Fenced code, inline code, autolinks, HTML comments and HTML open
     tags (attribute values included) are inert, so a bracket inside them is text: it neither opens nor closes a link.
     An unescaped `]` that pops an opener and is directly followed by a destination `(...)` skips that destination,
     which is literal (a backtick in it opens no code span). A blank line clears the stack, and so does a block
@@ -654,7 +667,7 @@ def _active_openers(text: str) -> frozenset[int]:
     opened: set[int] = set()
     stack: list[tuple[int, bool]] = []  # (index of `[`, whether it opens an image `![`)
     barrier = 0  # stack positions below this hold inactive link openers (a link was completed after them)
-    inline = tag = comment = None  # cached next starts: None = not searched yet, False = none left
+    inline = tag = comment = autolink = None  # cached next starts: None = not searched yet, False = none left
     n, pos = len(text), 0
     blocks = mdcode.inline_regions(text)
     previous_block = None
@@ -707,6 +720,8 @@ def _active_openers(text: str) -> frozenset[int]:
             tag = _search_unescaped(HTML_OPEN_TAG, text, pos, html_spans) or False
         if comment is not False and (comment is None or comment.start() < pos):
             comment = _search_comment(text, pos, html_spans) or False
+        if autolink is not False and (autolink is None or autolink[0] < pos):
+            autolink = mdcode.find_autolink(text, pos) or False
         k = bisect.bisect_left(fences, (pos, -1))
         regions = []
         if inline:
@@ -715,6 +730,8 @@ def _active_openers(text: str) -> frozenset[int]:
             regions.append(tag.span())
         if comment:
             regions.append(comment.span())
+        if autolink:
+            regions.append(autolink)
         if k < len(fences):
             regions.append(fences[k])
         h = bisect.bisect_left(html_spans, (pos, -1))
@@ -1016,7 +1033,15 @@ def _markdown_images(text: str, document: str) -> list[tuple[str, str, int, int]
         # `text` masks inline code to spaces (a prefix-aligned copy): labels are matched on the written source, literal backticks included
         key = _label_key(document[match.end():close] if len(document) >= len(text) else alt)
         if after < len(text) and text[after] == "[":
-            ref_close = _closing_bracket(text, after, document)
+            # A reference label is raw lexical text, not rendered inline text.
+            # In particular a `]` inside a URI closes the label even though it
+            # is inert while reading an image's alt text. A nested `[` makes
+            # the full label invalid and leaves the shortcut available.
+            source = document if len(document) >= len(text) else text
+            region = _span_at(mdcode.inline_regions(source), after)
+            ref_close = _next_unescaped_bracket(source, after + 1, min(region[1], after + 1001)) if region else -1
+            if ref_close < 0 or source[ref_close] != "]":
+                ref_close = None
             # a label holding a block boundary is no label: the shortcut form below still applies, as CommonMark has it
             if ref_close is not None and not _crosses_block(text, after + 1, ref_close, fences, document):
                 label = (document if len(document) >= len(text) else text)[after + 1:ref_close]

@@ -508,6 +508,42 @@ def _region_bounds(text: str) -> tuple[tuple[int, ...], tuple[int, ...]]:
     return tuple(lo for lo, _ in kept), tuple(hi for _, hi in kept)
 
 
+_AUTOLINK = re.compile(
+    # CommonMark replaces source NUL with U+FFFD before parsing. Keeping its
+    # source position here gives the same recognition without rewriting bytes.
+    r"<(?:[A-Za-z][A-Za-z0-9+.-]{1,31}:[^\x01-\x20\x7f<>]*|"
+    r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@"
+    r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*)>")
+
+
+@functools.lru_cache(maxsize=16)
+def autolink_candidates(text: str) -> tuple[tuple[int, int], ...]:
+    """Source-aligned URI/email autolinks, before inline precedence is applied.
+
+    These are candidates, not a global mask: a code opener before `<` still
+    consumes raw backticks inside the URI. An earlier tag, title or comment
+    likewise wins. A backslash can escape the opener, never the raw closer.
+    """
+    spans = []
+    for lo, hi in inline_regions(text):
+        for match in _AUTOLINK.finditer(text, lo, hi):
+            start = match.start()
+            before = start
+            while before > lo and text[before - 1] == "\\":
+                before -= 1
+            if (start - before) % 2 == 0:
+                spans.append(match.span())
+    return tuple(spans)
+
+
+def find_autolink(text: str, start: int = 0) -> tuple[int, int] | None:
+    """First candidate whose opener is at or after `start` (cached index lookup)."""
+    spans = autolink_candidates(text)
+    index = bisect.bisect_left(spans, (start, -1))
+    return spans[index] if index < len(spans) else None
+
+
 def find_inline_code(text: str, start: int = 0) -> tuple[int, int] | None:
     """(start, end) of the first CommonMark inline code span whose opening run begins at or after `start`. The span
     runs from the opening backtick run to the end of its closing run; escaping backslashes are not part of it. A
@@ -516,11 +552,19 @@ def find_inline_code(text: str, start: int = 0) -> tuple[int, int] | None:
     same inline region: no blank line, fence, heading, list item, new block quote, thematic break, setext underline,
     HTML block start (types 1-6) or table cell boundary in between. Fenced text holds no inline span."""
     los, his = _region_bounds(text)
+    links = autolink_candidates(text)
     for n in range(bisect.bisect_right(his, start), len(los)):
         WORK['regions'] += 1
         lo, hi = los[n], his[n]
         i = max(start, lo)
         while (i := text.find("`", i, hi)) >= 0:
+            link = bisect.bisect_right(links, (i, len(text))) - 1
+            if link >= 0 and start <= links[link][0] <= i < links[link][1]:
+                # Only an opener encountered on this pass creates a literal.
+                # A prior code span may have consumed `<` and ended inside the
+                # apparent URI; resuming there must read later backticks raw.
+                i = links[link][1]
+                continue
             if i == start and i > 0 and text[i - 1] == "`":
                 # `start` landed inside a run that began earlier, so that run is not an opener at or after `start`
                 i = _run_end(text, i)
