@@ -64,7 +64,7 @@ def test_docs_only_and_mobile_shapes(tmp_path):
     mobile = detect({"owner": "Northwind-Trading-Co", "repo": "client"}, RepoFacts({}, tmp_path))
     names = [x[0] for x in required_sections(mobile)]
     assert mobile["type"] == "mobile-app" and mobile["variant"] == "B"
-    assert "Platforms" in names and "Installation" in names
+    assert "Platforms" in names and "Install" in names
     assert "Live Site" not in names
 
 
