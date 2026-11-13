@@ -289,29 +289,36 @@ def license_section(ctx: RepoContext) -> tuple[str, str] | None:
     if third:
         ctx.log("needs-input:upstream")
         return None
-    # visibility first: a private repository is proprietary in every org, Security included (LICENSE-POLICY.md)
-    if ctx.public and (ctx.det["variant"] == "F" or (ctx.org.get("license_chip") and lic and lic.upper().startswith("AGPL"))):
-        return "Licensing", rv["security"]
+    # A license identifier is factual metadata. Trademark and copyright claims
+    # require exact wording on this org's row; family membership cannot grant it.
+    wording = ctx.org.get("license_wording", "").strip()
     if not ctx.public:
-        if ctx.same_owner("TouchedByAnAgent"):
-            return "License", rv["private_hold"]
-        year = (ctx.meta.get("created_at") or "")[:4]
-        if not year:
-            ctx.log("needs-input:license-year")
+        private = ctx.org.get("private_license_wording", "").strip()
+        if not private:
+            ctx.log("needs-input:license-wording")
             return None
-        private = rv["private"].replace("<year>", year)
-        if ctx.org.get("family") not in (None, "completetech"):
-            private = private.replace("CompleteTech LLC", ctx.org.get("display_name") or ctx.owner)
+        if "<year>" in private:
+            year = (ctx.meta.get("created_at") or "")[:4]
+            if len(year) != 4 or not year.isdigit():
+                ctx.log("needs-input:license-year")
+                return None
+            private = private.replace("<year>", year)
         return "License", private
-    if lic == "MIT":
-        if f.exists("BRAND_ASSETS.md"):
-            return "License", rv["skills_mit"]
-        if ctx.tier.startswith("T2") or ctx.org.get("family") not in (None, "completetech"):
-            return "License", rv["t2_mit"].replace("<Brand>", ctx.org.get("display_name") or ctx.owner)
-        return "License", rv["t1_mit"]
-    if lic and lic not in ("NOASSERTION",):
-        brand = ctx.company
-        return "License", rv["other"].replace("<license>", lic).replace("<path>", "LICENSE").replace("<Brand>", brand)
+    if ctx.det["variant"] == "F" or (ctx.org.get("license_chip") and lic and lic.upper().startswith("AGPL")):
+        return "Licensing", rv["security"]
+    if lic and lic != "NOASSERTION":
+        if not wording:
+            ctx.log("needs-input:license-wording")
+        if lic == "MIT":
+            if f.exists("BRAND_ASSETS.md"):
+                extra = ctx.org.get("skills_license_wording", wording).strip()
+                factual = "Code, templates, and documentation are licensed under the MIT License."
+                tail = " See `LICENSE` and `BRAND_ASSETS.md`."
+                return "License", factual + (" " + extra if extra else "") + tail
+            factual = "Code and documentation are licensed under the MIT License; see `LICENSE`."
+        else:
+            factual = f"Licensed under the {lic}; see `LICENSE`."
+        return "License", factual + (" " + wording if wording else "")
     ctx.log("needs-input:license")
     return None
 
