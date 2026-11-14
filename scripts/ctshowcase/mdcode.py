@@ -294,20 +294,40 @@ def _container_path(body: str) -> tuple[tuple[tuple[str, int], ...], str]:
 
 def _continue_containers(body: str, path: tuple[tuple[str, int], ...]) -> str | None:
     """Strip ancestors in their original order, or None when this line leaves one."""
+    cursor = 0
+    residual = 0
+    nonblank_end = len(body.rstrip(" "))
     for kind, width in path:
         if kind == "quote":
-            match = _QUOTE.match(body)
-            if match is None:
-                return None
-            body = body[match.end():]
+            # A partially consumed tab is represented by virtual spaces.
+            if residual:
+                if residual > 3:
+                    return None
+                prefix = " " * residual + body[cursor:cursor + 4]
+                match = _QUOTE.match(prefix)
+                if match is None:
+                    return None
+                cursor += match.end() - residual
+                residual = 0
+            else:
+                match = _QUOTE.match(body, cursor)
+                if match is None:
+                    return None
+                cursor = match.end()
         else:
-            # A blank line needs no item indentation, but any later quote in
-            # the path still requires its own marker (quotes have no lazy
-            # continuation inside fenced code or raw HTML blocks).
-            if body.strip(" ") and _indent_columns(body) < width:
+            column = 0
+            used = min(residual, width)
+            column += used
+            residual -= used
+            while column < width and cursor < len(body) and body[cursor] in " \t":
+                column = (column // 4 + 1) * 4 if body[cursor] == "\t" else column + 1
+                cursor += 1
+                WORK['container_indent_chars'] += 1
+            if column < width and (residual or cursor < nonblank_end):
                 return None
-            body = _dedent_columns(body, width)
-    return body
+            residual += max(0, column - width)
+    return " " * residual + body[cursor:]
+
 
 
 def _unescaped_pipe(row: str, i: int) -> bool:
@@ -1632,6 +1652,41 @@ def _next_unescaped_bracket(text: str, start: int, end: int) -> int:
     return -1
 
 
+@functools.lru_cache(maxsize=16)
+def _label_prefix_index(text: str):
+    """Source-aligned structural prefix positions for semantic label lengths."""
+    positions = []
+    prefixes = _layout(text)[5]
+    for start in continuation_starts(text):
+        length = prefixes.get(start, 0)
+        if not length and (match := _QUOTE.match(text, start)):
+            end = match.end()
+            while next_match := _QUOTE.match(text, end):
+                end = next_match.end()
+            length = end - start
+        positions.extend(range(start, start + length))
+    return tuple(positions)
+
+
+def _label_range(text: str, start: int, end: int) -> str | None:
+    """Materialize a bounded semantic label while retaining source offsets elsewhere."""
+    positions = _label_prefix_index(text)
+    first = bisect.bisect_left(positions, start)
+    last = bisect.bisect_left(positions, end)
+    if end - start - (last - first) > 999:
+        return None
+    WORK['label_materialized_chars'] += end - start
+    if first == last:
+        return text[start:end]
+    excluded = set(positions[first:last])
+    return "".join(text[i] for i in range(start, end) if i not in excluded)
+
+
+def _range_label_key(text: str, start: int, end: int) -> str:
+    value = _label_range(text, start, end)
+    return _label_key(value) if value is not None else ""
+
+
 def _reference_form(text: str, open_idx: int, close: int, limit: int, keys: set) -> tuple[int | None, int | None] | None:
     """Reference-style link after the `]` at `close` whose `[` is at `open_idx`, or None. Returns (jump, label_close):
     `jump` is the index past the label's closing bracket (None for a shortcut, which does not jump) and `label_close`
@@ -1639,21 +1694,20 @@ def _reference_form(text: str, open_idx: int, close: int, limit: int, keys: set)
     `limit`, the next inert region, so a jump never skips into one. A full reference's description may contain nested
     brackets; only collapsed/shortcut descriptions supply a label and need its lexical restrictions via `_label_key`.
     An inline `(dest)` is decided by the caller first, so a `(` here means the closer is not a shortcut."""
-    labels = _quote_continuation_view(text)
     if text[close + 1:close + 2] == "[":
         label_end = _next_unescaped_bracket(text, close + 2, limit)
         if label_end == -1:
             return None
         if label_end == close + 2 and text[label_end] == "]":  # collapsed `[text][]`
-            if _label_key(labels[open_idx + 1:close]) in keys:
+            if _range_label_key(text, open_idx + 1, close) in keys:
                 return label_end + 1, label_end
             return None
-        if text[label_end] == "]" and _label_key(labels[close + 2:label_end]) in keys:  # full `[text][label]`
+        if text[label_end] == "]" and _range_label_key(text, close + 2, label_end) in keys:  # full `[text][label]`
             return label_end + 1, label_end
         return None
     if text[close + 1:close + 2] == "(":  # not a shortcut when a destination follows
         return None
-    if _label_key(labels[open_idx + 1:close]) in keys:  # shortcut `[text]`
+    if _range_label_key(text, open_idx + 1, close) in keys:  # shortcut `[text]`
         return None, None
     return None
 
@@ -1933,11 +1987,11 @@ def _reference_label_spans(document: str) -> tuple[tuple[int, int], ...]:
         # Full reference labels are raw lexical text: HTML-looking brackets
         # close or invalidate them even though HTML is inert in descriptions.
         region = _span_at(inline_regions(document), open_)
-        close = _next_unescaped_bracket(document, open_ + 1, min(region[1], open_ + 1001)) if region else -1
+        close = _next_unescaped_bracket(document, open_ + 1, region[1]) if region else -1
         if close < 0 or document[close] != "]":
             continue
-        label = _quote_continuation_view(document)[open_ + 1:close]
-        if not _label_key(label) or BLANK_LINE.search(label):
+        label = _label_range(document, open_ + 1, close)
+        if label is None or not _label_key(label) or BLANK_LINE.search(label):
             continue  # an empty label or one spanning a blank line is not a reference label
         first_fence = bisect.bisect_left(fences, (open_ + 1, -1))
         if first_fence < len(fences) and fences[first_fence][0] < close:
@@ -2101,7 +2155,6 @@ def _markdown_images(text: str, document: str) -> list[tuple[str, str, int, int]
     """Read inline and reference images with balanced alt text; definitions use first-wins labels."""
     text, document = _parse_views(text, document)
     definitions = {}
-    labels = _quote_continuation_view(document)
     for match in _definitions(document):
         destination = match.group(2) if match.group(2) is not None else match.group(3)
         target = _destination_value(destination)
@@ -2143,7 +2196,7 @@ def _markdown_images(text: str, document: str) -> list[tuple[str, str, int, int]
                 continue
             # not an inline destination (for example, a space-containing label): try a shortcut reference
         # `text` masks inline code to spaces (a prefix-aligned copy): labels are matched on the written source, literal backticks included
-        key = _label_key(labels[match.end():close] if len(document) >= len(text) else alt)
+        key = _range_label_key(document, match.end(), close) if len(document) >= len(text) else _label_key(alt)
         if after < len(text) and text[after] == "[":
             # A reference label is raw lexical text, not rendered inline text.
             # In particular a `]` inside a URI closes the label even though it
@@ -2151,13 +2204,13 @@ def _markdown_images(text: str, document: str) -> list[tuple[str, str, int, int]
             # the full label invalid and leaves the shortcut available.
             source = document if len(document) >= len(text) else text
             region = _span_at(inline_regions(source), after)
-            ref_close = _next_unescaped_bracket(source, after + 1, min(region[1], after + 1001)) if region else -1
+            ref_close = _next_unescaped_bracket(source, after + 1, region[1]) if region else -1
             if ref_close < 0 or source[ref_close] != "]":
                 ref_close = None
             # a label holding a block boundary is no label: the shortcut form below still applies, as CommonMark has it
             if ref_close is not None and not _crosses_block(text, after + 1, ref_close, fences, document):
-                label = (labels if len(document) >= len(text) else text)[after + 1:ref_close]
-                if _label_syntax(label):  # invalid labels leave the shortcut and following text visible
+                label = _label_range(source, after + 1, ref_close)
+                if label is not None and _label_syntax(label):  # invalid labels leave the shortcut and following text visible
                     key = _label_key(label) if label else key
                     after = ref_close + 1
         if key in definitions:

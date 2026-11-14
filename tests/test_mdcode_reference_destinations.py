@@ -232,3 +232,46 @@ def test_deep_list_definition_peeling_memory_is_linear():
         tracemalloc.stop()
     assert peaks[1] < peaks[0] * 6, peaks
     assert peaks[1] < 2_000_000, peaks
+
+@pytest.mark.parametrize("prefix, continuation", [("", ""), ("> ", "> "), ("- ", "  "), ("- > ", "  > ")])
+@pytest.mark.parametrize("length", [999, 1000])
+@pytest.mark.parametrize("ending", ["\n", "\r\n"])
+def test_cli_reference_label_limit_excludes_container_prefixes(checkout, prefix, continuation, length, ending):
+    left = "a" * 499
+    right = "b" * (length - 500)
+    source = f"{prefix}![Shot][{left}\n{continuation}{right}]\n\n[{left} {right}]: missing.png\n"
+    path, args = insert(checkout, source, ending)
+    result = run_cli(*args, "lint", "readme", path, "--variant", "C")
+    found = any("local image does not resolve: missing.png" in item for item in json.loads(result.stdout)["fails"])
+    assert found == (length == 999)
+
+
+def test_container_continuation_work_scales_with_input():
+    work = []
+    for depth in (1000, 2000, 4000):
+        source = "- " * depth + "text\n" + "  " * depth + "continued\n"
+        mdcode._layout.cache_clear()
+        mdcode.WORK.clear()
+        mdcode._layout(source)
+        work.append(mdcode.WORK["container_indent_chars"])
+    assert work == [2000, 4000, 8000]
+
+
+def test_oversized_shortcuts_do_not_copy_overlapping_labels():
+    work = []
+    for depth in (1000, 2000, 4000):
+        source = "[" * depth + "]" * depth
+        mdcode.WORK.clear()
+        for close in range(depth, 2 * depth):
+            mdcode._reference_form(source, 2 * depth - close - 1, close, len(source), set())
+        work.append(mdcode.WORK["label_materialized_chars"])
+    assert max(work) <= 500_000
+    assert work[0] == work[1] == work[2]
+
+
+def test_cli_quoted_reference_at_limit_checks_badge_palette(checkout):
+    left, right = "a" * 499, "b" * 499
+    source = f"> ![Shot][{left}\n> {right}]\n\n[{left} {right}]: https://img.shields.io/badge/x-x-ABCDEF\n"
+    path, args = insert(checkout, source)
+    result = run_cli(*args, "lint", "readme", path, "--variant", "C")
+    assert any("off-palette badge colour ABCDEF" in item for item in json.loads(result.stdout)["fails"])
