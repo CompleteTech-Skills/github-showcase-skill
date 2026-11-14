@@ -131,7 +131,7 @@ def row(ctx: RepoContext) -> dict:
         cells.update(banner=_cell(watching), icon=_cell(watching), card=_cell(status["card"] or watching),
                      footer=_cell(watching))  # art_status keeps exempt:no-card for forks, backups, profiles
     elif not rd:
-        cells.update(banner="unknown", icon="unknown", card="unknown", footer="unknown")
+        cells.update(banner="unknown", icon="unknown", card="unknown", footer=_cell(fstat) if fstat else "unknown")
     else:
         text = readme.read_text(encoding="utf-8") if readme is not None and readme.is_file() else ""
         # R14: a preserve-list README is n/a only when q57 `pres` is "Leave them unchanged" (`preserve-list`)
