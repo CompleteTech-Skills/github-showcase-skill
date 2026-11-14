@@ -2472,6 +2472,7 @@ def add_parser(sub, cli=None):
                                                     "social-preview), plus the browser upload job")
     a.add_argument("--out")
     a.add_argument("--title")
+    a.add_argument("--description", help="render a staged description and record its provenance")
     a.add_argument("--key-chip", action="append", default=[])
     a.add_argument("--chip", action="append", default=[])
     a.add_argument("--icon")

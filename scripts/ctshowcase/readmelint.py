@@ -1,26 +1,173 @@
 """README lint: R7 + decision 13 (banner first, plain <img>) + decision 18 (footer last, exact) (spec A6.11)."""
 from __future__ import annotations
 
+import functools
 import re
 from pathlib import Path
 from urllib.parse import unquote
 
 from . import footer as footermod
+from . import mdcode
+from .mdcode import find_inline_code  # noqa: F401 (compatibility re-export)
 from .context import RepoContext
 from .detect import standard
 from .readme import BANNER_BLOCK, EMOJI, MARK, is_footer_like, masked, normalize_text, nav_first, preserved, split_sections
+
+from .mdcode import (  # noqa: F401 (compatibility re-exports)
+    _NL,
+    _SOFT_NL,
+    REF_DEFINITION,
+    HTML_OPEN_TAG,
+    HTML_ATTR,
+    HTML_COMMENT,
+    _RAW_HTML_OPEN,
+    _INLINE_DECLARATION,
+    _HTML_CLOSE_TAG,
+    _LINK_SPACE,
+    _ESCAPABLE,
+    _BLANK_LINE_AT,
+    _BRACKET,
+    _escaped,
+    _search_unescaped,
+    _comment_matches,
+    _CommentMatch,
+    _search_comment,
+    _raw_html_matches,
+    _search_raw_html,
+    _span_at,
+    _in_inline_code,
+    _in_html_block,
+    _raw_definition_matches,
+    _definition_candidates,
+    _peel_definition_containers,
+    _whitespace_columns,
+    _inline_link_spans,
+    _balanced_destination,
+    _definitions,
+    _definition_spans,
+    _HTMLTokens,
+    _fence_spans,
+    _outside_code,
+    _bracket_pairs,
+    _closing_bracket,
+    _block_boundary,
+    _crosses_block,
+    _next_unescaped_bracket,
+    _reference_form,
+    _inline_openers_and_autolinks,
+    _active_openers,
+    _live_autolinks,
+    _find_live_autolink,
+    _has_link_opener,
+    _label_syntax,
+    _label_key,
+    _definition_key,
+    _reference_label_spans,
+    _blank_line_starts,
+    _blank_between,
+    _title_ends,
+    _inline_image_target,
+    _link_literal_spans,
+    _markdown_images,
+    _images,
+)
+
 
 IMG_MD = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)[^)]*\)")
 IMG_HTML = re.compile(r"<img\b([^>]*)>", re.I)
 PALETTE = {"1E3A8A", "005ADD", "067647", "64748B", "E551BA", "F386A1", "1E1E1E"}
 
+SHIELDS_SRC = re.compile(r"https?://img\.shields\.io/badge/", re.I)
+SHIELDS_BADGE = re.compile(r"https?://img\.shields\.io/badge/(.+)", re.I)
 
-def _outside_code(text: str) -> str:
-    """The text without fenced code (``` and ~~~), inline code and HTML comments."""
-    text = re.sub(r"(?ms)^ {0,3}(`{3,}(?=[^`\n]*$)|~{3,}).*?^ {0,3}\1", "", text)  # no backtick in a ``` info string
-    text = re.sub(r"```.*?```", "", text, flags=re.S)
-    text = re.sub(r"`[^`\n]*`", "", text)
-    return re.sub(r"<!--.*?-->", "", text, flags=re.S)
+
+# Writable diagnostic counters are a compatibility API for deterministic tests.
+# Core calls nest only in mdcode; each facade call accounts for its complete delta.
+_OPENER_STEPS = _DEST_STEPS = _BRACKET_STEPS = 0
+
+
+def _parser_view(function):
+    @functools.wraps(function)
+    def measured(*args, **kwargs):
+        before = (mdcode._OPENER_STEPS, mdcode._DEST_STEPS, mdcode._BRACKET_STEPS)
+        try:
+            return function(*args, **kwargs)
+        finally:
+            for name, previous in zip(("_OPENER_STEPS", "_DEST_STEPS", "_BRACKET_STEPS"), before):
+                globals()[name] += getattr(mdcode, name) - previous
+    for name in ("cache_clear", "cache_info", "cache_parameters"):
+        if hasattr(function, name):
+            setattr(measured, name, getattr(function, name))
+    return measured
+
+
+for _parser_name in (
+    '_escaped',
+    '_search_unescaped',
+    '_comment_matches',
+    '_search_comment',
+    '_raw_html_matches',
+    '_search_raw_html',
+    '_span_at',
+    '_in_inline_code',
+    '_in_html_block',
+    '_raw_definition_matches',
+    '_definition_candidates',
+    '_peel_definition_containers',
+    '_whitespace_columns',
+    '_inline_link_spans',
+    '_balanced_destination',
+    '_definitions',
+    '_definition_spans',
+    '_fence_spans',
+    '_outside_code',
+    '_bracket_pairs',
+    '_closing_bracket',
+    '_block_boundary',
+    '_crosses_block',
+    '_next_unescaped_bracket',
+    '_reference_form',
+    '_inline_openers_and_autolinks',
+    '_active_openers',
+    '_live_autolinks',
+    '_find_live_autolink',
+    '_has_link_opener',
+    '_label_syntax',
+    '_label_key',
+    '_definition_key',
+    '_reference_label_spans',
+    '_blank_line_starts',
+    '_blank_between',
+    '_title_ends',
+    '_inline_image_target',
+    '_link_literal_spans',
+    '_markdown_images',
+    '_images',
+):
+    globals()[_parser_name] = _parser_view(getattr(mdcode, _parser_name))
+
+
+def _badge_colour(path: str) -> str:
+    """Upper-cased colour of a Shields badge path (the text after `/badge/`): its last segment, with the query and
+    fragment removed. Shields escapes a literal dash as a pair `--`; a lone `-` is the structural separator. The scan
+    runs left to right, so `type-example---FF0000` reads as `type`, `example-`, `FF0000`. Labels and messages may hold
+    apostrophes or hex-looking text; only the final segment is the colour."""
+    path = path.split("#", 1)[0].split("?", 1)[0]  # literal delimiters only: an encoded %23 or %3F belongs to a label
+    text = unquote(path)
+    segments, current, i = [], [], 0
+    while i < len(text):
+        if text[i] == "-" and text[i + 1:i + 2] == "-":  # an escaped literal dash
+            current.append("-")
+            i += 2
+        elif text[i] == "-":  # the structural separator
+            segments.append("".join(current))
+            current = []
+            i += 1
+        else:
+            current.append(text[i])
+            i += 1
+    segments.append("".join(current))
+    return segments[-1].upper()
 
 
 def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
@@ -29,7 +176,9 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
     if not path.is_file():
         return {"file": str(path), "result": "fail", "fails": ["missing README"], "warns": []}
     raw = path.read_bytes()
-    text = normalize_text(raw.decode("utf-8", errors="replace"))  # a leading BOM never hides the H1
+    # Lint uses an LF-only read view for its presentation checks. Shared scans
+    # also accept unnormalized source; this view never reaches a README writer.
+    text = normalize_text(raw.decode("utf-8", errors="replace")).replace("\r", "\n")
     variant = variant if variant and variant != "auto" else ctx.det["variant"]
     rv = standard("readme-variants")
     if len(raw) >= 512_000:
@@ -93,10 +242,14 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
     elif len(h1s) != 1:
         fails.append(f"R7 exactly one H1 required (found {len(h1s)})")
     # badges 2-4, palette tokens only
-    shields = re.findall(r"img\.shields\.io/badge/([^)\"\s]+)", plain)
+    shields: list[str] = []
     header_part = plain.split("\n---\n", 1)[0]
-    hb = re.findall(r"img\.shields\.io/badge/([^)\"\s]+)", header_part)
-    nbadges = len(hb) + len(re.findall(r"badge\.svg", header_part))
+    # masked over the whole document, then cut to the header: a reference label is resolved by a definition below it
+    badge_header = _outside_code(plain)[:len(header_part)]
+    image_sources = [source for _, source in _images(badge_header, plain)]
+    nbadges = sum(bool(SHIELDS_SRC.match(src)
+                       or re.fullmatch(r"(?:\./)?docs/images/badges/[^/?#]+\.svg(?:[?#].*)?", unquote(src))
+                       or re.search(r"(?:^|/)badge\.svg(?:[?#].*)?$", src)) for src in image_sources)
     if not preserve:
         from .readme import badges as derivable
         floor = min(2, len(derivable(ctx)))  # a public repo with no licence and no language derives fewer than two
@@ -104,8 +257,12 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
             fails.append(f"R7 2-4 header badges required (found {nbadges})")
         elif nbadges < 2:
             warns.append(f"badges-short: {nbadges} badge (no licence or language to show yet)")
+    # colours come only from complete parsed image destinations, so an apostrophe or other HTML delimiter inside a Markdown URL hides nothing
+    shields += [m.group(1) for _, src in _images(_outside_code(plain), plain)
+                if (m := SHIELDS_BADGE.match(src))]
+    shields = list(dict.fromkeys(shields))
     for s in shields:
-        col = re.split(r"[?)]", s.rsplit("-", 1)[-1])[0].upper()
+        col = _badge_colour(s)
         family_cols = {str(ctx.style.get(k) or "").upper() for k in ("badge_brand", "badge_accent")}
         if re.fullmatch(r"[0-9A-F]{6}", col) and col not in PALETTE and col not in family_cols:
             fails.append(f"R7 off-palette badge colour {col}")
@@ -155,17 +312,12 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
         elif _extra_footer(text):
             fails.append("D18 footer fail:duplicate")
     # alt text, local images
-    for m in IMG_MD.finditer(plain):
-        if not m.group(1).strip():
-            fails.append(f"R7 image without alt text: {m.group(2)[:40]}")
-        _local(path, m.group(2), fails)
-    for m in IMG_HTML.finditer(plain):
-        a = re.search(r'alt="([^"]*)"', m.group(1))
-        if not a or not a.group(1).strip():
-            fails.append("R7 <img> without alt text")
-        src = re.search(r'src="([^"]+)"', m.group(1))
-        if src:
-            _local(path, src.group(1), fails, example="examples" in src.group(1))
+    visible = _outside_code(plain)
+    for alt, source in _images(visible, plain):
+        if not alt.strip():
+            fails.append(f"R7 image without alt text: {source[:40]}")
+        if source:
+            _local(path, source, fails, example="examples" in source)
     body = _outside_code(plain)
     ph = re.search(rv["placeholder_regex"], body)
     if ph or re.search(r"<…>|<\.\.\.>", body):

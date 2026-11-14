@@ -78,10 +78,12 @@ Run every command **from inside the target repository's checkout**, with the ski
 | 3 | `topics`, `labels --plan` | Proposals only. Add `--records FILE` to emit change records, `--gh` to print the exact `gh` commands. |
 | 4 | Apply the approved description and topics on GitHub (the writer), or write them into `meta.json` | Before any art: the banner subtitle, the card and the README tagline come from the description, so rendering first breaks R2 (tagline equals description) the moment the writer applies the new one. |
 | 5 | `banner`, then `card` (and `content social`) | `art-fail` (exit 3) writes nothing. `needs-input` (exit 4) names the missing fact, including fewer than two fact chips (`needs-input:banner-chips`; add `chips:` to `.github/showcase.yml` or pass `--key-chip`/`--chip`). |
-| 6 | `readme`, then `readme --write` | Dry run prints a unified diff first. `readme-shrink` (exit 1) writes nothing. |
+| 6 | `readme`, then `readme --write` | Dry run prints a unified diff first. `readme-shrink` (exit 1) writes nothing. Variant J generates a GitHub-profile type badge and a license badge when the license is known; a whitespace-preserving content digest (also used for the migration `replaces=` identity) distinguishes generated rows that refresh from authored badge blocks that remain for linting. Template recognition normalizes only line endings and separator newlines, so an indented, tab-prefixed or trailing-space copy of the inherited type row is authored and is never replaced. README lint reads link titles to the end of their block (a heading, list item or fence ends one; a soft line break does not), accepts reference definition labels across a soft line break, and keeps the residual columns of a tab that crosses a list content column (four make code, not a definition). A parenthesized link title that holds an unescaped `(` is no title (the link is invalid, so an image inside it renders and is checked; escaped parentheses stay valid), and an ordered-list marker other than `1.` does not interrupt a multiline image alt or label outside a list (a sibling item of an enclosing list still does). |
 | 7 | `footer --check README.md`, `lint all` | Every applicable check passes; `incomplete` is allowed for logged `needs-input` omissions. |
 | 8 | `doctor --header` | One coverage row with `skill_complete` for locally generated surfaces and `owner_pending` listing unresolved owner-controlled cells. `--allow-unmeasured` is accepted for CLI consistency; it does not relax the checks on existing outputs. `done` only when every applicable cell is `pass`, `warn`, `incomplete` or `n/a`, and the banner has two to four chips. |
 | 9 | `contact-sheet` | A human (or an independent verifier) views the set on both GitHub page colours before rollout. Pass PNGs: `card --png`, `org-tile --png` previews, or install the optional `resvg_py` (`requirements-preview.txt`) so SVG inputs (the intro's static frame) render too; otherwise an SVG input exits 2. |
+
+**Staged descriptions.** `banner`, `card`, `content social` and `readme` accept `--description TEXT` to render a proposed sentence without editing the captured metadata or GitHub. Each reports `staged-description`; written outputs record the text and hashes per output in `docs/images/.showcase.json` (beside external outputs). `doctor` fails R2 and logs `description-drift:readme` when the managed tagline differs from the captured live description. See [staged descriptions](references/staged-descriptions.md) for dry runs and provenance.
 
 **Who applies GitHub changes.** Under the estate orchestrator, every proposal (description, topics, labels, README) goes to its single writer queue as change records. Used standalone, with no orchestrator: show the user the `--gh` command lines (or the `argv` of `labels --plan`) and the README diff; the user runs them after approving that repository's changes. The skill itself never runs a write.
 
@@ -186,16 +188,16 @@ labels --emit-yml
 labels --plan [--references] [--records FILE] [--gh] [--jobs FILE] [--allow-hold]
 banner [--out docs/images/banner.png] [--scale 2] [--icon PATH] [--subtitle TEXT]
        [--key-chip TEXT]... [--chip TEXT]... [--category TEXT] [--allow-unmeasured] [--allow-hold]
-       [--allow-few-chips] [--png-budget 300000]
+       [--allow-few-chips] [--png-budget 300000] [--description TEXT]
 card [--out docs/images/card.svg] [--png PATH] [--icon PATH] [--allow-unmeasured] [--allow-hold]
-     [--key-chip TEXT]... [--chip TEXT]...
+    [--description TEXT] [--key-chip TEXT]... [--chip TEXT]...
 org-banner --org OWNER --out PATH [--illustration PATH]
 org-tile --org OWNER [--avatar PATH] [--illustration PATH] [--out PATH] [--png PATH]
 intro (--profile CompleteDotTech | --org OWNER) [--name TEXT] [--eyebrow TEXT] [--tagline TEXT]
       [--chip key:TEXT] [--chip attr:TEXT]... [--mark PATH] [--height 320|360] [--static] [--out assets/intro.svg]
 footer [--check README.md [--online]] [--org OWNER] [--raw]
 readme [--mode auto|scaffold|upgrade|header] [--variant auto|A|B|C|D|E|F|G|H|I|J]
-       [--write] [--diff] [--records FILE] [--bootstrap]
+       [--write] [--diff] [--records FILE] [--bootstrap] [--description TEXT]
 lint svg --kind intro|card|tile|plate|divider FILE...
 lint readme [README.md] [--variant auto]
 lint banner [docs/images/banner.png]
@@ -233,7 +235,7 @@ project copy-plan --target ORG|@me [--role org|template|estate] [--source OWNER/
 project readme --capture FILE --owner OWNER [--out FILE]
 project estate-plan [--copied FILE] [--user-id ID] [--source OWNER/N] [--jobs FILE]
 content social [--out PATH] [--title TEXT] [--icon PATH] [--job] [--allow-unmeasured] [--allow-hold]
-    [--key-chip TEXT]... [--chip TEXT]...
+    [--description TEXT] [--key-chip TEXT]... [--chip TEXT]...
 content icon prompt|normalize|check [--option A|B] [--glyph FILE] [--art-direction FILE] [--in PNG]
     [--ground auto|transparent|keep] [--ground-tolerance DE (0 to 12)] [--seed N] [--out PATH] [--preview PATH]
     [--strict] [--min-contrast RATIO] [--ocr]
@@ -262,7 +264,7 @@ content sidebar --facts FILE [--packages FILE]... [--current FILE] [--repo OWNER
 | `intro` | Renders the profile intro (animated only for the personal profile and T1 flagship orgs; `.still` reduced-motion frame). | `--out` |
 | `footer` | Prints the decision 18 footer using the published masters in this skill's `assets/brand/`, between `showcase:footer` markers, or checks that the README ends with it; `--check --online` also HEADs both raw logo URLs and fails (`fail:offline`) unless both return 200 (the Phase 4.0 hard gate). `--org OWNER` answers `exempt`, `exempt:footer` or `hold` for an org outside the footer's scope; for the watching org, `--check` still reads the README (its `.github` gets the footer, and `--org` cannot tell it from a fork). | stdout |
 | `readme` | Scaffolds, upgrades or refreshes the header marker blocks; never drops a line (multiset check). `--bootstrap` fills a template body only while its marker's sha256 still matches (a person's edit makes the block theirs). | `README.md` with `--write`; `CONTRIBUTING.md` with `--bootstrap` |
-| `lint` | SVG rules, README rules (R7 plus decisions 13 and 18) and banner PNG checks; `public-leak` checks any public file the run writes against the estate's private set (private slugs and names under every login of the owner, members-only pins, internal notes from the org rows, the registry's top-level notes and judge_changes and the profile's internal keys; OPS-03), reading the private registry and `--meta-dir`, or using registry-free `--denylist FILE` with one literal name per UTF-8 line (case-insensitive; output reports line numbers without matched text); `prose` runs the CQ-17 checks on text the run writes (§1.2 brand strings, no emoji, no placeholders, the §4.1 formula for descriptions and taglines, typos when the optional `codespell` is installed; `--preserved` text only warns). | nothing |
+| `lint` | SVG rules, README rules (R7 plus decisions 13 and 18; the destination and title of an inline link are literal text, never an image, and a comment opener inside a complete HTML tag is text) and banner PNG checks; `public-leak` checks any public file the run writes against the estate's private set (private slugs and names under every login of the owner, members-only pins, internal notes from the org rows, the registry's top-level notes and judge_changes and the profile's internal keys; OPS-03), reading the private registry and `--meta-dir`, or using registry-free `--denylist FILE` with one literal name per UTF-8 line (case-insensitive; output reports line numbers without matched text); `prose` runs the CQ-17 checks on text the run writes (§1.2 brand strings, no emoji, no placeholders, the §4.1 formula for descriptions and taglines, typos when the optional `codespell` is installed; `--preserved` text only warns). | nothing |
 | `contact-sheet` | Lays outputs out the way GitHub shows them, on `#0d1117` and `#ffffff` (proofing surfaces, not asset variants). `--org ORG --cross-surface` is the G4 gate: the org avatar at 32 px, a hero banner, a repo card, the social preview and the org banner on one labelled sheet; a missing surface is logged `needs-input:cross-surface:<surface>` (result `incomplete`). | `PATH.on-github-dark.png`, `PATH.on-github-light.png` |
 | `doctor` | Prints the definition-of-done row: `R1`–`R11`, `banner`, `icon`, `card`, `footer`, `done`, `skill_complete` and `owner_pending`. No network. `--estate` classifies every repository in `--meta-dir` that `registry/estate.yaml` does not list with `decisions/POLICY.md` (`keep`, `move`, `archive`, `delete`, `merge`, `rename`, `rename-default-branch`; never acted on) and diffs the template-managed files of template-born checkouts against the current template (bump PRs are proposals). | `--out` (merges its own entries into `NEW_PROPOSALS.yaml`; others stay) |
 | `new` | Plans a repository from the template: the `gh repo create OWNER/NAME --template CompleteTech-LLC/completetech-repo-template --private` writer job, then `adopt` on it (naming N1–N4 and the §5.4 type are checked first; the watching org, placeholder orgs and refused owners exit 2). | `--records`, `--jobs` |
