@@ -369,7 +369,9 @@ def cmd_footer(args):
     # An explicit --org remains useful for raw markup without a checkout.
     ctx = None
     if args.meta or args.repo_dir is not None or (args.check and not args.org and _origin_slug(Path("."))):
-        ctx = context(args, b)
+        # Applicability needs no renderable family identity. The coverage context
+        # keeps pending identity read-only; the scoped consent gate still runs below.
+        ctx = context(args, b, for_coverage=True)
         if args.org and not b.resolver().same(args.org, ctx.owner):
             raise ShowcaseError("--org does not match the repository metadata", log="usage")
         b.check_owner(ctx.owner, repo=ctx.repo)
