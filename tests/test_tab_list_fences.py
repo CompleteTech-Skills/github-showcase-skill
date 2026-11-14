@@ -4,15 +4,20 @@ import pytest
 from ctshowcase import mdcode, readme, readmelint
 
 
-@pytest.mark.parametrize("prefix", ["-\t", "1.\t", "- \t", "> -\t", "> 1.\t"])
-@pytest.mark.parametrize("indent,rendered", [(2, True), (3, True), (4, False), (5, False)])
-def test_tabbed_item_fence_uses_visual_content_column(prefix, indent, rendered):
+@pytest.mark.parametrize("prefix,column", [("-\t", 4), ("1.\t", 4), ("- \t", 4), ("> -\t", 2), ("> 1.\t", 6)])
+@pytest.mark.parametrize("indent", [2, 3, 4, 5, 6])
+def test_tabbed_item_fence_uses_visual_content_column(prefix, column, indent):
     quote = "> " if prefix.startswith(">") else ""
     text = prefix + "```\n" + quote + " " * indent + "![Shot](docs/images/missing.png)\n"
-    expected = [("Shot", "docs/images/missing.png")] if rendered else []
+    # Leaving the item ends its fence. Four remaining columns still form a
+    # separate indented code block in the quote, rather than a rendered image.
+    expected = [("Shot", "docs/images/missing.png")] if indent < min(column, 4) else []
     assert readmelint._images(readmelint._outside_code(text), text) == expected
-    _, column, rest = mdcode._containers(prefix + "```")
-    assert (column, rest) == (4, "```")
+    if 4 <= indent < column:
+        assert mdcode.fence_spans(text) == ((0, len(prefix + "```\n")),)
+        assert len(mdcode.code_block_spans(text)) == 2
+    _, measured, rest = mdcode._containers(prefix + "```")
+    assert (measured, rest) == (column, "```")
 
 
 def test_tabbed_item_fence_cannot_hide_a_missing_image_from_lint(make_ctx, tmp_path):
