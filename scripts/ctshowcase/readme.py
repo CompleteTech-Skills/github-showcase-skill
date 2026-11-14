@@ -7,12 +7,15 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from difflib import SequenceMatcher
+from html import escape
 from pathlib import Path
 from urllib.parse import quote
 
 from . import footer as footermod
 from .context import RepoContext
 from .detect import standard
+from .errors import NeedsInput
 from .mdcode import code_spans, find_blocks, masked  # noqa: F401  (code_spans: re-exported for callers)
 
 MARK = re.compile(r"<!-- showcase:([a-z-]+):start -->\n?(.*?)\n?<!-- showcase:\1:end -->", re.S)
@@ -26,6 +29,21 @@ def normalize_text(text: str) -> str:
     from every `^#` match)."""
     text = text.replace("\r\n", "\n")
     return text[1:] if text.startswith(BOM) else text
+
+
+def personal_readme_bytes(original: bytes, text: str) -> bytes:
+    """Keep BOM and each unchanged line's terminator, including authored mixed LF/CRLF files."""
+    source = original.decode("utf-8")
+    bom = BOM if source.startswith(BOM) else ""
+    source = source.removeprefix(BOM)
+    old = source.splitlines(keepends=True)
+    normalized = [line.replace("\r\n", "\n") for line in old]
+    new = text.splitlines(keepends=True)
+    newline = "\r\n" if source.count("\r\n") > source.count("\n") / 2 else "\n"
+    out = []
+    for tag, i, j, a, b in SequenceMatcher(None, normalized, new, autojunk=False).get_opcodes():
+        out.extend(old[i:j] if tag == "equal" else [line.replace("\n", newline) for line in new[a:b]])
+    return (bom + "".join(out)).encode("utf-8")
 
 
 def start(b):
@@ -150,8 +168,44 @@ def nav_line(ctx: RepoContext) -> str:
     return line + (" · Internal" if not ctx.public else "")
 
 
+def personal_profile(ctx: RepoContext) -> bool:
+    """Use the same personal-profile exemption as banner generation (decision 15, CQ-03)."""
+    return ctx.det["type"] == "github-profile" and ctx.same_owner(ctx.repo)
+
+
+def hero_path(ctx: RepoContext) -> str:
+    return "assets/intro.svg" if personal_profile(ctx) else "docs/images/banner.png"
+
+
+def legacy_banner_html(ctx: RepoContext) -> str:
+    """The exact previously generated body; a similar authored image is not ours to migrate."""
+    return f'<p align="center">\n  <img src="docs/images/banner.png" alt="{ctx.repo} by {ctx.company}" width="100%">\n</p>'
+
+
+def personal_intro_html(ctx: RepoContext) -> str:
+    profile = ctx.org.get("profile") or {}
+    name = profile.get("name") or ctx.org.get("display_name")
+    if not ctx.org.get("known") or not (name or "").strip() or not (profile.get("eyebrow") or "").strip():
+        raise NeedsInput("intro-identity", "Configure the personal profile name and eyebrow in brand.yaml first.")
+    return f'<p align="center">\n  <img src="assets/intro.svg" alt="{escape(name, quote=True)}" width="100%">\n</p>'
+
+
+def personal_generated_hero(ctx: RepoContext, body: str) -> bool:
+    if body == legacy_banner_html(ctx) or not body.strip():
+        return True
+    try:
+        return body == personal_intro_html(ctx)
+    except NeedsInput:
+        return False  # unresolved identity cannot authorize replacing an authored block
+
+
 def banner_html(ctx: RepoContext) -> str:
-    return (f'<p align="center">\n  <img src="docs/images/banner.png" alt="{ctx.repo} by {ctx.company}" width="100%">\n</p>')
+    if not personal_profile(ctx):
+        return legacy_banner_html(ctx)
+    body = personal_intro_html(ctx)
+    if ctx.repo_dir is None or not (ctx.repo_dir / hero_path(ctx)).is_file():
+        raise NeedsInput("intro", "Generate the personal profile with intro --profile OWNER --out assets/intro.svg first.")
+    return body
 
 
 def badges(ctx: RepoContext) -> list[tuple[str, str, str | None]]:
@@ -790,15 +844,25 @@ def _unreemitted(lines: list[str], kept: Counter) -> list[str]:
 
 
 def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
-    """Return (new text, header lines removed). Raises nothing; callers run the shrink checks."""
+    """Return (new text, header lines removed); callers run the shrink checks."""
     variant = ctx.det["variant"]
     rv = standard("readme-variants")
     if variant in ("G", "H"):
         return callout_only(ctx, normalize_text(text))
     text = normalize_text(text)
+    if personal_profile(ctx):
+        heroes = [m.group(2) for m in find_blocks(MARK, text) if m.group(1) == "banner"]
+        unmarked, _ = _strip_markers(text)
+        preamble, _ = split_sections(unmarked)
+        authored_art = re.search(r"<(?:img|picture)\b|!\[[^\]]*\]\(", masked(preamble), re.I)
+        if any(not personal_generated_hero(ctx, body) for body in heroes) or authored_art:
+            # Personal artwork and its surrounding authored content stay in place. Refresh only owned blocks.
+            return header_only(ctx, text), []
     body, blocks = _strip_markers(text)
     want_footer = footer_wanted(ctx)
     removed: list[str] = []
+    if personal_profile(ctx) and "banner" in blocks:
+        removed += blocks["banner"].splitlines()  # only an exact generated hero reaches this branch
     # One multiset of the footer lines the emitted footer carries again, shared by the marked and the unmarked branch
     # because only one new footer is emitted. A compliant footer is re-emitted unchanged and must not weaken the
     # never-drop-a-line guard, so only the old lines it does not carry again are reported as removed.
@@ -990,8 +1054,11 @@ def header_only(ctx: RepoContext, text: str) -> str:
     """Replace only existing marker blocks (what the Action runs)."""
     text = normalize_text(text)
     desc = (ctx.meta.get("description") or "").strip()
-    gen = {"nav": nav_line(ctx), "banner": banner_html(ctx), "footer": footermod.markup(ctx.brand)}
-    if ctx.repo_dir is not None and not (ctx.repo_dir / "docs" / "images" / "banner.png").is_file():
+    personal = personal_profile(ctx)
+    gen = {"nav": nav_line(ctx), "footer": footermod.markup(ctx.brand)}
+    if not personal:
+        gen["banner"] = banner_html(ctx)
+    if not personal and ctx.repo_dir is not None and not (ctx.repo_dir / hero_path(ctx)).is_file():
         gen["banner"] = ""  # no image yet (for example no description): an empty block, never a broken image
         ctx.log("needs-input:banner")
     gen["badges"] = badges_html(ctx) if ctx.det["variant"] == "F" else badges_md(ctx)
@@ -1005,6 +1072,8 @@ def header_only(ctx: RepoContext, text: str) -> str:
         if b == "tagline":  # tagline_body: the description's line, else the block as written unless inherited
             new = tagline_body(ctx, body, text)
             return m.group(0) if not desc and new == body else wrap(b, re.sub(r"\n{3,}", "\n\n", new))
+        if b == "banner" and personal:
+            return wrap(b, banner_html(ctx)) if personal_generated_hero(ctx, body) else m.group(0)
         if b in gen:
             return wrap(b, re.sub(r"\n{3,}", "\n\n", gen[b]))
         return m.group(0)
@@ -1141,7 +1210,10 @@ def bootstrap(ctx: RepoContext, text: str) -> str:
             # the tagline block carries over (tagline_body), so a line the owner wrote survives the rebuild and only an
             # inherited one is emptied, exactly as header_only decides it
             old = next((m.group(2) for m in find_blocks(MARK, hm.group(0)) if m.group(1) == "tagline"), None)
-            new_header = header(ctx, title=auto, tagline=tagline_body(ctx, old, text))
+            authored_hero = next((m.group(0) for m in find_blocks(MARK, hm.group(0))
+                                  if m.group(1) == "banner" and personal_profile(ctx)
+                                  and not personal_generated_hero(ctx, m.group(2))), None)
+            new_header = header(ctx, keep_banner=authored_hero, title=auto, tagline=tagline_body(ctx, old, text))
             text = new_header + "\n\n" + text[hm.end():].lstrip("\n")
     return header_only(ctx, text)
 

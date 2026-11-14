@@ -93,5 +93,20 @@ Every intro owner needs a configured organization row; an unresolved owner retur
 Profile mode also needs a configured or explicit name and eyebrow; missing values
 return `needs-input:name` or `needs-input:eyebrow` instead of guessing profile facts.
 
+The repository `readme` command also uses `assets/intro.svg` for a personal
+owner/owner profile. Generate it with `intro --profile OWNER --out
+CHECKOUT/assets/intro.svg` before scaffolding or refreshing a generated hero.
+Missing profile name/eyebrow facts return `needs-input:intro-identity`; a missing
+local intro returns `needs-input:intro` (exit 4), before any README, badge or change
+record write. This command does not generate artwork implicitly. Organization
+and ordinary repository scaffolds keep `docs/images/banner.png`.
+
+Personal header refresh migrates only the exact legacy generated banner body
+(or an empty managed banner block); authored hero bodies and unmarked artwork
+stay owned by their author. Personal upgrade with authored artwork refreshes
+existing marker blocks only. The managed block keeps its `showcase:banner` name
+for compatibility, even when its image is the personal intro. The intro is a
+plain `<img>`; the decision 18 footer remains the only generated `<picture>`.
+
 Eyebrows, names and taglines must fit their fixed size ladders. An exhausted ladder
 returns `art-fail` (exit 3) without writing an SVG; text is never truncated.
