@@ -878,10 +878,12 @@ _ESCAPE_SEQUENCE = re.compile(r"\\([" + re.escape("".join(sorted(_ESCAPABLE))) +
 
 def _destination_value(value: str) -> str:
     """Decode destination entities and CommonMark's ASCII punctuation escapes only."""
-    token = re.compile(r"\\[" + re.escape("".join(sorted(_ESCAPABLE))) + r"]|&(?:#[xX][0-9a-fA-F]{1,6}|#[0-9]{1,7}|[A-Za-z][A-Za-z0-9]{1,31});")
+    token = re.compile(r"\\?&(?:#[xX][0-9a-fA-F]{1,6}|#[0-9]{1,7}|[A-Za-z][A-Za-z0-9]{1,31});|\\[" + re.escape("".join(sorted(_ESCAPABLE))) + r"]")
     def decode(match):
         part = match.group()
-        if part.startswith("\\"):
+        if part.startswith("\\&"):
+            part = part[1:]
+        elif part.startswith("\\"):
             return part[1:]
         if part.startswith("&#") or part[1:] in html.entities.html5:
             return html.unescape(part)

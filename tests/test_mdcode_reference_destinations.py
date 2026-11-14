@@ -119,6 +119,22 @@ def test_cli_unicode_symbol_escape_cannot_alias_existing_file(checkout, form):
 
 
 @pytest.mark.parametrize("form", ["inline", "reference"])
+@pytest.mark.parametrize("written,target", [
+    (r"x\&amp;y", "x&y"), ("x&amp;y", "x&y"),
+    ("x&copy.png", "x&copy.png"), (r"x&copy\;png", "x&copy;png"),
+    (r"x&amp\;y", "x&amp;y"),
+])
+def test_cli_destination_entities_follow_cmark_gfm(checkout, form, written, target):
+    repo, _ = checkout
+    (repo / target).write_bytes(b"synthetic existence fixture")
+    source = f"![Shot](<{written}>)" if form == "inline" else f"![Shot][ref]\n\n[ref]: <{written}>\n"
+    path, args = insert(checkout, source)
+    result = run_cli(*args, "lint", "readme", path, "--variant", "C")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout)["fails"] == []
+
+
+@pytest.mark.parametrize("form", ["inline", "reference"])
 @pytest.mark.parametrize("written,target", [(r"x\!y", "x!y"), ("x!y", "x!y"),
     (r"x\§y", r"x\§y"), ("x§y", "x§y"), (r"x\\§y", r"x\§y"),
     (r"x\ay", r"x\ay"), ("x&amp;y", "x&y"), (r"x\&amp;y", "x&y")])
