@@ -128,3 +128,20 @@ def test_missing_brand_never_bypasses_t3_consent(onboarded, tmp_path, allow):
     data = json.loads(result.stdout)
     assert data["result"] == "refused" and "gh" not in data
     assert any(log.startswith("t3-signoff") for log in data["logs"])
+
+
+def test_missing_brand_and_unsafe_topics_keep_both_holds(onboarded, tmp_path):
+    common = context_args(onboarded, tmp_path, visibility="private", topics=["pokemon", "curated-subject"])
+    result = run_cli(*common, "topics", "--gh", "--records", tmp_path / "records.jsonl")
+    data = json.loads(result.stdout)
+    assert result.returncode == 4
+    assert data["proposed"] == ["pokemon", "curated-subject"]
+    assert {"needs-input:brand-topic", "needs-review:topic-safety"} <= set(data["logs"])
+    assert not data["plan_allowed"] and "gh" not in data
+    assert not (tmp_path / "records.jsonl").exists()
+    coverage = json.loads(run_cli(*common, "doctor", "--format", "json").stdout)
+    assert coverage["cells"]["R3"] == "hold"
+    assert "needs-review:topic-safety" in coverage["logs"]
+    adopted = json.loads(run_cli(*common, "adopt", "Northwind-Onboard/triage-tool").stdout)
+    assert not any(job["kind"] == "topics" for job in adopted["jobs"])
+    assert not any(record.get("kind") == "topics" for record in adopted["records"])
