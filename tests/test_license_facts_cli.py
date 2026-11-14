@@ -286,3 +286,53 @@ def test_captured_tree_requires_exact_unambiguous_files(brand, files, supported,
     assert license_facts(ctx) == ("AGPL-3.0", supported)
     license_present = files is not None and "LICENSE" in files and "LICENSE/terms" not in files
     assert ("`LICENSE`" in license_reference(ctx)) == license_present
+
+
+@pytest.mark.parametrize("owner,license,licensing_file", [
+    ("LibreEvolve", "MIT", False), ("CompleteTech-Security", "AGPL-3.0", True)])
+def test_valid_header_preserves_unverified_authored_license(tmp_path, monkeypatch, owner, license, licensing_file):
+    authored = "# Synthetic\n\n## License\n\n<!-- showcase:license -->\nOwner-authored terms.\n"
+    _, checkout, metadata = invoke(tmp_path, monkeypatch, owner=owner, license=license,
+                                   licensing_file=licensing_file, authored=authored)
+    result = run_cli("--meta", metadata, "--repo-dir", checkout, "readme", "--mode", "header", "--write")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert "Owner-authored terms." in (checkout / "README.md").read_text()
+    assert "needs-input:license-policy" not in json.loads(result.stdout)["logs"]
+
+
+def test_private_proprietary_policy_conflicts_with_captured_mit(tmp_path, monkeypatch):
+    out, _, _ = invoke(tmp_path, monkeypatch, owner="CompleteTech-LLC", visibility="private")
+    assert "![License MIT]" in out["diff"]
+    assert "Proprietary. Copyright (c) 2024 CompleteTech LLC." in out["diff"]
+    assert "needs-input:license-policy" in out["logs"]
+
+
+def test_generated_license_updates_until_edited(tmp_path, monkeypatch):
+    _, checkout, metadata = invoke(tmp_path, monkeypatch)
+    args = ["--meta", metadata, "--repo-dir", checkout, "readme"]
+    result = run_cli(*args, "--mode", "scaffold", "--write")
+    assert result.returncode == 0
+    readme = checkout / "README.md"
+    assert "showcase:license:sha256=" in readme.read_text()
+    meta = json.loads(metadata.read_text())
+    meta["license"] = "AGPL-3.0"
+    metadata.write_text(json.dumps(meta))
+    result = run_cli(*args, "--mode", "header", "--write")
+    assert result.returncode == 0
+    assert "Licensed under the AGPL-3.0" in readme.read_text()
+    edited = readme.read_text().replace("Licensed under the AGPL-3.0", "Owner-edited terms")
+    readme.write_text(edited)
+    meta["license"] = "MIT"
+    metadata.write_text(json.dumps(meta))
+    result = run_cli(*args, "--mode", "header", "--write")
+    assert result.returncode == 0
+    assert "Owner-edited terms" in readme.read_text()
+
+
+def test_malformed_license_digest_preserves_authored_paragraph(tmp_path, monkeypatch):
+    authored = ("# Synthetic\n\n## License\n\n<!-- showcase:license -->\n"
+                "<!-- showcase:license:sha256=broken -->\nOwner terms.\n")
+    _, checkout, metadata = invoke(tmp_path, monkeypatch, authored=authored)
+    result = run_cli("--meta", metadata, "--repo-dir", checkout, "readme", "--mode", "header", "--write")
+    assert result.returncode == 0
+    assert "<!-- showcase:license:sha256=broken -->\nOwner terms." in (checkout / "README.md").read_text()

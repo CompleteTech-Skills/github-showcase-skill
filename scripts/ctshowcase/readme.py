@@ -170,6 +170,11 @@ def license_facts(ctx: RepoContext) -> tuple[str | None, bool]:
         ctx.log("needs-input:license")
     if lic and not ctx.facts.is_file("LICENSE"):
         ctx.log("needs-input:license-file")
+    private_wording = ctx.org.get("private_license_wording")
+    if (not ctx.public and lic and isinstance(private_wording, str)
+            and re.search(r"\bproprietary\b", private_wording, re.I)
+            and lic.lower() != "proprietary"):
+        ctx.log("needs-input:license-policy")
     chip = ctx.org.get("license_chip")
     requested = ctx.public and (ctx.det["variant"] == "F" or bool(chip))
     dual = False
@@ -451,7 +456,7 @@ def scaffold(ctx: RepoContext, existing: str = "") -> str:
             ctx.log(f"needs-input:{variant}:{h2}")
     lic = license_section(ctx)
     if lic:
-        parts.append(f"## {lic[0]}\n\n{lic[1]}")
+        parts.append(f"## {lic[0]}\n\n{managed_license(lic[1])}")
     if footer_wanted(ctx):
         parts.append(footermod.block(ctx.brand))
     return "\n\n".join(parts) + "\n"
@@ -985,7 +990,7 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
         if not any(h.strip().lower() in ("license", "licensing", "licence") for h, _ in sections):
             lic = license_section(ctx)
             if lic:
-                out.append(f"## {lic[0]}\n\n{lic[1]}")
+                out.append(f"## {lic[0]}\n\n{managed_license(lic[1])}")
         if want_footer:
             out.append(footermod.block(ctx.brand))
         return "\n\n".join(x for x in out if x) + "\n", removed
@@ -1026,7 +1031,7 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
     else:
         lic = license_section(ctx)
         if lic:
-            out.append(f"## {lic[0]}\n\n{lic[1]}")
+            out.append(f"## {lic[0]}\n\n{managed_license(lic[1])}")
     if want_footer:
         out.append(footermod.block(ctx.brand))
     for b in ("template-body", "checklist"):  # inserted in reverse: the checklist stays above the body
@@ -1096,20 +1101,30 @@ def reorder_lead(ctx: RepoContext, text: str) -> str:
 LICENSE_MARK = "<!-- showcase:license -->"
 
 
+def license_sha(body: str) -> str:
+    import hashlib
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
+def managed_license(body: str) -> str:
+    """Mark newly generated legal prose so later changes can be detected."""
+    return f"{LICENSE_MARK}\n<!-- showcase:license:sha256={license_sha(body)} -->\n{body}"
+
+
 def license_block(ctx: RepoContext, text: str) -> str:
-    """Rewrite the paragraph after `<!-- showcase:license -->` (and its H2) from license_section(), with or without a
-    LICENSE file: private wording must be explicit; public Security gets "## Licensing". When the
-    section cannot be derived (needs-input), the existing text stays."""
-    i = masked(text).find(LICENSE_MARK)  # the first mark outside code (a documented example is left alone)
+    """Refresh only a paragraph whose recorded digest still matches its content."""
+    i = masked(text).find(LICENSE_MARK)
     if i < 0:
         return text
     lic = license_section(ctx)
     if not lic or any(code in ctx.logs for code in ("needs-input:license-policy", "needs-input:license-file",
                                                     "needs-input:licensing-file")):
         return text
-    m = re.compile(re.escape(LICENSE_MARK) + r"\n(.*?)(\n\n|\n?$)", re.S).match(text, i)
-    if m:
-        text = text[:i] + LICENSE_MARK + "\n" + lic[1] + m.group(2) + text[m.end():]
+    pattern = re.escape(LICENSE_MARK) + r"\n<!-- showcase:license:sha256=([0-9a-f]{64}) -->\n(.*?)(\n\n|\n?$)"
+    m = re.compile(pattern, re.S).match(text, i)
+    if not m or license_sha(m.group(2)) != m.group(1):
+        return text
+    text = text[:i] + managed_license(lic[1]) + m.group(3) + text[m.end():]
     h = re.search(r"(?m)^## (?:License|Licensing|Licence)[ \t]*\n(\n?)\Z", text[:i])
     return text[:h.start()] + f"## {lic[0]}\n" + h.group(1) + text[i:] if h else text
 
