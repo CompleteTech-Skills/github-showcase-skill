@@ -71,8 +71,8 @@ def org_row(r: Resolver | None, brand, login: str, require: bool = False) -> dic
     return row
 
 
-def org_style(r: Resolver | None, brand, login: str) -> dict:
-    return brand.style(brand_key(r, login))
+def org_style(r: Resolver | None, brand, login: str, *, repo: str | None = None) -> dict:
+    return brand.style(brand_key(r, login), repo=repo)
 
 
 def in_estate(r: Resolver | None, login: str) -> bool:
@@ -1845,7 +1845,7 @@ def org_glyph(text: str, owner: str) -> str | None:
 
 def icon_colours(ctx, text: str, org: dict, resolver: Resolver, *, require_palette: bool = True) -> dict:
     """Keep estate palettes explicit; the bundled template uses the committed brand tokens."""
-    family = org_style(resolver, ctx.brand, ctx.owner)["name"]
+    family = org_style(resolver, ctx.brand, ctx.owner, repo=ctx.repo)["name"]
     colours = family_colours(text, org["brand_key"], family, resolver.aliases(ctx.owner))
     if _section(text, "Repository glyph prompt template") and not _section(text, "(b) Family palette"):
         tokens = ctx.style["tokens"]
@@ -1907,7 +1907,7 @@ def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = Non
     owner, repo = ctx.owner, ctx.repo
     org = org_row(resolver, ctx.brand, owner, require=True)
     org["canonical"], org["current"] = org["brand_key"], current_login(resolver, owner)
-    family = org_style(resolver, ctx.brand, owner)["name"]
+    family = org_style(resolver, ctx.brand, owner, repo=repo)["name"]
     logins = [org["canonical"], *resolver.aliases(owner)]  # ART_DIRECTION may name the org by any of its logins (CQ-03)
     colours = icon_colours(ctx, art_text, org, resolver, require_palette=option.upper() == "A")
     org_mark = next((g for g in (org_glyph(art_text, x) for x in logins) if g), None)
@@ -2472,6 +2472,8 @@ def add_parser(sub, cli=None):
                                                     "social-preview), plus the browser upload job")
     a.add_argument("--out")
     a.add_argument("--title")
+    a.add_argument("--key-chip", action="append", default=[])
+    a.add_argument("--chip", action="append", default=[])
     a.add_argument("--icon")
     a.add_argument("--allow-unmeasured", action="store_true")
     a.add_argument("--allow-hold", action="store_true")
@@ -2585,7 +2587,7 @@ def _ctx(args, cli, resolver):
     key = resolver.brand_key(ctx.owner)
     if key and key != ctx.owner and not ctx.org.get("known"):
         ctx.org = org_row(resolver, ctx.brand, ctx.owner)
-        ctx.style = org_style(resolver, ctx.brand, ctx.owner)
+        ctx.style = org_style(resolver, ctx.brand, ctx.owner, repo=ctx.repo)
         ctx.logs = [x for x in ctx.logs if x != "needs-input:org-row"]
         ctx.log(f"org-alias:{key}")
     return ctx
@@ -2708,10 +2710,16 @@ def cmd_content(args, cli=None):
     raise ShowcaseError(f"unknown content action {act}", log="usage")
 
 
-def social_job(ctx, resolver: Resolver, out: str) -> dict | None:
-    """Browser job for the repository social preview upload (STANDARD §12.4; public T1/T2 repos only)."""
+def social_job(ctx, resolver: Resolver | None, out: str) -> dict | None:
+    """Browser upload job for an applicable public repository, with scoped T3 provenance."""
     if not ctx.social_applicable():
         return None
+    if resolver is None:
+        resolver = ctx.brand.resolver()
+    # Re-check at the planning boundary, including direct library callers, so a T3
+    # grant is scoped to this repository and registered for provenance stamping.
+    if resolver.owner_status(ctx.owner) == "t3":
+        resolver.check_owner(ctx.owner, repo=ctx.repo)
     full = f"{current_login(resolver, ctx.owner)}/{ctx.repo}"
     steps = [f"Open https://github.com/{full}/settings (the General page).",
              "Scroll to \"Social preview\" and click \"Edit\", then \"Upload an image…\".",
@@ -2719,8 +2727,11 @@ def social_job(ctx, resolver: Resolver, out: str) -> dict | None:
              "Wait until the preview shows the new image; do not change any other setting on this page.",
              f"Verify with the read-only query: gh api graphql -f query='{{repository(owner:\"{full.split('/')[0]}\","
              f"name:\"{ctx.repo}\"){{usesCustomOpenGraphImage openGraphImageUrl}}}}' (usesCustomOpenGraphImage is true)."]
-    return browser_job(job_id("p5", "social-preview", full), "5", full, f"https://github.com/{full}/settings",
-                       "social-preview", steps, "Upload the repository social preview (R10; STANDARD §9.5, §12.4).")
+    job = browser_job(job_id("p5", "social-preview", full), "5", full, f"https://github.com/{full}/settings",
+                      "social-preview", steps, "Upload the repository social preview (R10; STANDARD §9.5, §12.4).")
+    from .signoff import stamp
+    stamp([job])
+    return job
 
 
 def _cmd_sidebar(args, cli, resolver, head):

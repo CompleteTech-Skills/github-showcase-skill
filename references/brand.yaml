@@ -162,9 +162,14 @@ defaults:
     tagline: mono-medium
 
 families:
+  ticketstub:
+    identity_pending: true  # Owner-supplied palette and mark are not available; never inherit CompleteTech art.
+    company_label: TicketStub
   completetech:
     measured: true
   ai-ascension:
+    badge_brand: "F2B75C"
+    badge_accent: "E39B3A"
     measured: true
     banner: keep-existing
     company_label: AI Ascension
@@ -193,6 +198,8 @@ families:
     fonts: {title: fraunces-semibold, eyebrow: mono-medium, subtitle: bricolage-medium, card_name: fraunces-semibold,
             card_body: bricolage-medium, display: fraunces-semibold}
   jev-engineering:
+    badge_brand: "22D3EE"
+    badge_accent: "8B5CF6"
     measured: false
     company_label: Jev Engineering
     eyebrow_case: asis
@@ -214,6 +221,8 @@ families:
       icon_ink: "#8B5CF6"
       icon_spark: "#22D3EE"
   jevplay-games:
+    badge_brand: "F386A1"
+    badge_accent: "E551BA"
     # Dark design (decision 21, "I like the dark ones"): ink canvas with the family's magenta halftone,
     # pink/magenta accents from §9.3 and the art-direction night tile. The pink-ground variant is not used.
     measured: true
@@ -275,6 +284,8 @@ families:
       icon_ink: "#0F766E"
       icon_spark: "#B45309"          # deep amber: readable on the light icon card (the chip and accent stay #FBBF24)
   libreevolve:
+    badge_brand: "10B981"
+    badge_accent: "065F46"
     measured: false
     company_label: LibreEvolve
     eyebrow_case: asis
@@ -296,6 +307,8 @@ families:
       icon_ink: "#10B981"
       icon_spark: "#F1F5F9"
   touchedbyanagent:
+    badge_brand: "F59E0B"
+    badge_accent: "E11D74"
     measured: false
     hold: true
     company_label: Touched By An Agent
@@ -318,6 +331,8 @@ families:
       icon_ink: "#E11D74"
       icon_spark: "#F59E0B"
   romgenie:
+    badge_brand: "F4C430"
+    badge_accent: "B8860B"
     measured: false
     company_label: romgenie
     eyebrow_case: asis
@@ -343,6 +358,9 @@ families:
 orgs:
   CompleteTech-LLC:
     family: completetech
+    license_wording: "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project."
+    private_license_wording: "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved."
+    skills_license_wording: "CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project."
     former_slugs: []              # old logins after an approved org-rename (CQ-03; ORCHESTRATOR Phase 1.1)
     tier: T1
     display_name: CompleteTech LLC
@@ -356,6 +374,9 @@ orgs:
     flagship: true
   CompleteTech-Skills:
     family: completetech
+    license_wording: "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project."
+    private_license_wording: "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved."
+    skills_license_wording: "CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project."
     former_slugs: []
     tier: T1
     display_name: CompleteTech Skills
@@ -374,6 +395,9 @@ orgs:
     readme_preserve: [creative-studio]
   CompleteTech-LLC-AI-Research:
     family: completetech
+    license_wording: "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project."
+    private_license_wording: "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved."
+    skills_license_wording: "CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project."
     former_slugs: []
     tier: T1
     mark: assets/orgs/CompleteTech-LLC-AI-Research/mark.png
@@ -386,6 +410,9 @@ orgs:
     footer: true
   CompleteTech-Security:
     family: completetech
+    license_wording: "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project."
+    private_license_wording: "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved."
+    skills_license_wording: "CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project."
     former_slugs: [CompleTetech-Security]
     tier: T1
     mark: assets/orgs/CompleteTech-Security/mark.png
@@ -401,6 +428,9 @@ orgs:
     flagship: true
   CompleteTech-Infrastructure:
     family: completetech
+    license_wording: "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project."
+    private_license_wording: "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved."
+    skills_license_wording: "CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project."
     former_slugs: []
     tier: T1
     mark: assets/orgs/CompleteTech-Infrastructure/mark.png
@@ -413,6 +443,9 @@ orgs:
     footer: true
   CompleteTech-Commerce:
     family: completetech
+    license_wording: "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project."
+    private_license_wording: "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved."
+    skills_license_wording: "CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project."
     former_slugs: []
     tier: T1
     mark: assets/orgs/CompleteTech-Commerce/mark.png
@@ -425,6 +458,9 @@ orgs:
     footer: true
   CompleteTech-Creative:
     family: completetech
+    license_wording: "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project."
+    private_license_wording: "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved."
+    skills_license_wording: "CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project."
     former_slugs: []
     tier: T1
     mark: assets/orgs/CompleteTech-Creative/mark.png
@@ -437,6 +473,9 @@ orgs:
     footer: true
   CompleteTech-Pokemon:
     family: completetech
+    license_wording: "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project."
+    private_license_wording: "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved."
+    skills_license_wording: "CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project."
     former_slugs: []
     tier: T1
     mark: assets/orgs/CompleteTech-Pokemon/mark.png
@@ -450,6 +489,9 @@ orgs:
     footer: true
   CompleteTech-Data:
     family: completetech
+    license_wording: "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project."
+    private_license_wording: "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved."
+    skills_license_wording: "CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project."
     former_slugs: []
     tier: T1
     mark: assets/orgs/CompleteTech-Data/mark.png
@@ -462,6 +504,9 @@ orgs:
     footer: true
   CompleteTech-Games:
     family: completetech
+    license_wording: "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project."
+    private_license_wording: "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved."
+    skills_license_wording: "CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project."
     former_slugs: []
     tier: T1
     mark: assets/orgs/CompleteTech-Games/mark.png
@@ -474,6 +519,9 @@ orgs:
     footer: true
   CompleteTech-Directories:
     family: completetech
+    license_wording: "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project."
+    private_license_wording: "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved."
+    skills_license_wording: "CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project."
     former_slugs: []
     tier: T1
     mark: assets/orgs/CompleteTech-Directories/mark.png
@@ -486,6 +534,9 @@ orgs:
     footer: true
   CompleteTech-Hardware:
     family: completetech
+    license_wording: "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project."
+    private_license_wording: "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved."
+    skills_license_wording: "CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project."
     former_slugs: []
     tier: T1
     mark: assets/orgs/CompleteTech-Hardware/mark.png
@@ -498,6 +549,9 @@ orgs:
     footer: true
   CompleteTechDiscord-Games:
     family: completetech
+    license_wording: "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project."
+    private_license_wording: "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved."
+    skills_license_wording: "CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project."
     former_slugs: []
     tier: T1
     mark: assets/orgs/CompleteTechDiscord-Games/mark.png
@@ -510,6 +564,9 @@ orgs:
     footer: true
   CompleteTech-DiscordApps:
     family: completetech
+    license_wording: "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project."
+    private_license_wording: "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved."
+    skills_license_wording: "CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project."
     former_slugs: []
     tier: T1
     mark: assets/orgs/CompleteTech-DiscordApps/mark.png
@@ -522,6 +579,9 @@ orgs:
     footer: true
   CompleteTech-Patent-IP:
     family: completetech
+    license_wording: "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project."
+    private_license_wording: "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved."
+    skills_license_wording: "CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project."
     former_slugs: []
     tier: T1
     mark: assets/orgs/CompleteTech-Patent-IP/mark.png
@@ -534,6 +594,9 @@ orgs:
     footer: true
   CompleteTech-Career-Toolkit:
     family: completetech
+    license_wording: "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project."
+    private_license_wording: "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved."
+    skills_license_wording: "CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project."
     former_slugs: []
     tier: T1
     mark: assets/orgs/CompleteTech-Career-Toolkit/mark.png
@@ -546,6 +609,9 @@ orgs:
     footer: true
   CompleteTech-ManageEngine:
     family: completetech
+    license_wording: "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project."
+    private_license_wording: "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved."
+    skills_license_wording: "CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project."
     former_slugs: []
     tier: T1
     mark: assets/orgs/CompleteTech-ManageEngine/mark.png
@@ -558,6 +624,9 @@ orgs:
     footer: true
   CompleteDotTech:
     family: completetech
+    license_wording: "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project."
+    private_license_wording: "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved."
+    skills_license_wording: "CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project."
     former_slugs: []
     tier: T1-user
     display_name: Timothy Wayne Gregg
@@ -668,7 +737,7 @@ orgs:
     hub_url: https://pickyour.ai
     footer: false
   Jevelopers-neatHack-2026:
-    family: completetech
+    family: ticketstub
     former_slugs: []
     tier: T3
     display_name: TicketStub
@@ -681,6 +750,9 @@ orgs:
   # Synthetic demo owner (§1.2 fictional client); used only by fixtures and examples.
   Northwind-Trading-Co:
     family: completetech
+    license_wording: "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project."
+    private_license_wording: "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved."
+    skills_license_wording: "CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project."
     former_slugs: []
     tier: T1
     display_name: Northwind Trading Co.

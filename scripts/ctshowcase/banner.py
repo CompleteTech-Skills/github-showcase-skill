@@ -71,12 +71,25 @@ def description_heads(first: str) -> list[str]:
     return out
 
 
+def _subtitle_text(value) -> bool:
+    return isinstance(value, str) and bool(value.strip()) and "\n" not in value and "\r" not in value
+
+
+def selected_subtitle(ctx: RepoContext, cli: str | None) -> str | None:
+    """Validate the highest-priority subtitle without inventing missing text."""
+    selected = cli if cli is not None else ctx.override.get("subtitle")
+    if selected is not None and not _subtitle_text(selected):
+        raise NeedsInput("subtitle", "subtitle must be nonempty single-line text")
+    return selected
+
+
 def subtitle_candidates(ctx: RepoContext, cli: str | None) -> list[tuple[str, str]]:
     """One-line candidates in order: cli, override, security short title, description, first sentence, heads."""
+    selected_subtitle(ctx, cli)
     out: list[tuple[str, str]] = []
     if cli:
         out.append((cli, "cli"))
-    if ctx.override.get("subtitle"):
+    if _subtitle_text(ctx.override.get("subtitle")):
         out.append((ctx.override["subtitle"], "override"))
     desc = (ctx.meta.get("description") or "").strip()
     if ctx.det["type"] == "security-check":
@@ -153,6 +166,8 @@ def layout(ctx: RepoContext, fonts: Fonts, *, subtitle: str | None = None, keys=
         total = sum(chip_w(t) for t, _, _ in row) + CHIP_GAP * max(0, len(row) - 1)
         if total <= TW or not a:
             break
+        if any(source in ("cli", "override") for _, source in a):
+            raise ArtFail("chips", "supplied attribute chips exceed the available row")
         a = a[:-1]
     if total > TW:
         raise ArtFail("chips", " ".join(t for t, _, _ in row))

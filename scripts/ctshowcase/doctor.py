@@ -55,10 +55,13 @@ def row(ctx: RepoContext) -> dict:
                           owner=ctx.owner)
     cells["R2"] = "fail" if any(c["result"] == "fail" for c in chk) else "pass"
     tp = topicsmod.merge(ctx)
-    topic_blocked = (not tp.get("plan_allowed", True) or "needs-input:topics-capacity" in tp["logs"])
     topic_review = any(log.startswith("review-remove:") for log in tp["logs"])
-    cells["R3"] = ("fail" if topic_blocked or not tp["equal_as_set"] else
-                   "warn" if "topics-short" in tp["logs"] or topic_review else "pass")
+    if "needs-input:brand-topic" in tp["logs"]:
+        cells["R3"] = "hold"
+    else:
+        blocked = not tp.get("plan_allowed", True) or "needs-input:topics-capacity" in tp["logs"]
+        cells["R3"] = ("fail" if blocked or not tp["equal_as_set"] else
+                       "warn" if "topics-short" in tp["logs"] or topic_review else "pass")
     logs += tp["logs"]
     hp = ctx.meta.get("homepage") or ""
     cells["R4"] = "pass" if not hp or ctx.meta.get("homepage_status") == 200 else (
@@ -91,7 +94,9 @@ def row(ctx: RepoContext) -> dict:
                                  defaults=labelsmod.defaults_for(ctx.owner, ctx.repo, repo_dir=rd, meta=ctx.meta))
         cells["R6"] = "pass" if all(o["op"] == "skip" and not o.get("log") for o in ops) else "fail"
     readme = rd / "README.md" if rd else None
-    if readme and readme.is_file():
+    if ctx.identity_pending:
+        cells["R7"] = "hold"  # README palette checks wait for approved identity, even with valid consent.
+    elif readme and readme.is_file():
         rl = readmelint.lint(ctx, readme)
         cells["R7"] = rl["result"]
         logs += rl.get("logs", [])

@@ -35,6 +35,28 @@ Condensed from the estate's profile README kit (decision 15), with decision 21 a
 
 Public org text never names a private repository, client, person, codename or strategy. Private repositories are never listed. An org with no public repositories shows the banner, the mission, the line `Work in this organization is private. Public CompleteTech projects are listed at [github.com/CompleteTech-LLC](https://github.com/CompleteTech-LLC).`, then the footer.
 
+### Foreign organization identity
+
+The CompleteTech-family wording above stays unchanged for configured
+`completetech` rows. A foreign profile uses its own website, GitHub organization
+and approved, explicitly configured contact email. CompleteTech affiliation is
+included only when the effective description's final sentence is exactly
+`A CompleteTech LLC organization.` or `Steward: CompleteTech LLC.`. A non-empty
+registry `profile.description` takes precedence over the brand row description;
+otherwise the brand description supplies it. The exact relationship is retained:
+an organization sentence does not become a steward assertion. Incidental or
+negated mentions, tier, consent and `footer: true` do not establish affiliation.
+
+Without that affiliation, the profile omits CompleteTech directory/contact copy
+and uses **Related projects and organizations** for configured cross-listings.
+The public slice still retains factual repository descriptions and links, even
+when they name another organization. With no public repositories showcased, a
+foreign profile says `No public repositories are currently showcased.`; this
+makes no claim about whether its work is private or the organization is empty.
+Decision 18 footer applicability remains independent. A foreign star List name
+alone does not establish its owning account: its link requires a matching
+captured public List URL (or captured viewer login plus matching List slug); otherwise `needs-input:star-list-url` is logged.
+
 ## Personal profile section order (CompleteDotTech, built last)
 
 `showcase.py org profile --user CompleteDotTech --meta-dir DIR [--out-dir CHECKOUT --render]` renders it from the registry's top-level `profile` (public slice: public, non-fork, non-archived pins and more projects only; no placeholder org, no T3 org before sign-off; no `why` or `notes` text) and runs the `lint public-leak` check against the whole estate before it writes `README.md` and `data.json` (and, with `--render`, the badges, cards and org tiles). The intro is the `intro --profile CompleteDotTech` asset it lists. The tech stack is a Markdown share line computed from the public repositories' `languages` until the stack plate exists.
@@ -80,3 +102,18 @@ All families use the same plate and pieces with different skins:
 ## Not used, and why
 
 Novelty contribution games, hotlinked stats and typing services (they break rule 1), filter-heavy animated looks (62–90% main-thread cost), jitter or flashing animation, imitation trading cards, more than one perpetual motion per page, anything clickable that exists only inside an image, web-font-first font stacks, symbol glyphs, `feTurbulence` grain, and 9–11 px tracked labels that carry information.
+
+## Intro identity and text fit
+
+Non-CompleteTech profile intros use the organization's configured `mark` or an
+explicit `--mark`, and an explicit `--tagline` (or a configured profile tagline).
+They never fall back to CompleteTech artwork or its tagline. Missing inputs return
+`needs-input:org-mark` or `needs-input:tagline` without writing an image.
+
+Every intro owner needs a configured organization row; an unresolved owner returns
+`needs-input:org-row` (exit 4), even when explicit text and artwork are supplied.
+Profile mode also needs a configured or explicit name and eyebrow; missing values
+return `needs-input:name` or `needs-input:eyebrow` instead of guessing profile facts.
+
+Eyebrows, names and taglines must fit their fixed size ladders. An exhausted ladder
+returns `art-fail` (exit 3) without writing an SVG; text is never truncated.

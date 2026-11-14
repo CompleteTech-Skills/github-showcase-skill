@@ -10,7 +10,8 @@ from .facts import RepoFacts
 
 
 class RepoContext:
-    def __init__(self, brand: Brand, meta: dict, repo_dir: str | Path | None = None, type_override: str | None = None):
+    def __init__(self, brand: Brand, meta: dict, repo_dir: str | Path | None = None, type_override: str | None = None,
+                 *, for_coverage: bool = False):
         self.brand, self.meta = brand, meta
         self.repo_dir = Path(repo_dir) if repo_dir else None
         self.facts = RepoFacts(meta, repo_dir)
@@ -30,10 +31,17 @@ class RepoContext:
         else:
             self._scoped_away = None
         self.org = brand.org(self.owner)
-        self.style = brand.style(self.owner)
+        family = self.org.get("family", "completetech")
+        self.identity_pending = bool((brand.raw.get("families", {}).get(family) or {}).get("identity_pending"))
+        # A read-only coverage row must report missing identity inputs, without borrowing a palette or needing
+        # consent to generate art. Ordinary contexts still require the real style and its owner/scope checks.
+        self.style = ({"name": family, "hold": True, "measured": False} if for_coverage and self.identity_pending
+                      else brand.style(self.owner, repo=self.repo))
         self.det = detect(meta if self.owner == meta.get("owner") else dict(meta, owner=self.owner), self.facts,
                           self.override, type_override, same_owner=self.same_owner)
         self.logs: list[str] = []
+        if self.identity_pending:
+            self.log("needs-input:brand-identity")
         if not self.org.get("known"):
             self.log("needs-input:org-row")
         if type_override:
@@ -129,10 +137,11 @@ class RepoContext:
         return self.is_fork or self.det["type"] in ("backup", "github-profile")
 
     def social_applicable(self) -> bool:
-        """R10: public product repositories, including the personal-profile capstone."""
+        """R10: public product repositories, including a T3 repository signed off for this run."""
         return (self.public and not self.meta.get("archived") and not self.is_fork and self.repo != ".github"
                 and not self.repo.lower().endswith(".github.io")
-                and self.tier in ("T1", "T1-user", "T2"))
+                and (self.tier in ("T1", "T1-user", "T2")
+                     or self.tier == "T3" and t3_signed_off(self.owner, self.repo)))
 
     def art_status(self) -> dict:
         """{"banner": None | code, "card": None | code, "icon": None | code}: None when the surface applies, else why it

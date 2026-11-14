@@ -33,6 +33,14 @@ original column order. The CLI exit status still follows failing cells.
 never skips asset checks or declares an unmeasured palette approved: doctor reads
 existing outputs and performs no rendering, so the flag has no effect.
 
+A family with `identity_pending` still gets a read-only coverage row, including
+for an unsigned T3 owner. The row logs `needs-input:brand-identity` and holds R7
+instead of checking README colours against an invented palette. Its applicable
+local art checks remain held when a checkout is supplied. A valid scoped sign-off
+can be reported on the row, but does not supply the missing identity. Generation
+still requires the usual consent checks and then the owner-supplied identity;
+neither `doctor` nor `--allow-unmeasured` provides those inputs.
+
 ## Repository checks
 
 | # | Check | Verified by | `doctor` source |
@@ -46,7 +54,7 @@ existing outputs and performs no rendering, so the flag has no effect.
 | R7 | README matches its variant: nav line, banner, H2 order, every image resolves, canonical GitHub links, no placeholder text, under 500 KiB; logged omissions → `incomplete`; preserve-list repositories checked for the additive items only | `lint readme` | `lint readme` |
 | R8 | A LICENSE is present and unchanged, or added from the approved list, or none is required | metadata `license` and the checkout | license rows |
 | R9 | CompleteTech-Skills `agent-skills` repositories: `assets/logo.png` and `assets/logo-dark.png` are byte-identical to the brand files; `n/a` elsewhere | sha256 | checkout |
-| R10 | Custom social preview on T1 and T2 public, non-fork, non-archived repositories (excluding `.github` and `*.github.io`). The personal profile repository is included in the capstone (decision 20). T2-R and T3 are `n/a`. | live GraphQL `usesCustomOpenGraphImage` | `unknown` without the field when applicable; otherwise `n/a` |
+| R10 | Custom social preview on T1, T2 and signed-off T3 public, non-fork, non-archived repositories (excluding `.github` and `*.github.io`). T3 requires `--allow-t3` and a current record covering this repository, matching upload-job applicability. The personal profile repository is included in the capstone (decision 20). T2-R and unsigned T3 are `n/a`. | live GraphQL `usesCustomOpenGraphImage` | `unknown` without the field when applicable; otherwise `n/a` |
 | R11 | `health_percentage` is 100 for public, non-fork, non-archived, non-`.github` repositories in T1 and T2 orgs other than romgenie (excluding those waiting on the license list) | metadata `health_percentage` | `unknown` without the field |
 | R12 | Custom properties set (orgs only; only if adopted) | org properties | not a repository column |
 

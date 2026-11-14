@@ -64,7 +64,7 @@ Do not use it for accounts outside the estate. Excluded owners (BunsDev, GoZippy
 | Render banners, cards, tiles, intros and contact sheets from metadata and committed brand files. | Draw illustrations, or let an image model draw text, logos or marks. |
 | Lint descriptions, topics, labels, READMEs, SVGs and banner PNGs against `ct-std-v1` and the user decisions. | Compose a new description sentence, an org description or a tagline; it returns `needs-writer` with the template. |
 | Propose GitHub changes as diffs, `gh` command lines, change records and `scripts/writer.py` jobs (`browser` jobs with exact click paths for UI-only steps) for a serialized writer. | Perform GitHub writes on its own. The only write is the Action committing into its own repository; label plans leave as `gh` argv and writer jobs (`labels --plan`). |
-| Write only the paths given by `--out`, `--out-dir`, `--jobs`, `--report` or `--records`, or README marker blocks and `docs/images/*` with `--write`. | Delete text from a README, crop or recolour a mark, or truncate text with an ellipsis. |
+| Write only named output paths, README marker blocks and `docs/images/*` with `--write`, or the selected local brand config, adjacent lock and optional copied mark with `brand ... --write`. | Delete text from a README, crop or recolour a mark, or truncate text with an ellipsis. |
 | Read metadata from a JSON file or with read-only `gh api` GETs, and read the private estate registry without copying it. | Read credentials, persist state, schedule jobs, change repository settings, or copy the registry's private data into a repository. |
 
 ## Core Workflow
@@ -176,6 +176,10 @@ meta --from-gh OWNER/REPO [--out FILE] [--allow-t3]
 fingerprint [--out-dir docs/images] [--github-output]
 fonts [--check | --fetch]
 config [--write-lock] [--crop]
+brand add-family --name NAME --label TEXT --canvas HEX --ink HEX --accent HEX
+    [--icon-ink HEX] [--icon-spark HEX] [--org ORG --tier TIER --display-name TEXT --footer yes|no|hold]
+    [--mark PNG] [--write]
+brand add-org --family FAMILY --org ORG --tier TIER --display-name TEXT --footer yes|no|hold [--mark PNG] [--write]
 describe [--text TEXT] [--type TYPE] [--records FILE]
 topics [--records FILE] [--gh] [--also-in ORG[,ORG] | --registry [FILE]]
 labels --emit-yml
@@ -184,6 +188,7 @@ banner [--out docs/images/banner.png] [--scale 2] [--icon PATH] [--subtitle TEXT
        [--key-chip TEXT]... [--chip TEXT]... [--category TEXT] [--allow-unmeasured] [--allow-hold]
        [--allow-few-chips] [--png-budget 300000]
 card [--out docs/images/card.svg] [--png PATH] [--icon PATH] [--allow-unmeasured] [--allow-hold]
+     [--key-chip TEXT]... [--chip TEXT]...
 org-banner --org OWNER --out PATH [--illustration PATH]
 org-tile --org OWNER [--avatar PATH] [--illustration PATH] [--out PATH] [--png PATH]
 intro (--profile CompleteDotTech | --org OWNER) [--name TEXT] [--eyebrow TEXT] [--tagline TEXT]
@@ -228,6 +233,7 @@ project copy-plan --target ORG|@me [--role org|template|estate] [--source OWNER/
 project readme --capture FILE --owner OWNER [--out FILE]
 project estate-plan [--copied FILE] [--user-id ID] [--source OWNER/N] [--jobs FILE]
 content social [--out PATH] [--title TEXT] [--icon PATH] [--job] [--allow-unmeasured] [--allow-hold]
+    [--key-chip TEXT]... [--chip TEXT]...
 content icon prompt|normalize|check [--option A|B] [--glyph FILE] [--art-direction FILE] [--in PNG]
     [--ground auto|transparent|keep] [--ground-tolerance DE (0 to 12)] [--seed N] [--out PATH] [--preview PATH]
     [--strict] [--min-contrast RATIO] [--ocr]
@@ -244,6 +250,7 @@ content sidebar --facts FILE [--packages FILE]... [--current FILE] [--repo OWNER
 | `meta` | Normalizes repository metadata from read-only `gh api` GETs and adds the detected type, variant and family. Stdlib only. A `--meta` file keeps every key a later check reads ([references/meta.schema.json](references/meta.schema.json)): `has_pages`, `size`, `template_repository` (the full_name GitHub records for a repository generated from a template) and `template_taglines` (that template's README tagline when the repository was generated and today, read by `--from-gh`), the About sidebar counts (`releases`, `deployments`, `packages`, `environments`), and the R10 evidence `uses_custom_og_image` (the captured GraphQL `usesCustomOpenGraphImage` is mapped to it; only a boolean counts, and two spellings that disagree leave R10 `unknown`). `--from-gh` makes no GraphQL call, so add the flag from the social preview job's read-only check. | `--out` |
 | `fingerprint` | Hashes description, topics, visibility, license, language, icon, override file, skill version and brand config; reports `changed` against `docs/images/.showcase.json`. Stdlib only. | `$GITHUB_OUTPUT` with `--github-output` |
 | `config` | Validates `references/brand.yaml` against its schema and checks the stdlib lock copy; `--write-lock` regenerates `references/brand.lock.json` after an edit. | `references/brand.lock.json` with `--write-lock` |
+| `brand` | Scaffolds explicit local family and organization rows, validates palette contrast and schema, and preserves existing owner policies. Dry run by default; see [brand onboarding](references/brand-onboarding.md). A new palette stays unmeasured and supplies no approval or legal wording. | Selected config and adjacent lock, optional copied mark, only with `--write` |
 | `fonts` | `--check` verifies `assets/fonts/FONTS.json` sha256; `--fetch` downloads the pinned OFL fonts (ClawHub installs). | `assets/fonts/` with `--fetch` |
 | `describe` | Runs D1–D8, V1, P1, B1 and X1 and answers `keep`, `edit` or `needs-writer`. | `--records` |
 | `topics` | Runs the closed-vocabulary merge algorithm (brand, family, org membership, type, domain, tech; 10 public, 8 private). `--also-in ORG[,ORG]` (or `--registry`, which reads the repository's `also_in` from the private registry, read only, or an `also_in` list in the metadata) adds one org membership topic per cross-listing org from `org_topics` (never the home org's own). | `--records` |
@@ -268,6 +275,8 @@ content sidebar --facts FILE [--packages FILE]... [--current FILE] [--repo OWNER
 `--type` replaces type detection with a §5.4 type (logged `type-override:<type>`); use it only when neither a checkout nor a captured file tree is available, for example with registry metadata. Without a tree, the type is provisional (`needs-input:file-tree`); a README link to a root `SKILL.md` still counts as rule 5.
 
 `lint readme` and `lint all` refuse excluded, hold and T3 owners like every other repository command. `lint all` fails an applicable banner or card that is missing; an exempt one is linted only if it exists. Forks outside the watching org, backups, archived and `.github` repositories need the banner (they have no card); a preserve-list README is exempt from the banner only when review q57 `pres` is "Leave them unchanged".
+
+`banner` accepts a nonblank, single-line `--subtitle` or configured `subtitle:` when the captured description is empty, and logs `description-missing` so that metadata work remains visible. A blank selected subtitle returns `needs-input:subtitle`; a valid CLI subtitle takes precedence over an unused blank config value. `card` and `content social` accept repeatable `--key-chip` and `--chip` with the same validation and ordering as the banner. The combined selected row supports at most four facts, including configured or inferred keys: supplied attributes that exceed that count are rejected rather than trimmed. Selected configured and CLI chips that cannot fit return `art-fail`; only automatically derived facts retain their priority-based selection. The deprecated social alias accepts the same inputs.
 
 Banner refusals: a watching-org fork returns `exempt` and writes nothing; the watching org's `.github` gets the banner and icon like any `.github`; another watching-org repository that is not a fork is refused (exit 2, `hold:watching-non-fork`) until decided, then `--allow-hold`; `CompleteDotTech/CompleteDotTech` (it opens with the intro) and a placeholder org's `.github` return `exempt:*`. Every other repository gets the hero banner (decisions 12, 13 and 18): forks outside the watching org (G), backups and archived repositories (H) and `.github` repositories (J) included, while `card` returns `exempt:no-card` for forks, backups and `.github`. AI-Ascension (`banner: keep-existing`) gets the hero in its own palette above its existing banner (q57 `aia` and `pres` defaults) and returns `exempt:keep-existing` only when `readme.preserve_banner` is `unchanged`; TouchedByAnAgent (`hold: true`) needs `--allow-hold`; families marked `measured: false` need `--allow-unmeasured` (otherwise exit 4, `needs-input:palette-v1.1`).
 
@@ -300,6 +309,7 @@ These user decisions outrank `STANDARD.md` (`ct-std-v1`). Full text: [references
 
 | Resource | Role |
 |---|---|
+| [references/brand-boundaries.md](references/brand-boundaries.md) | Explicit per-org legal wording and fail-closed brand identity. |
 | [references/estate-standard.md](references/estate-standard.md) | Tiers, brand strings, golden rules, org identity table, repo naming. |
 | [references/descriptions.md](references/descriptions.md) | Description checks D1–D8, V1, P1, B1, X1, keep-or-edit order, templates by type. |
 | [references/topics.md](references/topics.md) | Topic layers, type detection rules 1–25, vocabulary, aliases, merge algorithm, safety. |
@@ -317,6 +327,7 @@ These user decisions outrank `STANDARD.md` (`ct-std-v1`). Full text: [references
 | [references/constraints.md](references/constraints.md) | Platform limits, write discipline, approval-gated actions, change records. |
 | [references/definition-of-done.md](references/definition-of-done.md) | Checks R1–R12 and O1–O11 mapped to `doctor` and `lint` cells. |
 | [references/decisions.md](references/decisions.md) | The user decisions this skill implements, verbatim. |
+| [references/brand-onboarding.md](references/brand-onboarding.md) | Local `brand add-family` and `brand add-org` walkthrough, inputs and write boundaries. |
 | `references/brand.yaml`, `references/brand.schema.json`, `references/repo-config.schema.json`, `references/meta.schema.json` | Brand data and the schemas for it, for `.github/showcase.yml` and for metadata. |
 | `references/standard/` | Machine-readable standard: topics, types, labels, descriptions, README variants, naming. |
 | `examples/` | Synthetic Northwind Trading Co. metadata, small fixture checkouts, an example `.github/showcase.yml`, a synthetic estate (`examples/estate/`: registry and metadata for the `org` commands), and `render_examples.sh`, which regenerates every committed preview. |
@@ -328,7 +339,7 @@ These user decisions outrank `STANDARD.md` (`ct-std-v1`). Full text: [references
 |---|---|
 | Execution | Runs the local Python entry point `scripts/showcase.py` (and `scripts/action_commit.sh`, `scripts/action_prepare.py` inside the Action only). |
 | Reads | The target repository directory (`--repo-dir`), a metadata JSON (`--meta`) or directory (`--meta-dir`), `references/` and `assets/`; for the `org`, `project` and `content` groups also the estate registry and the approval files (`--registry`, `--approved`, `--approved-yaml`, `--actions`, `--decisions`, or the bundle beside the skill), read only and never copied. |
-| Writes | Only paths given by `--out`, `--png`, `--records`, `--jobs`, `--report`, `--out-dir`, `--files-dir`, `--preview` or `--cache`; with `--write`, the README marker blocks and `docs/images/*`; with `--bootstrap`, `CONTRIBUTING.md` owner tokens; `content icon normalize` defaults to `assets/icon.png` in the target checkout. |
+| Writes | Only paths given by `--out`, `--png`, `--records`, `--jobs`, `--report`, `--out-dir`, `--files-dir`, `--preview` or `--cache`; with `--write`, the README marker blocks and `docs/images/*`; with `--bootstrap`, `CONTRIBUTING.md` owner tokens; `content icon normalize` defaults to `assets/icon.png` in the target checkout. `brand ... --write` writes the selected config, adjacent lock and optional mark beneath that config's package root. |
 | Network | None by default. `meta --from-gh`, `labels --plan` and `adopt` without metadata, and opt-in `org labels --repos-from-gh` run read-only `gh api` GETs; `enterprise discover` and `enterprise snapshot` run read-only `gh api graphql` queries; `content links --online` and `content images --online` make cached, rate-limited HEAD/GET requests to the hosts the files link to and read-only `gh api` GETs; `fonts --fetch` downloads the pinned fonts over HTTPS; `footer --check --online` sends one HEAD to each of the two decision 18 logo URLs on raw.githubusercontent.com. `org` without `--repos-from-gh`, `project`, `enterprise snapshot-query`, `plan` and every other command only print the commands they plan. |
 
 | Not Included | Boundary |
