@@ -1099,6 +1099,8 @@ def reorder_lead(ctx: RepoContext, text: str) -> str:
 
 
 LICENSE_MARK = "<!-- showcase:license -->"
+LICENSE_BODY_START = "<!-- showcase:license:body:start -->"
+LICENSE_BODY_END = "<!-- showcase:license:body:end -->"
 
 
 def license_sha(body: str) -> str:
@@ -1108,23 +1110,28 @@ def license_sha(body: str) -> str:
 
 def managed_license(body: str) -> str:
     """Mark newly generated legal prose so later changes can be detected."""
-    return f"{LICENSE_MARK}\n<!-- showcase:license:sha256={license_sha(body)} -->\n{body}"
+    return (f"{LICENSE_MARK}\n<!-- showcase:license:sha256={license_sha(body)} -->\n"
+            f"{LICENSE_BODY_START}\n{body}\n{LICENSE_BODY_END}")
 
 
 def license_block(ctx: RepoContext, text: str) -> str:
-    """Refresh only a paragraph whose recorded digest still matches its content."""
-    i = masked(text).find(LICENSE_MARK)
+    """Refresh only an unambiguously bounded body with a matching digest."""
+    visible = masked(text)
+    i = visible.find(LICENSE_MARK)
     if i < 0:
+        return text
+    if any(visible.count(marker) != 1 for marker in (LICENSE_MARK, LICENSE_BODY_START, LICENSE_BODY_END)):
         return text
     lic = license_section(ctx)
     if not lic or any(code in ctx.logs for code in ("needs-input:license-policy", "needs-input:license-file",
                                                     "needs-input:licensing-file")):
         return text
-    pattern = re.escape(LICENSE_MARK) + r"\n<!-- showcase:license:sha256=([0-9a-f]{64}) -->\n(.*?)(\n\n|\n?$)"
+    pattern = (re.escape(LICENSE_MARK) + r"\n<!-- showcase:license:sha256=([0-9a-f]{64}) -->\n" +
+               re.escape(LICENSE_BODY_START) + r"\n(.*?)\n" + re.escape(LICENSE_BODY_END))
     m = re.compile(pattern, re.S).match(text, i)
     if not m or license_sha(m.group(2)) != m.group(1):
         return text
-    text = text[:i] + managed_license(lic[1]) + m.group(3) + text[m.end():]
+    text = text[:i] + managed_license(lic[1]) + text[m.end():]
     h = re.search(r"(?m)^## (?:License|Licensing|Licence)[ \t]*\n(\n?)\Z", text[:i])
     return text[:h.start()] + f"## {lic[0]}\n" + h.group(1) + text[i:] if h else text
 

@@ -336,3 +336,45 @@ def test_malformed_license_digest_preserves_authored_paragraph(tmp_path, monkeyp
     result = run_cli("--meta", metadata, "--repo-dir", checkout, "readme", "--mode", "header", "--write")
     assert result.returncode == 0
     assert "<!-- showcase:license:sha256=broken -->\nOwner terms." in (checkout / "README.md").read_text()
+
+
+@pytest.mark.parametrize("damage", [None, "edit", "missing-start", "missing-end", "duplicate-end", "legacy"])
+def test_multiline_license_boundaries_through_cli(tmp_path, monkeypatch, damage):
+    import yaml
+    from conftest import ROOT
+
+    _, checkout, metadata = invoke(tmp_path, monkeypatch)
+    config = yaml.safe_load((ROOT / "references" / "brand.yaml").read_text(encoding="utf-8"))
+    config["orgs"]["LibreEvolve"]["license_wording"] = "First synthetic paragraph.\n\nSecond synthetic paragraph."
+    config_path = tmp_path / "brand.yaml"
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    args = ["--config", config_path, "--meta", metadata, "--repo-dir", checkout, "readme"]
+    result = run_cli(*args, "--mode", "scaffold", "--write")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    readme = checkout / "README.md"
+    original = readme.read_text(encoding="utf-8")
+    start = "<!-- showcase:license:body:start -->\n"
+    end = "\n<!-- showcase:license:body:end -->"
+    assert "First synthetic paragraph.\n\nSecond synthetic paragraph." in original
+    replacements = {"edit": ("Second synthetic paragraph.", "Owner-edited paragraph."),
+                    "missing-start": (start, ""), "missing-end": (end, ""),
+                    "duplicate-end": (end, end + end), "legacy": (start, "")}
+    if damage:
+        old, new = replacements[damage]
+        original = original.replace(old, new)
+        if damage == "legacy":
+            original = original.replace(end, "")
+        readme.write_text(original, encoding="utf-8")
+    meta = json.loads(metadata.read_text(encoding="utf-8"))
+    meta["license"] = "Apache-2.0"
+    metadata.write_text(json.dumps(meta), encoding="utf-8")
+    result = run_cli(*args, "--mode", "header", "--write")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    updated = readme.read_text(encoding="utf-8")
+    assert "License Apache-2.0" in updated
+    if damage:
+        assert original[original.index("<!-- showcase:license -->"):] == updated[updated.index("<!-- showcase:license -->"):]
+    else:
+        assert "Licensed under the Apache-2.0" in updated
+        assert "Code and documentation are licensed under the MIT License" not in updated
+        assert "First synthetic paragraph.\n\nSecond synthetic paragraph." in updated
