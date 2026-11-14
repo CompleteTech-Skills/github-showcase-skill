@@ -24,8 +24,10 @@ def lint(tmp_path, source):
 
 @pytest.mark.parametrize('reference', [False, True])
 @pytest.mark.parametrize('written,actual,wrong', [
-    (r'x\&amp;y', 'x&amp;y', 'x&y'),
+    (r'x\&amp;y', 'x&y', 'x&amp;y'),
     ('x&copy.png', 'x&copy.png', 'x©.png'),
+    (r'x&copy\;png', 'x&copy;png', 'x©png'),
+    (r'x&amp\;y', 'x&amp;y', 'x&y'),
     ('x&amp;y', 'x&y', 'x&amp;y'),
     ('x&#169;.png', 'x©.png', 'x&#169;.png'),
 ])
