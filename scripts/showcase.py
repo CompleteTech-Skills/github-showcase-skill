@@ -219,15 +219,31 @@ def cmd_card(args):
     out = Path(args.out) if args.out else default_out(args, "docs/images/card.svg")
     fonts = Fonts(ctx.brand)
     svg, scene, info = card.render(ctx, fonts, args.icon)
+    if args.format_generated:
+        from ctshowcase.formatting import format_text
+        svg = format_text(ctx.repo_dir, out, svg)
     lint = svglint.lint_bytes("card", svg.encode(), str(out))
     if lint["result"] != "PASS":
         return base("card", ctx, result="fail", lint=lint), CHECK_FAILED
+    sidecar = None
+    if args.format_generated and out.parent.name == "images" and out.parent.parent.name == "docs":
+        import hashlib
+        from ctshowcase import fingerprint as fp
+        record = {"sha256": hashlib.sha256(svg.encode()).hexdigest(), "bytes": len(svg.encode())}
+        if isinstance(ctx.meta.get("id"), int) and not isinstance(ctx.meta["id"], bool):
+            record["repository_id"] = ctx.meta["id"]
+        sidecar_path = out.parent / fp.SIDECAR
+        sidecar = (sidecar_path, format_text(ctx.repo_dir, sidecar_path,
+                   fp.sidecar_text(out.parent, fp.inputs(ctx.meta, ctx.repo_dir), ctx.brand.sha256, out.name, record)))
     write_bytes(out, svg.encode())
     outputs = [str(out)]
     if args.png:
         write_bytes(Path(args.png), png_bytes(card.preview_png(scene, fonts)))
         outputs.append(args.png)
-    maybe_sidecar(ctx, out, file_record(out))
+    if sidecar is None:
+        maybe_sidecar(ctx, out, file_record(out))
+    else:
+        write_bytes(sidecar[0], sidecar[1].encode())
     return base("card", ctx, result="ok", out=str(out), outputs=outputs, bytes=len(svg.encode()),
                 alt=f"{ctx.repo}: {ctx.meta.get('description')}", items=info["items"], icon=info["icon"],
                 lint=lint), OK
@@ -396,6 +412,9 @@ def cmd_readme(args):
     path = rd / "README.md"
     if args.no_regroup and (args.bootstrap or args.mode == "scaffold"):
         raise ShowcaseError("--no-regroup cannot be combined with --bootstrap or --mode scaffold", log="usage")
+    if args.no_regroup and args.format_generated:
+        raise ShowcaseError("--no-regroup preserves outside bytes and cannot be combined with --format-generated",
+                            log="usage")
     original = ""
     if path.is_file():
         with path.open(encoding="utf-8", newline="") as stream:
@@ -472,6 +491,20 @@ def cmd_readme(args):
     if problems:
         return base("readme", ctx, result="needs-input", mode=mode, problems=problems, written=False,
                     logs=ctx.logs + ["needs-input:readme-block-ownership"]), NEEDS_INPUT
+    if args.format_generated:
+        from ctshowcase.formatting import format_text
+        formatted = format_text(rd, path, after)
+        problems = readme.preservation(before, formatted, removed)
+        if problems:
+            return base("readme", ctx, result="fail", mode=mode, problems=problems[:20],
+                        logs=ctx.logs + ["readme-shrink"]), CHECK_FAILED
+        after = formatted
+        if contrib_new is not None:
+            formatted_contrib = format_text(rd, rd / "CONTRIBUTING.md", contrib_new)
+            if re.sub(r"\s", "", contrib_new) != re.sub(r"\s", "", formatted_contrib):
+                raise ShowcaseError("formatter changed CONTRIBUTING.md content; all outputs left unchanged",
+                                    log="formatter-content")
+            contrib_new = formatted_contrib
     after = readme.restore_bytes(original, before, after)
     changed = after != original
     diff = "".join(difflib.unified_diff(original.splitlines(True), after.splitlines(True), "a/README.md", "b/README.md"))
@@ -904,6 +937,8 @@ def cmd_doctor(args):
         print(doctor.as_md(r, args.header))
     else:
         print(json.dumps(r, ensure_ascii=False))
+    if fmt != "json" and (r["tooling"]["formatters"] or r["tooling"]["validators"]):
+        print("Tooling preflight (not run): " + json.dumps(r["tooling"], ensure_ascii=False), file=sys.stderr)
     return None, CHECK_FAILED if any(v == "fail" for v in r["cells"].values()) else OK
 
 
@@ -1027,6 +1062,7 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--icon")
     s.add_argument("--allow-unmeasured", action="store_true")
     s.add_argument("--allow-hold", action="store_true")
+    s.add_argument("--format-generated", action="store_true", help="format SVG with the target's pinned local Prettier")
     s.set_defaults(func=cmd_card)
 
     # deprecated alias of the contract name `content social` (same options, same file); added without `help`, so
@@ -1085,6 +1121,7 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--no-regroup", action="store_true", help="refresh existing marker blocks without regrouping headings")
     s.add_argument("--badges", choices=("shields", "local"), default="shields",
                    help="local renders badges offline to docs/images/badges/*.svg (profile READMEs)")
+    s.add_argument("--format-generated", action="store_true", help="format generated text with the target's pinned local Prettier")
     s.set_defaults(func=cmd_readme)
 
     s = sub.add_parser("describe", help="lint a description against §4.1 and propose keep/edit")
