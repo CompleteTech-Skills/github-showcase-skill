@@ -57,3 +57,42 @@ def test_completed_multiline_optional_title_hides_image_cli(tmp_path, ending, op
 def test_unterminated_title_does_not_cross_quote_boundary_cli(tmp_path):
     source = '> [a]: /url\n> "unfinished\n# boundary\n![Shot](docs/images/missing.png)\n'
     assert MISSING in cli_fails(tmp_path, source, '\n')
+
+
+@pytest.mark.parametrize("ending", ["\n", "\r\n"])
+def test_definition_in_list_preserves_indented_paragraph_cli(tmp_path, ending):
+    source = ('- [a]: /url\n      `\n    `\n'
+              '![Shot](docs/images/missing.png)\n'
+              '![Bad](https://img.shields.io/badge/x-x-ABCDEF)\n`\n')
+    fails = cli_fails(tmp_path, source, ending)
+    assert MISSING in fails
+    assert any('off-palette badge colour ABCDEF' in fail for fail in fails)
+
+
+@pytest.mark.parametrize("ending", ["\n", "\r\n"])
+@pytest.mark.parametrize("inner,diagnostic", [
+    ('![Shot](docs/images/missing.png)', MISSING),
+    ('![Bad](https://img.shields.io/badge/x-x-ABCDEF)', 'off-palette badge colour ABCDEF'),
+    ('<img src="docs/images/missing.png" alt="Shot">', MISSING),
+])
+def test_reference_suffix_images_render_cli(tmp_path, ending, inner, diagnostic):
+    source = f'[Docs][r](url "{inner}")\n\n[r]: target\n'
+    assert any(diagnostic in fail for fail in cli_fails(tmp_path, source, ending))
+
+
+def test_optional_title_lookahead_does_not_copy_remaining_lines(monkeypatch):
+    class CountingList(list):
+        copied = 0
+
+        def __getitem__(self, key):
+            result = super().__getitem__(key)
+            if isinstance(key, slice):
+                type(self).copied += len(result)
+            return result
+
+    monkeypatch.setattr(mdcode, 'list', CountingList, raising=False)
+    for count in (500, 1000, 2000):
+        CountingList.copied = 0
+        mdcode._layout.cache_clear()
+        mdcode._layout('[a]: /url\n "title"\n' * count)
+        assert CountingList.copied <= 4 * count

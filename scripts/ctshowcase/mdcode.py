@@ -589,6 +589,22 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
             table = False
         elif seg:
             para_content, matched = _paragraph_line(body, para_path)
+            # Inside a list, an indented non-title line can continue the
+            # paragraph from which the definition is removed. Keep that
+            # paragraph open so later lazy continuations retain its context.
+            list_continuation = (matched and any(kind == "item" for kind, _ in para_path)
+                                 and _indent_columns(para_content) >= 4
+                                 and not para_content.lstrip(" ").startswith(('"', "'", "(")))
+            if list_continuation:
+                list_continuation = False
+                for future_index in range(line_index + 1, len(lines)):
+                    inner, continues = _paragraph_line(
+                        block_line(lines[future_index].rstrip("\r\n")), para_path)
+                    if not continues or not inner.strip(" "):
+                        break
+                    if _indent_columns(inner) < 4:
+                        list_continuation = not _paragraph_interrupts(inner, continues)
+                        break
             if definition and definition.state == "complete":
                 # A following title is part of the definition only inside the
                 # same containers. Otherwise the definition has no paragraph
@@ -602,7 +618,8 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
                     probe = _DefinitionProgress(definition.parts[0])
                     for part in definition.parts[1:]:
                         probe.feed(part)
-                    for future in lines[line_index:]:
+                    for future_index in range(line_index, len(lines)):
+                        future = lines[future_index]
                         inner, continues = _paragraph_line(block_line(future.rstrip("\r\n")), para_path)
                         if not continues or not inner.strip(" ") or _paragraph_interrupts(inner, continues):
                             break
@@ -610,13 +627,13 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
                         if probe.state in ("complete", "invalid"):
                             break
                     possible_title = probe.state == "complete" and probe.has_title
-                if not possible_title:
+                if not possible_title and not list_continuation:
                     flush(seg)
                     seg = []
             if seg and definition:
                 was_complete = definition.state == "complete"
                 definition.feed(para_content)
-                if was_complete and definition.state == "invalid":
+                if was_complete and definition.state == "invalid" and not list_continuation:
                     flush(seg)
                     seg = []
             if not seg:
@@ -2159,16 +2176,10 @@ def _inline_image_target(text: str, start: int) -> tuple[str, int] | None:
 def _link_literal_spans(document: str) -> tuple[tuple[int, int], ...]:
     """Spans of resolved inline link destinations and titles, from `(` through the closing `)`. This text is literal: a
     `![...](...)` inside a link title renders no image, while a linked image in the link text is not covered. The spans
-    are sorted and never overlap, because `_active_openers` skips a completed destination."""
+    come from the precedence pass, which skips each completed destination."""
     document = _source_view(document)
-    spans = []
-    for i in sorted(_active_openers(document)):
-        if document[i + 1:i + 2] != "(":
-            continue
-        target = _inline_image_target(document, i + 1)
-        if target is not None:
-            spans.append((i + 1, target[1]))
-    return tuple(sorted(spans))
+    return tuple(span for span in _accepted_inline(document)[3]
+                 if document[span[0]:span[0] + 1] == "(")
 
 
 def _markdown_images(text: str, document: str) -> list[tuple[str, str, int, int]]:
