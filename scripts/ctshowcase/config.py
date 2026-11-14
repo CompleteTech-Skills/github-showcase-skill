@@ -180,7 +180,12 @@ class Brand:
         if not rel:
             return None
         p = Path(rel)
-        return p if p.is_absolute() else self.root / p
+        if p.is_absolute():
+            return p
+        if self.root != ROOT:  # An explicitly redirected package keeps its existing asset-root contract.
+            return self.root / p
+        local = self.path.resolve().parent.parent / p
+        return local if local.is_file() else self.root / p
 
     def font_file(self, key: str) -> Path:
         fonts = self.raw["fonts"]
