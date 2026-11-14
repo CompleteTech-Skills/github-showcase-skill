@@ -111,3 +111,51 @@ def test_nested_list_thematic_scan_is_bounded(monkeypatch, ending, tmp_path):
         assert measured.characters - before <= 8 * depth
     assert 'R7 local image does not resolve: missing.png' in lint(
         tmp_path, '- ' * 2000 + 'text' + ending + '\n\n![Shot](missing.png)')
+
+
+@pytest.mark.parametrize('ending', ['\n', '\r\n', '\r'])
+@pytest.mark.parametrize('prefix,destination,indent', [
+    ('', '/url', '    '), ('> ', '> /url', '    '), ('- ', '  /url', '      '),
+])
+def test_split_destination_keeps_code_boundary_cli(tmp_path, ending, prefix, destination, indent):
+    source = (prefix + '[a]:\n' + destination + '\n' + indent + '`\n'
+              '![Shot](missing.png)\n![Bad](https://img.shields.io/badge/x-x-ABCDEF)\n`').replace('\n', ending)
+    fails = lint(tmp_path, source)
+    assert 'R7 local image does not resolve: missing.png' in fails
+    assert 'R7 off-palette badge colour ABCDEF' in fails
+    assert ('Shot', 'missing.png') in mdcode._images(mdcode._outside_code(source), source)
+
+
+@pytest.mark.parametrize('opener,closer', [('\"', '\"'), ("'", "'"), ('(', ')')])
+@pytest.mark.parametrize('ending', ['\n', '\r\n', '\r'])
+def test_reference_title_literal_backslash_cli(tmp_path, opener, closer, ending):
+    source = f'![Shot][r]\n\n[r]: missing.png {opener}first\\\nsecond{closer}'.replace('\n', ending)
+    assert 'R7 local image does not resolve: missing.png' in lint(tmp_path, source)
+    invalid = source.replace('second' + closer, 'second' + closer + ' extra')
+    assert 'R7 local image does not resolve: missing.png' not in lint(tmp_path, invalid)
+
+
+@pytest.mark.parametrize('prefix', ['', '> ', '> > '])
+@pytest.mark.parametrize('extra,valid', [('', True), ('x', False)])
+def test_definition_label_length_excludes_container_prefix_cli(tmp_path, prefix, extra, valid):
+    a, b = 'a' * 499, 'b' * 499 + extra
+    source = f'![Shot][{a} {b}]\n\n{prefix}[{a}\n{prefix}{b}]: missing.png'
+    assert ('R7 local image does not resolve: missing.png' in lint(tmp_path, source)) is valid
+
+
+def test_nested_container_suffix_copy_is_linear():
+    class MeasuredString(str):
+        copied = 0
+
+        def __getitem__(self, key):
+            result = super().__getitem__(key)
+            if isinstance(key, slice):
+                type(self).copied += len(result)
+                return type(self)(result)
+            return result
+
+    for depth in (1000, 2000, 4000):
+        MeasuredString.copied = 0
+        path, rest = mdcode._container_path(MeasuredString('- ' * depth + 'text*'))
+        assert len(path) == depth and rest == 'text*'
+        assert MeasuredString.copied <= 4 * depth + 20

@@ -87,6 +87,9 @@ _BULLET_ITEM = re.compile(r"^ {0,3}[-+*][ \t]+\S")
 _ORDERED_ITEM = re.compile(r"^ {0,3}([0-9]{1,9})[.)][ \t]+\S")
 _ITEM_PREFIX = re.compile(r"^ {0,3}(?:[-+*]|[0-9]{1,9}[.)])(?: {1,4}(?=\S)|[ \t]|$)")
 _QUOTE = re.compile(r" {0,3}> ?")
+_ITEM_AT = re.compile(_ITEM_PREFIX.pattern.removeprefix("^"))
+_MARKER_AT = re.compile(r" {0,3}(?:[-+*]|[0-9]{1,9}[.)])")
+_THEMATIC_AT = re.compile(_THEMATIC.pattern.removeprefix("^"))
 _DELIMITER_CELLS = re.compile(r"\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*")
 _TYPE_6 = ("address article aside base basefont blockquote body caption center col colgroup dd details dialog dir div dl "
            "dt fieldset figcaption figure footer form frame frameset h1 h2 h3 h4 h5 h6 head header hr html iframe legend "
@@ -268,27 +271,25 @@ def _container_path(body: str) -> tuple[tuple[tuple[str, int], ...], str]:
     trimmed = body.rstrip(" \t")
     marker = trimmed[-1:] if trimmed[-1:] in ("-", "*", "_") else ""
     thematic_start = len(trimmed.rstrip(marker + " \t")) if marker else len(body)
-    original_length = len(body)
+    cursor = 0
     while True:
-        if match := _QUOTE.match(body):
+        if match := _QUOTE.match(body, cursor):
             path.append(("quote", 0))
-            body = body[match.end():]
-        elif not (marker and original_length - len(body) >= thematic_start
-                  and _THEMATIC.match(body)) and (match := _ITEM_PREFIX.match(body)):
-            marker = re.match(r"^ {0,3}(?:[-+*]|[0-9]{1,9}[.)])", body)
-            end = marker.end()
+            cursor = match.end()
+        elif not (marker and cursor >= thematic_start
+                  and _THEMATIC_AT.match(body, cursor)) and (match := _ITEM_AT.match(body, cursor)):
+            item_marker = _MARKER_AT.match(body, cursor)
+            end = item_marker.end()
             while end < len(body) and body[end] == " ":
                 end += 1
-            # CommonMark 5.2: a marker with blank content has one virtual
-            # padding column, regardless of its trailing whitespace. For a
-            # nonempty item, 1..4 spaces are padding; greater indentation
-            # uses one padding column and retains the excess as content.
+            # A blank item has one virtual padding column. Nonempty items
+            # use up to four spaces, leaving any excess as content.
             empty = end == len(body)
-            width = end if not empty and 0 < end - marker.end() <= 4 else marker.end() + 1
+            width = end - cursor if not empty and 0 < end - item_marker.end() <= 4 else item_marker.end() - cursor + 1
             path.append(("item", width))
-            body = "" if empty else body[width:]
+            cursor = len(body) if empty else cursor + width
         else:
-            return tuple(path), body
+            return tuple(path), body[cursor:]
 
 
 def _continue_containers(body: str, path: tuple[tuple[str, int], ...]) -> str | None:
@@ -440,7 +441,10 @@ class _DefinitionProgress:
             trial = candidate + closer
             match = REF_DEFINITION.match(trial)
             if (match and match.end() == len(trial) and _definition_key(match, trial)
-                    and (match.group(3) is None or _balanced_destination(match.group(3)))):
+                    and (match.group(3) is None or _balanced_destination(match.group(3)))
+                    and match.end(2 if match.group(2) is not None else 3) < len(candidate)
+                    and candidate[match.end(2) + 1 if match.group(2) is not None else match.end(3):]
+                    .lstrip(" \t\r\n\x00").startswith(opener)):
                 self.state, self.closer = "title", closer
                 return
         # Labels may span lines but are limited to 999 characters. A colon
@@ -936,8 +940,8 @@ _SOFT_NL = _NL + rf"(?![ \t\x00]*{_NL})"
 REF_DEFINITION = re.compile(
     rf"(?:\A|(?<=\n)|(?<=\r)(?!\n))\x00* {{0,3}}\[((?:\\.|[^\[\]\\\r\n]|{_SOFT_NL})+)\]:"
     rf"[ \t\x00]*(?:{_NL}[ \t\x00]*)?(?:<((?:\\[^\r\n]|[^<>\\\r\n])*)>|((?!<)[^\x00-\x20\x7f]+?))"
-    rf"(?:(?:[ \t]+|[ \t\x00]*{_NL}[ \t\x00]*)(?:\"(?:\\.|[^\"\\\r\n]|{_SOFT_NL})*\"|"
-    rf"'(?:\\.|[^'\\\r\n]|{_SOFT_NL})*'|\((?:\\.|[^()\\\r\n]|{_SOFT_NL})*\)))?"
+    rf"(?:(?:[ \t]+|[ \t\x00]*{_NL}[ \t\x00]*)(?:\"(?:\\.|\\(?={_NL})|[^\"\\\r\n]|{_SOFT_NL})*\"|"
+    rf"'(?:\\.|\\(?={_NL})|[^'\\\r\n]|{_SOFT_NL})*'|\((?:\\.|\\(?={_NL})|[^()\\\r\n]|{_SOFT_NL})*\)))?"
     r"[ \t]*(?=\r|\n|\Z)")
 # a title may span lines but never a blank one; NUL stands in for a blanked quote or list-item prefix (see below)
 # CommonMark raw HTML: an open tag needs a valid tag name, valid attributes and a closing `>`; anything else is text
@@ -1903,7 +1907,7 @@ def _label_key(value: str) -> str:
 def _definition_key(match: re.Match, document: str) -> str:
     """Peeled container/indent prefixes are separators, never literal label NULs."""
     start = match.start(1)
-    label = "".join(" " if char == "\x00" and document[start + i] != "\x00" else char
+    label = "".join("" if char == "\x00" and document[start + i] != "\x00" else char
                     for i, char in enumerate(match.group(1)))
     return _label_key(label)
 
