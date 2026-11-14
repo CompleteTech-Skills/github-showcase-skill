@@ -2,6 +2,7 @@
 Fixtures are synthetic captures shaped like the documented GraphQL responses (tests/fixtures/project)."""
 import argparse
 import copy
+import hashlib
 import json
 import os
 import re
@@ -366,6 +367,33 @@ def test_estate_plan_stage_two(estate_resolver):
 
 
 # ----------------------------------------------------------------------------------------------- CLI layer
+def _loopback_output_summary(output):
+    """Report bounded output evidence without exposing subprocess output or credentials."""
+    data = output.encode("utf-8", errors="replace") if isinstance(output, str) else (output or b"")
+    indicators = [word for word in (b"timeout", b"connection refused", b"connection reset", b"EOF")
+                  if word.lower() in data.lower()]
+    return f"bytes={len(data)}, sha256={hashlib.sha256(data).hexdigest()}, indicators={indicators}"
+
+
+def _loopback_timeout_diagnostic(events, exc):
+    return (f"gh timed out after {exc.timeout}s; subprocess state: killed and reaped by subprocess.run; "
+            f"handler events: {list(events)}; stdout: {_loopback_output_summary(exc.stdout)}; "
+            f"stderr: {_loopback_output_summary(exc.stderr)}")
+
+
+def test_loopback_timeout_diagnostic_redacts_output():
+    import subprocess
+
+    exc = subprocess.TimeoutExpired(["gh"], 10, output=b"secret-token", stderr=b"private-data timeout")
+    message = _loopback_timeout_diagnostic(["request-arrived", "reading-body"], exc)
+    assert "request-arrived" in message and "reading-body" in message
+    assert "bytes=12" in message and "bytes=20" in message
+    assert "b'timeout'" in message
+    assert "secret-token" not in message and "private-data" not in message
+    assert "killed and reaped" in message
+    assert "bytes=0" in _loopback_output_summary(None)
+
+
 def test_register_and_cmd_project(tmp_path):
     p = argparse.ArgumentParser()
     p.add_argument("--config")
@@ -391,20 +419,48 @@ def test_inline_view_job_serializes_correctly_with_real_gh(tmp_path, brand):
     """Exercise gh's field encoding against a loopback server; no GitHub mutation runs."""
     import http.server
     import shutil
+    import socket
     import subprocess
     import threading
+    from collections import deque
 
     gh = shutil.which("gh")
     if gh is None:
         pytest.skip("gh CLI is required to verify inline REST field serialization")
     received = []
+    events = deque(maxlen=16)
+    connections = []
+    lock = threading.Lock()
+    stopping = threading.Event()
+
+    def record(event):
+        with lock:
+            events.append(event)
+
+    class Server(http.server.HTTPServer):
+        def get_request(self):
+            connection, address = super().get_request()
+            with lock:
+                connections.append(connection)
+                events.append("connection-accepted")
+                if stopping.is_set():
+                    connection.shutdown(socket.SHUT_RDWR)
+            return connection, address
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_POST(self):
-            received.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(b"{}")
+            record("request-arrived")
+            try:
+                record("reading-body")
+                received.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+                record("body-parsed")
+                self.send_response(200)
+                self.end_headers()
+                record("headers-sent")
+                self.wfile.write(b"{}")
+                record("response-written")
+            finally:
+                record("handler-finished")
 
         def log_message(self, *args):
             pass
@@ -414,14 +470,26 @@ def test_inline_view_job_serializes_correctly_with_real_gh(tmp_path, brand):
             "sort_by": [["Updated", "desc"]]}
     plan = PJ.copy_plan(N, copied=cap("copy-capture.json"), resolver=resolver(brand), views=[view])
     job = next(j for j in plan["jobs"] if j["id"].endswith("-view-inline-encoding"))
-    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    server = Server(("127.0.0.1", 0), Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
         argv = [gh, *job["argv"][1:]]
         argv[4] = f"http://127.0.0.1:{server.server_port}/views"
         env = dict(os.environ, GH_TOKEN="synthetic-loopback-only", GH_CONFIG_DIR=str(tmp_path / "gh"))
-        result = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", env=env, timeout=10)
+        try:
+            result = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", env=env, timeout=10)
+        except subprocess.TimeoutExpired as exc:
+            with lock:
+                stopping.set()
+                diagnostic = _loopback_timeout_diagnostic(list(events), exc)
+                active_connections = list(connections)
+            for connection in active_connections:
+                try:
+                    connection.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+            pytest.fail(diagnostic, pytrace=False)
         assert result.returncode == 0, result.stderr
     finally:
         server.shutdown()
