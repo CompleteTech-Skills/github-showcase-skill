@@ -1,6 +1,6 @@
 {
- "config_sha256": "dc74956cdd1fec80148d97ba93ebbe148f0c659aeda2ccf070a28c37e6897023",
- "fingerprint": "d95eaf1ad2b14d73419466b9c3d6dcea99ad79c9499601cf58aaf0bef7bb15a1",
+ "config_sha256": "9e55320898893e630c409441e076ef0d19244dc208b1e20b79476624ccf4ab8c",
+ "fingerprint": "6214d3d76211d221cfe945506409662f0747f05a189ce75aa80920f0104a2d8c",
  "inputs": {
   "description": "Generate CompleteTech LLC GitHub banners, cards, icons and READMEs, with repository checks and metadata plans.",
   "icon_sha256": "a1bbf17b8f066ec7e8442a323d4b1a21656a8f8788a1e54ece6f83e76dde7bf5",
@@ -23,7 +23,7 @@
  },
  "outputs": {
   "banner.png": {
-   "bytes": 211705,
+   "bytes": 216011,
    "chips": [
     {
      "box": [
@@ -66,7 +66,7 @@
    ],
    "repository_id": 1433830462,
    "scale": 2,
-   "sha256": "f6dcc89cc0159d1d458c26960f13a830f0a2d3636b1258dffd6e72a0f9bd3b46"
+   "sha256": "ef088e8fe22f3e62ad6b77bfe34fa618f17c1157447452b2139b8897d885d4cd"
   },
   "card.svg": {
    "bytes": 27727,
