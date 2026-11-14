@@ -97,8 +97,11 @@ The repository `readme` command also uses `assets/intro.svg` for a personal
 owner/owner profile. Generate it with `intro --profile OWNER --out
 CHECKOUT/assets/intro.svg` before scaffolding or refreshing a generated hero.
 Missing profile name/eyebrow facts return `needs-input:intro-identity`; a missing
-local intro returns `needs-input:intro` (exit 4), before any README, badge or change
-record write. This command does not generate artwork implicitly. Organization
+local, invalid, or nonmatching intro returns `needs-input:intro` (exit 4), before any README, badge or change
+record write. The asset must pass intro SVG lint and match the current configured default profile generator output
+(static or applicable animated, at 320 or 360 pixels). Explicit generator overrides cannot be verified here;
+matching establishes applicability, not artwork rights. An unresolved identity on a managed intro also refuses
+refresh because ownership cannot be established. This command does not generate artwork implicitly. Organization
 and ordinary repository scaffolds keep `docs/images/banner.png`.
 
 Personal header refresh migrates only the exact legacy generated banner body
