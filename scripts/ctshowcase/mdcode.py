@@ -292,27 +292,28 @@ def _container_path(body: str) -> tuple[tuple[tuple[str, int], ...], str]:
             return tuple(path), body[cursor:]
 
 
-def _continue_containers(body: str, path: tuple[tuple[str, int], ...]) -> str | None:
-    """Strip ancestors in their original order, or None when this line leaves one."""
+def _container_cursor(body: str, path: tuple[tuple[str, int], ...]):
+    """Walk ancestors once; return the cursor, residual spaces and matched count."""
     cursor = 0
     residual = 0
     nonblank_end = len(body.rstrip(" "))
-    for kind, width in path:
+    for index, (kind, width) in enumerate(path):
+        previous_cursor, previous_residual = cursor, residual
         if kind == "quote":
             # A partially consumed tab is represented by virtual spaces.
             if residual:
                 if residual > 3:
-                    return None
+                    return previous_cursor, previous_residual, index
                 prefix = " " * residual + body[cursor:cursor + 4]
                 match = _QUOTE.match(prefix)
                 if match is None:
-                    return None
+                    return previous_cursor, previous_residual, index
                 cursor += match.end() - residual
                 residual = 0
             else:
                 match = _QUOTE.match(body, cursor)
                 if match is None:
-                    return None
+                    return previous_cursor, previous_residual, index
                 cursor = match.end()
         else:
             column = 0
@@ -324,8 +325,17 @@ def _continue_containers(body: str, path: tuple[tuple[str, int], ...]) -> str | 
                 cursor += 1
                 WORK['container_indent_chars'] += 1
             if column < width and (residual or cursor < nonblank_end):
-                return None
+                return previous_cursor, previous_residual, index
             residual += max(0, column - width)
+    return cursor, residual, len(path)
+
+
+def _continue_containers(body: str, path: tuple[tuple[str, int], ...]) -> str | None:
+    """Strip ancestors in their original order, or None when this line leaves one."""
+    cursor, residual, matched = _container_cursor(body, path)
+    if matched != len(path):
+        return None
+    WORK['container_materialized_chars'] += residual + len(body) - cursor
     return " " * residual + body[cursor:]
 
 
@@ -390,12 +400,9 @@ def _paragraph_line(body: str, path: tuple[tuple[str, int], ...]) -> tuple[str, 
     HTML. Keep the ordered path so indentation before a nested quote is not
     confused with quote depth at the beginning of the source line.
     """
-    for ancestor in path:
-        inner = _continue_containers(body, (ancestor,))
-        if inner is None:
-            return body, False
-        body = inner
-    return body, True
+    cursor, residual, matched = _container_cursor(body, path)
+    WORK['container_materialized_chars'] += residual + len(body) - cursor
+    return " " * residual + body[cursor:], matched == len(path)
 
 
 def _paragraph_interrupts(content: str, matched: bool) -> bool:
@@ -506,13 +513,9 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
     lists: tuple[tuple[str, int], ...] = ()
 
     def surviving_list(body, path):
-        rest, last = body, 0
-        for index, ancestor in enumerate(path):
-            rest = _continue_containers(rest, (ancestor,))
-            if rest is None:
-                break
-            if ancestor[0] == "item":
-                last = index + 1
+        _, _, matched = _container_cursor(body, path)
+        last = next((index + 1 for index in range(matched - 1, -1, -1)
+                       if path[index][0] == "item"), 0)
         return path[:last]
     # an open raw HTML block: (end regex, or None for a block that ends at a blank line; the same container fields)
     html = None
@@ -524,7 +527,8 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
     def row_cells(at, raw):
         regions.extend((a, b) for a, b in _cell_bounds(raw.rstrip("\r\n"), at) if a < b)
 
-    for raw in source_lines(text):
+    lines = list(source_lines(text))
+    for line_index, raw in enumerate(lines):
         at, pos = pos, pos + len(raw)
         # Block syntax uses visual columns. Expanding once before peeling any
         # container lets a tab supply the optional quote space AND residual
@@ -590,11 +594,31 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
                 # same containers. Otherwise the definition has no paragraph
                 # that could lazily continue into this line.
                 possible_title = matched and not definition.has_title and para_content.lstrip(" ").startswith(('"', "'", "("))
+                if possible_title:
+                    # A next-line title is optional: if it never completes,
+                    # the already valid definition ends before this line.
+                    # Look ahead in the same containers before committing the
+                    # paragraph boundary, retaining original source offsets.
+                    probe = _DefinitionProgress(definition.parts[0])
+                    for part in definition.parts[1:]:
+                        probe.feed(part)
+                    for future in lines[line_index:]:
+                        inner, continues = _paragraph_line(block_line(future.rstrip("\r\n")), para_path)
+                        if not continues or not inner.strip(" ") or _paragraph_interrupts(inner, continues):
+                            break
+                        probe.feed(inner)
+                        if probe.state in ("complete", "invalid"):
+                            break
+                    possible_title = probe.state == "complete" and probe.has_title
                 if not possible_title:
                     flush(seg)
                     seg = []
             if seg and definition:
+                was_complete = definition.state == "complete"
                 definition.feed(para_content)
+                if was_complete and definition.state == "invalid":
+                    flush(seg)
+                    seg = []
             if not seg:
                 pass  # process this line as a new block below
             elif not para_content.strip(" "):
@@ -1288,13 +1312,9 @@ def _peel_definition_containers(document: str, out: list[str]) -> str:
         source = block_line(body)
         line = block_line("".join(out[pos:end]))
         # Walk the open path once, retaining only fully continued items.
-        remainder, last = source, 0
-        for index, ancestor in enumerate(path):
-            remainder = _continue_containers(remainder, (ancestor,))
-            if remainder is None:
-                break
-            if ancestor[0] == "item":
-                last = index + 1
+        _, _, matched = _container_cursor(source, path)
+        last = next((index + 1 for index in range(matched - 1, -1, -1)
+                     if path[index][0] == "item"), 0)
         del path[last:]
         while item_ends and item_ends[-1] > last:
             item_ends.pop()
@@ -1657,7 +1677,7 @@ def _label_prefix_index(text: str):
     """Source-aligned structural prefix positions for semantic label lengths."""
     positions = []
     prefixes = _layout(text)[5]
-    for start in continuation_starts(text):
+    for start in sorted(continuation_starts(text)):
         length = prefixes.get(start, 0)
         if not length and (match := _QUOTE.match(text, start)):
             end = match.end()
@@ -2184,19 +2204,19 @@ def _markdown_images(text: str, document: str) -> list[tuple[str, str, int, int]
             continue
         if _crosses_block(text, match.end(), close, fences, document):
             continue  # alt text cannot hold a heading, list item, fence or quote start: no image forms there
-        alt = text[match.end():close]
         after = close + 1  # tentative: `consumed` moves only once the image resolves, so a failed outer keeps its nested images
         if after < len(text) and text[after] == "(":
             # Destinations are read from the written document: the masked copy blanks literal backticks in filenames.
             target = _inline_image_target(document if len(document) >= len(text) else text, after)
             if target:
                 source, end = target
-                sources.append((alt, source, match.start(), end))
+                WORK['image_alt_materialized_chars'] += close - match.end()
+                sources.append((text[match.end():close], source, match.start(), end))
                 consumed = end
                 continue
             # not an inline destination (for example, a space-containing label): try a shortcut reference
         # `text` masks inline code to spaces (a prefix-aligned copy): labels are matched on the written source, literal backticks included
-        key = _range_label_key(document, match.end(), close) if len(document) >= len(text) else _label_key(alt)
+        key = _range_label_key(document, match.end(), close) if len(document) >= len(text) else _range_label_key(text, match.end(), close)
         if after < len(text) and text[after] == "[":
             # A reference label is raw lexical text, not rendered inline text.
             # In particular a `]` inside a URI closes the label even though it
@@ -2214,7 +2234,8 @@ def _markdown_images(text: str, document: str) -> list[tuple[str, str, int, int]
                     key = _label_key(label) if label else key
                     after = ref_close + 1
         if key in definitions:
-            sources.append((alt, definitions[key], match.start(), after))
+            WORK['image_alt_materialized_chars'] += close - match.end()
+            sources.append((text[match.end():close], definitions[key], match.start(), after))
             consumed = after
     return sources
 
