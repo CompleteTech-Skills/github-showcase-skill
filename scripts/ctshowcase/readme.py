@@ -194,17 +194,54 @@ def personal_generated_hero(ctx: RepoContext, body: str) -> bool:
     if body == legacy_banner_html(ctx) or not body.strip():
         return True
     try:
-        return body == personal_intro_html(ctx)
+        if body == personal_intro_html(ctx):
+            return True
+        if re.fullmatch(r'<p align="center">\n  <img src="assets/intro\.svg" alt="[^"\n]*" width="100%">\n</p>', body):
+            raise NeedsInput("intro-identity", "Cannot establish ownership of the existing intro hero.")
+        return False
     except NeedsInput:
-        return False  # unresolved identity cannot authorize replacing an authored block
+        if "assets/intro.svg" in body:
+            raise  # this may be our generated hero; ownership is unresolved
+        return False
 
 
 def banner_html(ctx: RepoContext) -> str:
     if not personal_profile(ctx):
         return legacy_banner_html(ctx)
     body = personal_intro_html(ctx)
-    if ctx.repo_dir is None or not (ctx.repo_dir / hero_path(ctx)).is_file():
+    path = ctx.repo_dir / hero_path(ctx) if ctx.repo_dir is not None else None
+    if path is None or not path.is_file():
         raise NeedsInput("intro", "Generate the personal profile with intro --profile OWNER --out assets/intro.svg first.")
+    # Matching the current default generator output establishes applicability, not asset rights.
+    # Explicit generator overrides cannot be inferred from an SVG and require separate review.
+    from . import intro, svglint
+    from .typeset import Fonts
+    try:
+        raw = path.read_bytes()
+        if svglint.lint_bytes("intro", raw, str(path))["result"] != "PASS":
+            raise ValueError("invalid intro")
+        profile = ctx.org.get("profile") or {}
+        chips = []
+        for chip in profile.get("chips") or []:
+            kind, _, value = chip.partition(":")
+            if kind not in ("key", "attr") or not value:
+                raise ValueError("invalid chips")
+            chips.append((value, kind))
+        complete = ctx.org.get("family") == "completetech"
+        mark = (ctx.brand.mark_dark() or ctx.brand.dark_master()) if complete else ctx.brand.asset(ctx.org.get("mark"))
+        tagline = profile.get("tagline") or (ctx.brand.strings["tagline"] if complete else None)
+        if not mark or not tagline:
+            raise ValueError("missing profile facts")
+        name = profile.get("name") or ctx.org.get("display_name")
+        fonts = Fonts(ctx.brand)
+        variants = (False, True) if ctx.org.get("flagship") else (True,)
+        if not any(raw == intro.build(ctx.brand, fonts, owner=ctx.owner, name=name,
+                                      eyebrow=profile["eyebrow"], tagline=tagline, chips=chips,
+                                      mark_path=mark, height=height, static=static).encode()
+                   for height in (320, 360) for static in variants):
+            raise ValueError("intro does not match configured profile")
+    except (OSError, ValueError, KeyError, TypeError):
+        raise NeedsInput("intro", "Generate an applicable default profile intro with showcase.py first.") from None
     return body
 
 

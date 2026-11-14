@@ -228,3 +228,83 @@ def test_personal_bootstrap_preserves_authored_hero_in_pristine_template(tmp_pat
     after = path.read_text(encoding="utf-8")
     assert hero in after
     assert 'src="assets/intro.svg"' not in after and "docs/images/banner.png" not in after
+
+
+@pytest.mark.parametrize("mode", ["header", "upgrade"])
+def test_unresolved_existing_intro_refuses_all_writes(tmp_path, intro_bytes, mode):
+    import yaml
+    from conftest import ROOT
+
+    config = yaml.safe_load((ROOT / "references/brand.yaml").read_text(encoding="utf-8"))
+    config["orgs"]["CompleteDotTech"]["profile"].pop("eyebrow")
+    config_path = tmp_path / "brand.yaml"
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    meta = metadata(tmp_path)
+    put_intro(tmp_path, intro_bytes)
+    source = ('<!-- showcase:banner:start -->\n<p align="center">\n'
+              '  <img src="assets/intro.svg" alt="Former identity" width="100%">\n'
+              '</p>\n<!-- showcase:banner:end -->\n\n'
+              '<!-- showcase:nav:start -->\nOld nav\n<!-- showcase:nav:end -->\n\n# Profile\n')
+    path = tmp_path / "README.md"
+    path.write_text(source, encoding="utf-8")
+    records = tmp_path / "records.jsonl"
+    result = run_cli("--format", "json", "--config", config_path, "--meta", meta, "--repo-dir", tmp_path,
+                     "readme", "--mode", mode, "--badges", "local", "--records", records, "--write")
+    assert result.returncode == 4 and "needs-input:intro-identity" in result.stdout
+    assert path.read_bytes() == source.encode()
+    assert not records.exists() and not (tmp_path / "docs").exists()
+
+
+@pytest.mark.parametrize("asset", [b"not an SVG", b'<svg xmlns="http://www.w3.org/2000/svg"/>'])
+def test_invalid_or_unrelated_intro_refuses_before_writes(tmp_path, asset):
+    meta = metadata(tmp_path)
+    put_intro(tmp_path, asset)
+    records = tmp_path / "records.jsonl"
+    result = run_cli("--format", "json", "--meta", meta, "--repo-dir", tmp_path, "readme",
+                     "--mode", "scaffold", "--badges", "local", "--records", records, "--write")
+    assert result.returncode == 4 and "needs-input:intro" in result.stdout
+    assert not (tmp_path / "README.md").exists()
+    assert not records.exists() and not (tmp_path / "docs").exists()
+
+
+def test_other_valid_generated_intro_is_not_assumed_applicable(tmp_path):
+    meta = metadata(tmp_path)
+    path = tmp_path / "assets" / "intro.svg"
+    result = run_cli("intro", "--profile", "CompleteDotTech", "--name", "Synthetic Other", "--static", "--out", path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    result = run_cli("--format", "json", "--meta", meta, "--repo-dir", tmp_path, "readme", "--mode", "scaffold", "--write")
+    assert result.returncode == 4 and "needs-input:intro" in result.stdout
+    assert not (tmp_path / "README.md").exists()
+
+
+def test_org_personal_profile_output_stays_authored_on_readme_upgrade(tmp_path):
+    from test_round5_regressions import _user_cli, _user_estate
+
+    root = _user_estate(tmp_path, "Synthetic public profile text.")
+    out = tmp_path / "profile"
+    result = _user_cli(root, "--out-dir", out)
+    assert result.returncode == 0, result.stdout + result.stderr
+    path = out / "README.md"
+    before = path.read_bytes()
+    assert b'assets/intro.svg' in before
+    meta = metadata(tmp_path)
+    result = run_cli("--meta", meta, "--repo-dir", out, "readme", "--mode", "upgrade", "--write")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert path.read_bytes() == before
+    lint = run_cli("--meta", meta, "--repo-dir", out, "lint", "readme", path)
+    failures = json.loads(lint.stdout)["fails"]
+    assert any("banner" in failure or "nav" in failure for failure in failures), failures
+
+
+def test_changed_intro_identity_refuses_ambiguous_managed_hero(tmp_path, intro_bytes):
+    meta = metadata(tmp_path)
+    put_intro(tmp_path, intro_bytes)
+    source = ('<!-- showcase:banner:start -->\n<p align="center">\n'
+              '  <img src="assets/intro.svg" alt="Previous identity" width="100%">\n'
+              '</p>\n<!-- showcase:banner:end -->\n\n# Profile\n')
+    path = tmp_path / "README.md"
+    path.write_text(source, encoding="utf-8")
+    result = run_cli("--format", "json", "--meta", meta, "--repo-dir", tmp_path,
+                     "readme", "--mode", "header", "--write")
+    assert result.returncode == 4 and "needs-input:intro-identity" in result.stdout
+    assert path.read_bytes() == source.encode()
