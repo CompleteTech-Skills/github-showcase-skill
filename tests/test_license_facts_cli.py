@@ -6,6 +6,68 @@ import pytest
 from conftest import run_cli
 
 
+def test_direct_license_selector_rejects_unnormalized_value(make_ctx):
+    from ctshowcase.errors import NeedsInput
+    from ctshowcase.readme import license_facts
+
+    ctx = make_ctx()
+    ctx.meta["license"] = ["MIT"]
+    with pytest.raises(NeedsInput, match="license identifier must be a string"):
+        license_facts(ctx)
+
+
+def test_trimmed_spdx_remains_factual(tmp_path, monkeypatch):
+    out, _, _ = invoke(tmp_path, monkeypatch, license="  MIT  ")
+    assert "![License MIT]" in out["diff"]
+    assert "needs-input:license" not in out["logs"]
+
+
+@pytest.mark.parametrize("owner,visibility", [("LibreEvolve", "public"), ("LibreEvolve", "private"),
+                                              ("CompleteTech-Security", "public")])
+@pytest.mark.parametrize("license_value", [123, ["MIT"], {"spdx_id": ["MIT"]}, {"key": False}])
+@pytest.mark.parametrize("operation", ["--diff", "--write"])
+def test_invalid_license_refuses_before_writing(tmp_path, monkeypatch, owner, visibility, license_value, operation):
+    monkeypatch.setenv("SHOWCASE_ESTATE_ROOT", str(tmp_path / "empty-estate"))
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    sentinels = {"README.md": b"# Authored sentinel\n\nKeep this text.\n", "LICENSE": b"Unrecognized license sentinel\n",
+                 "LICENSING.md": b"Owner terms sentinel\n"}
+    for name, content in sentinels.items():
+        (checkout / name).write_bytes(content)
+    metadata = tmp_path / "meta.json"
+    metadata.write_text(json.dumps({"owner": owner, "repo": "synthetic-license-control", "visibility": visibility,
+                                    "description": "Inspect synthetic records.", "license": license_value}))
+    before = metadata.read_bytes()
+    result = run_cli("--meta", metadata, "--repo-dir", checkout, "readme", "--mode", "scaffold", operation)
+    assert result.returncode == 4, (result.stdout, result.stderr)
+    assert json.loads(result.stdout)["logs"] == ["needs-input:license"]
+    assert "Traceback" not in result.stderr
+    assert metadata.read_bytes() == before
+    assert {p.name: p.read_bytes() for p in checkout.iterdir()} == sentinels
+
+
+@pytest.mark.parametrize("owner,visibility", [("LibreEvolve", "public"), ("LibreEvolve", "private"),
+                                              ("CompleteTech-Security", "public")])
+@pytest.mark.parametrize("operation", ["--diff", "--write"])
+def test_blank_license_is_unavailable(tmp_path, monkeypatch, owner, visibility, operation):
+    monkeypatch.setenv("SHOWCASE_ESTATE_ROOT", str(tmp_path / "empty-estate"))
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    (checkout / "LICENSE").write_text("Unrecognized license sentinel\n")
+    metadata = tmp_path / "meta.json"
+    metadata.write_text(json.dumps({"owner": owner, "repo": "synthetic-license-control", "visibility": visibility,
+                                    "description": "Inspect synthetic records.", "license": "  \t "}))
+    before = metadata.read_bytes()
+    result = run_cli("--meta", metadata, "--repo-dir", checkout, "readme", "--mode", "scaffold", operation)
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    out = json.loads(result.stdout)
+    assert "needs-input:license" in out["logs"]
+    text = out["diff"] if operation == "--diff" else (checkout / "README.md").read_text()
+    assert "license-%20" not in text and "Licensed under the   " not in text
+    assert metadata.read_bytes() == before
+    assert (checkout / "LICENSE").read_text() == "Unrecognized license sentinel\n"
+
+
 def invoke(tmp_path, monkeypatch, *, owner="LibreEvolve", visibility="public", license="MIT",
            license_file=True, licensing_file=False, variant=None, authored=None):
     monkeypatch.setenv("SHOWCASE_ESTATE_ROOT", str(tmp_path / "empty-estate"))

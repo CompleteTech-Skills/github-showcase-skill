@@ -34,7 +34,10 @@ README badges use captured SPDX for public and private repositories; private
 visibility does not imply proprietary licensing. Missing SPDX logs
 `needs-input:license` and omits a new badge. Exact private wording remains an
 explicit section control and is never parsed to derive a badge or a commercial
-grant. The Internal / distribution callout is unchanged presentation policy.
+grant. Blank identifiers are unavailable; a non-string
+identifier (including a non-string nested `spdx_id` or `key`) refuses the command
+with `needs-input:license` before writing. Captured string identifiers are trimmed.
+The Internal / distribution callout is unchanged presentation policy.
 
 The configured AGPL/commercial README policy requires a captured AGPL-3.0
 identifier and both `LICENSE` and `LICENSING.md` before its standard badge and

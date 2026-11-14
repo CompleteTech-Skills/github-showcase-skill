@@ -13,7 +13,7 @@ from urllib.parse import quote
 from . import footer as footermod
 from .context import RepoContext
 from .detect import standard
-from .errors import ConfigError
+from .errors import ConfigError, NeedsInput
 from .mdcode import code_spans, find_blocks, masked  # noqa: F401  (code_spans: re-exported for callers)
 
 MARK = re.compile(r"<!-- showcase:([a-z-]+):start -->\n?(.*?)\n?<!-- showcase:\1:end -->", re.S)
@@ -162,6 +162,9 @@ def license_facts(ctx: RepoContext) -> tuple[str | None, bool]:
     verbatim elsewhere; it is never parsed into a license or a commercial grant.
     """
     lic = ctx.meta.get("license")
+    if lic is not None and not isinstance(lic, str):
+        raise NeedsInput("license", "license identifier must be a string")
+    lic = lic.strip() if lic else None
     if not lic or lic in ("NOASSERTION", "other"):
         lic = None
         ctx.log("needs-input:license")
