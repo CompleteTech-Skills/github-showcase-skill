@@ -501,7 +501,11 @@ def cmd_readme(args):
         for rel, data in badge_outputs.items():
             write_bytes(rd / rel, data)
     if args.write and changed:
-        path.write_bytes(after.encode("utf-8"))
+        if readme.personal_profile(ctx):
+            original = path.read_bytes() if path.is_file() else b""
+            path.write_bytes(readme.personal_readme_bytes(original, after))
+        else:
+            path.write_bytes(after.encode("utf-8"))
         if contrib_new is not None:
             (rd / "CONTRIBUTING.md").write_text(contrib_new, encoding="utf-8")
     if args.records and changed:

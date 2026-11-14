@@ -8,7 +8,9 @@ from urllib.parse import unquote
 from . import footer as footermod
 from .context import RepoContext
 from .detect import standard
-from .readme import BANNER_BLOCK, EMOJI, MARK, is_footer_like, masked, normalize_text, nav_first, preserved, split_sections
+from .readme import (
+    BANNER_BLOCK, EMOJI, MARK, hero_path, is_footer_like, masked, normalize_text, nav_first, preserved, split_sections,
+)
 
 IMG_MD = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)[^)]*\)")
 IMG_HTML = re.compile(r"<img\b([^>]*)>", re.I)
@@ -54,10 +56,11 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
     lines = [ln for ln in plain.splitlines() if ln.strip()]
     preserve = preserved(ctx, text)
     unchanged = preserve and ctx.preserve_unchanged()
+    hero = hero_path(ctx)
     # §7.1 order (q57 `nav`): hero banner, then the nav line; "Nav line first" (readme.nav_first) puts the nav on top
     navs = lines
     if not nav_first(ctx) and not unchanged:
-        n = _lead_banner_lines(lines)
+        n = _lead_banner_lines(lines, hero)
         if n is None:
             fails.append("R7 the hero banner must open the README, then the nav line")
             navs = []
@@ -78,10 +81,10 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
                          "order are n/a")
     if imgs:
         _, first = imgs[0]
-        if "docs/images/banner.png" not in first and not unchanged:
-            fails.append("D13 the banner must be the first image (docs/images/banner.png)")
+        if hero not in first and not unchanged:
+            fails.append(f"D13 the hero must be the first image ({hero})")
         pic = re.search(r"<picture>.*?</picture>", plain, re.S)
-        if pic and "docs/images/banner.png" in pic.group(0):
+        if pic and hero in pic.group(0):
             fails.append("D13 banner must be a plain <img>, not <picture>")
     elif not unchanged:
         fails.append("D13 no banner image")
@@ -184,13 +187,13 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
     return _result(path, fails, warns, incomplete)
 
 
-def _lead_banner_lines(lines: list[str]) -> int | None:
+def _lead_banner_lines(lines: list[str], hero: str = "docs/images/banner.png") -> int | None:
     """How many leading non-blank lines the hero banner takes (`<p align="center">`, the banner `<img>`, `</p>`, or one
     line holding it), or None when the README does not open with it."""
-    if len(lines) >= 3 and lines[0].strip() == '<p align="center">' and "docs/images/banner.png" in lines[1] \
+    if len(lines) >= 3 and lines[0].strip() == '<p align="center">' and hero in lines[1] \
             and lines[2].strip() == "</p>":
         return 3
-    if lines and "docs/images/banner.png" in lines[0]:
+    if lines and hero in lines[0]:
         return 1
     return None
 
