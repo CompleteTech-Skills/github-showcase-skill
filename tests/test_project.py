@@ -511,37 +511,43 @@ def test_loopback_run_cleans_up_inherited_output_handles(tmp_path):
     import sys
 
     pid_file = tmp_path / "pid"
+    parent_file = tmp_path / "parent"
     marker = tmp_path / "survived"
-    descendant = ("import os, pathlib, sys, time; "
+    descendant = ("import os, pathlib, sys, time; time.sleep(0.6); "
                   "pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); "
                   "time.sleep(1.5); pathlib.Path(sys.argv[2]).write_text('alive')")
-    parent = ("import pathlib, subprocess, sys, time; "
+    parent = ("import os, pathlib, subprocess, sys, time; "
+              "pathlib.Path(sys.argv[4]).write_text(str(os.getpid())); "
               "subprocess.Popen([sys.executable, '-c', sys.argv[1], sys.argv[2], sys.argv[3]]); "
-              "p = pathlib.Path(sys.argv[2]); "
-              "exec('while not p.exists():\\n time.sleep(0.01)'); time.sleep(30)")
-    runner = ("import os, sys, threading; from test_project import _loopback_run; "
+              "time.sleep(30)")
+    runner = ("import os, pathlib, sys, threading, time; from test_project import _loopback_run; "
+              "ready = threading.Event(); p = pathlib.Path(sys.argv[3]); "
+              "def_wait = 'while not p.exists():\\n time.sleep(0.01)\\nready.set()'; "
+              "threading.Thread(target=lambda: exec(def_wait), daemon=True).start(); "
               "code, phase, output = _loopback_run([sys.executable, '-c', sys.argv[1], *sys.argv[2:]], "
-              "os.environ, threading.Event(), preconnect_timeout=0.5); "
-              "assert code is None and phase == 'pre-connection' and output == (b'', b'')")
+              "os.environ, ready, preconnect_timeout=8, interaction_timeout=0.1); "
+              "assert code is None and phase == 'interaction' and output == (b'', b'')")
     env = dict(os.environ, PYTHONPATH=os.pathsep.join([str(ROOT / "tests"), str(ROOT / "scripts")]))
-    completed = False
+    passed = False
     try:
-        subprocess.run([sys.executable, "-c", runner, parent, descendant, str(pid_file), str(marker)],
-                       env=env, check=True, timeout=5, capture_output=True)
-        completed = True
-        assert pid_file.exists(), "descendant did not start before the deadline"
+        subprocess.run([sys.executable, "-c", runner, parent, descendant, str(pid_file), str(marker),
+                        str(parent_file)], env=env, check=True, timeout=12, capture_output=True)
+        assert pid_file.exists(), "descendant did not report readiness"
         time.sleep(1.6)
         assert not marker.exists(), "descendant survived process-tree cleanup"
+        passed = True
     finally:
-        if not completed and pid_file.exists():
-            pid = int(pid_file.read_text())
-            if os.name == "nt":
-                subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True, timeout=5)
-            else:
-                try:
-                    os.kill(pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
+        for path in (() if passed else (parent_file, pid_file)):
+            if path.exists():
+                pid = int(path.read_text())
+                if os.name == "nt":
+                    subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True, timeout=5)
+                else:
+                    try:
+                        os.kill(pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+
 
 def test_loopback_timeout_diagnostic_redacts_output():
     import subprocess
