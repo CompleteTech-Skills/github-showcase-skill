@@ -920,6 +920,8 @@ def cmd_doctor(args):
         print(doctor.as_md(r, args.header))
     else:
         print(json.dumps(r, ensure_ascii=False))
+    if fmt != "json" and (r["tooling"]["formatters"] or r["tooling"]["validators"]):
+        print("Tooling preflight (not run): " + json.dumps(r["tooling"], ensure_ascii=False), file=sys.stderr)
     return None, CHECK_FAILED if any(v == "fail" for v in r["cells"].values()) else OK
 
 

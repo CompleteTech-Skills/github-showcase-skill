@@ -16,9 +16,22 @@ def test_discovery_is_read_only_and_reports_sources(tmp_path):
     workflow.parent.mkdir(parents=True)
     workflow.write_text('jobs:\n  checks:\n    steps:\n      - run: make verify\n')
     result = discover(tmp_path)
-    assert result["formatters"] == [".prettierrc.json", ".editorconfig"]
+    assert result["formatters"] == [".editorconfig", ".prettierrc.json"]
     assert [v["command"] for v in result["validators"]] == ["never-execute-this", "python -m pytest", "make verify"]
     assert all(v["status"] == "not run" for v in result["validators"])
+
+
+def test_json5_and_inline_instructions_are_passive(tmp_path, monkeypatch):
+    (tmp_path / ".prettierrc.json5").write_text("{}")
+    (tmp_path / "AGENTS.md").write_text(
+        "Run `python -m pytest -q` before submitting.\n"
+        "Example `ruff check .` is documentation.\n"
+        "Run `touch should-not-exist` before testing.\n")
+    monkeypatch.setattr("ctshowcase.formatting.subprocess.run", lambda *a, **k: pytest.fail("executed"))
+    result = discover(tmp_path)
+    assert result["formatters"] == [".prettierrc.json5"]
+    assert result["validators"] == [{"source": "AGENTS.md", "command": "python -m pytest -q", "status": "not run"}]
+    assert not (tmp_path / "should-not-exist").exists()
 
 
 def local_prettier(tmp_path, version="3.6.2", pin="3.6.2"):

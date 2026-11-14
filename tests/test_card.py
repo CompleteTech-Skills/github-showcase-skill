@@ -70,3 +70,12 @@ def test_long_chip_card_budget_and_bounds(make_ctx, fonts):
     assert len(raw.encode("utf-8")) <= 40_000
     assert all(item["x"] + item["w"] <= 384.5 for item in info["items"])
     assert [item["label"] for item in info["items"]] == ["Support automation", "Read-only operation"]
+
+
+def test_card_size_warning_and_failure_boundaries(make_ctx, fonts):
+    raw = card.render(make_ctx(), fonts)[0].encode("utf-8")
+    for size, result, warning in [(30000, "PASS", False), (30001, "PASS", True),
+                                  (40000, "PASS", True), (40001, "FAIL", False)]:
+        lint = svglint.lint_bytes("card", raw + b" " * (size - len(raw)))
+        assert lint["result"] == result
+        assert any("S10" in item for item in lint["warns"]) is warning

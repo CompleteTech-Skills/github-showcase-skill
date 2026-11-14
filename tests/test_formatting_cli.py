@@ -35,6 +35,16 @@ def test_doctor_exposes_declared_validation_without_execution(tmp_path):
         {"source": "package.json#scripts.lint", "command": "do-not-execute-this", "status": "not run"}]
 
 
+def test_doctor_default_reports_tooling_without_running_it(tmp_path):
+    repo, meta = target(tmp_path)
+    (repo / ".prettierrc.json5").write_text("{}", encoding="utf-8")
+    (repo / "AGENTS.md").write_text("Run `python -m pytest -q` before submitting.\n", encoding="utf-8")
+    result = run_cli("--meta", meta, "--repo-dir", repo, "doctor")
+    assert "Tooling preflight (not run)" in result.stderr
+    assert ".prettierrc.json5" in result.stderr and "python -m pytest -q" in result.stderr
+    assert len(result.stdout.strip().splitlines()) == 1
+
+
 def test_no_regroup_cannot_silently_reformat_outside_bytes(tmp_path):
     repo, meta = target(tmp_path)
     original = "# Exact title\r\n\r\n  Authored text.\r\n"

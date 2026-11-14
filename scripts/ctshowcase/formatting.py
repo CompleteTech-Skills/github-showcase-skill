@@ -33,7 +33,8 @@ def discover(repo_dir: Path | None) -> dict:
         return {"formatters": [], "validators": [], "status": "needs-input:repo-dir"}
     root = Path(repo_dir)
     package = _json(root / "package.json")
-    configs = [name for name in FORMAT_CONFIGS if (root / name).is_file()]
+    configs = sorted({p.name for p in root.glob('.prettierrc*') if p.is_file()} |
+                     {name for name in FORMAT_CONFIGS if (root / name).is_file()})
     if "prettier" in package:
         configs.append("package.json#prettier")
     validators = []
@@ -45,11 +46,18 @@ def discover(repo_dir: Path | None) -> dict:
         if not path.is_file():
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
-        # Only fenced shell blocks: prose is evidence, not executable shell.
+        # These are reported evidence, never executable instructions.
         for match in re.finditer(r"^```(?:bash|sh|shell|console)\s*\n(.*?)^```", text, re.M | re.S):
             for line in match.group(1).splitlines():
                 command = line.strip().removeprefix("$ ")
                 if re.search(r"(?:pytest|unittest|validate|\blint\b|\bcheck\b|typecheck|prettier|ruff)", command):
+                    validators.append({"source": name, "command": command, "status": "not run"})
+        prose = re.sub(r"^```[^\n]*\n.*?^```[^\n]*", "", text, flags=re.M | re.S)
+        for line in prose.splitlines():
+            if not re.search(r"\b(?:run|execute)\b", line, re.I):
+                continue
+            for command in re.findall(r"`([^`\n]+)`", line):
+                if re.search(r"(?:pytest|unittest|validate|\blint\b|\bcheck\b|typecheck|prettier|ruff)", command, re.I):
                     validators.append({"source": name, "command": command, "status": "not run"})
     workflows = root / ".github" / "workflows"
     if workflows.is_dir():
