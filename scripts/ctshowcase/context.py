@@ -129,10 +129,11 @@ class RepoContext:
         return self.is_fork or self.det["type"] in ("backup", "github-profile")
 
     def social_applicable(self) -> bool:
-        """R10: public product repositories, including the personal-profile capstone."""
+        """R10: public product repositories, including a T3 repository signed off for this run."""
         return (self.public and not self.meta.get("archived") and not self.is_fork and self.repo != ".github"
                 and not self.repo.lower().endswith(".github.io")
-                and self.tier in ("T1", "T1-user", "T2"))
+                and (self.tier in ("T1", "T1-user", "T2")
+                     or self.tier == "T3" and t3_signed_off(self.owner, self.repo)))
 
     def art_status(self) -> dict:
         """{"banner": None | code, "card": None | code, "icon": None | code}: None when the surface applies, else why it
