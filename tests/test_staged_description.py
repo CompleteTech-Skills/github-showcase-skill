@@ -86,3 +86,57 @@ def test_readme_staged_dry_run_and_write(tmp_path):
     report = json.loads(doctor.stdout)
     assert report["cells"]["R2"] == "fail"
     assert "description-drift:readme" in report["logs"]
+
+
+@pytest.mark.parametrize("variant", list("ABCDEFIJ"))
+def test_cli_generated_variant_tagline_has_no_drift(tmp_path, variant):
+    capture = tmp_path / "meta.json"
+    capture.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    target = tmp_path / "repo"
+    (target / ".github").mkdir(parents=True)
+    (target / ".github/showcase.yml").write_text(f"variant: {variant}\n", encoding="utf-8")
+    args = ["--meta", capture, "--repo-dir", target]
+    result = run_cli(*args, "readme", "--mode", "scaffold", "--write")
+    assert result.returncode == 0, result.stderr
+    doctor = run_cli(*args, "doctor", "--format", "json")
+    report = json.loads(doctor.stdout)
+    assert "description-drift:readme" not in report["logs"]
+
+
+@pytest.mark.parametrize("surface", ["banner", "card", "social", "readme"])
+def test_cli_ordinary_refresh_replaces_only_its_staged_records(tmp_path, surface):
+    capture = tmp_path / "meta.json"
+    capture.write_text(json.dumps(meta_dict(id=12345)), encoding="utf-8")
+    target = tmp_path / "repo"
+    (target / ".github").mkdir(parents=True)
+    (target / ".github/showcase.yml").write_text("chips:\n  key: ['Triage']\n  attrs: ['Python']\n", encoding="utf-8")
+    common = ["--meta", capture, "--repo-dir", target, "--format", "json"]
+    # A separate staged output must survive every refresh untouched.
+    other = run_cli(*common, "content", "social", "--description", "A separate proposal.")
+    assert other.returncode == 0, other.stderr
+    if surface == "social":
+        command = ["readme", "--mode", "scaffold", "--write"]
+        other = run_cli(*common, *command, "--description", "A separate proposal.")
+        assert other.returncode == 0, other.stderr
+    commands = {"banner": ["banner"], "card": ["card", "--png", target / "docs/images/card.png"],
+                "social": ["content", "social"], "readme": ["readme", "--mode", "scaffold", "--write"]}
+    command = commands[surface]
+    staged = run_cli(*common, *command, "--description", "Route support requests.")
+    assert staged.returncode == 0, staged.stdout + staged.stderr
+    sidecar = target / "docs/images"
+    before = read_sidecar(sidecar)["outputs"]
+    keys = {"banner": ["banner.png"], "card": ["card.svg", "card.png"],
+            "social": ["assets/social-preview.png"], "readme": ["README.md"]}[surface]
+    untouched = "README.md" if surface == "social" else "assets/social-preview.png"
+    for key in keys:
+        assert before[key]["staged_description"]["text"] == "Route support requests."
+        if surface in ("banner", "card"):
+            assert before[key]["repository_id"] == 12345
+    ordinary = run_cli(*common, *command)
+    assert ordinary.returncode == 0, ordinary.stdout + ordinary.stderr
+    after = read_sidecar(sidecar)["outputs"]
+    assert after[untouched] == before[untouched]
+    for key in keys:
+        path = (target / "docs/images" / key) if "/" not in key and key != "README.md" else target / key
+        assert after[key]["sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
+        assert "staged_description" not in after[key]

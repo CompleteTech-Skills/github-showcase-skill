@@ -17,7 +17,11 @@ only the card does not claim the banner was refreshed. For explicit output paths
 outside the target checkout, the sidecar is placed beside that output; metadata-only
 rendering uses that location too. README dry runs report the proposal without
 writing a sidecar; `readme --write` records it even if the README is already current.
-Ordinary rendering keeps the existing sidecar behavior.
+An ordinary render replaces the record for each refreshed output with its current
+hash and no staged description, while leaving untouched output records intact.
+Card PNG previews have their own records. Banner and card records retain the
+captured repository ID when available. The sidecar's top-level inputs and
+fingerprint describe the most recent recorded output, not every retained record.
 
 `doctor` compares the rendered managed tagline with the live description in the
 supplied metadata. A mismatch fails R2 and logs `description-drift:readme`, even if

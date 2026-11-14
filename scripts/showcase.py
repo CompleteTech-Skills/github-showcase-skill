@@ -239,6 +239,8 @@ def cmd_card(args):
         write_bytes(Path(args.png), png_bytes(card.preview_png(scene, fonts)))
         outputs.append(args.png)
     maybe_sidecar(ctx, out, file_record(out))
+    if args.png:
+        maybe_sidecar(ctx, Path(args.png), file_record(Path(args.png)))
     return base("card", ctx, result="ok", out=str(out), outputs=outputs, bytes=len(svg.encode()),
                 alt=f"{ctx.repo}: {ctx.meta.get('description')}", items=info["items"], icon=info["icon"],
                 lint=lint), OK
