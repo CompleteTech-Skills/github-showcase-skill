@@ -864,6 +864,14 @@ _INLINE_DECLARATION = re.compile(rf"<![A-Z]+{HTML_SPACE}")
 _HTML_CLOSE_TAG = re.compile(HTML_CLOSE_TAG_PATTERN)
 _LINK_SPACE = " \t\r\n"
 _ESCAPABLE = frozenset(string.punctuation)
+_ESCAPE_SEQUENCE = re.compile(r"\\([" + re.escape("".join(sorted(_ESCAPABLE))) + r"])")
+
+
+def _destination_value(value: str) -> str:
+    """Decode destination entities and CommonMark's ASCII punctuation escapes only."""
+    return html.unescape(_ESCAPE_SEQUENCE.sub(r"\1", value))
+
+
 def _escaped(text: str, i: int) -> bool:
     """True when an odd number of consecutive backslashes immediately precedes index `i` (CommonMark escape)."""
     count, before = 0, i - 1
@@ -1509,10 +1517,9 @@ def _reference_form(text: str, open_idx: int, close: int, limit: int, keys: set)
     """Reference-style link after the `]` at `close` whose `[` is at `open_idx`, or None. Returns (jump, label_close):
     `jump` is the index past the label's closing bracket (None for a shortcut, which does not jump) and `label_close`
     is that bracket's index (None for a shortcut). The label must be plain text before
-    `limit`, the next inert region, so a jump never skips into one. Link text holding an unescaped bracket is no label.
+    `limit`, the next inert region, so a jump never skips into one. A full reference's description may contain nested
+    brackets; only collapsed/shortcut descriptions supply a label and need its lexical restrictions via `_label_key`.
     An inline `(dest)` is decided by the caller first, so a `(` here means the closer is not a shortcut."""
-    if _next_unescaped_bracket(text, open_idx + 1, close) != -1:
-        return None
     if text[close + 1:close + 2] == "[":
         label_end = _next_unescaped_bracket(text, close + 2, limit)
         if label_end == -1:
@@ -1929,7 +1936,7 @@ def _inline_image_target(text: str, start: int) -> tuple[str, int] | None:
     region = _span_at(_layout(text)[0], start)
     if region is None or pos >= region[1]:
         return None  # destination whitespace cannot join separate Markdown blocks either
-    return html.unescape(re.sub(r"\\([^\w\s])", r"\1", target)), pos + 1
+    return _destination_value(target), pos + 1
 
 
 @functools.lru_cache(maxsize=16)
@@ -1954,7 +1961,7 @@ def _markdown_images(text: str, document: str) -> list[tuple[str, str, int, int]
     definitions = {}
     for match in _definitions(document):
         destination = match.group(2) if match.group(2) is not None else match.group(3)
-        target = html.unescape(re.sub(r"\\([^\w\s])", r"\1", destination))
+        target = _destination_value(destination)
         definitions.setdefault(_definition_key(match, document), target)
     spans = _definition_spans(document)  # definition titles are never rendered as images
     html_spans = html_block_spans(document)  # raw HTML blocks are literal: Markdown image syntax there is text
