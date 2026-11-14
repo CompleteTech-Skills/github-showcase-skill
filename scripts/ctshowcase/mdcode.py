@@ -263,11 +263,14 @@ def _container_path(body: str) -> tuple[tuple[tuple[str, int], ...], str]:
     indentation is after the first quote and before the second quote.
     """
     path = []
+    # A thematic break must end in its marker; avoid rescanning each nested
+    # suffix when a long item chain ends in ordinary content.
+    thematic_possible = body.rstrip().endswith(("-", "*", "_"))
     while True:
         if match := _QUOTE.match(body):
             path.append(("quote", 0))
             body = body[match.end():]
-        elif not _THEMATIC.match(body) and (match := _ITEM_PREFIX.match(body)):
+        elif not (thematic_possible and _THEMATIC.match(body)) and (match := _ITEM_PREFIX.match(body)):
             marker = re.match(r"^ {0,3}(?:[-+*]|[0-9]{1,9}[.)])", body)
             end = marker.end()
             while end < len(body) and body[end] == " ":
@@ -414,7 +417,17 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
     para_path: tuple[tuple[str, int], ...] = ()
     # Paths through open list items, outermost first. They persist across blank
     # lines; a nonblank line that cannot continue an ancestor leaves that item.
-    lists: list[tuple[tuple[str, int], ...]] = []
+    lists: tuple[tuple[str, int], ...] = ()
+
+    def surviving_list(body, path):
+        rest, last = body, 0
+        for index, ancestor in enumerate(path):
+            rest = _continue_containers(rest, (ancestor,))
+            if rest is None:
+                break
+            if ancestor[0] == "item":
+                last = index + 1
+        return path[:last]
     # an open raw HTML block: (end regex, or None for a block that ends at a blank line; the same container fields)
     html = None
 
@@ -476,8 +489,7 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
                 # An explicitly empty quote can leave an existing list even
                 # though it has no paragraph content. A truly blank line
                 # instead keeps the item open for an indented continuation.
-                while lists and _continue_containers(body, lists[-1]) is None:
-                    lists.pop()
+                lists = surviving_list(body, lists)
             continue
         if table:
             if not _interrupts(rest, depth, para_depth, 0, quote_column):
@@ -514,17 +526,14 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
         # Continue the deepest surviving list before looking for more
         # containers. This retains the ancestor order even when a quoted fence
         # starts on a later line of an item, rather than on the marker line.
-        while lists and _continue_containers(body, lists[-1]) is None:
-            lists.pop()
-        inherited = lists[-1] if lists else ()
+        lists = surviving_list(body, lists)
+        inherited = lists
         content = _continue_containers(body, inherited) if inherited else body
         added, crest = _container_path(content)
         path = inherited + added
         item_indices = [i for i, (kind, _) in enumerate(added) if kind == "item"]
-        for item_index in item_indices:
-            # Each item can survive when a deeper quote/item ends. Retaining
-            # only the deepest path would also discard a still-live ancestor.
-            lists.append(inherited + added[:item_index + 1])
+        if item_indices:
+            lists = path[:len(inherited) + item_indices[-1] + 1]
         if not crest.strip(" "):
             continue  # empty items/quotes open containers, never a paragraph
         if _indent_columns(crest) >= 4:
@@ -869,7 +878,16 @@ _ESCAPE_SEQUENCE = re.compile(r"\\([" + re.escape("".join(sorted(_ESCAPABLE))) +
 
 def _destination_value(value: str) -> str:
     """Decode destination entities and CommonMark's ASCII punctuation escapes only."""
-    return html.unescape(_ESCAPE_SEQUENCE.sub(r"\1", value))
+    token = re.compile(r"\\[" + re.escape("".join(sorted(_ESCAPABLE))) + r"]|&(?:#[xX][0-9a-fA-F]{1,6}|#[0-9]{1,7}|[A-Za-z][A-Za-z0-9]{1,31});")
+    def decode(match):
+        part = match.group()
+        if part.startswith("\\"):
+            return part[1:]
+        if part.startswith("&#") or part[1:] in html.entities.html5:
+            return html.unescape(part)
+        return part
+
+    return token.sub(decode, value)
 
 
 def _escaped(text: str, i: int) -> bool:
@@ -1864,11 +1882,30 @@ def _title_ends(text: str) -> dict[str, tuple[int, ...]]:
     return {char: tuple(positions) for char, positions in found.items()}
 
 
+@functools.lru_cache(maxsize=16)
+def _quote_continuation_view(text: str) -> str:
+    """Mask quote prefixes on paragraph continuation lines without shifting offsets."""
+    chars = None
+    for line_start in continuation_starts(text):
+        match = _QUOTE.match(text, line_start)
+        if match:
+            if chars is None:
+                chars = list(text)
+            end = match.end()
+            while next_match := _QUOTE.match(text, end):
+                end = next_match.end()
+            chars[line_start:end] = " " * (end - line_start)
+    return "".join(chars) if chars is not None else text
+
+
 def _inline_image_target(text: str, start: int) -> tuple[str, int] | None:
     """Read a Markdown destination and optional title after its opening parenthesis. Destination nesting deeper than
     32 parentheses is no link (CommonMark's limit), which bounds each call and keeps the opener pass linear."""
     text = _source_view(text)
     global _DEST_STEPS
+    original = text
+    region = _span_at(_layout(text)[0], start)
+    text = _quote_continuation_view(text)
     pos = start + 1
     while pos < len(text) and text[pos] in _LINK_SPACE:
         _DEST_STEPS += 1
@@ -1931,7 +1968,7 @@ def _inline_image_target(text: str, start: int) -> tuple[str, int] | None:
             first_open = bisect.bisect_left(opens, pos)
             if first_open < len(opens) and opens[first_open] < ends[at]:
                 return None
-        if _blank_between(text, pos, ends[at]) or _crosses_block(text, pos, ends[at], _fence_spans(text)):
+        if _blank_between(text, pos, ends[at]) or _crosses_block(original, pos, ends[at], _fence_spans(original)):
             return None  # (c) a title may span soft line breaks, never a paragraph or block boundary (heading, list, fence)
         title_close = pos = ends[at] + 1
         while pos < len(text) and text[pos] in _LINK_SPACE:
@@ -1941,7 +1978,6 @@ def _inline_image_target(text: str, start: int) -> tuple[str, int] | None:
             return None
     if pos >= len(text) or text[pos] != ")":
         return None
-    region = _span_at(_layout(text)[0], start)
     if region is None or pos >= region[1]:
         return None  # destination whitespace cannot join separate Markdown blocks either
     return _destination_value(target), pos + 1
