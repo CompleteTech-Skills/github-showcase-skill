@@ -16,6 +16,12 @@ A topic belongs to the first layer it matches: brand (Brand topic) → family (F
 
 ## Brand topic
 
+For a configured organization, non-forks require its `brand_topic`.
+When that input is missing, `topics` returns `needs-input` (exit 4), preserves the
+current topics and emits no topic command or change record. A `.github` profile
+may also suggest `github-profile`. `adopt` holds its topic job and record pending
+that input; `doctor` reports R3 as `hold`. Forks retain their brand-free rule.
+
 `completetech` on every T1 repo and CompleteDotTech. T2: `ai-ascension`, `jev`, `libreevolve` or `touchedbyanagent`. T3 (after approval): `pick-your-ai`; `ticketstub` is HOLD. romgenie: `completetech` on own work and `.github`, none on forks.
 
 ## Family topics

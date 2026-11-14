@@ -128,11 +128,12 @@ def validate_mermaid(skip: bool) -> None:
 SHOWCASE = [sys.executable, str(ROOT / "scripts" / "showcase.py")]
 SUBCOMMANDS = ["banner", "card", "org-banner", "org-tile", "intro", "footer", "readme", "describe", "topics",
                "labels", "meta", "fingerprint", "fonts", "lint", "contact-sheet", "doctor", "enterprise", "config",
-               "org", "project", "content", "new", "adopt"]
+               "org", "project", "content", "new", "adopt", "brand"]
 # hidden, deprecated aliases: still parse (`--help` works) but are not listed or documented as commands
 DEPRECATED_ALIASES = {"social-preview": "content social"}
 # the command-group contract other workstreams call by name (org/project/enterprise/content); every action is documented
-GROUP_ACTIONS = {"org": ("profile", "about", "pins", "labels", "health", "doctor"),
+GROUP_ACTIONS = {"brand": ("add-family", "add-org"),
+                 "org": ("profile", "about", "pins", "labels", "health", "doctor"),
                  "project": ("capture-query", "normalize", "copy-plan", "readme", "lint", "estate-plan"),
                  "enterprise": ("snapshot-query", "doctor", "plan", "discover", "snapshot", "seat-check", "diff"),
                  "content": ("social", "icon", "links", "linguist", "actions", "images", "sidebar")}
@@ -174,6 +175,7 @@ def gate_help() -> None:
     for group, actions in GROUP_ACTIONS.items():
         group_help = showcase(group, "--help").stdout
         for action in actions:
+            showcase(group, action, "--help")
             if action not in group_help:
                 raise RuntimeError(f"showcase.py {group} --help does not offer {action}")
             if not re.search(rf"^{group} [^\n]*\b{re.escape(action)}\b", ref, re.M):

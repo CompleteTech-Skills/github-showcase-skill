@@ -55,7 +55,11 @@ def row(ctx: RepoContext) -> dict:
                           owner=ctx.owner)
     cells["R2"] = "fail" if any(c["result"] == "fail" for c in chk) else "pass"
     tp = topicsmod.merge(ctx)
-    cells["R3"] = ("warn" if "topics-short" in tp["logs"] else "pass") if tp["equal_as_set"] else "fail"
+    if not tp.get("plan_allowed", True):
+        cells["R3"] = "hold"
+        logs += tp["logs"]
+    else:
+        cells["R3"] = ("warn" if "topics-short" in tp["logs"] else "pass") if tp["equal_as_set"] else "fail"
     hp = ctx.meta.get("homepage") or ""
     cells["R4"] = "pass" if not hp or ctx.meta.get("homepage_status") == 200 else (
         "unknown" if ctx.meta.get("homepage_status") is None else "warn")
