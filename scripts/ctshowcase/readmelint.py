@@ -25,13 +25,13 @@ REF_DEFINITION = re.compile(
     r"|\((?:\\.|[^()\\\n]|\n(?![ \t\x00]*\n))*\)))?[ \t]*$", re.M)
 # a title may span lines but never a blank one; NUL stands in for a blanked quote or list-item prefix (see below)
 # CommonMark raw HTML: an open tag needs a valid tag name, valid attributes and a closing `>`; anything else is text
-_ATTR = r"""\s+[A-Za-z_:][A-Za-z0-9_.:-]*(?:\s*=\s*(?:[^\s"'=<>`]+|'[^']*'|"[^"]*"))?"""
-HTML_OPEN_TAG = re.compile(rf"<([A-Za-z][A-Za-z0-9-]*)((?:{_ATTR})*)\s*/?>")
-HTML_ATTR = re.compile(r"""([A-Za-z_:][A-Za-z0-9_.:-]*)(?:\s*=\s*([^\s"'=<>`]+|'[^']*'|"[^"]*"))?""")
+HTML_OPEN_TAG = re.compile(mdcode.HTML_OPEN_TAG_PATTERN)
+HTML_ATTR = re.compile(rf"({mdcode.HTML_ATTRIBUTE_NAME})(?:{mdcode.HTML_SPACE}*={mdcode.HTML_SPACE}*"
+                       rf"({mdcode.HTML_ATTRIBUTE_VALUE}))?")
 HTML_COMMENT = re.compile(r"<!--.*?-->", re.S)
 _RAW_HTML_OPEN = re.compile(r"<\?|<![A-Za-z]|<!\[CDATA\[")
-_INLINE_DECLARATION = re.compile(r"<![A-Z]+\s")
-_HTML_CLOSE_TAG = re.compile(r"</[A-Za-z][A-Za-z0-9-]*\s*>")
+_INLINE_DECLARATION = re.compile(rf"<![A-Z]+{mdcode.HTML_SPACE}")
+_HTML_CLOSE_TAG = re.compile(mdcode.HTML_CLOSE_TAG_PATTERN)
 _LINK_SPACE = " \t\r\n"
 _ESCAPABLE = frozenset(string.punctuation)
 SHIELDS_SRC = re.compile(r"https?://img\.shields\.io/badge/", re.I)

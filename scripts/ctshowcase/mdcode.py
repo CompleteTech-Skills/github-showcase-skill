@@ -32,6 +32,15 @@ _TYPE_6 = ("address article aside base basefont blockquote body caption center c
            "dt fieldset figcaption figure footer form frame frameset h1 h2 h3 h4 h5 h6 head header hr html iframe legend "
            "li link main menu menuitem nav noframes ol optgroup option p param search section summary table tbody td "
            "tfoot th thead title tr track ul").split()
+# GFM raw HTML uses ASCII whitespace and names, unlike Python's Unicode \s/\w.
+# Share these lexical classes with the inline scanner so a complete type-7 tag
+# has the same grammar as an inline tag (its block extent remains independent).
+HTML_SPACE = r"[ \t\n\v\f\r]"
+HTML_ATTRIBUTE_NAME = r"[A-Za-z_:][A-Za-z0-9_.:-]*"
+HTML_ATTRIBUTE_VALUE = r"""(?:[^ \t\n\v\f\r"'=<>`]+|'[^']*'|"[^"]*")"""
+HTML_ATTRIBUTE = rf"{HTML_SPACE}+{HTML_ATTRIBUTE_NAME}(?:{HTML_SPACE}*={HTML_SPACE}*{HTML_ATTRIBUTE_VALUE})?"
+HTML_OPEN_TAG_PATTERN = rf"<([A-Za-z][A-Za-z0-9-]*)((?:{HTML_ATTRIBUTE})*){HTML_SPACE}*/?>"
+HTML_CLOSE_TAG_PATTERN = rf"</[A-Za-z][A-Za-z0-9-]*{HTML_SPACE}*>"
 # CommonMark HTML blocks 1-6 interrupt a paragraph; type 7 (any other complete tag, like <span> or <a>) cannot
 _HTML_BLOCK = re.compile(
     r"^ {0,3}(?:<(?:script|pre|style|textarea)(?:[ \t>]|$)|<!--|<\?|<![A-Za-z]|<!\[CDATA\[|</?(?:"
@@ -51,8 +60,7 @@ _HTML_OPEN_1_5 = (
 )
 _HTML_TYPE_6 = re.compile(r"^ {0,3}</?(?:" + "|".join(_TYPE_6) + r")(?:[ \t]|/?>|$)", re.I)
 _HTML_TYPE_7 = re.compile(
-    r"^ {0,3}(?:<[A-Za-z][A-Za-z0-9-]*(?:[ \t]+[A-Za-z_:][\w:.-]*(?:[ \t]*=[ \t]*(?:[^\s\"'=<>`]+|'[^']*'|\"[^\"]*\"))?)*"
-    r"[ \t]*/?>|</[A-Za-z][A-Za-z0-9-]*[ \t]*>)[ \t]*$")
+    rf"^ {{0,3}}(?:{HTML_OPEN_TAG_PATTERN}|{HTML_CLOSE_TAG_PATTERN}){HTML_SPACE}*$")
 
 
 def _html_block(line: str):
