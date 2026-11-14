@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+from contextvars import ContextVar, Token
 from pathlib import Path
 
 from . import REFERENCES, ROOT
@@ -40,19 +41,29 @@ def canonical(obj) -> str:
     return json.dumps(obj, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
 
 
-_T3_SIGNED_OFF = False
+_T3_SIGNED_OFF: ContextVar[bool] = ContextVar("ctshowcase_t3_signed_off", default=False)
 
 
-def set_t3_signed_off(value: bool) -> None:
+def set_t3_signed_off(value: bool) -> Token:
     """Record the run's `--allow-t3`: set once by the CLI, read by every owner gate (check_owner, art_status,
     footer_status). Off by default, so a T3 owner is refused unless the caller passes the flag after an approved
-    t3-metadata or t3-signoff row."""
-    global _T3_SIGNED_OFF
-    _T3_SIGNED_OFF = bool(value)
+    t3-metadata or t3-signoff row. Context-local (contextvars): threads and asyncio tasks do not see each other's
+    sign-off. Returns a token for reset_t3_signed_off."""
+    return _T3_SIGNED_OFF.set(bool(value))
 
 
-def t3_signed_off() -> bool:
-    return _T3_SIGNED_OFF
+def reset_t3_signed_off(token: Token) -> None:
+    _T3_SIGNED_OFF.reset(token)
+
+
+def t3_signed_off(owner: str | None = None, repo: str | None = None) -> bool:
+    """The run's `--allow-t3` (context-local). With an owner, also needs a valid sign-off
+    record (ctshowcase/signoff.py): enforcement is always on, and no flag or environment variable opts out of it."""
+    signed = _T3_SIGNED_OFF.get()
+    if owner is not None and signed:
+        from . import signoff
+        return signoff.granted(owner, repo)
+    return signed
 
 
 class Brand:
@@ -104,7 +115,8 @@ class Brand:
                     return status
         return None
 
-    def check_owner(self, owner: str, *, allow_t3: bool = False) -> str | None:
+    def check_owner(self, owner: str, *, allow_t3: bool = False, repo: str | None = None,
+                    verify_signoff: bool = True) -> str | None:
         """Raise Refused for excluded/hold/T3 owners; return 'watching' or None."""
         status = self.owner_status(owner)
         if status == "excluded":
@@ -113,6 +125,9 @@ class Brand:
             raise Refused(f"{owner} is on HOLD", log="hold")
         if status == "t3" and not (allow_t3 or t3_signed_off()):
             raise Refused(f"{owner} is T3; needs co-owner sign-off", log="t3-signoff")
+        if status == "t3" and verify_signoff:
+            from . import signoff
+            signoff.require(owner, repo, self.aliases(owner))
         return status
 
     def org(self, owner: str) -> dict:
@@ -135,6 +150,8 @@ class Brand:
         if name not in fams:
             raise ConfigError(f"unknown family {name!r}")
         own = fams[name] or {}
+        if own.get("identity_pending"):
+            raise NeedsInput("brand-identity", f"family {name!r} needs an owner-supplied palette and mark")
         fam = deep_merge(self.raw.get("defaults", {}), own)
         for chip in ("chip_key", "chip_attr"):  # a family that sets a chip bg without fg gets a computed fg
             oc = (own.get("tokens") or {}).get(chip) or {}
@@ -149,8 +166,10 @@ class Brand:
                 c["fg"] = best_fg(c["bg"], [tokens["title"], *cands])
         return fam
 
-    def style(self, owner: str) -> dict:
+    def style(self, owner: str, *, repo: str | None = None) -> dict:
         org = self.org(owner)
+        if (self.raw.get("families", {}).get(org.get("family")) or {}).get("identity_pending"):
+            self.check_owner(owner, repo=repo)  # Missing consent still refuses before missing design inputs.
         fam = self.family(org.get("family", "completetech"))
         if org.get("banner"):
             fam["banner"] = org["banner"]
@@ -161,7 +180,12 @@ class Brand:
         if not rel:
             return None
         p = Path(rel)
-        return p if p.is_absolute() else self.root / p
+        if p.is_absolute():
+            return p
+        if self.root != ROOT:  # An explicitly redirected package keeps its existing asset-root contract.
+            return self.root / p
+        local = self.path.resolve().parent.parent / p
+        return local if local.is_file() else self.root / p
 
     def font_file(self, key: str) -> Path:
         fonts = self.raw["fonts"]

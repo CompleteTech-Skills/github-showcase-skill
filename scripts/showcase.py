@@ -93,8 +93,11 @@ def repo_dir(args) -> Path | None:
         want = f"{m.get('owner')}/{m.get('repo')}"
         have = _origin_slug(rd)
         if have and not _same_slug(args, want, have):
+            import shlex
             raise ShowcaseError(f"metadata describes {want} but {rd.resolve()} is a checkout of {have}; pass the right "
-                                "--repo-dir, or --no-repo-dir to use the metadata alone", log="usage")
+                                "--repo-dir, or --no-repo-dir to use the metadata alone. If this is a verified rename, "
+                                f"update this checkout locally with git -C {shlex.quote(str(rd))} remote set-url origin "
+                                f"https://github.com/{want}.git; the skill never changes remotes", log="usage")
         if not explicit and have is None:
             raise ShowcaseError(f"--meta {want} without --repo-dir: run from inside that repository's checkout, or pass "
                                 "--repo-dir DIR or --no-repo-dir", log="usage")
@@ -115,7 +118,7 @@ def brand(args, prefer_lock=False):
     return load_brand(args.config, prefer_lock=prefer_lock)
 
 
-def context(args, b=None):
+def context(args, b=None, *, for_coverage=False):
     from ctshowcase.context import RepoContext
     from ctshowcase.meta import merged
     b = b or brand(args)
@@ -123,7 +126,7 @@ def context(args, b=None):
     meta = merged(args.meta, str(rd) if rd else None)
     from ctshowcase.staged import prepare
     meta, staged = prepare(meta, getattr(args, "description", None))
-    ctx = RepoContext(b, meta, rd, type_override=getattr(args, "type_override", None))
+    ctx = RepoContext(b, meta, rd, type_override=getattr(args, "type_override", None), for_coverage=for_coverage)
     if staged is not None:
         ctx.staged_description = staged
         ctx.log("staged-description")
@@ -145,7 +148,7 @@ def base(cmd, ctx=None, **kw) -> dict:
 
 def gate_owner(ctx, allow_hold=False) -> str | None:
     """Refuse excluded/hold/T3 (exit 2); return 'watching' for the watching org."""
-    status = ctx.brand.check_owner(ctx.owner)
+    status = ctx.brand.check_owner(ctx.owner, repo=ctx.repo)
     if ctx.style.get("hold") and not allow_hold:
         raise ShowcaseError(f"{ctx.owner} family is on hold; pass --allow-hold", log="hold")
     return status
@@ -200,7 +203,11 @@ def cmd_banner(args):
         return base("banner", ctx, result="exempt", logs=[why]), OK
     gate_watching(ctx, args.allow_hold)
     ctx.require_measured(args.allow_unmeasured)
-    ctx.require_description()
+    if banner.selected_subtitle(ctx, args.subtitle) is not None:
+        if not (ctx.meta.get("description") or "").strip():
+            ctx.log("description-missing")
+    else:
+        ctx.require_description()
     out = Path(args.out) if args.out else default_out(args, "docs/images/banner.png")
     fonts = Fonts(ctx.brand)
     data, info = banner.render(ctx, fonts, scale=args.scale, budget=args.png_budget, subtitle=args.subtitle,
@@ -229,7 +236,7 @@ def cmd_card(args):
     ctx.require_measured(args.allow_unmeasured)
     out = Path(args.out) if args.out else default_out(args, "docs/images/card.svg")
     fonts = Fonts(ctx.brand)
-    svg, scene, info = card.render(ctx, fonts, args.icon)
+    svg, scene, info = card.render(ctx, fonts, args.icon, keys=args.key_chip or None, attrs=args.chip or None)
     lint = svglint.lint_bytes("card", svg.encode(), str(out))
     if lint["result"] != "PASS":
         return base("card", ctx, result="fail", lint=lint), CHECK_FAILED
@@ -258,7 +265,8 @@ def cmd_social(args):
     ctx.require_measured(args.allow_unmeasured)
     r = getattr(args, "_content_resolver", None)  # set by `content social` from its --registry/--approved* flags
     data, fmt, info = social.social_render(ctx, Fonts(ctx.brand), args.title, args.icon,
-                                           login=r.canonical(ctx.owner) if r else None)
+                                           login=r.canonical(ctx.owner) if r else None,
+                                           keys=args.key_chip or None, attrs=args.chip or None)
     out = Path(args.out) if args.out else default_out(args, "assets/social-preview.png")
     if fmt == "jpg":
         out = out.with_suffix(".jpg")
@@ -314,6 +322,8 @@ def cmd_intro(args):
         raise ShowcaseError("pass --profile CompleteDotTech or --org OWNER", log="usage")
     b.check_owner(owner)
     org = b.org(owner)
+    if not org.get("known"):
+        raise ShowcaseError(f"no brand.yaml org row for {owner}", log="needs-input:org-row", code=NEEDS_INPUT)
     logs = []
     prof = org.get("profile") or {}
     if args.profile:
@@ -328,6 +338,9 @@ def cmd_intro(args):
         if st.get("eyebrow_case") == "upper":
             eyebrow = eyebrow.upper()
         chips_raw = args.chip or []
+    for field, value in (("name", name), ("eyebrow", eyebrow)):
+        if not value or not value.strip():
+            raise ShowcaseError(f"supply this profile's --{field}", log=f"needs-input:{field}", code=NEEDS_INPUT)
     chips = []
     for c in chips_raw:
         kind, _, text = c.partition(":")
@@ -337,14 +350,25 @@ def cmd_intro(args):
     static = args.static or not org.get("flagship")
     if static and not args.static:
         logs.append("static:not-flagship")
+    complete_tech = org.get("family") == "completetech"
     if args.mark:
         mark = Path(args.mark)
-    else:
+    elif complete_tech:
         mark = b.mark_dark()
         if not mark:
             mark = b.dark_master()
             logs.append("needs-input:mark-dark")
-    svg = intro.build(b, Fonts(b), owner=owner, name=name, eyebrow=eyebrow, tagline=args.tagline or b.strings["tagline"],
+    else:
+        mark = b.asset(org.get("mark"))
+        if not mark or not mark.is_file():
+            raise ShowcaseError("supply this organization's own --mark", log="needs-input:org-mark", code=NEEDS_INPUT)
+    tagline = args.tagline or prof.get("tagline")
+    if not tagline:
+        if complete_tech:
+            tagline = b.strings["tagline"]
+        else:
+            raise ShowcaseError("supply this organization's own --tagline", log="needs-input:tagline", code=NEEDS_INPUT)
+    svg = intro.build(b, Fonts(b), owner=owner, name=name, eyebrow=eyebrow, tagline=tagline,
                       chips=chips, mark_path=mark, height=args.height, static=static)
     lint = svglint.lint_bytes("intro", svg.encode(), args.out)
     if lint["result"] != "PASS":
@@ -357,19 +381,33 @@ def cmd_intro(args):
 def cmd_footer(args):
     from ctshowcase import footer
     b = brand(args)
-    # the watching org's exemption covers only its forks, which `--org` cannot tell from its `.github` (which gets the
-    # footer): `--check` reads the README there instead of answering `exempt` (fail closed)
-    if args.org and not (args.check and b.owner_status(args.org) == "watching"):
-        status = b.owner_status(args.org)
-        if status in ("excluded", "hold", "t3"):
-            b.check_owner(args.org)
-        if status == "watching":
+    # Use the same repository applicability as doctor, including fork status.
+    # An explicit --org remains useful for raw markup without a checkout.
+    ctx = None
+    if args.meta or args.repo_dir is not None or (args.check and not args.org and _origin_slug(Path("."))):
+        # Applicability needs no renderable family identity. The coverage context
+        # keeps pending identity read-only; the scoped consent gate still runs below.
+        ctx = context(args, b, for_coverage=True)
+        if args.org and not b.resolver().same(args.org, ctx.owner):
+            raise ShowcaseError("--org does not match the repository metadata", log="usage")
+        b.check_owner(ctx.owner, repo=ctx.repo)
+        reason = ctx.footer_status()
+        if reason:
+            result = "exempt" if reason.startswith("exempt") else "hold"
+            return {"command": "footer", "owner": ctx.owner, "repo": ctx.repo,
+                    "result": result, "logs": [reason]}, OK
+    elif args.org:
+        status = b.check_owner(args.org)
+        # Without repository metadata a watching owner can describe a fork or
+        # its own .github; --check must inspect the footer conservatively.
+        if status == "watching" and not args.check:
             return {"command": "footer", "owner": args.org, "result": "exempt", "logs": ["exempt"]}, OK
-        fv = b.org(args.org).get("footer", True)
-        if fv == "hold":
-            return {"command": "footer", "owner": args.org, "result": "hold", "logs": ["hold"]}, OK
-        if fv is False:
-            return {"command": "footer", "owner": args.org, "result": "exempt", "logs": ["exempt:footer"]}, OK
+        if status != "watching":
+            fv = b.org(args.org).get("footer", True)
+            if fv == "hold":
+                return {"command": "footer", "owner": args.org, "result": "hold", "logs": ["hold"]}, OK
+            if fv is False:
+                return {"command": "footer", "owner": args.org, "result": "exempt", "logs": ["exempt:footer"]}, OK
     if args.online and not args.check:
         raise ShowcaseError("--online goes with --check README.md", log="usage")
     if args.check:
@@ -468,14 +506,18 @@ def cmd_readme(args):
                             logs=ctx.logs + ["readme-shrink"]), CHECK_FAILED
     changed = after != before
     diff = "".join(difflib.unified_diff(before.splitlines(True), after.splitlines(True), "a/README.md", "b/README.md"))
-    if args.write and getattr(ctx, "badge_files", None):
+    badge_outputs = {}
+    if getattr(ctx, "badge_files", None):
         from ctshowcase import badge
         from ctshowcase.typeset import Fonts
         fonts = Fonts(ctx.brand)
         for rel, (label, message, colour) in sorted(ctx.badge_files.items()):
-            write_bytes(rd / rel, badge.svg(ctx.brand, fonts, label, message, colour).encode())
+            badge_outputs[rel] = badge.svg(ctx.brand, fonts, label, message, colour, style=ctx.style).encode()
+    if args.write:
+        for rel, data in badge_outputs.items():
+            write_bytes(rd / rel, data)
     if args.write and changed:
-        path.write_text(after, encoding="utf-8")
+        path.write_bytes(after.encode("utf-8"))
         if contrib_new is not None:
             (rd / "CONTRIBUTING.md").write_text(contrib_new, encoding="utf-8")
     if args.write:
@@ -520,6 +562,14 @@ def cmd_describe(args):
         CHECK_FAILED if failed else OK
 
 
+def _stamp_signoff_ids(rec: dict, association_ids, ctx) -> None:
+    """The topics change record names every record that authorized it, the target owner's
+    own grant first (a T3 target) and then each T3 `also_in` association's (topics.merge `signoff_ids`).
+    `signoff_id` is the first; `signoff_ids` lists all of them only when there is more than one."""
+    from ctshowcase import signoff
+    signoff.stamp_associations(rec, association_ids, ctx.owner, ctx.repo)  # shared with intake.adopt
+
+
 def cmd_topics(args):
     from ctshowcase import records, topics
     ctx = context(args)
@@ -532,14 +582,18 @@ def cmd_topics(args):
         res = Resolver.from_paths(ctx.brand, None if args.registry == "auto" else args.registry, require_registry=True)
         also_in = topics.registry_also_in(res, ctx.owner, ctx.repo)
     r = topics.merge(ctx, also_in)
-    if args.records and not r["equal_as_set"]:
-        records.append(args.records, [records.record(ctx.owner, ctx.repo, "topics", "topics", r["current"], r["proposed"],
-                                                     "§5.6 merge")])
-    out = base("topics", ctx, result="pass" if r["equal_as_set"] else "fail", **{k: v for k, v in r.items() if k != "logs"},
-               logs=ctx.logs + r["logs"])
-    if args.gh and not r["equal_as_set"]:
+    allowed = r["plan_allowed"]
+    if args.records and allowed and not r["equal_as_set"]:
+        rec = records.record(ctx.owner, ctx.repo, "topics", "topics", r["current"], r["proposed"], "§5.6 merge")
+        _stamp_signoff_ids(rec, r.get("signoff_ids"), ctx)
+        records.append(args.records, [rec])
+    brand_hold = "needs-input:brand-topic" in r["logs"]
+    complete = allowed and r["equal_as_set"] and "needs-input:topics-capacity" not in r["logs"]
+    out = base("topics", ctx, result="needs-input" if brand_hold else "pass" if complete else "fail",
+               **{k: v for k, v in r.items() if k != "logs"}, logs=ctx.logs + r["logs"])
+    if args.gh and allowed and not r["equal_as_set"]:
         out["gh"] = topics.gh_command(ctx.owner, ctx.repo, r["proposed"])
-    return out, OK if r["equal_as_set"] else CHECK_FAILED
+    return out, NEEDS_INPUT if brand_hold else OK if complete else CHECK_FAILED
 
 
 def cmd_labels(args):
@@ -551,7 +605,7 @@ def cmd_labels(args):
         sys.stdout.write(labels.emit_yml())
         return None, OK
     ctx = context(args)
-    ctx.brand.check_owner(ctx.owner)
+    ctx.brand.check_owner(ctx.owner, repo=ctx.repo)
     # the gates `org labels` applies (labels.md Scope): a family on hold is refused like banner and card
     if (ctx.style.get("hold") or ctx.brand.resolver().family_hold(ctx.owner)) and not args.allow_hold:
         raise ShowcaseError(f"{ctx.owner} family is on hold: labels are not applied; pass --allow-hold", log="hold")
@@ -639,7 +693,7 @@ def cmd_meta(args):
         status = brand(args, prefer_lock=True).owner_status(owner)
         if status in ("excluded", "hold", "t3"):
             # raises Refused (exit 2); --allow-t3 only after an approved t3-metadata or t3-signoff row
-            brand(args, prefer_lock=True).check_owner(owner, allow_t3=args.allow_t3)
+            brand(args, prefer_lock=True).check_owner(owner, allow_t3=args.allow_t3, repo=args.from_gh.split("/")[1] if "/" in args.from_gh else None)
         m = M.from_gh(args.from_gh)
     else:
         rd = repo_dir(args)
@@ -736,6 +790,11 @@ def lint_public_leak(args) -> list[dict]:
     from ctshowcase.resolver import Resolver
     if not args.files:
         raise ShowcaseError("lint public-leak needs FILE...", log="usage")
+    if getattr(args, "denylist", None) is not None:
+        if any((args.registry, args.meta_dir, args.decisions, args.org, args.approved, args.approved_yaml, args.actions)):
+            raise ShowcaseError("use --denylist without registry, metadata, org or approval inputs", log="usage")
+        from ctshowcase.publicleak import check_files
+        return check_files(args.files, args.denylist)
     b = brand(args)
     res = Resolver.from_paths(b, args.registry, args.approved, args.approved_yaml, args.actions, require_registry=True)
     estate = Estate(b, res, flags=load_flags(args.decisions or _default_decisions()))
@@ -835,7 +894,7 @@ def cmd_adopt(args):
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+", args.slug or ""):
         raise ShowcaseError("adopt needs OWNER/REPO", log="usage")
     b = brand(args)
-    b.check_owner(args.slug.split("/")[0])
+    b.check_owner(args.slug.split("/")[0], repo=args.slug.split("/")[1] if "/" in args.slug else None)
     if args.meta:
         m = M.load_file(args.meta)
         if not _same_slug(args, f"{m.get('owner')}/{m.get('repo')}", args.slug):
@@ -885,8 +944,8 @@ def cmd_doctor(args):
         res = intake.estate_doctor(brand(args), _resolver_args(args, require_registry=True), metas,
                                    template_dir=args.template_dir, checkouts=args.checkouts, out=args.out)
         return res, OK
-    ctx = context(args)
-    ctx.brand.check_owner(ctx.owner, allow_t3=True)
+    ctx = context(args, for_coverage=True)
+    ctx.brand.check_owner(ctx.owner, allow_t3=True, repo=ctx.repo, verify_signoff=False)  # read-only: doctor.row shows R7 hold
     r = doctor.row(ctx)
     fmt = args.doctor_format
     if fmt == "tsv":
@@ -993,7 +1052,11 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--format", choices=("json", "text"), default=None, help="output style")
     p.add_argument("--quiet", action="store_true")
     p.add_argument("--allow-t3", action="store_true",
-                   help="treat a T3 (co-owned) owner as signed off for this run: every repository command and generator, not just `meta`; pass only when a t3-metadata or t3-signoff row is approved (default: T3 owners are refused, exit 2)")
+                   help="treat a T3 (co-owned) owner as signed off for this run: every repository command and generator, not just `meta`; pass only when a t3-metadata or t3-signoff row is approved (default: T3 owners are refused, exit 2). It also needs a valid sign-off record, by default in <estate root>/decisions/t3-signoffs.yaml (see --t3-signoff-file and references/t3-signoff.md); there is no opt-out")
+    p.add_argument("--t3-signoff-file", metavar="PATH",
+                   help="the sign-off record file to read instead of the default <estate root>/decisions/t3-signoffs.yaml "
+                        "(env SHOWCASE_T3_SIGNOFF_FILE; format: references/t3-signoff.md). Order: this flag, the env, the default. "
+                        "The file is read, never created")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__} ({STANDARD})")
     sub = p.add_subparsers(dest="command", required=True, metavar="<command>")
 
@@ -1020,6 +1083,8 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--allow-unmeasured", action="store_true")
     s.add_argument("--allow-hold", action="store_true")
     s.add_argument("--description", help="render a staged description; log and record it without changing GitHub")
+    s.add_argument("--key-chip", action="append", default=[])
+    s.add_argument("--chip", action="append", default=[])
     s.set_defaults(func=cmd_card)
 
     # deprecated alias of the contract name `content social` (same options, same file); added without `help`, so
@@ -1031,6 +1096,8 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--allow-unmeasured", action="store_true")
     s.add_argument("--allow-hold", action="store_true")
     s.add_argument("--description", help="render a staged description; log and record it without changing GitHub")
+    s.add_argument("--key-chip", action="append", default=[])
+    s.add_argument("--chip", action="append", default=[])
     s.set_defaults(func=cmd_social)
 
     s = sub.add_parser("org-banner", help="1600x400 org profile banner JPG (.github/profile/assets/banner.jpg)")
@@ -1136,6 +1203,7 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("files", nargs="*")
     s.add_argument("--kind", choices=("intro", "card", "tile", "plate", "divider"))
     s.add_argument("--variant", default="auto")
+    s.add_argument("--denylist", help="public-leak: UTF-8 literal names, one per line; case-insensitive; never echoed")
     s.add_argument("--registry", help="public-leak: registry/estate.yaml (default: the bundle beside the skill; read only)")
     s.add_argument("--meta-dir", help="public-leak: per-repository metadata JSONs (visibility; without them every "
                                       "repository counts as private)")
@@ -1173,6 +1241,8 @@ def parser() -> argparse.ArgumentParser:
     s = sub.add_parser("doctor", help="definition-of-done coverage row; --estate: intake proposals and template drift")
     s.add_argument("--format", dest="doctor_format", choices=("tsv", "json", "md"), default="tsv")
     s.add_argument("--header", action="store_true")
+    s.add_argument("--allow-unmeasured", action="store_true",
+                   help="accepted for consistency; doctor checks existing outputs and does not render art")
     s.add_argument("--estate", action="store_true",
                    help="classify repositories missing from the registry with POLICY.md into NEW_PROPOSALS entries and "
                         "diff template-managed files against the template (read only)")
@@ -1231,7 +1301,8 @@ def parser() -> argparse.ArgumentParser:
 
     # command groups (decisions 5, 14, 15, 18, 21, 23 and 24; COVERAGE gaps): each module registers its own parser, and
     # every org lookup inside them goes through ctshowcase.resolver (old and new logins resolve alike, CQ-03)
-    from ctshowcase import content, org, project
+    from ctshowcase import brand_commands, content, org, project
+    brand_commands.register(sub)
     org.register(sub)
     project.register(sub)
     content.add_parser(sub, sys.modules.get(__name__))  # None when loaded by path: content finds showcase.py itself
@@ -1239,13 +1310,19 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main(argv=None) -> int:
-    """Run one invocation. `--allow-t3` holds only for this call: the previous value is restored on every exit."""
-    from ctshowcase.config import set_t3_signed_off, t3_signed_off
-    previous = t3_signed_off()
+    """Run one invocation. `--allow-t3` and the sign-off record file hold only for this call (and this context): the prior
+    values, and the sign-off grants of any enclosing run, are restored on every exit."""
+    from ctshowcase.config import reset_t3_signed_off, set_t3_signed_off, t3_signed_off
+    from ctshowcase import signoff
+    token = set_t3_signed_off(t3_signed_off())
+    file_token = signoff.set_file(signoff._FILE.get())
+    run_token = signoff.reset()
     try:
         return _main(argv)
     finally:
-        set_t3_signed_off(previous)
+        signoff.restore(run_token)
+        signoff.reset_file(file_token)
+        reset_t3_signed_off(token)
 
 
 def _main(argv=None) -> int:
@@ -1270,12 +1347,14 @@ def _main(argv=None) -> int:
         cli.error("unrecognized arguments: " + " ".join(remaining))
     from ctshowcase.config import set_t3_signed_off
     set_t3_signed_off(getattr(args, "allow_t3", False))
+    from ctshowcase import signoff
+    signoff.set_file(getattr(args, "t3_signoff_file", None))
     if args.format is None:
         args.format = "text" if args.command in GENERATORS else "json"
     try:
         obj, code = args.func(args)
     except ShowcaseError as exc:
-        obj = {"command": args.command, "result": "refused" if exc.code == USAGE and exc.log in ("hold", "t3-signoff", "exempt")
+        obj = {"command": args.command, "result": "refused" if exc.code == USAGE and (exc.log in ("hold", "t3-signoff", "exempt") or exc.log.startswith("t3-signoff:"))
                else exc.log.split(":")[0], "error": str(exc), "logs": [exc.log]}
         code = exc.code
         if args.format == "text" and not args.quiet:
@@ -1289,6 +1368,9 @@ def _main(argv=None) -> int:
             print(f"{args.command}: {obj['error']}", file=sys.stderr)
             return code
     if obj is not None:
+        for key in ("jobs", "records", "proposals"):  # writer jobs, change records, writer-shaped proposals
+            if isinstance(obj.get(key), list):
+                signoff.stamp(obj[key])  # the granting record
         emit(args, obj)
     return code
 

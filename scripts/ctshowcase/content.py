@@ -71,8 +71,8 @@ def org_row(r: Resolver | None, brand, login: str, require: bool = False) -> dic
     return row
 
 
-def org_style(r: Resolver | None, brand, login: str) -> dict:
-    return brand.style(brand_key(r, login))
+def org_style(r: Resolver | None, brand, login: str, *, repo: str | None = None) -> dict:
+    return brand.style(brand_key(r, login), repo=repo)
 
 
 def in_estate(r: Resolver | None, login: str) -> bool:
@@ -111,6 +111,10 @@ def writer_job(jid: str, phase, kind: str, target: str, argv: list, note: str, a
     j["argv"] = [str(a) for a in argv]
     j["note"] = note
     j.update(extra)
+    # Direct library consumers receive the same verified target provenance as
+    # serialized CLI jobs; stamping never registers or authorizes a grant.
+    from .signoff import stamp
+    stamp([j])
     return j
 
 
@@ -1841,7 +1845,7 @@ def org_glyph(text: str, owner: str) -> str | None:
 
 def icon_colours(ctx, text: str, org: dict, resolver: Resolver, *, require_palette: bool = True) -> dict:
     """Keep estate palettes explicit; the bundled template uses the committed brand tokens."""
-    family = org_style(resolver, ctx.brand, ctx.owner)["name"]
+    family = org_style(resolver, ctx.brand, ctx.owner, repo=ctx.repo)["name"]
     colours = family_colours(text, org["brand_key"], family, resolver.aliases(ctx.owner))
     if _section(text, "Repository glyph prompt template") and not _section(text, "(b) Family palette"):
         tokens = ctx.style["tokens"]
@@ -1903,7 +1907,7 @@ def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = Non
     owner, repo = ctx.owner, ctx.repo
     org = org_row(resolver, ctx.brand, owner, require=True)
     org["canonical"], org["current"] = org["brand_key"], current_login(resolver, owner)
-    family = org_style(resolver, ctx.brand, owner)["name"]
+    family = org_style(resolver, ctx.brand, owner, repo=repo)["name"]
     logins = [org["canonical"], *resolver.aliases(owner)]  # ART_DIRECTION may name the org by any of its logins (CQ-03)
     colours = icon_colours(ctx, art_text, org, resolver, require_palette=option.upper() == "A")
     org_mark = next((g for g in (org_glyph(art_text, x) for x in logins) if g), None)
@@ -2469,6 +2473,8 @@ def add_parser(sub, cli=None):
     a.add_argument("--out")
     a.add_argument("--title")
     a.add_argument("--description", help="render a staged description and record its provenance")
+    a.add_argument("--key-chip", action="append", default=[])
+    a.add_argument("--chip", action="append", default=[])
     a.add_argument("--icon")
     a.add_argument("--allow-unmeasured", action="store_true")
     a.add_argument("--allow-hold", action="store_true")
@@ -2582,7 +2588,7 @@ def _ctx(args, cli, resolver):
     key = resolver.brand_key(ctx.owner)
     if key and key != ctx.owner and not ctx.org.get("known"):
         ctx.org = org_row(resolver, ctx.brand, ctx.owner)
-        ctx.style = org_style(resolver, ctx.brand, ctx.owner)
+        ctx.style = org_style(resolver, ctx.brand, ctx.owner, repo=ctx.repo)
         ctx.logs = [x for x in ctx.logs if x != "needs-input:org-row"]
         ctx.log(f"org-alias:{key}")
     return ctx
@@ -2590,6 +2596,12 @@ def _ctx(args, cli, resolver):
 
 def _finish(args, obj: dict, code: int):
     jobs = list(obj.get("jobs") or []) + ([obj["job"]] if obj.get("job") else [])
+    from .signoff import stamp
+    stamp(jobs)  # before any serialization (--jobs, --report)
+    # Writer-shaped proposals (phase/kind/repo/argv, e.g. a workflow-toggle awaiting --approval) carry the granting
+    # sign-off in the report and stdout but are NOT added to `jobs`, so they stay out of the writer queue. stamp() only
+    # touches dicts with `phase` or std/owner/repo, so diff-style proposals (no phase) are left untouched.
+    stamp([p for p in (obj.get('proposals') or []) if isinstance(p, dict)])
     if getattr(args, "jobs", None) and jobs:  # writer jobs only; unapproved proposals stay in the report
         from .records import append
         append(args.jobs, jobs)
@@ -2611,9 +2623,9 @@ def cmd_content(args, cli=None):
     resolver = _resolver(args, cli)
     head = {"command": "content", "action": act}
     if act == "social":
-        owner, _, _ = _owner_repo(args, cli, None)
+        owner, srepo, _ = _owner_repo(args, cli, None)
         if owner:
-            resolver.check_owner(owner, allow_hold=args.allow_hold)
+            resolver.check_owner(owner, allow_hold=args.allow_hold, repo=srepo)
         obj, code = cli.cmd_social(args)
         obj = dict(head, **{k: v for k, v in obj.items() if k != "command"}, alias_of="social-preview")
         if args.job and obj.get("result") == "ok":
@@ -2633,7 +2645,7 @@ def cmd_content(args, cli=None):
             raise ShowcaseError(f"content {act} needs a checkout (--repo-dir)", log="usage")
         owner, repo, _ = _owner_repo(args, cli, rd)
         if owner:
-            resolver.check_owner(owner)
+            resolver.check_owner(owner, repo=repo)
         tree = Tree(rd)
         readme = displayed_readme(tree, args.readme_path)
         files = list(args.files) or markdown_files(tree, readme)
@@ -2663,7 +2675,7 @@ def cmd_content(args, cli=None):
         return _finish(args, obj, _code(obj["result"]))
     if act == "linguist":
         ctx = _ctx(args, cli, resolver)
-        resolver.check_owner(ctx.owner)
+        resolver.check_owner(ctx.owner, repo=ctx.repo)
         tree = Tree(ctx.repo_dir) if ctx.repo_dir else None
         override = dict(ctx.override)
         if args.language:
@@ -2672,7 +2684,7 @@ def cmd_content(args, cli=None):
         return _finish(args, {**head, "owner": ctx.owner, "repo": ctx.repo, **res, "logs": ctx.logs + res["logs"]}, OK)
     if act == "actions":
         ctx = _ctx(args, cli, resolver)
-        resolver.check_owner(ctx.owner)
+        resolver.check_owner(ctx.owner, repo=ctx.repo)
         wf_files, root_files, readme = {}, (), ""
         if ctx.repo_dir:
             tree = Tree(ctx.repo_dir)
@@ -2699,10 +2711,16 @@ def cmd_content(args, cli=None):
     raise ShowcaseError(f"unknown content action {act}", log="usage")
 
 
-def social_job(ctx, resolver: Resolver, out: str) -> dict | None:
-    """Browser job for the repository social preview upload (STANDARD §12.4; public T1/T2 repos only)."""
+def social_job(ctx, resolver: Resolver | None, out: str) -> dict | None:
+    """Browser upload job for an applicable public repository, with scoped T3 provenance."""
     if not ctx.social_applicable():
         return None
+    if resolver is None:
+        resolver = ctx.brand.resolver()
+    # Re-check at the planning boundary, including direct library callers, so a T3
+    # grant is scoped to this repository and registered for provenance stamping.
+    if resolver.owner_status(ctx.owner) == "t3":
+        resolver.check_owner(ctx.owner, repo=ctx.repo)
     full = f"{current_login(resolver, ctx.owner)}/{ctx.repo}"
     steps = [f"Open https://github.com/{full}/settings (the General page).",
              "Scroll to \"Social preview\" and click \"Edit\", then \"Upload an image…\".",
@@ -2710,8 +2728,11 @@ def social_job(ctx, resolver: Resolver, out: str) -> dict | None:
              "Wait until the preview shows the new image; do not change any other setting on this page.",
              f"Verify with the read-only query: gh api graphql -f query='{{repository(owner:\"{full.split('/')[0]}\","
              f"name:\"{ctx.repo}\"){{usesCustomOpenGraphImage openGraphImageUrl}}}}' (usesCustomOpenGraphImage is true)."]
-    return browser_job(job_id("p5", "social-preview", full), "5", full, f"https://github.com/{full}/settings",
-                       "social-preview", steps, "Upload the repository social preview (R10; STANDARD §9.5, §12.4).")
+    job = browser_job(job_id("p5", "social-preview", full), "5", full, f"https://github.com/{full}/settings",
+                      "social-preview", steps, "Upload the repository social preview (R10; STANDARD §9.5, §12.4).")
+    from .signoff import stamp
+    stamp([job])
+    return job
 
 
 def _cmd_sidebar(args, cli, resolver, head):
@@ -2726,7 +2747,7 @@ def _cmd_sidebar(args, cli, resolver, head):
     keyed = isinstance(facts, dict) and facts and all(isinstance(k, str) and "/" in k for k in facts)
     if not keyed:
         ctx = _ctx(args, cli, resolver)
-        resolver.check_owner(ctx.owner)
+        resolver.check_owner(ctx.owner, repo=ctx.repo)
         res = sidebar_plan(ctx.meta, facts, resolver=resolver, packages=pk,
                            current=current.get(f"{ctx.owner}/{ctx.repo}") or current or None)
         obj = dict(head, owner=ctx.owner, repo=ctx.repo, **{k: v for k, v in res.items() if k != "logs"},
@@ -2738,8 +2759,10 @@ def _cmd_sidebar(args, cli, resolver, head):
         if args.only and not (resolver.same(o, args.only.split("/")[0]) and r.lower() == args.only.split("/")[1].lower()):
             continue
         try:
-            resolver.check_owner(o)
+            resolver.check_owner(o, repo=r)
         except Refused as exc:
+            if str(exc.log or "").startswith("t3-signoff:"):
+                raise  # a sign-off refusal must reach the exit-2 handler, never read as a pass with the repo skipped
             skipped.append({"repo": full, "why": exc.log})
             continue
         meta = dict((f or {}).get("meta") or {}, owner=o, repo=r)
@@ -2760,7 +2783,7 @@ def _cmd_sidebar(args, cli, resolver, head):
 def _cmd_icon(args, cli, resolver, head):
     from PIL import Image
     ctx = _ctx(args, cli, resolver)
-    resolver.check_owner(ctx.owner)
+    resolver.check_owner(ctx.owner, repo=ctx.repo)
     # decision 12: the same applicability as banner, card, lint all and doctor (RepoContext.art_status); only
     # watching-org forks and a placeholder org's `.github` are exempt. Forks outside the watching org, backups and
     # `.github` repositories need their own icon. The resolver also sees the renames and placeholders passed here.

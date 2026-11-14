@@ -2,9 +2,11 @@
 Fixtures are synthetic captures shaped like the documented GraphQL responses (tests/fixtures/project)."""
 import argparse
 import copy
+import hashlib
 import json
 import os
 import re
+import time
 
 import pytest
 
@@ -161,11 +163,14 @@ def test_copy_plan_stage_two(brand):
     assert 'viewId: "PVTV_n5", filter: "status:Backlog,Ready workstream:\\"Pricing research\\""' in f5
     # missing views through REST with integer field ids
     my = jobs[f"{pre}-view-my-items"]
-    assert my["argv"] == ["gh", "api", "-X", "POST", f"orgs/{N}/projectsV2/3/views", "--input",
-                          "work/projects/Northwind-Trading-Co-3/view-6-my-items.json"]
+    assert my["argv"][:5] == ["gh", "api", "-X", "POST", f"orgs/{N}/projectsV2/3/views"]
+    assert "name=My items" in my["argv"] and "filter=assignee:@me -status:Done" in my["argv"]
+    assert all("--input" not in j.get("argv", []) for j in plan["jobs"])
     shipped = plan["files"]["work/projects/Northwind-Trading-Co-3/view-7-shipped.json"]
     assert shipped == {"name": "Shipped", "layout": "table", "filter": "status:Done updated:>=@today-30d",
                        "group_by": [1009], "sort_by": [[1012, "desc"]]}
+    assert "group_by[]=1009" in jobs[f"{pre}-view-shipped"]["argv"]
+    assert any("Sort: Updated desc" in step for step in jobs[f"{pre}-ui-shipped"]["steps"])
     # text: the README waits for the new view numbers; links only for the same owner
     text = next(j for i, j in jobs.items() if re.fullmatch(f"{re.escape(pre)}-text-[0-9a-f]{{8}}", i))["argv"]
     assert text[:6] == ["gh", "project", "edit", "3", "--owner", N] and "--readme" not in text
@@ -335,7 +340,7 @@ def estate_resolver(brand):
     return resolver(b, rows=[("create-project", "@me", "*", "")], registry=reg)
 
 
-def test_estate_plan_stage_one(estate_resolver):
+def test_estate_plan_stage_one(estate_resolver, t3_record):
     plan = PJ.estate_plan(estate_resolver, source="CompleteTech-LLC/4")
     assert plan["action"] == "estate-plan" and plan["owner"] == "@me"
     assert plan["jobs"][0]["argv"] == ["gh", "project", "copy", "4", "--source-owner", "CompleteTech-LLC", "--target-owner",
@@ -363,6 +368,200 @@ def test_estate_plan_stage_two(estate_resolver):
 
 
 # ----------------------------------------------------------------------------------------------- CLI layer
+def _loopback_output_summary(output):
+    """Report bounded output evidence without exposing subprocess output or credentials."""
+    data = output.encode("utf-8", errors="replace") if isinstance(output, str) else (output or b"")
+    indicators = [word for word in (b"timeout", b"connection refused", b"connection reset", b"EOF")
+                  if word.lower() in data.lower()]
+    return f"bytes={len(data)}, sha256={hashlib.sha256(data).hexdigest()}, indicators={indicators}"
+
+
+def _loopback_timeout_diagnostic(events, exc):
+    return (f"gh timed out after {exc.timeout}s; subprocess state: killed and reaped by subprocess.run; "
+            f"handler events: {list(events)}; stdout: {_loopback_output_summary(exc.stdout)}; "
+            f"stderr: {_loopback_output_summary(exc.stderr)}")
+
+
+
+def _loopback_env(env, config_dir, *, remove_proxy=False):
+    proxy_names = {"http_proxy", "https_proxy", "all_proxy", "no_proxy"}
+    names = sorted(k for k in env if k.lower() in proxy_names or k.upper().startswith("GH_"))
+    clean = {k: v for k, v in env.items() if not (remove_proxy and k.lower() in proxy_names)
+             and k.upper() not in {"GH_TOKEN", "GH_CONFIG_DIR"}}
+    clean.update(GH_TOKEN="synthetic-loopback-only", GH_CONFIG_DIR=str(config_dir))
+    return clean, names
+
+
+def test_loopback_env_redacts_and_removes_proxy():
+    env = {"HtTp_PrOxY": "secret", "NO_PROXY": "private", "GH_TOKEN": "token", "Gh_Host": "host", "PATH": "path"}
+    clean, names = _loopback_env(env, "fresh", remove_proxy=True)
+    assert names == ["GH_TOKEN", "Gh_Host", "HtTp_PrOxY", "NO_PROXY"]
+    assert "HtTp_PrOxY" not in clean and "NO_PROXY" not in clean
+    assert clean["GH_TOKEN"] == "synthetic-loopback-only" and clean["GH_CONFIG_DIR"] == "fresh"
+    assert clean["Gh_Host"] == "host" and clean["PATH"] == "path"
+    assert "secret" not in str(names) and "private" not in str(names)
+
+
+def _loopback_executable_info(gh):
+    # Paths can contain usernames; a hash permits comparison without disclosing them.
+    import subprocess
+
+    path_hash = hashlib.sha256(os.fsencode(gh)).hexdigest()
+    try:
+        result = subprocess.run([gh, "--version"], capture_output=True, timeout=3)
+        match = re.search(rb"\bgh version ([0-9]+\.[0-9]+\.[0-9]+)\b", result.stdout[:512])
+        version = match.group(1).decode("ascii") if match else "unavailable"
+    except (OSError, subprocess.TimeoutExpired):
+        version = "unavailable"
+    return f"path_sha256={path_hash}, version={version}"
+
+
+def _loopback_run(argv, env, accepted, *, preconnect_timeout=60, interaction_timeout=10):
+    """Bound both phases and clean up the process tree, including inherited handles."""
+    import signal
+    import subprocess
+    import tempfile
+
+    # A Windows job closes over descendants even after the direct child exits. Assign
+    # before polling; if assignment fails, fail the test rather than leave an orphan.
+    job = None
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.CreateJobObjectW.argtypes = [wintypes.LPVOID, wintypes.LPCWSTR]
+        kernel.CreateJobObjectW.restype = wintypes.HANDLE
+        kernel.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+        kernel.AssignProcessToJobObject.restype = wintypes.BOOL
+        kernel.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
+        kernel.TerminateJobObject.restype = wintypes.BOOL
+        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        ntdll = ctypes.WinDLL("ntdll")
+        ntdll.NtResumeProcess.argtypes = [wintypes.HANDLE]
+        ntdll.NtResumeProcess.restype = ctypes.c_long
+        job = kernel.CreateJobObjectW(None, None)
+        if not job:
+            raise ctypes.WinError(ctypes.get_last_error())
+
+    try:
+        # Files cannot be held open in a way that blocks output collection, unlike pipes.
+        with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
+            process = subprocess.Popen(argv, stdout=stdout, stderr=stderr, env=env,
+                                       start_new_session=(os.name != "nt"),
+                                       creationflags=0x00000004 if job else 0)  # CREATE_SUSPENDED
+            try:
+                if job and not kernel.AssignProcessToJobObject(job, int(process._handle)):
+                    raise ctypes.WinError(ctypes.get_last_error())
+                if job and ntdll.NtResumeProcess(int(process._handle)) != 0:
+                    raise OSError("could not resume process assigned to cleanup job")
+                deadline = time.monotonic() + preconnect_timeout
+                phase = "pre-connection"
+                while process.poll() is None:
+                    if phase == "pre-connection" and accepted.is_set():
+                        phase = "interaction"
+                        deadline = time.monotonic() + interaction_timeout
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    accepted.wait(min(remaining, 0.05)) if phase == "pre-connection" else time.sleep(
+                        min(remaining, 0.05))
+                timed_out = process.poll() is None
+            finally:
+                try:
+                    if job:
+                        if not kernel.TerminateJobObject(job, 1):
+                            raise ctypes.WinError(ctypes.get_last_error())
+                    else:
+                        try:
+                            os.killpg(process.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                    process.wait(timeout=2)
+            stdout.seek(0)
+            stderr.seek(0)
+            return (None if timed_out else process.returncode, phase if timed_out else None,
+                    (stdout.read(), stderr.read()))
+    finally:
+        if job:
+            kernel.CloseHandle(job)
+
+
+def test_loopback_run_phase_deadlines():
+    import sys
+    import threading
+
+    sleeper = [sys.executable, "-c", "import time; time.sleep(5)"]
+    code, phase, output = _loopback_run(sleeper, os.environ, threading.Event(), preconnect_timeout=0.1)
+    assert code is None and phase == "pre-connection" and output == (b"", b"")
+    accepted = threading.Event()
+    accepted.set()
+    code, phase, output = _loopback_run(sleeper, os.environ, accepted, interaction_timeout=0.1)
+    assert code is None and phase == "interaction" and output == (b"", b"")
+    code, phase, output = _loopback_run([sys.executable, "-c", "print('ok')"], os.environ, threading.Event())
+    assert code == 0 and phase is None and output[0].strip() == b"ok" and output[1] == b""
+
+
+def test_loopback_run_cleans_up_inherited_output_handles(tmp_path):
+    import signal
+    import subprocess
+    import sys
+
+    pid_file = tmp_path / "pid"
+    parent_file = tmp_path / "parent"
+    marker = tmp_path / "survived"
+    descendant = ("import os, pathlib, sys, time; time.sleep(0.6); "
+                  "pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); "
+                  "time.sleep(1.5); pathlib.Path(sys.argv[2]).write_text('alive')")
+    parent = ("import os, pathlib, subprocess, sys, time; "
+              "pathlib.Path(sys.argv[4]).write_text(str(os.getpid())); "
+              "subprocess.Popen([sys.executable, '-c', sys.argv[1], sys.argv[2], sys.argv[3]]); "
+              "time.sleep(30)")
+    runner = ("import os, pathlib, sys, threading, time; from test_project import _loopback_run; "
+              "ready = threading.Event(); p = pathlib.Path(sys.argv[3]); "
+              "def_wait = 'while not p.exists():\\n time.sleep(0.01)\\nready.set()'; "
+              "threading.Thread(target=lambda: exec(def_wait), daemon=True).start(); "
+              "code, phase, output = _loopback_run([sys.executable, '-c', sys.argv[1], *sys.argv[2:]], "
+              "os.environ, ready, preconnect_timeout=8, interaction_timeout=0.1); "
+              "assert code is None and phase == 'interaction' and output == (b'', b'')")
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join([str(ROOT / "tests"), str(ROOT / "scripts")]))
+    passed = False
+    try:
+        subprocess.run([sys.executable, "-c", runner, parent, descendant, str(pid_file), str(marker),
+                        str(parent_file)], env=env, check=True, timeout=12, capture_output=True)
+        assert pid_file.exists(), "descendant did not report readiness"
+        time.sleep(1.6)
+        assert not marker.exists(), "descendant survived process-tree cleanup"
+        passed = True
+    finally:
+        for path in (() if passed else (parent_file, pid_file)):
+            if path.exists():
+                pid = int(path.read_text())
+                if os.name == "nt":
+                    subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True, timeout=5)
+                else:
+                    try:
+                        os.kill(pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+
+
+def test_loopback_timeout_diagnostic_redacts_output():
+    import subprocess
+
+    exc = subprocess.TimeoutExpired(["gh"], 10, output=b"secret-token", stderr=b"private-data timeout")
+    message = _loopback_timeout_diagnostic(["request-arrived", "reading-body"], exc)
+    assert "request-arrived" in message and "reading-body" in message
+    assert "bytes=12" in message and "bytes=20" in message
+    assert "b'timeout'" in message
+    assert "secret-token" not in message and "private-data" not in message
+    assert "killed and reaped" in message
+    assert "bytes=0" in _loopback_output_summary(None)
+
+
 def test_register_and_cmd_project(tmp_path):
     p = argparse.ArgumentParser()
     p.add_argument("--config")
@@ -382,3 +581,136 @@ def test_register_and_cmd_project(tmp_path):
     assert all(("argv" in j) != (j["kind"] == "browser") for j in lines)
     args = p.parse_args(["project", "capture-query", "--owner", "Pick-Your-AI", "--number", "1"])
     assert args.func(args)[0]["reads"][0]["argv"][-1].endswith("project_capture.graphql")
+
+
+def test_inline_view_job_serializes_correctly_with_real_gh(tmp_path, brand):
+    """Exercise gh's field encoding against a loopback server; no GitHub mutation runs."""
+    import http.server
+    import shutil
+    import socket
+    import subprocess
+    import threading
+    from collections import deque
+
+    gh = shutil.which("gh")
+    if gh is None:
+        pytest.skip("gh CLI is required to verify inline REST field serialization")
+    received = []
+    events = deque(maxlen=16)
+    connections = []
+    lock = threading.Lock()
+    stopping = threading.Event()
+    accepted = threading.Event()
+    started = time.monotonic()
+    server_error = []
+
+    def record(event):
+        with lock:
+            events.append((event, round(time.monotonic() - started, 3)))
+
+    class Server(http.server.HTTPServer):
+        def get_request(self):
+            connection, address = super().get_request()
+            with lock:
+                connections.append(connection)
+                events.append(("connection-accepted", round(time.monotonic() - started, 3)))
+                accepted.set()
+                if stopping.is_set():
+                    connection.shutdown(socket.SHUT_RDWR)
+            return connection, address
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            record("request-arrived")
+            try:
+                record("reading-body")
+                received.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+                record("body-parsed")
+                self.send_response(200)
+                self.end_headers()
+                record("headers-sent")
+                self.wfile.write(b"{}")
+                record("response-written")
+            finally:
+                record("handler-finished")
+
+        def log_message(self, *args):
+            pass
+
+    view = {"name": "Inline encoding", "layout": "table", "filter": 'repo:Northwind-Trading-Co/site label:"a=b"',
+            "group_by": ["Status"], "visible_fields": ["Status", "Workstream"],
+            "sort_by": [["Updated", "desc"]]}
+    plan = PJ.copy_plan(N, copied=cap("copy-capture.json"), resolver=resolver(brand), views=[view])
+    job = next(j for j in plan["jobs"] if j["id"].endswith("-view-inline-encoding"))
+    expected = [{"name": view["name"], "layout": "table", "filter": view["filter"],
+                 "group_by": [1003], "visible_fields": [1003, 1009]}]
+
+    def run_once(config_dir, remove_proxy=False):
+        received.clear()
+        events.clear()
+        server_error.clear()
+        stopping.clear()
+        accepted.clear()
+        server = Server(("127.0.0.1", 0), Handler)
+        record("server-bound")
+
+        def serve():
+            record("server-thread-started")
+            try:
+                server.serve_forever()
+            except Exception as error:
+                # Exception text can contain sensitive data; retain only its type.
+                server_error.append(type(error).__name__)
+                record("server-thread-exception")
+
+        thread = threading.Thread(target=serve, daemon=True)
+        thread.start()
+        env, names = _loopback_env(os.environ, config_dir, remove_proxy=remove_proxy)
+        argv = [gh, *job["argv"][1:]]
+        argv[4] = f"http://127.0.0.1:{server.server_port}/views"
+        active_connections = []
+        try:
+            record("subprocess-launch")
+            code, phase, output = _loopback_run(argv, env, accepted)
+            if phase is None:
+                result = subprocess.CompletedProcess(argv, code, *output)
+                record("subprocess-exit")
+                outcome = f"exit={result.returncode}; serialization_matches={received == expected}"
+            else:
+                record("subprocess-timeout")
+                limit = 60 if phase == "pre-connection" else 10
+                outcome = (f"gh {phase} timed out after {limit}s; subprocess killed and reaped; "
+                           f"stdout: {_loopback_output_summary(output[0])}; "
+                           f"stderr: {_loopback_output_summary(output[1])}")
+                result = None
+            with lock:
+                stopping.set()
+                active_connections = list(connections)
+                detail = (f"{outcome}; server_alive={thread.is_alive()}; server_exception={list(server_error)}; "
+                          f"milestones={list(events)}; env_names={names}")
+            return result, detail, list(received)
+        finally:
+            for connection in active_connections:
+                try:
+                    connection.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+            connections.clear()
+
+    result, diagnostic, received = run_once(tmp_path / "gh")
+    if result is None:
+        executable = _loopback_executable_info(gh)
+        try:
+            _, comparison, _ = run_once(tmp_path / "gh-control", remove_proxy=True)
+        except Exception as error:
+            comparison = f"unavailable: {type(error).__name__}"
+        pytest.fail(f"primary: {diagnostic}; executable: {executable}; "
+                    f"controlled proxy-removed run: {comparison}", pytrace=False)
+    assert result.returncode == 0, _loopback_output_summary(result.stderr)
+    assert received == [{"name": view["name"], "layout": "table", "filter": view["filter"],
+                         "group_by": [1003], "visible_fields": [1003, 1009]}]
+    ui = next(j for j in plan["jobs"] if j["id"].endswith("-ui-inline-encoding"))
+    assert any("Sort: Updated desc" in step for step in ui["steps"])

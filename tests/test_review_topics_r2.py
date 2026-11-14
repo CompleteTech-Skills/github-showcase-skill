@@ -56,8 +56,11 @@ def test_cve_vendor_topic_is_proposed_under_new_login(renamed_ctx):
 def test_vendor_rule_stays_scoped_to_the_security_org(renamed_ctx):
     ctx = renamed_ctx(SEC_RENAME, owner="Northwind-Trading-Co", repo=CVE_REPO, description=CVE_DESC,
                       topics=["northwind"])
-    p = merge(ctx)["proposed"]
-    assert "northwind" not in p
+    result = merge(ctx)
+    assert "northwind" in result["proposed"]  # authored topics require review, never silent deletion
+    assert "review-remove:northwind" in result["logs"]
+    ctx.meta["topics"] = []
+    assert "northwind" not in merge(ctx)["proposed"]
 
 
 def test_touchedbyanagent_domain_vocab_follows_the_resolver(renamed_ctx):

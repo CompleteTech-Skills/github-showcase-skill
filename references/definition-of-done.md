@@ -1,12 +1,45 @@
 # Definition of done
 
-A repository is done when every check that applies is `pass` (R3 may be `warn`; R7 may be `incomplete`) and the decision columns pass. `showcase.py doctor` prints one row per repository with exactly these columns, so rows from the whole estate concatenate into the coverage matrix:
+A repository is done when every check that applies is `pass` (R3 may be `warn`; R7 may be `incomplete`) and the decision columns pass. `showcase.py doctor` prints one row per repository with these columns, so rows from the whole estate concatenate into the coverage matrix:
 
 ```text
-owner/repo  type  variant  R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11  banner icon card footer  done
+owner/repo  type  variant  R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11  banner icon card footer  done skill_complete owner_pending
 ```
 
 Each cell is `pass`, `warn`, `incomplete`, `fail`, `n/a` or `unknown`. The `done` cell reports done only when every applicable cell is `pass`, `warn` or `incomplete`. `doctor` reads `--repo-dir` and `--meta` only and makes no network calls; live-only checks are `unknown` without the metadata fields they need. Exit 1 when any cell is `fail`.
+
+## Skill delivery and owner decisions
+
+`done` keeps its existing whole-repository meaning. The additional `skill_complete`
+field is `yes` only when R9, banner, icon, card and footer are all `pass` or `n/a`.
+Warnings, missing evidence, incomplete art and holds do not certify a local output.
+`owner_pending` lists the remaining owner-controlled cells: R1 through R8, R10 and
+R11 whose status is not `pass` or `n/a`. Those cells concern naming, descriptions,
+topics, URLs, GitHub settings, labels, authored README content, licensing, social
+preview upload and health metadata. The skill can prepare proposals and generated
+README blocks; the owner supplies missing facts and authorizes their application.
+R9 and the four decision columns describe local skill-controlled assets. These
+classifications identify the next work, and do not grant permissions or change
+which existing checks pass.
+
+For example, reviewed local assets with a pending description, incomplete authored
+README sections and an unconfirmed upload can report `skill_complete: yes`,
+`owner_pending: [R2, R7, R10]` and `done: no`. A missing icon still makes
+`skill_complete: no`. JSON emits a list for `owner_pending`; TSV and Markdown use
+comma-separated cell IDs or `none`. Both new fields follow `done`, preserving the
+original column order. The CLI exit status still follows failing cells.
+
+`doctor --allow-unmeasured` is accepted for consistency with the generators. It
+never skips asset checks or declares an unmeasured palette approved: doctor reads
+existing outputs and performs no rendering, so the flag has no effect.
+
+A family with `identity_pending` still gets a read-only coverage row, including
+for an unsigned T3 owner. The row logs `needs-input:brand-identity` and holds R7
+instead of checking README colours against an invented palette. Its applicable
+local art checks remain held when a checkout is supplied. A valid scoped sign-off
+can be reported on the row, but does not supply the missing identity. Generation
+still requires the usual consent checks and then the owner-supplied identity;
+neither `doctor` nor `--allow-unmeasured` provides those inputs.
 
 ## Repository checks
 
@@ -21,7 +54,7 @@ Each cell is `pass`, `warn`, `incomplete`, `fail`, `n/a` or `unknown`. The `done
 | R7 | README matches its variant: nav line, banner, H2 order, every image resolves, canonical GitHub links, no placeholder text, under 500 KiB; logged omissions → `incomplete`; preserve-list repositories checked for the additive items only | `lint readme` | `lint readme` |
 | R8 | A LICENSE is present and unchanged, or added from the approved list, or none is required | metadata `license` and the checkout | license rows |
 | R9 | CompleteTech-Skills `agent-skills` repositories: `assets/logo.png` and `assets/logo-dark.png` are byte-identical to the brand files; `n/a` elsewhere | sha256 | checkout |
-| R10 | Custom social preview on T1 and T2 public, non-fork, non-archived repositories (excluding `.github` and `*.github.io`). The personal profile repository is included in the capstone (decision 20). T2-R and T3 are `n/a`. | live GraphQL `usesCustomOpenGraphImage` | `unknown` without the field when applicable; otherwise `n/a` |
+| R10 | Custom social preview on T1, T2 and signed-off T3 public, non-fork, non-archived repositories (excluding `.github` and `*.github.io`). T3 requires `--allow-t3` and a current record covering this repository, matching upload-job applicability. The personal profile repository is included in the capstone (decision 20). T2-R and unsigned T3 are `n/a`. | live GraphQL `usesCustomOpenGraphImage` | `unknown` without the field when applicable; otherwise `n/a` |
 | R11 | `health_percentage` is 100 for public, non-fork, non-archived, non-`.github` repositories in T1 and T2 orgs other than romgenie (excluding those waiting on the license list) | metadata `health_percentage` | `unknown` without the field |
 | R12 | Custom properties set (orgs only; only if adopted) | org properties | not a repository column |
 

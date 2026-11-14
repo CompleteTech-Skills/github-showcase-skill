@@ -124,3 +124,34 @@ def brand_with():
         raw.setdefault("readme", {}).update(readme_opts)
         return Brand(raw, base.path)
     return _make
+
+
+T3_RECORD_OWNERS = ("Pick-Your-AI", "Pick-Your-Stack", "Northwind-Trading-Co", "Jevelopers-neatHack-2026")
+
+
+@pytest.fixture
+def t3_record(tmp_path, monkeypatch):
+    """A synthetic sign-off record file (every owner `*`, id t3s-synthetic-N) behind SHOWCASE_T3_SIGNOFF_FILE: `--allow-t3`
+    needs a record by default (issue 23), and the in-process tests that exercise a T3 gate bring their own. No estate
+    bundle is read and nothing here is a real approval."""
+    lines = ["signoffs:"]
+    for n, owner in enumerate(T3_RECORD_OWNERS, 1):
+        lines += [f"  - id: t3s-synthetic-{n}", f"    owner: {owner}", '    repos: ["*"]', "    approved: true",
+                  "    approver: synthetic-co-owner", "    approved_on: 2026-01-15", "    expires: 2099-12-31"]
+    path = tmp_path / "t3-signoffs.yaml"
+    path.write_text(os.linesep.join(lines) + os.linesep, encoding="utf-8")
+    monkeypatch.setenv("SHOWCASE_T3_SIGNOFF_FILE", str(path))
+    return path
+
+
+@pytest.fixture(autouse=True)
+def _isolated_signoff_state():
+    """Sign-off enforcement is on by default (issue 23), so library calls outside showcase.main() now register grants in the
+    module's context. Give every test fresh grants and the default record file, and restore them after."""
+    from ctshowcase import signoff
+    run, file = signoff.reset(), signoff.set_file(None)
+    try:
+        yield
+    finally:
+        signoff.reset_file(file)
+        signoff.restore(run)

@@ -6,6 +6,7 @@ import re
 from .config import t3_signed_off
 from .context import RepoContext
 from .detect import standard
+from .errors import ConfigError
 
 
 def _singular(w: str) -> str:
@@ -65,7 +66,7 @@ def membership_topics(ctx: RepoContext, also_in: list[str]) -> tuple[list[str], 
         if status in ("excluded", "hold"):
             logs.append(f"exempt:also-in:{org}")
             continue
-        if status == "t3" and not t3_signed_off():
+        if status == "t3" and not t3_signed_off(org):
             logs.append(f"t3-signoff:also-in:{org}")
             continue
         known, topic = org_topic(ctx.brand, org)
@@ -81,6 +82,17 @@ def membership_topics(ctx: RepoContext, also_in: list[str]) -> tuple[list[str], 
     return orgs, topics_, logs
 
 
+def extra_topics(ctx: RepoContext) -> list[str]:
+    """Owner-approved domain vocabulary; malformed configuration is never silently ignored."""
+    values = ctx.org.get("topics_extra", [])
+    if not isinstance(values, list) or any(
+        not isinstance(value, str) or re.fullmatch(r"[a-z0-9][a-z0-9-]{0,49}", value) is None
+        for value in values
+    ):
+        raise ConfigError("topics_extra must be a list of lowercase GitHub topics (1–50 letters, digits or hyphens)")
+    return list(dict.fromkeys(values))
+
+
 def merge(ctx: RepoContext, also_in: list[str] | None = None) -> dict:
     """§5.6 merge. `also_in` (org logins, from the registry or `--also-in`) adds the §5.3a org membership topics; when
     it is None, the metadata's own `also_in` list is used (empty when absent)."""
@@ -91,9 +103,12 @@ def merge(ctx: RepoContext, also_in: list[str] | None = None) -> dict:
     typ = ctx.det["type"]
     logs: list[str] = []
     current = list(meta.get("topics") or [])
+    if any(not isinstance(value, str) for value in current):
+        raise ConfigError("metadata topics must contain strings")
+    extra = extra_topics(ctx)
     vocab = set(t["brand_topics"]) | set(t["family_topics"]) | set(t["type_topics"]) | set(t["featured"]) | \
-        set(t["allowed"]) | set(t["domain"])
-    private = meta.get("visibility") == "private"
+        set(t["allowed"]) | set(t["domain"]) | set(extra)
+    private = meta.get("visibility") in ("private", "internal")
     # owner identity through the shared resolver (CQ-03): an approved org rename (CompleTetech-Security ->
     # CompleteTech-Security) or a re-cased login must not change the repository's required topics
     res = ctx.brand.resolver()
@@ -133,13 +148,25 @@ def merge(ctx: RepoContext, also_in: list[str] | None = None) -> dict:
         tech = [alias(x) for x in parent if alias(x) in set(t["featured"]) | set(t["allowed"])]
         # a fork listed in also_in also carries that org membership topic (§5.1), counted toward the maximum
         proposed = list(dict.fromkeys(["fork"] + m_topics + list(dict.fromkeys(tech))[:4]))[:limit]
-        return _result(current, proposed, logs)
-    if typ == "github-profile":
-        proposed = [org.get("brand_topic") or "completetech", "github-profile"]
-        return _result(current, proposed, logs)
+        result = _result(current, proposed, logs, limit, private, t, minimum=0)
+        return _with_signoffs(result, ctx, m_orgs, m_topics, result["proposed"])
 
     brand = org.get("brand_topic")
-    proposed: list[str] = [brand] if brand else []
+    if not brand:
+        logs.append("needs-input:brand-topic")
+        # Every non-fork requires an explicit brand topic. Preserve the captured
+        # set until that vocabulary is supplied; normalization would otherwise
+        # turn missing identity into a full-replacement mutation proposal.
+        proposed = list(current)
+        if typ == "github-profile":
+            proposed = list(dict.fromkeys(current + ["github-profile"]))
+        result = _result(current, proposed, logs, limit, private, t, minimum=0)
+        return dict(result, proposed=proposed, add=[x for x in proposed if x not in current],
+                    equal_as_set=False, plan_allowed=False)
+    if typ == "github-profile":
+        return _result(current, [brand, "github-profile"], logs, limit, private, t, minimum=0)
+
+    proposed: list[str] = [brand]
     # family topics (§5.3 scope)
     fam = list(org.get("family_topics") or [])
     scope = org.get("family_topics_scope")
@@ -159,6 +186,7 @@ def merge(ctx: RepoContext, also_in: list[str] | None = None) -> dict:
     # domain (§5.9)
     text = f"{meta.get('description') or ''} {ctx.facts.h1() or ''}"
     vocab_dom = t["touchedbyanagent_domain"] if res.same(owner, "TouchedByAnAgent") else t["domain"]
+    vocab_dom = list(dict.fromkeys([*vocab_dom, *extra]))
     found = domain_candidates(text, vocab_dom)
     existing_dom = [x for x in surviving if x in vocab_dom]
     ranked = [x for x in found if x in existing_dom] + sorted(x for x in existing_dom if x not in found) + \
@@ -185,16 +213,57 @@ def merge(ctx: RepoContext, also_in: list[str] | None = None) -> dict:
     proposed += tech
     proposed = list(dict.fromkeys(proposed))
     proposed = proposed[:limit]
-    minimum = t["min_private"] if private else t["min_public"]
+    result = _result(current, proposed, logs, limit, private, t)
+    return _with_signoffs(result, ctx, m_orgs, m_topics, result["proposed"])
+
+
+def _result(current, recommended, logs, limit, private, standard_topics, *, minimum=None):
+    """Keep authored topics, suggest additions and hold unsafe replacement payloads for review.
+
+    GitHub's endpoint replaces the whole set. Never silently turn a cleanup suggestion into a deletion,
+    including when the authored set has already reached the estate limit.
+    """
+    proposed = list(dict.fromkeys(current))
+    review = [x for x in current if x not in recommended]
+    logs += [f"review-remove:{x}" for x in review]
+    additions = [x for x in recommended if x not in proposed]
+    capacity = max(0, limit - len(proposed))
+    proposed += additions[:capacity]
+    if len(additions) > capacity or len(proposed) > limit:
+        logs.append("needs-input:topics-capacity")
+    unsafe = [x for x in proposed if not isinstance(x, str)
+              or re.fullmatch(r"[a-z0-9][a-z0-9-]{0,49}", x) is None
+              or x in standard_topics.get("prohibited", [])
+              or (private and x in standard_topics["private_banned"])]
+    if unsafe:
+        logs.append("needs-review:topic-safety")
+    if minimum is None:
+        minimum = standard_topics["min_private"] if private else standard_topics["min_public"]
+    logs = [code for code in logs if code != "topics-short"]
     if len(proposed) < minimum:
         logs.append("topics-short")
-    return _result(current, proposed, logs)
+    allowed = not unsafe and len(proposed) <= 20
+    return {"current": current, "proposed": proposed, "equal_as_set": allowed and set(current) == set(proposed),
+            "add": [x for x in proposed if x not in current], "remove": [], "review_remove": review,
+            "plan_allowed": allowed, "logs": logs}
 
 
-def _result(current, proposed, logs):
-    return {"current": current, "proposed": proposed, "equal_as_set": set(current) == set(proposed),
-            "add": [x for x in proposed if x not in current], "remove": [x for x in current if x not in proposed],
-            "logs": logs}
+def _with_signoffs(res: dict, ctx: RepoContext, orgs: list[str], topics_: list[str], proposed: list[str]) -> dict:
+    """Name the records that let a T3 org's membership topic into `proposed` as
+    `signoff_ids`, so cmd_topics carries them onto the change record. membership_topics only asks granted(), which
+    registers no grant, and records.append stamps by the target owner (often T1), so without this the record that
+    authorized the T3 association was lost (tests/test_t3_signoff_require.py
+    ::test_t3_also_in_association_carries_its_signoff_id). No key at all when no T3 org applies."""
+    from . import signoff
+    resolver = ctx.brand.resolver()
+    ids: list[str] = []
+    for org, topic in zip(orgs, topics_):
+        if topic not in proposed or ctx.brand.owner_status(org) != "t3":
+            continue
+        rec, _ = signoff.evaluate([org, *resolver.aliases(org)])
+        if rec is not None and rec.get("id") and str(rec["id"]) not in ids:
+            ids.append(str(rec["id"]))
+    return dict(res, signoff_ids=ids) if ids else res
 
 
 def registry_also_in(resolver, owner: str, repo: str) -> list[str]:
@@ -210,4 +279,6 @@ def registry_also_in(resolver, owner: str, repo: str) -> list[str]:
 
 
 def gh_command(owner: str, repo: str, proposed: list[str]) -> str:
+    if len(proposed) > 20 or any(re.fullmatch(r"[a-z0-9][a-z0-9-]{0,49}", x) is None for x in proposed):
+        raise ConfigError("cannot form a GitHub topic command from invalid topics")
     return f"gh api -X PUT repos/{owner}/{repo}/topics " + " ".join(f"-f names[]={x}" for x in proposed)

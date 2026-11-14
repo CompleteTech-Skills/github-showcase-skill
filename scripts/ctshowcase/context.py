@@ -10,7 +10,8 @@ from .facts import RepoFacts
 
 
 class RepoContext:
-    def __init__(self, brand: Brand, meta: dict, repo_dir: str | Path | None = None, type_override: str | None = None):
+    def __init__(self, brand: Brand, meta: dict, repo_dir: str | Path | None = None, type_override: str | None = None,
+                 *, for_coverage: bool = False):
         self.brand, self.meta = brand, meta
         self.repo_dir = Path(repo_dir) if repo_dir else None
         self.facts = RepoFacts(meta, repo_dir)
@@ -30,10 +31,17 @@ class RepoContext:
         else:
             self._scoped_away = None
         self.org = brand.org(self.owner)
-        self.style = brand.style(self.owner)
+        family = self.org.get("family", "completetech")
+        self.identity_pending = bool((brand.raw.get("families", {}).get(family) or {}).get("identity_pending"))
+        # A read-only coverage row must report missing identity inputs, without borrowing a palette or needing
+        # consent to generate art. Ordinary contexts still require the real style and its owner/scope checks.
+        self.style = ({"name": family, "hold": True, "measured": False} if for_coverage and self.identity_pending
+                      else brand.style(self.owner, repo=self.repo))
         self.det = detect(meta if self.owner == meta.get("owner") else dict(meta, owner=self.owner), self.facts,
                           self.override, type_override, same_owner=self.same_owner)
         self.logs: list[str] = []
+        if self.identity_pending:
+            self.log("needs-input:brand-identity")
         if not self.org.get("known"):
             self.log("needs-input:org-row")
         if type_override:
@@ -129,10 +137,11 @@ class RepoContext:
         return self.is_fork or self.det["type"] in ("backup", "github-profile")
 
     def social_applicable(self) -> bool:
-        """R10: public product repositories, including the personal-profile capstone."""
+        """R10: public product repositories, including a T3 repository signed off for this run."""
         return (self.public and not self.meta.get("archived") and not self.is_fork and self.repo != ".github"
                 and not self.repo.lower().endswith(".github.io")
-                and self.tier in ("T1", "T1-user", "T2"))
+                and (self.tier in ("T1", "T1-user", "T2")
+                     or self.tier == "T3" and t3_signed_off(self.owner, self.repo)))
 
     def art_status(self) -> dict:
         """{"banner": None | code, "card": None | code, "icon": None | code}: None when the surface applies, else why it
@@ -150,7 +159,7 @@ class RepoContext:
         no_card = "exempt:no-card" if self.card_exempt() else None  # §5.4 holds whatever the owner code says
         if watching:  # a watching-org repository that is not a fork and not its `.github`: decided explicitly
             return {"banner": watching, "card": no_card or watching, "icon": watching}
-        if status in ("t3", "hold", "excluded") and not (status == "t3" and t3_signed_off()):
+        if status in ("t3", "hold", "excluded") and not (status == "t3" and t3_signed_off(self.owner, self.repo)):
             code = {"t3": "t3-signoff", "hold": "hold", "excluded": "exempt"}[status]
             return {"banner": code, "card": no_card or code, "icon": code}
         if no_card:
@@ -182,7 +191,7 @@ class RepoContext:
         """None when the decision 18 footer applies, else why not: `exempt:watching-fork`, `hold:watching-non-fork`,
         `t3-signoff`, `hold` (org row `footer: hold`) or `exempt:footer` (org row `footer: false`). The watching org's
         `footer: false` exempts only its forks (org.md), so its `.github` needs the footer."""
-        if self.brand.owner_status(self.owner) == "t3" and not t3_signed_off():
+        if self.brand.owner_status(self.owner) == "t3" and not t3_signed_off(self.owner, self.repo):
             return "t3-signoff"
         watching = self.watching_status()
         if watching or self.brand.owner_status(self.owner) == "watching":

@@ -8,7 +8,7 @@ LICENSE_ROWS = [
     (dict(owner="CompleteTech-LLC", repo="thing-fork"), None, None),
     (dict(owner="CompleteTech-Skills", repo="x-skill", license="MIT", brand_assets=True), "## License", "seals, and brand assets"),
     (dict(owner="CompleteTech-LLC", repo="thing", license="MIT"), "## License", "CompleteTech LLC names and logos"),
-    (dict(owner="LibreEvolve", repo="thing", license="MIT"), "## License", "LibreEvolve names and logos"),
+    (dict(owner="LibreEvolve", repo="thing", license="MIT"), "## License", "MIT License; see `LICENSE`"),
     (dict(owner="CompleteTech-LLC", repo="thing", license="Apache-2.0"), "## License", "Licensed under the Apache-2.0"),
     (dict(owner="CompleteTech-LLC", repo="thing", license=None, visibility="private", created_at="2025-01-01T00:00:00Z"),
      "## License", "Copyright (c) 2025 CompleteTech LLC"),
@@ -19,6 +19,10 @@ LICENSE_ROWS = [
 @pytest.mark.parametrize("kw,heading,text", LICENSE_ROWS)
 def test_license_rows(make_ctx, tmp_path, kw, heading, text):
     kw = dict(kw)
+    if kw.get("license"):
+        (tmp_path / "LICENSE").write_text("Synthetic captured license file.", encoding="utf-8")
+    if (kw.get("license") or "").startswith("AGPL"):
+        (tmp_path / "LICENSING.md").write_text("Synthetic configured policy.", encoding="utf-8")
     if kw.pop("brand_assets", False):
         (tmp_path / "BRAND_ASSETS.md").write_text("x")
     if kw.get("repo", "").endswith("-fork"):
@@ -48,6 +52,7 @@ def test_variant_order_and_needs_input(make_ctx, tmp_path, variant):
 
 def test_f_layout_parity(make_ctx, tmp_path):
     (tmp_path / "LICENSING.md").write_text("x")
+    (tmp_path / "LICENSE").write_text("GNU AFFERO GENERAL PUBLIC LICENSE", encoding="utf-8")
     ctx = make_ctx(repo_dir=tmp_path, owner="CompleTetech-Security", repo="netscaler-cve-2026-19489-check", license="AGPL-3.0",
                    description="Check NetScaler versions for CVE-2026-19489 (LSN SIP ALG memory corruption), offline and dependency-free.")
     out = readme.scaffold(ctx)

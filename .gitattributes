@@ -12,3 +12,6 @@
 *.webp binary
 # Generated SVGs are hashed into docs/images/.showcase.json; keep their bytes identical on every OS
 *.svg text eol=lf
+# Docs and the changelog stay LF: a CRLF commit rewrites every line and conflicts every branch (CHANGELOG Unreleased)
+CHANGELOG.md text eol=lf
+references/*.md text eol=lf
