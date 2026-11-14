@@ -395,7 +395,7 @@ def _paragraph_interrupts(content: str, matched: bool) -> bool:
 
 @functools.lru_cache(maxsize=16)
 def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, int], ...], tuple[int, ...],
-                                tuple[tuple[int, int], ...], tuple[tuple[int, int], ...]]:
+                                tuple[tuple[int, int], ...], tuple[tuple[int, int], ...], dict[int, int]]:
     """(inline regions, fenced spans, continuation starts, raw HTML spans, indented spans). An inline region is a stretch in which
     one inline code span can live: a paragraph, a heading line, an HTML block start line or one table cell. A
     continuation start is the source offset of a line that continues an open paragraph or table (not the first line of
@@ -411,6 +411,7 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
     indented = None  # (source start, ordered container ancestors)
     hstart = 0
     conts: set[int] = set()
+    prefixes: dict[int, int] = {}
     seg: list[tuple[int, str]] = []
     # An open fence: (fence run, ordered container ancestors).
     fence, fstart, table, para_depth, pos = None, 0, False, 0, 0
@@ -520,6 +521,8 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
             if not _paragraph_interrupts(para_content, matched):
                 seg.append((at, raw))
                 conts.add(at)
+                if matched:
+                    prefixes[at] = source_prefix_chars(raw, len(body) - len(para_content))
                 continue
             flush(seg)
             seg = []
@@ -564,7 +567,7 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
         html_blocks.append((hstart, len(text)))
     if indented is not None:
         indented_blocks.append((indented[0], len(text)))
-    return tuple(regions), tuple(fences), tuple(sorted(conts)), tuple(html_blocks), tuple(indented_blocks)
+    return tuple(regions), tuple(fences), tuple(sorted(conts)), tuple(html_blocks), tuple(indented_blocks), prefixes
 
 
 def inline_regions(text: str) -> tuple[tuple[int, int], ...]:
@@ -1179,23 +1182,33 @@ def _peel_definition_containers(document: str, out: list[str]) -> str:
     # column of the deepest open item (within the same block quote) is inside that item, so that many columns are peeled.
     # A blank line keeps the items open; a line indented less closes the items it does not reach.
     pos = 0
-    items: list[tuple[tuple[str, int], ...]] = []
+    path: list[tuple[str, int]] = []
+    item_ends: list[int] = []
     for raw in source_lines(document):
         body = raw.rstrip("\r\n")
         end = pos + len(body)
         source = block_line(body)
         line = block_line("".join(out[pos:end]))
-        while items and _continue_containers(source, items[-1]) is None:
-            items.pop()
-        inherited = items[-1] if items else ()
-        inner = _continue_containers(line, inherited) if inherited else line
+        # Walk the open path once, retaining only fully continued items.
+        remainder, last = source, 0
+        for index, ancestor in enumerate(path):
+            remainder = _continue_containers(remainder, (ancestor,))
+            if remainder is None:
+                break
+            if ancestor[0] == "item":
+                last = index + 1
+        del path[last:]
+        while item_ends and item_ends[-1] > last:
+            item_ends.pop()
+        inner = _continue_containers(line, path) if path else line
         # Blanking code/comments can remove a structural prefix, in which case
         # the line itself contains no live definition to peel.
         if inner is not None:
             added, rest = _container_path(inner)
-            for index, (kind, _) in enumerate(added):
-                if kind == "item":
-                    items.append(inherited + added[:index + 1])
+            base = len(path)
+            path.extend(added)
+            item_ends.extend(base + index + 1 for index, (kind, _) in enumerate(added) if kind == "item")
+            del path[item_ends[-1] if item_ends else 0:]
             # Four residual columns mean indented code, not a definition. For
             # 0..3 columns, a partially consumed tab can be blanked whole:
             # both spellings remain legal, and source offsets stay unchanged.
@@ -1548,20 +1561,21 @@ def _reference_form(text: str, open_idx: int, close: int, limit: int, keys: set)
     `limit`, the next inert region, so a jump never skips into one. A full reference's description may contain nested
     brackets; only collapsed/shortcut descriptions supply a label and need its lexical restrictions via `_label_key`.
     An inline `(dest)` is decided by the caller first, so a `(` here means the closer is not a shortcut."""
+    labels = _quote_continuation_view(text)
     if text[close + 1:close + 2] == "[":
         label_end = _next_unescaped_bracket(text, close + 2, limit)
         if label_end == -1:
             return None
         if label_end == close + 2 and text[label_end] == "]":  # collapsed `[text][]`
-            if _label_key(text[open_idx + 1:close]) in keys:
+            if _label_key(labels[open_idx + 1:close]) in keys:
                 return label_end + 1, label_end
             return None
-        if text[label_end] == "]" and _label_key(text[close + 2:label_end]) in keys:  # full `[text][label]`
+        if text[label_end] == "]" and _label_key(labels[close + 2:label_end]) in keys:  # full `[text][label]`
             return label_end + 1, label_end
         return None
     if text[close + 1:close + 2] == "(":  # not a shortcut when a destination follows
         return None
-    if _label_key(text[open_idx + 1:close]) in keys:  # shortcut `[text]`
+    if _label_key(labels[open_idx + 1:close]) in keys:  # shortcut `[text]`
         return None, None
     return None
 
@@ -1844,7 +1858,7 @@ def _reference_label_spans(document: str) -> tuple[tuple[int, int], ...]:
         close = _next_unescaped_bracket(document, open_ + 1, min(region[1], open_ + 1001)) if region else -1
         if close < 0 or document[close] != "]":
             continue
-        label = document[open_ + 1:close]
+        label = _quote_continuation_view(document)[open_ + 1:close]
         if not _label_key(label) or BLANK_LINE.search(label):
             continue  # an empty label or one spanning a blank line is not a reference label
         first_fence = bisect.bisect_left(fences, (open_ + 1, -1))
@@ -1888,15 +1902,19 @@ def _title_ends(text: str) -> dict[str, tuple[int, ...]]:
 def _quote_continuation_view(text: str) -> str:
     """Mask quote prefixes on paragraph continuation lines without shifting offsets."""
     chars = None
+    prefixes = _layout(text)[5]
     for line_start in continuation_starts(text):
-        match = _QUOTE.match(text, line_start)
-        if match:
-            if chars is None:
-                chars = list(text)
+        length = prefixes.get(line_start, 0)
+        # Tables retain their existing simple quote-prefix handling.
+        if not length and (match := _QUOTE.match(text, line_start)):
             end = match.end()
             while next_match := _QUOTE.match(text, end):
                 end = next_match.end()
-            chars[line_start:end] = " " * (end - line_start)
+            length = end - line_start
+        if length:
+            if chars is None:
+                chars = list(text)
+            chars[line_start:line_start + length] = " " * length
     return "".join(chars) if chars is not None else text
 
 
@@ -2005,6 +2023,7 @@ def _markdown_images(text: str, document: str) -> list[tuple[str, str, int, int]
     """Read inline and reference images with balanced alt text; definitions use first-wins labels."""
     text, document = _parse_views(text, document)
     definitions = {}
+    labels = _quote_continuation_view(document)
     for match in _definitions(document):
         destination = match.group(2) if match.group(2) is not None else match.group(3)
         target = _destination_value(destination)
@@ -2046,7 +2065,7 @@ def _markdown_images(text: str, document: str) -> list[tuple[str, str, int, int]
                 continue
             # not an inline destination (for example, a space-containing label): try a shortcut reference
         # `text` masks inline code to spaces (a prefix-aligned copy): labels are matched on the written source, literal backticks included
-        key = _label_key(document[match.end():close] if len(document) >= len(text) else alt)
+        key = _label_key(labels[match.end():close] if len(document) >= len(text) else alt)
         if after < len(text) and text[after] == "[":
             # A reference label is raw lexical text, not rendered inline text.
             # In particular a `]` inside a URI closes the label even though it
@@ -2059,7 +2078,7 @@ def _markdown_images(text: str, document: str) -> list[tuple[str, str, int, int]
                 ref_close = None
             # a label holding a block boundary is no label: the shortcut form below still applies, as CommonMark has it
             if ref_close is not None and not _crosses_block(text, after + 1, ref_close, fences, document):
-                label = (document if len(document) >= len(text) else text)[after + 1:ref_close]
+                label = (labels if len(document) >= len(text) else text)[after + 1:ref_close]
                 if _label_syntax(label):  # invalid labels leave the shortcut and following text visible
                     key = _label_key(label) if label else key
                     after = ref_close + 1

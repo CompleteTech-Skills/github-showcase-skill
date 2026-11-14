@@ -186,3 +186,49 @@ def test_nested_reference_marker_projection_keeps_source_offsets(ending):
     assert all(projection[i] == ch for i, ch in enumerate(source) if ch in "\r\n")
     assert mdcode.find_blocks(readme.MARK, source) == []
     assert source[mdcode.inline_code_spans(source)[0][0]:mdcode.inline_code_spans(source)[0][1]] == EXAMPLE
+
+
+@pytest.mark.parametrize("source", [
+    "100. > ![Shot](\n     > docs/images/missing.png\n     > )",
+    "- - > ![Shot](docs/images/missing.png\n    > \"title\")",
+    "- > ![Shot](\n\t> docs/images/missing.png\n\t> )",
+    "> ![Shot][foo\n> bar]\n\n[foo bar]: docs/images/missing.png",
+    "- - > ![Shot][foo\n    > bar]\n\n[foo bar]: docs/images/missing.png",
+])
+def test_cli_containers_preserve_multiline_images(checkout, source):
+    path, args = insert(checkout, source)
+    result = run_cli(*args, "lint", "readme", path, "--variant", "C")
+    assert "R7 local image does not resolve: docs/images/missing.png" in json.loads(result.stdout)["fails"]
+
+
+@pytest.mark.parametrize("source", [
+    "> \\![Shot][foo\n> bar]\n\n[foo bar]: docs/images/missing.png",
+    "- - > `![Shot](\n    > docs/images/missing.png)`",
+    "> ![Shot][foo\n> bar]\n\n[foo baz]: docs/images/missing.png",
+    "- - > ```\n    > ![Shot](docs/images/missing.png)\n    > ```",
+])
+def test_cli_containers_keep_literal_images_inert(checkout, source):
+    path, args = insert(checkout, source)
+    result = run_cli(*args, "lint", "readme", path, "--variant", "C")
+    assert not any("local image" in f for f in json.loads(result.stdout)["fails"])
+
+
+def test_cli_multiline_reference_precedence_keeps_following_code(checkout):
+    source = "> [outer [inner][foo\n> bar]](x`y) ![Shot](docs/images/missing.png)\n\n[foo bar]: target"
+    path, args = insert(checkout, source)
+    result = run_cli(*args, "lint", "readme", path, "--variant", "C")
+    assert "R7 local image does not resolve: docs/images/missing.png" in json.loads(result.stdout)["fails"]
+
+
+def test_deep_list_definition_peeling_memory_is_linear():
+    import tracemalloc
+
+    peaks = []
+    for depth in (1000, 4000):
+        source = "- " * depth + "x\n"
+        tracemalloc.start()
+        mdcode._peel_definition_containers(source, list(source))
+        peaks.append(tracemalloc.get_traced_memory()[1])
+        tracemalloc.stop()
+    assert peaks[1] < peaks[0] * 6, peaks
+    assert peaks[1] < 2_000_000, peaks
