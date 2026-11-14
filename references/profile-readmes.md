@@ -35,6 +35,28 @@ Condensed from the estate's profile README kit (decision 15), with decision 21 a
 
 Public org text never names a private repository, client, person, codename or strategy. Private repositories are never listed. An org with no public repositories shows the banner, the mission, the line `Work in this organization is private. Public CompleteTech projects are listed at [github.com/CompleteTech-LLC](https://github.com/CompleteTech-LLC).`, then the footer.
 
+### Foreign organization identity
+
+The CompleteTech-family wording above stays unchanged for configured
+`completetech` rows. A foreign profile uses its own website, GitHub organization
+and approved, explicitly configured contact email. CompleteTech affiliation is
+included only when the effective description's final sentence is exactly
+`A CompleteTech LLC organization.` or `Steward: CompleteTech LLC.`. A non-empty
+registry `profile.description` takes precedence over the brand row description;
+otherwise the brand description supplies it. The exact relationship is retained:
+an organization sentence does not become a steward assertion. Incidental or
+negated mentions, tier, consent and `footer: true` do not establish affiliation.
+
+Without that affiliation, the profile omits CompleteTech directory/contact copy
+and uses **Related projects and organizations** for configured cross-listings.
+The public slice still retains factual repository descriptions and links, even
+when they name another organization. With no public repositories showcased, a
+foreign profile says `No public repositories are currently showcased.`; this
+makes no claim about whether its work is private or the organization is empty.
+Decision 18 footer applicability remains independent. A foreign star List name
+alone does not establish its owning account: its link requires a matching
+captured public List URL (or captured viewer login plus matching List slug); otherwise `needs-input:star-list-url` is logged.
+
 ## Personal profile section order (CompleteDotTech, built last)
 
 `showcase.py org profile --user CompleteDotTech --meta-dir DIR [--out-dir CHECKOUT --render]` renders it from the registry's top-level `profile` (public slice: public, non-fork, non-archived pins and more projects only; no placeholder org, no T3 org before sign-off; no `why` or `notes` text) and runs the `lint public-leak` check against the whole estate before it writes `README.md` and `data.json` (and, with `--render`, the badges, cards and org tiles). The intro is the `intro --profile CompleteDotTech` asset it lists. The tech stack is a Markdown share line computed from the public repositories' `languages` until the stack plate exists.
