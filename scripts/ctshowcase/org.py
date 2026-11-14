@@ -1034,15 +1034,23 @@ def _write_profile(estate, org, out: Path, text, data_json, card_svgs, badges, r
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_bytes(payload)
         outs.append(str(p))
+    badge_svgs = []
+    if render:
+        from . import badge as badgemod
+        from .typeset import Fonts
+        fonts = Fonts(estate.brand)
+        key = estate.resolver.brand_key(org) or org
+        style = estate.brand.style(key)
+        # A badge can refuse its configured contrast. Finish every badge before
+        # creating a destination or replacing any existing profile output.
+        badge_svgs = [(b["path"], badgemod.svg(estate.brand, fonts, b["label"], b["message"], b["colour"],
+                                             style=style).encode()) for b in badges]
     put("profile/README.md", text.encode())
     put("profile/data.json", data_json.encode())
     if not render:
         return outs
-    from . import badge as badgemod
-    from .typeset import Fonts
-    fonts = Fonts(estate.brand)
-    for b in badges:
-        put(b["path"], badgemod.svg(estate.brand, fonts, b["label"], b["message"], b["colour"]).encode())
+    for rel, svg in badge_svgs:
+        put(rel, svg)
     for full, svg in card_svgs.items():
         put(f"profile/assets/cards/{full.replace('/', '__')}.svg", svg.encode())
     if banner_asset:
