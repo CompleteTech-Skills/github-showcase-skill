@@ -64,8 +64,8 @@ HTML_OPEN_TAG_PATTERN = rf"<([A-Za-z][A-Za-z0-9-]*)((?:{HTML_ATTRIBUTE})*){HTML_
 HTML_CLOSE_TAG_PATTERN = rf"</[A-Za-z][A-Za-z0-9-]*{HTML_SPACE}*>"
 # CommonMark HTML blocks 1-6 interrupt a paragraph; type 7 (any other complete tag, like <span> or <a>) cannot
 _HTML_BLOCK = re.compile(
-    r"^ {0,3}(?:<(?:script|pre|style|textarea)(?:[ \t>]|$)|<!--|<\?|<![A-Za-z]|<!\[CDATA\[|</?(?:"
-    + "|".join(_TYPE_6) + r")(?:[ \t]|/?>|$))", re.I)
+    r"^ {0,3}(?:<(?i:script|pre|style|textarea)(?:[ \t>]|$)|<!--|<\?|<![A-Z]|<!\[CDATA\[|</?(?i:"
+    + "|".join(_TYPE_6) + r")(?:[ \t]|/?>|$))")
 
 
 # the seven HTML block kinds (CommonMark 4.6). Types 1-5 end at a marker found on a line (the start line included);
@@ -76,7 +76,7 @@ _HTML_OPEN_1_5 = (
      re.compile(r"</(?:script|pre|style|textarea)>", re.I)),
     (re.compile(r"^ {0,3}<!--"), re.compile(r"-->")),
     (re.compile(r"^ {0,3}<\?"), re.compile(r"\?>")),
-    (re.compile(r"^ {0,3}<![A-Za-z]"), re.compile(r">")),
+    (re.compile(r"^ {0,3}<![A-Z]"), re.compile(r">")),
     (re.compile(r"^ {0,3}<!\[CDATA\["), re.compile(r"\]\]>")),
 )
 _HTML_TYPE_6 = re.compile(r"^ {0,3}</?(?:" + "|".join(_TYPE_6) + r")(?:[ \t]|/?>|$)", re.I)
@@ -93,12 +93,26 @@ def _html_block(line: str):
     return True if _HTML_TYPE_6.match(line) or _HTML_TYPE_7.match(line) else None
 
 
+@functools.lru_cache(maxsize=16)
+def _backtick_index(text: str):
+    """Maximal raw runs, indexed once; escaped closers remain eligible raw runs."""
+    starts, ends, lengths = [], [], collections.defaultdict(list)
+    WORK['backtick_index_chars'] += len(text)
+    for match in re.finditer(r"`+", text):
+        start, end = match.span()
+        starts.append(start)
+        ends.append(end)
+        lengths[end - start].append(start)
+        WORK['backtick_index_runs'] += 1
+    return tuple(starts), tuple(ends), {length: tuple(positions) for length, positions in lengths.items()}
+
+
 def _run_end(text: str, i: int) -> int:
-    """Index just past the backtick run that starts at `i`."""
-    j = i
-    while j < len(text) and text[j] == "`":
-        j += 1
-    return j
+    """Index just past the raw run at `i`, including a resumed position inside it."""
+    starts, ends, _ = _backtick_index(text)
+    at = bisect.bisect_right(starts, i) - 1
+    WORK['backtick_end_lookups'] += 1
+    return ends[at] if at >= 0 and i < ends[at] else i
 
 
 def _quotes(body: str) -> tuple[int, str]:
@@ -517,15 +531,13 @@ def continuation_starts(text: str) -> frozenset[int]:
 
 
 def _closing_run(text: str, pos: int, k: int, limit: int) -> tuple[int, int] | None:
-    """First maximal backtick run of exactly `k` backticks at or after `pos` and before `limit`."""
-    while True:
-        p = text.find("`", pos, limit)
-        if p < 0:
-            return None
-        q = _run_end(text, p)
-        if q - p == k:
-            return p, q
-        pos = q
+    """First maximal raw run of length `k` in [pos, limit), without suffix rescans."""
+    positions = _backtick_index(text)[2].get(k, ())
+    at = bisect.bisect_left(positions, pos)
+    WORK['backtick_close_lookups'] += 1
+    if at < len(positions) and positions[at] + k <= limit:
+        return positions[at], positions[at] + k
+    return None
 
 
 @functools.lru_cache(maxsize=16)

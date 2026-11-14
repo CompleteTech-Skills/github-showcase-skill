@@ -24,7 +24,7 @@ _NL = mdcode.LINE_END
 _SOFT_NL = _NL + rf"(?![ \t\x00]*{_NL})"
 REF_DEFINITION = re.compile(
     rf"(?:\A|(?<=\n)|(?<=\r)(?!\n))\x00* {{0,3}}\[((?:\\.|[^\[\]\\\r\n]|{_SOFT_NL})+)\]:"
-    rf"[ \t\x00]*(?:{_NL}[ \t\x00]*)?(?:<([^<>\r\n]+)>|([^\s\x00]+?))"
+    rf"[ \t\x00]*(?:{_NL}[ \t\x00]*)?(?:<((?:\\[^\r\n]|[^<>\\\r\n])*)>|((?!<)[^\x00-\x20\x7f]+?))"
     rf"(?:(?:[ \t]+|[ \t\x00]*{_NL}[ \t\x00]*)(?:\"(?:\\.|[^\"\\\r\n]|{_SOFT_NL})*\"|"
     rf"'(?:\\.|[^'\\\r\n]|{_SOFT_NL})*'|\((?:\\.|[^()\\\r\n]|{_SOFT_NL})*\)))?"
     r"[ \t]*(?=\r|\n|\Z)")
@@ -185,7 +185,7 @@ def _raw_html_matches(text: str, document: str):
         if (block is None and end_marker == '>' and _INLINE_DECLARATION.match(text, start) is None):
             # Retain the published GFM inline declaration grammar, like the
             # existing strict inline-comment rules. HTML blocks independently
-            # allow an ASCII-letter opener without inline name/space rules.
+            # require an uppercase ASCII-letter opener without inline name/space rules.
             continue
         if block is not None:
             # A raw HTML block can end with its container before a closer.
@@ -914,6 +914,12 @@ def _active_openers(text: str) -> frozenset[int]:
     return _inline_openers_and_autolinks(text)[0]
 
 
+# Preserve the existing cache-control interface while both views share one
+# canonical precedence result (including work-counter resets in regressions).
+_active_openers.cache_clear = _inline_openers_and_autolinks.cache_clear
+_active_openers.cache_info = _inline_openers_and_autolinks.cache_info
+
+
 def _live_autolinks(text: str) -> tuple[tuple[int, int], ...]:
     return _inline_openers_and_autolinks(text)[1]
 
@@ -1119,7 +1125,8 @@ def _markdown_images(text: str, document: str) -> list[tuple[str, str, int, int]
     """Read inline and reference images with balanced alt text; definitions use first-wins labels."""
     definitions = {}
     for match in _definitions(document):
-        target = html.unescape(re.sub(r"\\([^\w\s])", r"\1", match.group(2) or match.group(3)))
+        destination = match.group(2) if match.group(2) is not None else match.group(3)
+        target = html.unescape(re.sub(r"\\([^\w\s])", r"\1", destination))
         definitions.setdefault(_definition_key(match, document), target)
     spans = _definition_spans(document)  # definition titles are never rendered as images
     html_spans = mdcode.html_block_spans(document)  # raw HTML blocks are literal: Markdown image syntax there is text
