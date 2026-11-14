@@ -186,6 +186,7 @@ banner [--out docs/images/banner.png] [--scale 2] [--icon PATH] [--subtitle TEXT
        [--key-chip TEXT]... [--chip TEXT]... [--category TEXT] [--allow-unmeasured] [--allow-hold]
        [--allow-few-chips] [--png-budget 300000]
 card [--out docs/images/card.svg] [--png PATH] [--icon PATH] [--allow-unmeasured] [--allow-hold]
+     [--key-chip TEXT]... [--chip TEXT]...
 org-banner --org OWNER --out PATH [--illustration PATH]
 org-tile --org OWNER [--avatar PATH] [--illustration PATH] [--out PATH] [--png PATH]
 intro (--profile CompleteDotTech | --org OWNER) [--name TEXT] [--eyebrow TEXT] [--tagline TEXT]
@@ -230,6 +231,7 @@ project copy-plan --target ORG|@me [--role org|template|estate] [--source OWNER/
 project readme --capture FILE --owner OWNER [--out FILE]
 project estate-plan [--copied FILE] [--user-id ID] [--source OWNER/N] [--jobs FILE]
 content social [--out PATH] [--title TEXT] [--icon PATH] [--job] [--allow-unmeasured] [--allow-hold]
+    [--key-chip TEXT]... [--chip TEXT]...
 content icon prompt|normalize|check [--option A|B] [--glyph FILE] [--art-direction FILE] [--in PNG]
     [--ground auto|transparent|keep] [--ground-tolerance DE (0 to 12)] [--seed N] [--out PATH] [--preview PATH]
     [--strict] [--min-contrast RATIO] [--ocr]
@@ -272,6 +274,8 @@ content sidebar --facts FILE [--packages FILE]... [--current FILE] [--repo OWNER
 
 `lint readme` and `lint all` refuse excluded, hold and T3 owners like every other repository command. `lint all` fails an applicable banner or card that is missing; an exempt one is linted only if it exists. Forks outside the watching org, backups, archived and `.github` repositories need the banner (they have no card); a preserve-list README is exempt from the banner only when review q57 `pres` is "Leave them unchanged".
 
+`banner` accepts a nonblank, single-line `--subtitle` or configured `subtitle:` when the captured description is empty, and logs `description-missing` so that metadata work remains visible. A blank selected subtitle returns `needs-input:subtitle`; a valid CLI subtitle takes precedence over an unused blank config value. `card` and `content social` accept repeatable `--key-chip` and `--chip` with the same validation and ordering as the banner. The combined selected row supports at most four facts, including configured or inferred keys: supplied attributes that exceed that count are rejected rather than trimmed. Selected configured and CLI chips that cannot fit return `art-fail`; only automatically derived facts retain their priority-based selection. The deprecated social alias accepts the same inputs.
+
 Banner refusals: a watching-org fork returns `exempt` and writes nothing; the watching org's `.github` gets the banner and icon like any `.github`; another watching-org repository that is not a fork is refused (exit 2, `hold:watching-non-fork`) until decided, then `--allow-hold`; `CompleteDotTech/CompleteDotTech` (it opens with the intro) and a placeholder org's `.github` return `exempt:*`. Every other repository gets the hero banner (decisions 12, 13 and 18): forks outside the watching org (G), backups and archived repositories (H) and `.github` repositories (J) included, while `card` returns `exempt:no-card` for forks, backups and `.github`. AI-Ascension (`banner: keep-existing`) gets the hero in its own palette above its existing banner (q57 `aia` and `pres` defaults) and returns `exempt:keep-existing` only when `readme.preserve_banner` is `unchanged`; TouchedByAnAgent (`hold: true`) needs `--allow-hold`; families marked `measured: false` need `--allow-unmeasured` (otherwise exit 4, `needs-input:palette-v1.1`).
 
 ## Decisions That Override the Standard
@@ -303,6 +307,7 @@ These user decisions outrank `STANDARD.md` (`ct-std-v1`). Full text: [references
 
 | Resource | Role |
 |---|---|
+| [references/brand-boundaries.md](references/brand-boundaries.md) | Explicit per-org legal wording and fail-closed brand identity. |
 | [references/estate-standard.md](references/estate-standard.md) | Tiers, brand strings, golden rules, org identity table, repo naming. |
 | [references/descriptions.md](references/descriptions.md) | Description checks D1–D8, V1, P1, B1, X1, keep-or-edit order, templates by type. |
 | [references/topics.md](references/topics.md) | Topic layers, type detection rules 1–25, vocabulary, aliases, merge algorithm, safety. |

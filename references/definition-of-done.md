@@ -33,6 +33,14 @@ original column order. The CLI exit status still follows failing cells.
 never skips asset checks or declares an unmeasured palette approved: doctor reads
 existing outputs and performs no rendering, so the flag has no effect.
 
+A family with `identity_pending` still gets a read-only coverage row, including
+for an unsigned T3 owner. The row logs `needs-input:brand-identity` and holds R7
+instead of checking README colours against an invented palette. Its applicable
+local art checks remain held when a checkout is supplied. A valid scoped sign-off
+can be reported on the row, but does not supply the missing identity. Generation
+still requires the usual consent checks and then the owner-supplied identity;
+neither `doctor` nor `--allow-unmeasured` provides those inputs.
+
 ## Repository checks
 
 | # | Check | Verified by | `doctor` source |

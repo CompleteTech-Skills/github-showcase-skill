@@ -185,3 +185,21 @@ When a chip text colour is not set, the generator picks the candidate with the h
 |---|---|
 | Social preview | 1280×640 (STANDARD §9.5, R10), the family canvas and bar. Eyebrow at (64, 84); the README H1 (else the title-cased slug) in the display font at 60 → 48 px, at most two lines in 600 px; a 120×4 accent rule ending in a gold solder pad; the type category in the accent colour; the description verbatim, at most three lines (24 → 20 px); `github.com/OWNER/REPO` in JetBrains Mono. The icon card (496×344 at x = 720) follows the plate rule. PNG within 900 KB, else JPG q85. Upload it in the repository settings (UI only). |
 | Org banner | 1600×400 JPG q85 within 400 KB. CompleteTech: the selected dark master at 480×240 from x = 96; other families: the display name in the display font; `--illustration` in the box (1040, 40)–(1504, 360). |
+
+## Operator-supplied subtitles and fact chips
+
+A configured `subtitle:` or `banner --subtitle` can render the banner when the About
+description is absent. The result logs `description-missing`; it does not supply or
+change the About text, and description checks still require it.
+
+`banner`, `card` and `content social` accept repeated `--key-chip` and `--chip`
+arguments. Each list replaces the matching inferred list for that invocation,
+with at most two key chips, three attributes, and four supplied chips in total.
+Values must be nonempty single-line text. Inferred attributes fill at most the
+remaining four-chip budget. Chips retain the `cli` source in rendering metadata.
+
+The smaller card may drop inferred attributes or stars as before. It refuses with
+`art-fail:card-chips` if operator-supplied chips cannot fit; it never silently drops
+those requested chips. Social previews retain their existing category row unless
+chip flags are supplied, in which case that row displays the supplied facts. An
+overflowing social chip row returns `art-fail:social-chips`.

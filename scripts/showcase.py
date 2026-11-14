@@ -118,13 +118,13 @@ def brand(args, prefer_lock=False):
     return load_brand(args.config, prefer_lock=prefer_lock)
 
 
-def context(args, b=None):
+def context(args, b=None, *, for_coverage=False):
     from ctshowcase.context import RepoContext
     from ctshowcase.meta import merged
     b = b or brand(args)
     rd = repo_dir(args)
     meta = merged(args.meta, str(rd) if rd else None)
-    return RepoContext(b, meta, rd, type_override=getattr(args, "type_override", None))
+    return RepoContext(b, meta, rd, type_override=getattr(args, "type_override", None), for_coverage=for_coverage)
 
 
 def base(cmd, ctx=None, **kw) -> dict:
@@ -192,7 +192,11 @@ def cmd_banner(args):
         return base("banner", ctx, result="exempt", logs=[why]), OK
     gate_watching(ctx, args.allow_hold)
     ctx.require_measured(args.allow_unmeasured)
-    ctx.require_description()
+    if banner.selected_subtitle(ctx, args.subtitle) is not None:
+        if not (ctx.meta.get("description") or "").strip():
+            ctx.log("description-missing")
+    else:
+        ctx.require_description()
     out = Path(args.out) if args.out else default_out(args, "docs/images/banner.png")
     fonts = Fonts(ctx.brand)
     data, info = banner.render(ctx, fonts, scale=args.scale, budget=args.png_budget, subtitle=args.subtitle,
@@ -221,7 +225,7 @@ def cmd_card(args):
     ctx.require_measured(args.allow_unmeasured)
     out = Path(args.out) if args.out else default_out(args, "docs/images/card.svg")
     fonts = Fonts(ctx.brand)
-    svg, scene, info = card.render(ctx, fonts, args.icon)
+    svg, scene, info = card.render(ctx, fonts, args.icon, keys=args.key_chip or None, attrs=args.chip or None)
     lint = svglint.lint_bytes("card", svg.encode(), str(out))
     if lint["result"] != "PASS":
         return base("card", ctx, result="fail", lint=lint), CHECK_FAILED
@@ -248,7 +252,8 @@ def cmd_social(args):
     ctx.require_measured(args.allow_unmeasured)
     r = getattr(args, "_content_resolver", None)  # set by `content social` from its --registry/--approved* flags
     data, fmt, info = social.social_render(ctx, Fonts(ctx.brand), args.title, args.icon,
-                                           login=r.canonical(ctx.owner) if r else None)
+                                           login=r.canonical(ctx.owner) if r else None,
+                                           keys=args.key_chip or None, attrs=args.chip or None)
     out = Path(args.out) if args.out else default_out(args, "assets/social-preview.png")
     if fmt == "jpg":
         out = out.with_suffix(".jpg")
@@ -483,12 +488,16 @@ def cmd_readme(args):
                             logs=ctx.logs + ["readme-shrink"]), CHECK_FAILED
     changed = after != before
     diff = "".join(difflib.unified_diff(before.splitlines(True), after.splitlines(True), "a/README.md", "b/README.md"))
-    if args.write and getattr(ctx, "badge_files", None):
+    badge_outputs = {}
+    if getattr(ctx, "badge_files", None):
         from ctshowcase import badge
         from ctshowcase.typeset import Fonts
         fonts = Fonts(ctx.brand)
         for rel, (label, message, colour) in sorted(ctx.badge_files.items()):
-            write_bytes(rd / rel, badge.svg(ctx.brand, fonts, label, message, colour).encode())
+            badge_outputs[rel] = badge.svg(ctx.brand, fonts, label, message, colour, style=ctx.style).encode()
+    if args.write:
+        for rel, data in badge_outputs.items():
+            write_bytes(rd / rel, data)
     if args.write and changed:
         path.write_text(after, encoding="utf-8")
         if contrib_new is not None:
@@ -910,7 +919,7 @@ def cmd_doctor(args):
         res = intake.estate_doctor(brand(args), _resolver_args(args, require_registry=True), metas,
                                    template_dir=args.template_dir, checkouts=args.checkouts, out=args.out)
         return res, OK
-    ctx = context(args)
+    ctx = context(args, for_coverage=True)
     ctx.brand.check_owner(ctx.owner, allow_t3=True, repo=ctx.repo, verify_signoff=False)  # read-only: doctor.row shows R7 hold
     r = doctor.row(ctx)
     fmt = args.doctor_format
@@ -1047,6 +1056,8 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--icon")
     s.add_argument("--allow-unmeasured", action="store_true")
     s.add_argument("--allow-hold", action="store_true")
+    s.add_argument("--key-chip", action="append", default=[])
+    s.add_argument("--chip", action="append", default=[])
     s.set_defaults(func=cmd_card)
 
     # deprecated alias of the contract name `content social` (same options, same file); added without `help`, so
@@ -1057,6 +1068,8 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--icon")
     s.add_argument("--allow-unmeasured", action="store_true")
     s.add_argument("--allow-hold", action="store_true")
+    s.add_argument("--key-chip", action="append", default=[])
+    s.add_argument("--chip", action="append", default=[])
     s.set_defaults(func=cmd_social)
 
     s = sub.add_parser("org-banner", help="1600x400 org profile banner JPG (.github/profile/assets/banner.jpg)")

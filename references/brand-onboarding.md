@@ -67,6 +67,11 @@ certify the artwork. Render with `--allow-unmeasured` for review, inspect the se
 and record the appropriate decision before marking the palette measured. This
 command supplies no license wording, topic vocabulary or repository facts; those
 remain explicit follow-up inputs. Generation and review do not authorize rollout.
+New org rows do not inherit another org's legal wording, even when they share a
+family. Public license sections retain only the captured license reference;
+private license sections wait for explicit wording. Adding an org to a family
+marked `identity_pending: true` also leaves its identity unresolved: rendering
+still returns `needs-input:brand-identity`, including with `--allow-unmeasured`.
 For an organization's `.github` repository without a configured `brand_topic`,
 `topics` preserves existing topics, suggests the known `github-profile` type and
 logs `needs-input:brand-topic`; it never substitutes a CompleteTech affiliation.
