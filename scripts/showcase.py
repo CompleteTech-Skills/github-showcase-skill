@@ -488,12 +488,16 @@ def cmd_readme(args):
                             logs=ctx.logs + ["readme-shrink"]), CHECK_FAILED
     changed = after != before
     diff = "".join(difflib.unified_diff(before.splitlines(True), after.splitlines(True), "a/README.md", "b/README.md"))
-    if args.write and getattr(ctx, "badge_files", None):
+    badge_outputs = {}
+    if getattr(ctx, "badge_files", None):
         from ctshowcase import badge
         from ctshowcase.typeset import Fonts
         fonts = Fonts(ctx.brand)
         for rel, (label, message, colour) in sorted(ctx.badge_files.items()):
-            write_bytes(rd / rel, badge.svg(ctx.brand, fonts, label, message, colour).encode())
+            badge_outputs[rel] = badge.svg(ctx.brand, fonts, label, message, colour, style=ctx.style).encode()
+    if args.write:
+        for rel, data in badge_outputs.items():
+            write_bytes(rd / rel, data)
     if args.write and changed:
         path.write_text(after, encoding="utf-8")
         if contrib_new is not None:

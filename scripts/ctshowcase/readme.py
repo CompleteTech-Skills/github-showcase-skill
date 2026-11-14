@@ -1065,7 +1065,7 @@ LICENSE_MARK = "<!-- showcase:license -->"
 
 def license_block(ctx: RepoContext, text: str) -> str:
     """Rewrite the paragraph after `<!-- showcase:license -->` (and its H2) from license_section(), with or without a
-    LICENSE file: a private repository reads "Proprietary...", a Security repository gets "## Licensing". When the
+    LICENSE file: private wording must be explicit; public Security gets "## Licensing". When the
     section cannot be derived (needs-input), the existing text stays."""
     i = masked(text).find(LICENSE_MARK)  # the first mark outside code (a documented example is left alone)
     if i < 0:
