@@ -265,12 +265,16 @@ def _container_path(body: str) -> tuple[tuple[tuple[str, int], ...], str]:
     path = []
     # A thematic break must end in its marker; avoid rescanning each nested
     # suffix when a long item chain ends in ordinary content.
-    thematic_possible = body.rstrip().endswith(("-", "*", "_"))
+    trimmed = body.rstrip(" \t")
+    marker = trimmed[-1:] if trimmed[-1:] in ("-", "*", "_") else ""
+    thematic_start = len(trimmed.rstrip(marker + " \t")) if marker else len(body)
+    original_length = len(body)
     while True:
         if match := _QUOTE.match(body):
             path.append(("quote", 0))
             body = body[match.end():]
-        elif not (thematic_possible and _THEMATIC.match(body)) and (match := _ITEM_PREFIX.match(body)):
+        elif not (marker and original_length - len(body) >= thematic_start
+                  and _THEMATIC.match(body)) and (match := _ITEM_PREFIX.match(body)):
             marker = re.match(r"^ {0,3}(?:[-+*]|[0-9]{1,9}[.)])", body)
             end = marker.end()
             while end < len(body) and body[end] == " ":
@@ -500,13 +504,34 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
             table = False
         elif seg:
             para_content, matched = _paragraph_line(body, para_path)
-            if not para_content.strip(" "):
+            if matched and _indent_columns(para_content) >= 4 and seg[0][1].lstrip(" >-+*0123456789.)\t").startswith("["):
+                # Definitions at the start of a block do not open a paragraph.
+                # Include this line so a valid multiline destination or title
+                # remains part of the definition before deciding the boundary.
+                first = block_line(seg[0][1].rstrip("\r\n"))
+                rows = [_container_path(first)[1]] + [
+                    _paragraph_line(block_line(row.rstrip("\r\n")), para_path)[0] for _, row in seg[1:]
+                ] + [para_content]
+                candidate = "\n".join(rows)
+                boundary = len(candidate) - len(para_content) - 1
+                cursor = 0
+                while match := REF_DEFINITION.match(candidate, cursor):
+                    if not _definition_key(match, candidate) or (match.group(3) is not None
+                                                               and not _balanced_destination(match.group(3))):
+                        break
+                    cursor = after_line_end(candidate, match.end())
+                if cursor == boundary + 1:
+                    flush(seg)
+                    seg = []
+            if not seg:
+                pass  # process this line as a new block below
+            elif not para_content.strip(" "):
                 # A blank line can carry item/quote prefixes. It is still a
                 # paragraph boundary after those ancestors have been peeled.
                 flush(seg)
                 seg, table = [], False
                 continue
-            if matched and _is_delimiter_row(para_content) and _cell_count(_quotes(seg[-1][1].rstrip("\r\n"))[1]) == _cell_count(para_content):
+            elif matched and _is_delimiter_row(para_content) and _cell_count(_quotes(seg[-1][1].rstrip("\r\n"))[1]) == _cell_count(para_content):
                 flush(seg[:-1])
                 # the header row (the last paragraph line) starts the table, so it is not a continuation
                 conts.discard(seg[-1][0])
@@ -514,11 +539,11 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
                 conts.add(at)
                 seg, table = [], True
                 continue
-            if matched and _SETEXT.match(para_content):
+            elif matched and _SETEXT.match(para_content):
                 flush(seg)
                 seg = []
                 continue
-            if not _paragraph_interrupts(para_content, matched):
+            elif not _paragraph_interrupts(para_content, matched):
                 seg.append((at, raw))
                 conts.add(at)
                 if matched:

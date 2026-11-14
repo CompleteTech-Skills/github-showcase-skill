@@ -71,3 +71,43 @@ def test_deep_list_cli_and_container_alignment(tmp_path):
     assert 'R7 local image does not resolve: missing.png' in lint(tmp_path, source)
     text = '- > - item\n  >   ```\n  >   ![hidden](missing.png)\n  >   ```\n\n![shown](missing.png)\n'
     assert mdcode._images(text, text) == [('shown', 'missing.png')]
+
+
+@pytest.mark.parametrize('prefix,indent', [('', '    '), ('> ', '>     '), ('- ', '      ')])
+def test_definition_followed_by_indented_code_cli(tmp_path, prefix, indent):
+    source = (prefix + '[a]: /url\n' + indent + '`example\n'
+              + '![Shot](missing.png)\n![Bad](https://img.shields.io/badge/x-x-ABCDEF)\n`')
+    fails = lint(tmp_path, source)
+    assert 'R7 local image does not resolve: missing.png' in fails
+    assert 'R7 off-palette badge colour ABCDEF' in fails
+    assert mdcode.code_block_spans(source)[0][0] == source.index(indent + '`example')
+
+
+def test_definition_code_boundary_controls(tmp_path):
+    image = '![Shot](missing.png)'
+    missing = 'R7 local image does not resolve: missing.png'
+    assert missing not in lint(tmp_path, '[a]: /url extra\n    `example\n' + image + '\n`')
+    assert missing not in lint(tmp_path, 'paragraph\n[a]: /url\n    `example\n' + image + '\n`')
+    assert missing in lint(tmp_path, '[a]: /url\n    "title"\n    `example\n' + image + '\n`')
+    assert missing not in lint(tmp_path, '```\n[a]: /url\n    `example\n```\n`' + image + '`')
+
+
+@pytest.mark.parametrize('ending', ['-', '*', '_'])
+def test_nested_list_thematic_scan_is_bounded(monkeypatch, ending, tmp_path):
+    original = mdcode._THEMATIC
+    class Measured:
+        characters = 0
+
+        def match(self, value, *args):
+            self.characters += len(value)
+            return original.match(value, *args)
+
+    measured = Measured()
+    monkeypatch.setattr(mdcode, '_THEMATIC', measured)
+    for depth in (1000, 2000):
+        before = measured.characters
+        path, rest = mdcode._container_path('- ' * depth + 'text' + ending)
+        assert len(path) == depth and rest == 'text' + ending
+        assert measured.characters - before <= 8 * depth
+    assert 'R7 local image does not resolve: missing.png' in lint(
+        tmp_path, '- ' * 2000 + 'text' + ending + '\n\n![Shot](missing.png)')
