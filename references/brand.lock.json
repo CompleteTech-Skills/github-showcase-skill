@@ -117,6 +117,8 @@
  },
  "families": {
   "ai-ascension": {
+   "badge_accent": "E39B3A",
+   "badge_brand": "F2B75C",
    "banner": "keep-existing",
    "canvas": {
     "color": "#15120E",
@@ -172,6 +174,8 @@
    "measured": true
   },
   "jev-engineering": {
+   "badge_accent": "8B5CF6",
+   "badge_brand": "22D3EE",
    "canvas": {
     "color": "#010104",
     "grid": "#22D3EE",
@@ -213,6 +217,8 @@
    }
   },
   "jevplay-games": {
+   "badge_accent": "E551BA",
+   "badge_brand": "F386A1",
    "canvas": {
     "color": "#1E1E1E",
     "dot": "#E551BA",
@@ -269,6 +275,8 @@
    }
   },
   "libreevolve": {
+   "badge_accent": "065F46",
+   "badge_brand": "10B981",
    "canvas": {
     "color": "#021527",
     "grid": "#10B981",
@@ -365,6 +373,8 @@
    }
   },
   "romgenie": {
+   "badge_accent": "B8860B",
+   "badge_brand": "F4C430",
    "canvas": {
     "color": "#002C31",
     "grid": "#F4C430",
@@ -404,7 +414,13 @@
     "title": "#F8FAFC"
    }
   },
+  "ticketstub": {
+   "company_label": "TicketStub",
+   "identity_pending": true
+  },
   "touchedbyanagent": {
+   "badge_accent": "E11D74",
+   "badge_brand": "F59E0B",
    "canvas": {
     "color": "#1D1116",
     "grid": "#F59E0B",
@@ -527,7 +543,9 @@
    "flagship": true,
    "footer": true,
    "former_slugs": [],
+   "license_wording": "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project.",
    "nav_name": "CompleteTech LLC",
+   "private_license_wording": "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved.",
    "profile": {
     "chips": [
      "key:complete.tech",
@@ -537,6 +555,7 @@
     "eyebrow": "COMPLETETECH LLC · CINCINNATI, OHIO",
     "name": "Timothy Wayne Gregg"
    },
+   "skills_license_wording": "CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project.",
    "tier": "T1-user"
   },
   "CompleteTech-Career-Toolkit": {
@@ -548,8 +567,11 @@
    "family_topics": [],
    "footer": true,
    "former_slugs": [],
+   "license_wording": "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project.",
    "mark": "assets/orgs/CompleteTech-Career-Toolkit/mark.png",
    "nav_name": "CompleteTech Career Toolkit",
+   "private_license_wording": "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved.",
+   "skills_license_wording": "CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project.",
    "tier": "T1"
   },
   "CompleteTech-Commerce": {
@@ -561,8 +583,11 @@
    "family_topics": [],
    "footer": true,
    "former_slugs": [],
+   "license_wording": "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project.",
    "mark": "assets/orgs/CompleteTech-Commerce/mark.png",
    "nav_name": "CompleteTech Commerce",
+   "private_license_wording": "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved.",
+   "skills_license_wording": "CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project.",
    "tier": "T1"
   },
   "CompleteTech-Creative": {
@@ -574,8 +599,11 @@
    "family_topics": [],
    "footer": true,
    "former_slugs": [],
+   "license_wording": "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project.",
    "mark": "assets/orgs/CompleteTech-Creative/mark.png",
    "nav_name": "CompleteTech Creative",
+   "private_license_wording": "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved.",
+   "skills_license_wording": "CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project.",
    "tier": "T1"
   },
   "CompleteTech-Data": {
@@ -587,8 +615,11 @@
    "family_topics": [],
    "footer": true,
    "former_slugs": [],
+   "license_wording": "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project.",
    "mark": "assets/orgs/CompleteTech-Data/mark.png",
    "nav_name": "CompleteTech Data",
+   "private_license_wording": "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved.",
+   "skills_license_wording": "CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project.",
    "tier": "T1"
   },
   "CompleteTech-Directories": {
@@ -600,8 +631,11 @@
    "family_topics": [],
    "footer": true,
    "former_slugs": [],
+   "license_wording": "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project.",
    "mark": "assets/orgs/CompleteTech-Directories/mark.png",
    "nav_name": "CompleteTech Directories",
+   "private_license_wording": "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved.",
+   "skills_license_wording": "CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project.",
    "tier": "T1"
   },
   "CompleteTech-DiscordApps": {
@@ -613,8 +647,11 @@
    "family_topics": [],
    "footer": true,
    "former_slugs": [],
+   "license_wording": "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project.",
    "mark": "assets/orgs/CompleteTech-DiscordApps/mark.png",
    "nav_name": "CompleteTech Discord Apps",
+   "private_license_wording": "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved.",
+   "skills_license_wording": "CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project.",
    "tier": "T1"
   },
   "CompleteTech-Games": {
@@ -626,8 +663,11 @@
    "family_topics": [],
    "footer": true,
    "former_slugs": [],
+   "license_wording": "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project.",
    "mark": "assets/orgs/CompleteTech-Games/mark.png",
    "nav_name": "CompleteTech Games",
+   "private_license_wording": "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved.",
+   "skills_license_wording": "CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project.",
    "tier": "T1"
   },
   "CompleteTech-Hardware": {
@@ -639,8 +679,11 @@
    "family_topics": [],
    "footer": true,
    "former_slugs": [],
+   "license_wording": "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project.",
    "mark": "assets/orgs/CompleteTech-Hardware/mark.png",
    "nav_name": "CompleteTech Hardware",
+   "private_license_wording": "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved.",
+   "skills_license_wording": "CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project.",
    "tier": "T1"
   },
   "CompleteTech-Infrastructure": {
@@ -654,8 +697,11 @@
    ],
    "footer": true,
    "former_slugs": [],
+   "license_wording": "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project.",
    "mark": "assets/orgs/CompleteTech-Infrastructure/mark.png",
    "nav_name": "CompleteTech Infrastructure",
+   "private_license_wording": "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved.",
+   "skills_license_wording": "CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project.",
    "tier": "T1"
   },
   "CompleteTech-LLC": {
@@ -669,7 +715,10 @@
    "flagship": true,
    "footer": true,
    "former_slugs": [],
+   "license_wording": "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project.",
    "nav_name": "CompleteTech LLC",
+   "private_license_wording": "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved.",
+   "skills_license_wording": "CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project.",
    "tier": "T1"
   },
   "CompleteTech-LLC-AI-Research": {
@@ -683,8 +732,11 @@
    ],
    "footer": true,
    "former_slugs": [],
+   "license_wording": "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project.",
    "mark": "assets/orgs/CompleteTech-LLC-AI-Research/mark.png",
    "nav_name": "CompleteTech AI Research",
+   "private_license_wording": "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved.",
+   "skills_license_wording": "CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project.",
    "tier": "T1"
   },
   "CompleteTech-ManageEngine": {
@@ -696,8 +748,11 @@
    "family_topics": [],
    "footer": true,
    "former_slugs": [],
+   "license_wording": "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project.",
    "mark": "assets/orgs/CompleteTech-ManageEngine/mark.png",
    "nav_name": "CompleteTech ManageEngine Tools",
+   "private_license_wording": "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved.",
+   "skills_license_wording": "CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project.",
    "tier": "T1"
   },
   "CompleteTech-Patent-IP": {
@@ -709,8 +764,11 @@
    "family_topics": [],
    "footer": true,
    "former_slugs": [],
+   "license_wording": "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project.",
    "mark": "assets/orgs/CompleteTech-Patent-IP/mark.png",
    "nav_name": "CompleteTech Patent and IP",
+   "private_license_wording": "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved.",
+   "skills_license_wording": "CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project.",
    "tier": "T1"
   },
   "CompleteTech-Pokemon": {
@@ -723,8 +781,11 @@
    "family_topics": [],
    "footer": true,
    "former_slugs": [],
+   "license_wording": "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project.",
    "mark": "assets/orgs/CompleteTech-Pokemon/mark.png",
    "nav_name": "CompleteTech TCG",
+   "private_license_wording": "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved.",
+   "skills_license_wording": "CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project.",
    "tier": "T1"
   },
   "CompleteTech-Security": {
@@ -744,8 +805,11 @@
     "CompleTetech-Security"
    ],
    "license_chip": "AGPL-3.0 or commercial",
+   "license_wording": "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project.",
    "mark": "assets/orgs/CompleteTech-Security/mark.png",
    "nav_name": "CompleteTech Security",
+   "private_license_wording": "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved.",
+   "skills_license_wording": "CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project.",
    "tier": "T1"
   },
   "CompleteTech-Skills": {
@@ -770,11 +834,14 @@
    "footer": true,
    "former_slugs": [],
    "hub_url": "https://www.complete.tech",
+   "license_wording": "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project.",
    "mark": "assets/orgs/CompleteTech-Skills/mark.png",
    "nav_name": "CompleteTech LLC Skills",
+   "private_license_wording": "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved.",
    "readme_preserve": [
     "creative-studio"
    ],
+   "skills_license_wording": "CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project.",
    "tier": "T1"
   },
   "CompleteTechDiscord-Games": {
@@ -786,8 +853,11 @@
    "family_topics": [],
    "footer": true,
    "former_slugs": [],
+   "license_wording": "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project.",
    "mark": "assets/orgs/CompleteTechDiscord-Games/mark.png",
    "nav_name": "CompleteTech Discord Games",
+   "private_license_wording": "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved.",
+   "skills_license_wording": "CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project.",
    "tier": "T1"
   },
   "Jev-Engineering": {
@@ -807,7 +877,7 @@
    "description": null,
    "display_name": "TicketStub",
    "eyebrow": null,
-   "family": "completetech",
+   "family": "ticketstub",
    "family_topics": [],
    "footer": false,
    "former_slugs": [],
@@ -835,7 +905,10 @@
    "family_topics": [],
    "footer": true,
    "former_slugs": [],
+   "license_wording": "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project.",
    "nav_name": "Northwind Trading Co.",
+   "private_license_wording": "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved.",
+   "skills_license_wording": "CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project.",
    "tier": "T1"
   },
   "Pick-Your-AI": {

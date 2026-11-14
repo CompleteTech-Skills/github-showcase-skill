@@ -150,6 +150,8 @@ class Brand:
         if name not in fams:
             raise ConfigError(f"unknown family {name!r}")
         own = fams[name] or {}
+        if own.get("identity_pending"):
+            raise NeedsInput("brand-identity", f"family {name!r} needs an owner-supplied palette and mark")
         fam = deep_merge(self.raw.get("defaults", {}), own)
         for chip in ("chip_key", "chip_attr"):  # a family that sets a chip bg without fg gets a computed fg
             oc = (own.get("tokens") or {}).get(chip) or {}
@@ -164,8 +166,10 @@ class Brand:
                 c["fg"] = best_fg(c["bg"], [tokens["title"], *cands])
         return fam
 
-    def style(self, owner: str) -> dict:
+    def style(self, owner: str, *, repo: str | None = None) -> dict:
         org = self.org(owner)
+        if (self.raw.get("families", {}).get(org.get("family")) or {}).get("identity_pending"):
+            self.check_owner(owner, repo=repo)  # Missing consent still refuses before missing design inputs.
         fam = self.family(org.get("family", "completetech"))
         if org.get("banner"):
             fam["banner"] = org["banner"]

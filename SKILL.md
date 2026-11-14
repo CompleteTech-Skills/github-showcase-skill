@@ -302,6 +302,7 @@ These user decisions outrank `STANDARD.md` (`ct-std-v1`). Full text: [references
 
 | Resource | Role |
 |---|---|
+| [references/brand-boundaries.md](references/brand-boundaries.md) | Explicit per-org legal wording and fail-closed brand identity. |
 | [references/estate-standard.md](references/estate-standard.md) | Tiers, brand strings, golden rules, org identity table, repo naming. |
 | [references/descriptions.md](references/descriptions.md) | Description checks D1–D8, V1, P1, B1, X1, keep-or-edit order, templates by type. |
 | [references/topics.md](references/topics.md) | Topic layers, type detection rules 1–25, vocabulary, aliases, merge algorithm, safety. |
