@@ -16,10 +16,25 @@ def lint(tmp_path, source):
     meta.write_text(json.dumps({'owner': 'Northwind-Trading-Co', 'repo': '.github',
                                 'license': 'MIT', 'files': ['README.md']}), encoding='utf-8')
     readme = tmp_path / 'README.md'
-    readme.write_text('# Probe\n\n' + source + '\n', encoding='utf-8')
+    readme.write_bytes(('# Probe\n\n' + source + '\n').encode('utf-8'))
     result = subprocess.run([sys.executable, str(CLI), '--meta', str(meta), '--repo-dir', str(tmp_path),
                              'lint', 'readme', str(readme)], capture_output=True, encoding='utf-8', timeout=15)
     return json.loads(result.stdout)['fails']
+
+
+@pytest.mark.parametrize('ending', ['\n', '\r\n', '\r'])
+def test_lint_fixture_preserves_bytes_with_windows_text_translation(tmp_path, monkeypatch, ending):
+    write_text = Path.write_text
+
+    def windows_write_text(path, data, encoding=None, **kwargs):
+        return write_text(path, data, encoding=encoding, newline='\r\n', **kwargs)
+
+    monkeypatch.setattr(Path, 'write_text', windows_write_text)
+    source = f'![Shot](x©.png){ending}![Bad](https://img.shields.io/badge/x-x-ABCDEF)'
+    fails = lint(tmp_path, source)
+    assert (tmp_path / 'README.md').read_bytes() == ('# Probe\n\n' + source + '\n').encode('utf-8')
+    assert 'R7 local image does not resolve: x©.png' in fails
+    assert 'R7 off-palette badge colour ABCDEF' in fails
 
 
 @pytest.mark.parametrize('reference', [False, True])
