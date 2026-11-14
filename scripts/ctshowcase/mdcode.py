@@ -1432,8 +1432,9 @@ def _bracket_pairs(text: str, document: str | None = None) -> dict[int, int]:
     The masked copy keeps original offsets but cannot classify blocks itself:
     code masks may erase the syntax that caused a boundary in the source.
     Complete raw HTML tokens bind more tightly than description brackets; their
-    literal text cannot open or close a description. Full reference labels
-    use a separate raw lexical scan.
+    literal text cannot open or close a description. Accepted nested link
+    destinations and titles are likewise literal. Full reference labels use a
+    separate raw lexical scan.
     """
     text, document = _parse_views(text, document if document is not None else text)
     global _BRACKET_STEPS
@@ -1442,11 +1443,18 @@ def _bracket_pairs(text: str, document: str | None = None) -> dict[int, int]:
     autolinks = _live_autolinks(source)
     code = _raw_inline_code_spans(source)
     tags = _HTMLTokens(text, source).tags
+    destinations = tuple(span for span in _accepted_inline(source)[3]
+                         if source[span[0]:span[0] + 1] == "("
+                         and source[span[0] - 1:span[0]] == "]")
     for lo, hi in inline_regions(source):
         stack: list[int] = []
         pos, limit = lo, min(hi, len(text))
         while pos < limit:
             _BRACKET_STEPS += 1
+            destination = _span_at(destinations, pos)
+            if destination is not None:
+                pos = destination[1]
+                continue
             link = _span_at(autolinks, pos)
             if link is not None and _span_at(code, link[0]) is None:
                 pos = link[1]

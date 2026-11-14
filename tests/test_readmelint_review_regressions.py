@@ -2,6 +2,34 @@
 import pytest
 
 from ctshowcase import readme, readmelint
+from test_reference_badge_count import lint_reference
+
+
+@pytest.mark.parametrize("nested", [
+    '[docs](https://example.test/[)',
+    '[docs](https://example.test/])',
+    '[docs](https://example.test "[")',
+    "[docs](https://example.test ']')",
+])
+def test_nested_link_destination_brackets_do_not_hide_image(make_ctx, tmp_path, nested):
+    target = "https://img.shields.io/badge/example-bad-FF0000"
+    alt = f"Shot {nested}"
+    text = f"![{alt}]({target})"
+    assert readmelint._images(readmelint._outside_code(text), text) == [(alt, target)]
+    failures = lint_reference(make_ctx, tmp_path, text, "")["fails"]
+    assert "R7 off-palette badge colour FF0000" in failures
+    assert "R7 2-4 header badges required (found 1)" not in failures
+
+
+def test_nested_link_destinations_keep_bracket_work_bounded():
+    counts = []
+    for count in (100, 200, 400):
+        text = ('![Shot [docs](https://example.test "[")](image.png) ' * count)
+        readmelint._bracket_pairs.cache_clear()
+        readmelint._BRACKET_STEPS = 0
+        assert len(readmelint._images(readmelint._outside_code(text), text)) == count
+        counts.append(readmelint._BRACKET_STEPS)
+    assert counts[2] <= counts[1] * 2.1
 
 
 @pytest.mark.parametrize("first,second", [(r"a\!", "a!"), ("a&amp;", "a&"), ("a&#33;", "a!")])
