@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import time
 
 import pytest
 
@@ -381,6 +382,39 @@ def _loopback_timeout_diagnostic(events, exc):
             f"stderr: {_loopback_output_summary(exc.stderr)}")
 
 
+
+def _loopback_env(env, config_dir, *, remove_proxy=False):
+    proxy_names = {"http_proxy", "https_proxy", "all_proxy", "no_proxy"}
+    names = sorted(k for k in env if k.lower() in proxy_names or k.upper().startswith("GH_"))
+    clean = {k: v for k, v in env.items() if not (remove_proxy and k.lower() in proxy_names)
+             and k.upper() not in {"GH_TOKEN", "GH_CONFIG_DIR"}}
+    clean.update(GH_TOKEN="synthetic-loopback-only", GH_CONFIG_DIR=str(config_dir))
+    return clean, names
+
+
+def test_loopback_env_redacts_and_removes_proxy():
+    env = {"HtTp_PrOxY": "secret", "NO_PROXY": "private", "GH_TOKEN": "token", "Gh_Host": "host", "PATH": "path"}
+    clean, names = _loopback_env(env, "fresh", remove_proxy=True)
+    assert names == ["GH_TOKEN", "Gh_Host", "HtTp_PrOxY", "NO_PROXY"]
+    assert "HtTp_PrOxY" not in clean and "NO_PROXY" not in clean
+    assert clean["GH_TOKEN"] == "synthetic-loopback-only" and clean["GH_CONFIG_DIR"] == "fresh"
+    assert clean["Gh_Host"] == "host" and clean["PATH"] == "path"
+    assert "secret" not in str(names) and "private" not in str(names)
+
+
+def _loopback_executable_info(gh):
+    # Paths can contain usernames; a hash permits comparison without disclosing them.
+    import subprocess
+
+    path_hash = hashlib.sha256(os.fsencode(gh)).hexdigest()
+    try:
+        result = subprocess.run([gh, "--version"], capture_output=True, timeout=3)
+        match = re.search(rb"\bgh version ([0-9]+\.[0-9]+\.[0-9]+)\b", result.stdout[:512])
+        version = match.group(1).decode("ascii") if match else "unavailable"
+    except (OSError, subprocess.TimeoutExpired):
+        version = "unavailable"
+    return f"path_sha256={path_hash}, version={version}"
+
 def test_loopback_timeout_diagnostic_redacts_output():
     import subprocess
 
@@ -432,17 +466,19 @@ def test_inline_view_job_serializes_correctly_with_real_gh(tmp_path, brand):
     connections = []
     lock = threading.Lock()
     stopping = threading.Event()
+    started = time.monotonic()
+    server_error = []
 
     def record(event):
         with lock:
-            events.append(event)
+            events.append((event, round(time.monotonic() - started, 3)))
 
     class Server(http.server.HTTPServer):
         def get_request(self):
             connection, address = super().get_request()
             with lock:
                 connections.append(connection)
-                events.append("connection-accepted")
+                events.append(("connection-accepted", round(time.monotonic() - started, 3)))
                 if stopping.is_set():
                     connection.shutdown(socket.SHUT_RDWR)
             return connection, address
@@ -470,31 +506,69 @@ def test_inline_view_job_serializes_correctly_with_real_gh(tmp_path, brand):
             "sort_by": [["Updated", "desc"]]}
     plan = PJ.copy_plan(N, copied=cap("copy-capture.json"), resolver=resolver(brand), views=[view])
     job = next(j for j in plan["jobs"] if j["id"].endswith("-view-inline-encoding"))
-    server = Server(("127.0.0.1", 0), Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
+    expected = [{"name": view["name"], "layout": "table", "filter": view["filter"],
+                 "group_by": [1003], "visible_fields": [1003, 1009]}]
+
+    def run_once(config_dir, remove_proxy=False):
+        received.clear()
+        events.clear()
+        server_error.clear()
+        stopping.clear()
+        server = Server(("127.0.0.1", 0), Handler)
+        record("server-bound")
+
+        def serve():
+            record("server-thread-started")
+            try:
+                server.serve_forever()
+            except Exception as error:
+                # Exception text can contain sensitive data; retain only its type.
+                server_error.append(type(error).__name__)
+                record("server-thread-exception")
+
+        thread = threading.Thread(target=serve, daemon=True)
+        thread.start()
+        env, names = _loopback_env(os.environ, config_dir, remove_proxy=remove_proxy)
         argv = [gh, *job["argv"][1:]]
         argv[4] = f"http://127.0.0.1:{server.server_port}/views"
-        env = dict(os.environ, GH_TOKEN="synthetic-loopback-only", GH_CONFIG_DIR=str(tmp_path / "gh"))
+        active_connections = []
         try:
-            result = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", env=env, timeout=10)
-        except subprocess.TimeoutExpired as exc:
+            record("subprocess-launch")
+            try:
+                result = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", env=env, timeout=10)
+                record("subprocess-exit")
+                outcome = f"exit={result.returncode}; serialization_matches={received == expected}"
+            except subprocess.TimeoutExpired as exc:
+                record("subprocess-timeout")
+                outcome = _loopback_timeout_diagnostic(list(events), exc)
+                result = None
             with lock:
                 stopping.set()
-                diagnostic = _loopback_timeout_diagnostic(list(events), exc)
                 active_connections = list(connections)
+                detail = (f"{outcome}; server_alive={thread.is_alive()}; server_exception={list(server_error)}; "
+                          f"milestones={list(events)}; env_names={names}")
+            return result, detail, list(received)
+        finally:
             for connection in active_connections:
                 try:
                     connection.shutdown(socket.SHUT_RDWR)
                 except OSError:
                     pass
-            pytest.fail(diagnostic, pytrace=False)
-        assert result.returncode == 0, result.stderr
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+            connections.clear()
+
+    result, diagnostic, received = run_once(tmp_path / "gh")
+    if result is None:
+        executable = _loopback_executable_info(gh)
+        try:
+            _, comparison, _ = run_once(tmp_path / "gh-control", remove_proxy=True)
+        except Exception as error:
+            comparison = f"unavailable: {type(error).__name__}"
+        pytest.fail(f"primary: {diagnostic}; executable: {executable}; "
+                    f"controlled proxy-removed run: {comparison}", pytrace=False)
+    assert result.returncode == 0, _loopback_output_summary(result.stderr)
     assert received == [{"name": view["name"], "layout": "table", "filter": view["filter"],
                          "group_by": [1003], "visible_fields": [1003, 1009]}]
     ui = next(j for j in plan["jobs"] if j["id"].endswith("-ui-inline-encoding"))
