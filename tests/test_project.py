@@ -415,6 +415,59 @@ def _loopback_executable_info(gh):
         version = "unavailable"
     return f"path_sha256={path_hash}, version={version}"
 
+
+def _loopback_run(argv, env, accepted, *, preconnect_timeout=60, interaction_timeout=10):
+    """Bound both phases; acceptance is observable, but is not proof of gh readiness."""
+    import subprocess
+    import threading
+
+    process = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+    finished = threading.Event()
+    output = []
+
+    def collect():
+        try:
+            output.append(process.communicate())
+        finally:
+            finished.set()
+
+    collector = threading.Thread(target=collect, daemon=True)
+    collector.start()
+    deadline = time.monotonic() + preconnect_timeout
+    phase = "pre-connection"
+    try:
+        while not finished.is_set():
+            if phase == "pre-connection" and accepted.is_set():
+                phase = "interaction"
+                deadline = time.monotonic() + interaction_timeout
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                process.kill()
+                collector.join()
+                return None, phase, output[0]
+            finished.wait(min(remaining, 0.05))
+        collector.join()
+        return process.returncode, None, output[0]
+    finally:
+        if process.poll() is None:
+            process.kill()
+        collector.join()
+
+
+def test_loopback_run_phase_deadlines():
+    import sys
+    import threading
+
+    sleeper = [sys.executable, "-c", "import time; time.sleep(5)"]
+    code, phase, output = _loopback_run(sleeper, os.environ, threading.Event(), preconnect_timeout=0.1)
+    assert code is None and phase == "pre-connection" and output == (b"", b"")
+    accepted = threading.Event()
+    accepted.set()
+    code, phase, output = _loopback_run(sleeper, os.environ, accepted, interaction_timeout=0.1)
+    assert code is None and phase == "interaction" and output == (b"", b"")
+    code, phase, output = _loopback_run([sys.executable, "-c", "print('ok')"], os.environ, threading.Event())
+    assert code == 0 and phase is None and output[0].strip() == b"ok" and output[1] == b""
+
 def test_loopback_timeout_diagnostic_redacts_output():
     import subprocess
 
@@ -466,6 +519,7 @@ def test_inline_view_job_serializes_correctly_with_real_gh(tmp_path, brand):
     connections = []
     lock = threading.Lock()
     stopping = threading.Event()
+    accepted = threading.Event()
     started = time.monotonic()
     server_error = []
 
@@ -479,6 +533,7 @@ def test_inline_view_job_serializes_correctly_with_real_gh(tmp_path, brand):
             with lock:
                 connections.append(connection)
                 events.append(("connection-accepted", round(time.monotonic() - started, 3)))
+                accepted.set()
                 if stopping.is_set():
                     connection.shutdown(socket.SHUT_RDWR)
             return connection, address
@@ -514,6 +569,7 @@ def test_inline_view_job_serializes_correctly_with_real_gh(tmp_path, brand):
         events.clear()
         server_error.clear()
         stopping.clear()
+        accepted.clear()
         server = Server(("127.0.0.1", 0), Handler)
         record("server-bound")
 
@@ -534,13 +590,17 @@ def test_inline_view_job_serializes_correctly_with_real_gh(tmp_path, brand):
         active_connections = []
         try:
             record("subprocess-launch")
-            try:
-                result = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", env=env, timeout=10)
+            code, phase, output = _loopback_run(argv, env, accepted)
+            if phase is None:
+                result = subprocess.CompletedProcess(argv, code, *output)
                 record("subprocess-exit")
                 outcome = f"exit={result.returncode}; serialization_matches={received == expected}"
-            except subprocess.TimeoutExpired as exc:
+            else:
                 record("subprocess-timeout")
-                outcome = _loopback_timeout_diagnostic(list(events), exc)
+                limit = 60 if phase == "pre-connection" else 10
+                outcome = (f"gh {phase} timed out after {limit}s; subprocess killed and reaped; "
+                           f"stdout: {_loopback_output_summary(output[0])}; "
+                           f"stderr: {_loopback_output_summary(output[1])}")
                 result = None
             with lock:
                 stopping.set()
