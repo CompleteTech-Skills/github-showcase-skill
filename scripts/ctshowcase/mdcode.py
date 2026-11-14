@@ -13,6 +13,8 @@ import bisect
 import collections
 import functools
 import re
+import string
+import unicodedata
 
 # Work counters for the cached scanners (layout builds on a cache miss, inline regions examined); tests read them.
 WORK: collections.Counter = collections.Counter()
@@ -544,10 +546,124 @@ _AUTOLINK = re.compile(
     r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*)>")
 
 
+_BARE_START = re.compile(r"(?ai:https?://|ftp://)|www\.")
+_ASCII_SPACE = " \t\r\n"
+
+
+def _host_character(char: str) -> bool:
+    # cmark-gfm permits Unicode host characters, but neither Unicode spaces
+    # nor punctuation (ASCII punctuation includes symbols such as `$`).
+    return (char not in _ASCII_SPACE + "\f" and unicodedata.category(char) != "Zs"
+            and char not in string.punctuation and not unicodedata.category(char).startswith("P"))
+
+
+def _bare_autolinks(text: str, lo: int, hi: int):
+    """Lexical GFM URL candidates; bracket/HTML/code precedence belongs to callers.
+
+    Index host runs and token ends once. Nested URL starts in a long token
+    share their suffix work, including rejected underscore domains. Native
+    cmark-gfm also accepts short hosts, ftp and scheme starts after punctuation;
+    `www.` has the published stricter preceding-delimiter rule.
+    """
+    if _BARE_START.search(text, lo, hi) is None:
+        return
+    size = hi - lo
+    host_ends = [hi] * (size + 1)
+    token_ends = [hi] * (size + 1)
+    opens, closes, dots, underscores = [], [], [], []
+    for i in range(hi - 1, lo - 1, -1):
+        char = text[i]
+        token_ends[i - lo] = i if char in _ASCII_SPACE + "<" else token_ends[i - lo + 1]
+        if char in "._-" or _host_character(char):
+            host_ends[i - lo] = host_ends[i - lo + 1]
+        elif char == "\\" and i + 1 < hi:
+            next_char = text[i + 1]
+            host_ends[i - lo] = (host_ends[i - lo + 2] if i + 2 <= hi and
+                                   (next_char in "._-" or _host_character(next_char)) else i + 1)
+        else:
+            host_ends[i - lo] = i
+    for i in range(lo, hi):
+        char = text[i]
+        if char == "(":
+            opens.append(i)
+        elif char == ")":
+            closes.append(i)
+        elif char == ".":
+            dots.append(i)
+        elif char == "_":
+            underscores.append(i)
+    # The punctuation-only tail is shared by every start in its token.
+    trimmed = {}
+    content_starts = set()
+    line_at = lo
+    for raw in source_lines(text[lo:hi]):
+        expanded = block_line(raw.rstrip("\r\n"))
+        _, rest = _container_path(expanded)
+        content_starts.add(line_at + source_prefix_chars(raw, len(expanded) - len(rest)))
+        line_at += len(raw)
+    for match in _BARE_START.finditer(text, lo, hi):
+        WORK['bare_starts'] += 1
+        start = match.start()
+        www = match.group() == "www."
+        before = text[start - 1] if start > lo else ""
+        if www:
+            if before and before not in _ASCII_SPACE + "*_~(" and start not in content_starts:
+                continue
+            host = start
+        else:
+            # cmark rewinds the entire ASCII-letter run before `://`.
+            if before and before in string.ascii_letters:
+                continue
+            host = match.end()
+            if host >= hi or not _host_character(text[host]):
+                continue
+        domain_end = host_ends[host - lo]
+        first_dot = bisect.bisect_left(dots, host)
+        last_dot = bisect.bisect_left(dots, domain_end)
+        if www and last_dot == first_dot:
+            continue
+        # Underscores in either of the last two segments invalidate a host.
+        # Match native's >10-segment safeguard without rescanning the suffix.
+        tail = dots[last_dot - 2] + 1 if last_dot - first_dot >= 2 else host
+        under = bisect.bisect_left(underscores, tail)
+        if (last_dot - first_dot <= 10 and under < len(underscores)
+                and underscores[under] < domain_end):
+            continue
+        end = token_ends[start - lo]
+        if end not in trimmed:
+            cursor = end
+            while cursor > lo:
+                WORK['bare_trim_steps'] += 1
+                char = text[cursor - 1]
+                if char in ")?!.,:*_~'\"":
+                    cursor -= 1
+                elif char == ";":
+                    previous = cursor - 2
+                    while previous >= lo and text[previous] in string.ascii_letters:
+                        previous -= 1
+                        WORK['bare_trim_steps'] += 1
+                    cursor = previous if previous >= lo and text[previous] == "&" else cursor - 1
+                else:
+                    break
+            trimmed[end] = cursor
+        tail = trimmed[end]
+        opening = bisect.bisect_left(opens, end) - bisect.bisect_left(opens, start)
+        last_close = bisect.bisect_left(closes, end)
+        closing = last_close - bisect.bisect_left(closes, start)
+        excess = max(0, closing - opening)
+        trailing_closes = last_close - bisect.bisect_left(closes, tail)
+        end = tail if excess >= trailing_closes else closes[last_close - excess - 1] + 1
+        if end > host:
+            yield start, end
+    WORK['bare_index_chars'] += 2 * size
+
+
 @functools.lru_cache(maxsize=16)
-def autolink_candidates(text: str) -> tuple[tuple[int, int], ...]:
+def autolink_candidates(text: str, bare: bool = True) -> tuple[tuple[int, int], ...]:
     """Source-aligned URI/email autolinks, before inline precedence is applied.
 
+    Bare candidates can overlap each other or an angle candidate. They require
+    bracket context from the shared inline precedence scan before acceptance.
     These are candidates, not a global mask: a code opener before `<` still
     consumes raw backticks inside the URI. An earlier tag, title or comment
     likewise wins. A backslash can escape the opener, never the raw closer.
@@ -561,7 +677,9 @@ def autolink_candidates(text: str) -> tuple[tuple[int, int], ...]:
                 before -= 1
             if (start - before) % 2 == 0:
                 spans.append(match.span())
-    return tuple(spans)
+        if bare:
+            spans.extend(_bare_autolinks(text, lo, hi))
+    return tuple(sorted(spans))
 
 
 def find_autolink(text: str, start: int = 0) -> tuple[int, int] | None:
@@ -579,7 +697,10 @@ def find_inline_code(text: str, start: int = 0) -> tuple[int, int] | None:
     same inline region: no blank line, fence, heading, list item, new block quote, thematic break, setext underline,
     HTML block start (types 1-6) or table cell boundary in between. Fenced text holds no inline span."""
     los, his = _region_bounds(text)
-    links = autolink_candidates(text)
+    # Bare URLs need bracket context, which the README inline scanner owns.
+    # Leave their raw ticks available here: that scanner compares the earlier
+    # URL opener against this possible code span and resumes after the winner.
+    links = autolink_candidates(text, bare=False)
     for n in range(bisect.bisect_right(his, start), len(los)):
         WORK['regions'] += 1
         lo, hi = los[n], his[n]

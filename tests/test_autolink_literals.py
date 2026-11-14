@@ -26,7 +26,7 @@ def test_invalid_schemes_leave_real_images_visible(scheme):
 
 @pytest.mark.parametrize('control', [chr(i) for i in range(1, 33)] + ['\x7f'])
 def test_ascii_space_and_controls_invalidate_a_uri_autolink(control):
-    assert images(f'<https://example.test/{control}{IMAGE}>') == [('probe', 'missing.png')]
+    assert images(f'<custom://example.test/{control}{IMAGE}>') == [('probe', 'missing.png')]
 
 
 @pytest.mark.parametrize('space', ['\u00a0', '\u2003'])
@@ -35,10 +35,10 @@ def test_non_ascii_spaces_are_permitted_in_uri_autolinks(space):
 
 
 @pytest.mark.parametrize('source', [
-    rf'\<https://example.test/{IMAGE}>',
-    f'<https://example.test/{IMAGE}',
-    f'<https://example.test/<{IMAGE}>',
-    f'<https://example.test/\n{IMAGE}>',
+    rf'\<custom://example.test/{IMAGE}>',
+    f'<custom://example.test/{IMAGE}',
+    f'<custom://example.test/<{IMAGE}>',
+    f'<custom://example.test/\n{IMAGE}>',
 ])
 def test_escaped_unclosed_and_malformed_angles_do_not_hide_images(source):
     assert images(source) == [('probe', 'missing.png')]

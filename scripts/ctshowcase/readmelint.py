@@ -292,7 +292,7 @@ def _definition_candidates(document: str) -> str:
     label_spans = []
     previous_end = None
     for match in _raw_definition_matches(candidate, document):
-        if not _label_key(match.group(1)):
+        if not _definition_key(match, document):
             continue
         if match.group(3) is not None and not _balanced_destination(match.group(3)):
             continue
@@ -404,6 +404,7 @@ def _inline_link_spans(document: str, fences: tuple[tuple[int, int], ...]) -> tu
     skip_until = 0  # text inside an accepted span is destination or title text: its brackets open nothing
     regions = mdcode.inline_regions(document)
     autolinks = mdcode.autolink_candidates(document)
+    angles = mdcode.autolink_candidates(document, bare=False)
     previous_region = None
     for token in re.finditer(r"\[|\]\(|\]|" + mdcode.BLANK_LINE.pattern, document):
         at = token.start()
@@ -420,8 +421,9 @@ def _inline_link_spans(document: str, fences: tuple[tuple[int, int], ...]) -> tu
             continue
         if _escaped(document, at) or _in_inline_code(document, at):
             continue  # an escaped or code-span bracket is literal text
-        autolink = _span_at(autolinks, at)
-        if autolink is not None and not _in_inline_code(document, autolink[0]):
+        autolink = _span_at(angles, at) or _span_at(autolinks, at)
+        if (autolink is not None and not _in_inline_code(document, autolink[0])
+                and (document[autolink[0]] == "<" or not openers)):
             continue  # URI/email contents cannot create a link opener or destination
         if token.group() == "[":
             openers.append(at)
@@ -466,7 +468,7 @@ def _definitions(document: str) -> tuple:
     continuation = mdcode.continuation_starts(document)
     live: list = []
     for match in _raw_definition_matches(_definition_candidates(document), document):
-        if not _label_key(match.group(1)):
+        if not _definition_key(match, document):
             continue
         if match.group(3) is not None and not _balanced_destination(match.group(3)):
             continue  # a malformed bare destination is not a definition: the line stays ordinary Markdown
@@ -573,7 +575,7 @@ def _outside_code(text: str, mask_inline: bool = True) -> str:
         if raw_html is not False and (raw_html is None or raw_html.start() < pos):
             raw_html = _search_raw_html(text, pos) or False
         if autolink is not False and (autolink is None or autolink[0] < pos):
-            autolink = mdcode.find_autolink(text, pos) or False
+            autolink = _find_live_autolink(text, pos) or False
         n = bisect.bisect_left(fences, (pos, -1))
         fence = fences[n] if n < len(fences) else None
         d = bisect.bisect_left(definitions, (pos, -1))
@@ -625,7 +627,7 @@ def _bracket_pairs(text: str, document: str | None = None) -> dict[int, int]:
     global _BRACKET_STEPS
     pairs: dict[int, int] = {}
     source = document if document is not None else text
-    autolinks = mdcode.autolink_candidates(source)
+    autolinks = _live_autolinks(source)
     code = mdcode.inline_code_spans(source)
     tags = _HTMLTokens(text, source).tags
     for lo, hi in mdcode.inline_regions(source):
@@ -726,8 +728,10 @@ def _reference_form(text: str, open_idx: int, close: int, limit: int, keys: set)
 
 
 @functools.lru_cache(maxsize=16)
-def _active_openers(text: str) -> frozenset[int]:
-    """Indices of every `]` that closes a link text, i.e. has a matching ACTIVE `[` before it in the same paragraph.
+def _inline_openers_and_autolinks(text: str):
+    """Active closing brackets and accepted autolinks from one precedence pass.
+
+    A closing bracket has a matching ACTIVE `[` before it in the same paragraph.
     One left-to-right pass keeps a stack of active `[` indices. Fenced code, inline code, autolinks, HTML comments and HTML open
     tags (attribute values included) are inert, so a bracket inside them is text: it neither opens nor closes a link.
     An unescaped `]` that pops an opener and is directly followed by a destination `(...)` skips that destination,
@@ -746,8 +750,9 @@ def _active_openers(text: str) -> frozenset[int]:
     fences = _fence_spans(text)
     html_spans = mdcode.html_block_spans(text)
     defs = _definition_spans(text)  # live reference definitions: inert block regions, cached per document
-    keys = {_label_key(m.group(1)) for m in _definitions(text)}  # live definition labels, computed once per call
+    keys = {_definition_key(m, text) for m in _definitions(text)}  # live definition labels, computed once per call
     opened: set[int] = set()
+    accepted_autolinks = []
     stack: list[tuple[int, bool]] = []  # (index of `[`, whether it opens an image `![`)
     barrier = 0  # stack positions below this hold inactive link openers (a link was completed after them)
     inline = tag = comment = raw_html = autolink = None  # cached next starts: None = not searched yet, False = none left
@@ -883,6 +888,14 @@ def _active_openers(text: str) -> frozenset[int]:
         elif region is None:
             break
         else:
+            if region == autolink:
+                if text[region[0]] != "<" and stack:
+                    # GFM's extension refuses URL autolinks while a bracket
+                    # opener is pending, even if it never resolves to a link.
+                    autolink = mdcode.find_autolink(text, region[0] + 1) or False
+                    pos = limit
+                    continue
+                accepted_autolinks.append(region)
             _OPENER_STEPS += 1
             if k < len(fences) and region == fences[k]:  # a fence skipped as a region is a block boundary too
                 stack.clear()
@@ -894,7 +907,21 @@ def _active_openers(text: str) -> frozenset[int]:
                 stack.clear()
                 barrier = 0
             pos = region[1]
-    return frozenset(opened)
+    return frozenset(opened), tuple(accepted_autolinks)
+
+
+def _active_openers(text: str) -> frozenset[int]:
+    return _inline_openers_and_autolinks(text)[0]
+
+
+def _live_autolinks(text: str) -> tuple[tuple[int, int], ...]:
+    return _inline_openers_and_autolinks(text)[1]
+
+
+def _find_live_autolink(text: str, start: int):
+    spans = _live_autolinks(text)
+    index = bisect.bisect_left(spans, (start, -1))
+    return spans[index] if index < len(spans) else None
 
 
 def _has_link_opener(text: str, close: int) -> bool:
@@ -915,7 +942,17 @@ def _label_key(value: str) -> str:
     """CommonMark reference matching folds case and whitespace, keeping escapes and entities literal."""
     if not _label_syntax(value):
         return ""  # CommonMark labels are at most 999 source characters.
-    return " ".join(value.split()).casefold()
+    # cmark-gfm label matching collapses only SP, HT and line endings.
+    # VT/FF and Unicode whitespace remain significant raw label characters.
+    return re.sub(r"[ \t\r\n]+", " ", value.strip(" \t\r\n")).casefold()
+
+
+def _definition_key(match: re.Match, document: str) -> str:
+    """Peeled container/indent prefixes are separators, never literal label NULs."""
+    start = match.start(1)
+    label = "".join(" " if char == "\x00" and document[start + i] != "\x00" else char
+                    for i, char in enumerate(match.group(1)))
+    return _label_key(label)
 
 
 @functools.lru_cache(maxsize=16)
@@ -924,7 +961,7 @@ def _reference_label_spans(document: str) -> tuple[tuple[int, int], ...]:
     pair. Only a label that names a live definition is a reference, so its backticks are literal; an unresolved label
     stays readable for inline code. Junctions inside fences or definitions are text. Computed once per document;
     the spans are sorted and never overlap."""
-    keys = {_label_key(m.group(1)) for m in _definitions(document)}
+    keys = {_definition_key(m, document) for m in _definitions(document)}
     fences = mdcode.code_block_spans(document)
     definitions = _definition_spans(document)
     spans = []
@@ -942,7 +979,7 @@ def _reference_label_spans(document: str) -> tuple[tuple[int, int], ...]:
         if close < 0 or document[close] != "]":
             continue
         label = document[open_ + 1:close]
-        if not label.strip() or mdcode.BLANK_LINE.search(label):
+        if not _label_key(label) or mdcode.BLANK_LINE.search(label):
             continue  # an empty label or one spanning a blank line is not a reference label
         first_fence = bisect.bisect_left(fences, (open_ + 1, -1))
         if first_fence < len(fences) and fences[first_fence][0] < close:
@@ -1083,7 +1120,7 @@ def _markdown_images(text: str, document: str) -> list[tuple[str, str, int, int]
     definitions = {}
     for match in _definitions(document):
         target = html.unescape(re.sub(r"\\([^\w\s])", r"\1", match.group(2) or match.group(3)))
-        definitions.setdefault(_label_key(match.group(1)), target)
+        definitions.setdefault(_definition_key(match, document), target)
     spans = _definition_spans(document)  # definition titles are never rendered as images
     html_spans = mdcode.html_block_spans(document)  # raw HTML blocks are literal: Markdown image syntax there is text
     link_spans = _link_literal_spans(document)  # a link destination or title is literal text, never a rendered image
