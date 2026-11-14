@@ -249,8 +249,6 @@ def markdown_files(tree: Tree, readme: str | None) -> list[str]:
 # =====================================================================================================
 # Markdown scanning
 # =====================================================================================================
-FENCE = re.compile(r"^ {0,3}(`{3,}(?=[^`\n]*$)|~{3,})")  # CommonMark: no backtick in a ``` info string
-INLINE_CODE = re.compile(r"(`+)(?:.+?)\1")
 ATX = re.compile(r"^ {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$")
 SETEXT = re.compile(r"^ {0,3}(=+|-+)[ \t]*$")
 MD_LINK = re.compile(r"(!?)\[((?:[^\[\]\n]|\[[^\[\]\n]*\])*)\]\(\s*(<[^>\n]*>|[^\s()]*(?:\([^\s()]*\)[^\s()]*)*)"
@@ -265,35 +263,40 @@ IMG_EXT = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".avif", ".bmp", ".
 
 
 def scan_lines(text: str) -> list[tuple[int, str | None, str | None]]:
-    """(line number, text without HTML comments, the same with inline code blanked); both None inside a code fence."""
-    out, fence, comment = [], None, False
-    for n, raw in enumerate(text.replace("\r\n", "\n").split("\n"), 1):
-        m = FENCE.match(raw)
-        if fence:
-            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) and not raw.strip().strip(fence[0]):
-                fence = None
+    """(line, comment-free source, code-masked source); use the shared Markdown code parser."""
+    from .mdcode import fence_spans, masked
+
+    text = text.replace("\r\n", "\n")
+    code_masked = masked(text).replace("\x00", " ")
+    fences = iter(fence_spans(text))
+    fence = next(fences, None)
+    out, comment, offset = [], False, 0
+    for n, raw in enumerate(text.split("\n"), 1):
+        while fence and offset >= fence[1]:
+            fence = next(fences, None)
+        coded = code_masked[offset:offset + len(raw)]
+        in_fence = fence and fence[0] <= offset < fence[1]
+        offset += len(raw) + 1
+        if in_fence:
             out.append((n, None, None))
             continue
-        if m and not comment:
-            fence = m.group(1)
-            out.append((n, None, None))
-            continue
-        line, rest = "", raw
-        while rest:
+        line, safe, pos = "", "", 0
+        while pos < len(raw):
             if comment:
-                end = rest.find("-->")
+                end = raw.find("-->", pos)
                 if end < 0:
-                    rest = ""
                     break
-                rest, comment = rest[end + 3:], False
+                pos, comment = end + 3, False
                 continue
-            start = rest.find("<!--")
+            start = coded.find("<!--", pos)
             if start < 0:
-                line += rest
+                line += raw[pos:]
+                safe += coded[pos:]
                 break
-            line += rest[:start] + " "
-            rest, comment = rest[start + 4:], True
-        out.append((n, line, INLINE_CODE.sub(lambda mm: " " * len(mm.group(0)), line)))
+            line += raw[pos:start] + " "
+            safe += coded[pos:start] + " "
+            pos, comment = start + 4, True
+        out.append((n, line, safe))
     return out
 
 
