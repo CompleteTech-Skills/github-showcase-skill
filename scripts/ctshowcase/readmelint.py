@@ -19,10 +19,15 @@ from .readme import BANNER_BLOCK, EMOJI, MARK, is_footer_like, masked, normalize
 IMG_MD = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)[^)]*\)")
 IMG_HTML = re.compile(r"<img\b([^>]*)>", re.I)
 PALETTE = {"1E3A8A", "005ADD", "067647", "64748B", "E551BA", "F386A1", "1E1E1E"}
+# Explicit source-aligned line boundaries also handle CRLF as one ending.
+_NL = mdcode.LINE_END
+_SOFT_NL = _NL + rf"(?![ \t\x00]*{_NL})"
 REF_DEFINITION = re.compile(
-    r"^\x00* {0,3}\[((?:\\.|[^\[\]\\\n]|\n(?![ \t\x00]*\n))+)\]:[ \t\x00]*(?:\n[ \t\x00]*)?(?:<([^<>\n]+)>|([^\s\x00]+?))"
-    r"(?:(?:[ \t]+|[ \t\x00]*\n[ \t\x00]*)(?:\"(?:\\.|[^\"\\\n]|\n(?![ \t\x00]*\n))*\"|'(?:\\.|[^'\\\n]|\n(?![ \t\x00]*\n))*'"
-    r"|\((?:\\.|[^()\\\n]|\n(?![ \t\x00]*\n))*\)))?[ \t]*$", re.M)
+    rf"(?:\A|(?<=\n)|(?<=\r)(?!\n))\x00* {{0,3}}\[((?:\\.|[^\[\]\\\r\n]|{_SOFT_NL})+)\]:"
+    rf"[ \t\x00]*(?:{_NL}[ \t\x00]*)?(?:<([^<>\r\n]+)>|([^\s\x00]+?))"
+    rf"(?:(?:[ \t]+|[ \t\x00]*{_NL}[ \t\x00]*)(?:\"(?:\\.|[^\"\\\r\n]|{_SOFT_NL})*\"|"
+    rf"'(?:\\.|[^'\\\r\n]|{_SOFT_NL})*'|\((?:\\.|[^()\\\r\n]|{_SOFT_NL})*\)))?"
+    r"[ \t]*(?=\r|\n|\Z)")
 # a title may span lines but never a blank one; NUL stands in for a blanked quote or list-item prefix (see below)
 # CommonMark raw HTML: an open tag needs a valid tag name, valid attributes and a closing `>`; anything else is text
 HTML_OPEN_TAG = re.compile(mdcode.HTML_OPEN_TAG_PATTERN)
@@ -82,7 +87,7 @@ def _comment_matches(text: str, html_spans):
     mdcode.WORK['comment_scan_chars'] += 4 * len(text)
     closers = [m.start() for m in re.finditer(r"-->", text)]
     doubles = [m.start() for m in re.finditer(r"(?=--)", text)]
-    paragraphs = [m.start() for m in re.finditer(r'\n[ \t\x00\r]*\n', text)]
+    paragraphs = [m.start() for m in mdcode.BLANK_LINE.finditer(text)]
     regions = mdcode._layout(text)[0]
     matches, starts = [], []
     closer = paragraph = double = 0
@@ -268,13 +273,13 @@ def _definition_candidates(document: str) -> str:
     out = list(document)
     for a, b in mdcode.code_block_spans(document):
         for i in range(a, b):
-            if out[i] != "\n":
+            if out[i] not in "\r\n":
                 out[i] = " "
     # raw HTML block text is literal HTML, not Markdown: a `[label]: dest` line inside it defines nothing. The block's
     # extent ends at its end condition, so a definition after the block still counts.
     for a, b in mdcode.html_block_spans(document):
         for i in range(a, b):
-            if out[i] != "\n":
+            if out[i] not in "\r\n":
                 out[i] = " "
     fences = mdcode.code_block_spans(document)
     html_spans = mdcode.html_block_spans(document)
@@ -294,7 +299,7 @@ def _definition_candidates(document: str) -> str:
         if match.start() in continuation and previous_end != match.start():
             continue
         label_spans.append(match.span(1))
-        previous_end = match.end() + 1
+        previous_end = mdcode.after_line_end(document, match.end())
     # Left-to-right scan over the next HTML open tag and the next comment, as in `_outside_code`: a comment opener that
     # sits inside a complete open tag (for example an attribute value) is attribute text, so the tag is consumed whole.
     pos = 0
@@ -333,7 +338,7 @@ def _definition_candidates(document: str) -> str:
             pos = start + 1
             continue
         for i in range(*nxt.span()):
-            if out[i] != "\n":
+            if out[i] not in "\r\n":
                 out[i] = " "
         pos = nxt.end()
     return _peel_definition_containers(document, out)
@@ -348,7 +353,7 @@ def _peel_definition_containers(document: str, out: list[str]) -> str:
     # A blank line keeps the items open; a line indented less closes the items it does not reach.
     pos = 0
     items: list[tuple[tuple[str, int], ...]] = []
-    for raw in re.findall(r"[^\n]*\n|[^\n]+", document):
+    for raw in mdcode.source_lines(document):
         body = raw.rstrip("\r\n")
         end = pos + len(body)
         source = mdcode.block_line(body)
@@ -400,7 +405,7 @@ def _inline_link_spans(document: str, fences: tuple[tuple[int, int], ...]) -> tu
     regions = mdcode.inline_regions(document)
     autolinks = mdcode.autolink_candidates(document)
     previous_region = None
-    for token in re.finditer(r"\[|\]\(|\]|\n[ \t\x00\r]*\n", document):
+    for token in re.finditer(r"\[|\]\(|\]|" + mdcode.BLANK_LINE.pattern, document):
         at = token.start()
         if at < skip_until:
             continue
@@ -408,7 +413,7 @@ def _inline_link_spans(document: str, fences: tuple[tuple[int, int], ...]) -> tu
         if region != previous_region:
             openers.clear()
             previous_region = region
-        if token.group().startswith("\n"):
+        if token.group().startswith(("\r", "\n")):
             openers.clear()  # a blank line ends the paragraph
             continue
         if region is None or _span_at(fences, at) is not None or _span_at(html_spans, at) is not None:
@@ -465,7 +470,7 @@ def _definitions(document: str) -> tuple:
             continue
         if match.group(3) is not None and not _balanced_destination(match.group(3)):
             continue  # a malformed bare destination is not a definition: the line stays ordinary Markdown
-        if match.start() in continuation and not (live and live[-1].end() + 1 == match.start()):
+        if match.start() in continuation and not (live and mdcode.after_line_end(document, live[-1].end()) == match.start()):
             continue
         live.append(match)
     return tuple(live)
@@ -530,7 +535,7 @@ def _outside_code(text: str, mask_inline: bool = True) -> str:
 
     def blank(a, b):
         for i in range(a, b):
-            if out[i] != "\n":
+            if out[i] not in "\r\n":
                 out[i] = " "
 
     def next_inline(start):
@@ -599,7 +604,7 @@ def _outside_code(text: str, mask_inline: bool = True) -> str:
     return "".join(out)
 
 
-_BLANK_LINE_AT = re.compile(r"\n[ \t\x00]*(?:\n|\Z)")  # a newline that starts a blank line (or ends the text)
+_BLANK_LINE_AT = re.compile(_NL + rf"[ \t\x00]*(?:{_NL}|\Z)")  # a newline that starts a blank line (or ends the text)
 
 
 # Count inspected characters in bracket pairing so malformed-input regressions can
@@ -668,7 +673,7 @@ def _block_boundary(text: str, newline: int, fences: tuple[tuple[int, int], ...]
     """
     regions = mdcode.inline_regions(text)
     before = _span_at(regions, newline)
-    after = _span_at(regions, newline + 1)
+    after = _span_at(regions, mdcode.after_line_end(text, newline))
     # A bare blank line is handled as a paragraph break by callers; this
     # compatibility helper describes the end of actual inline content only.
     return before is not None and before != after
@@ -937,7 +942,7 @@ def _reference_label_spans(document: str) -> tuple[tuple[int, int], ...]:
         if close < 0 or document[close] != "]":
             continue
         label = document[open_ + 1:close]
-        if not label.strip() or re.search(r"\n[ \t]*\n", label):
+        if not label.strip() or mdcode.BLANK_LINE.search(label):
             continue  # an empty label or one spanning a blank line is not a reference label
         first_fence = bisect.bisect_left(fences, (open_ + 1, -1))
         if first_fence < len(fences) and fences[first_fence][0] < close:
@@ -950,7 +955,7 @@ def _reference_label_spans(document: str) -> tuple[tuple[int, int], ...]:
 @functools.lru_cache(maxsize=16)
 def _blank_line_starts(text: str) -> tuple[int, ...]:
     """Sorted start offsets of every paragraph boundary (a newline that starts a blank line), from one regex pass."""
-    return tuple(match.start() for match in re.finditer(r"\n[ \t\r\x00]*\n", text))
+    return tuple(match.start() for match in mdcode.BLANK_LINE.finditer(text))
 
 
 def _blank_between(text: str, a: int, b: int) -> bool:
@@ -991,7 +996,7 @@ def _inline_image_target(text: str, start: int) -> tuple[str, int] | None:
         begin = pos = pos + 1
         while pos < len(text) and text[pos] != ">":
             _DEST_STEPS += 1
-            if text[pos] in "\n<":
+            if text[pos] in "\r\n<":
                 return None
             pos += 2 if text[pos] == "\\" and text[pos + 1:pos + 2] in _ESCAPABLE else 1
         if pos >= len(text):
@@ -1180,7 +1185,9 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
     if not path.is_file():
         return {"file": str(path), "result": "fail", "fails": ["missing README"], "warns": []}
     raw = path.read_bytes()
-    text = normalize_text(raw.decode("utf-8", errors="replace"))  # a leading BOM never hides the H1
+    # Lint uses an LF-only read view for its presentation checks. Shared scans
+    # also accept unnormalized source; this view never reaches a README writer.
+    text = normalize_text(raw.decode("utf-8", errors="replace")).replace("\r", "\n")
     variant = variant if variant and variant != "auto" else ctx.det["variant"]
     rv = standard("readme-variants")
     if len(raw) >= 512_000:

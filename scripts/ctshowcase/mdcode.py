@@ -17,6 +17,25 @@ import re
 # Work counters for the cached scanners (layout builds on a cache miss, inline regions examined); tests read them.
 WORK: collections.Counter = collections.Counter()
 
+# Markdown line endings are LF, CRLF or lone CR, never Python's other
+# Unicode splitlines separators. Keep source characters and offsets intact.
+LINE_END = r"(?:\r\n|\r(?!\n)|(?<!\r)\n)"
+_LINE_END = re.compile(r"\r\n|[\r\n]")
+_LINES = re.compile(r"[^\r\n]*(?:\r\n|[\r\n])|[^\r\n]+")
+BLANK_LINE = re.compile(LINE_END + r"[ \t\x00]*" + LINE_END)
+
+
+def source_lines(text: str):
+    """Yield original lines including their original terminators, without copying offsets."""
+    return (match.group() for match in _LINES.finditer(text))
+
+
+def after_line_end(text: str, index: int) -> int:
+    """Position after a line ending at index, or index if none starts there."""
+    match = _LINE_END.match(text, index)
+    return match.end() if match else index
+
+
 # CommonMark: a backtick fence's info string has no backtick, so "```npm test``` runs" is inline code, not a fence
 FENCE_OPEN = re.compile(r"^ {0,3}(`{3,}(?=[^`\n]*$)|~{3,})")
 _FENCE_CLOSE = re.compile(r"^ {0,3}(`{3,}|~{3,})[ \t]*$")
@@ -350,7 +369,7 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
     def row_cells(at, raw):
         regions.extend((a, b) for a, b in _cell_bounds(raw.rstrip("\r\n"), at) if a < b)
 
-    for raw in re.findall(r"[^\n]*\n|[^\n]+", text):
+    for raw in source_lines(text):
         at, pos = pos, pos + len(raw)
         # Block syntax uses visual columns. Expanding once before peeling any
         # container lets a tab supply the optional quote space AND residual
@@ -637,7 +656,7 @@ def masked(text: str) -> str:
     out = list(text)
     for a, b in code_spans(text):
         for i in range(a, b):
-            if out[i] != "\n":
+            if out[i] not in "\r\n":
                 out[i] = "\x00"
     return "".join(out)
 
