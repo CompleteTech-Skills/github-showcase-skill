@@ -13,6 +13,7 @@ from urllib.parse import quote
 from . import footer as footermod
 from .context import RepoContext
 from .detect import standard
+from .errors import ConfigError
 from .mdcode import code_spans, find_blocks, masked  # noqa: F401  (code_spans: re-exported for callers)
 
 MARK = re.compile(r"<!-- showcase:([a-z-]+):start -->\n?(.*?)\n?<!-- showcase:\1:end -->", re.S)
@@ -291,9 +292,15 @@ def license_section(ctx: RepoContext) -> tuple[str, str] | None:
         return None
     # A license identifier is factual metadata. Trademark and copyright claims
     # require exact wording on this org's row; family membership cannot grant it.
-    wording = ctx.org.get("license_wording", "").strip()
+    def configured_wording(key: str, fallback: str = "") -> str:
+        value = ctx.org.get(key, fallback)
+        if not isinstance(value, str):
+            raise ConfigError(f"{key} must be a string for {ctx.owner}")
+        return value.strip()
+
+    wording = configured_wording("license_wording")
     if not ctx.public:
-        private = ctx.org.get("private_license_wording", "").strip()
+        private = configured_wording("private_license_wording")
         if not private:
             ctx.log("needs-input:license-wording")
             return None
@@ -307,17 +314,19 @@ def license_section(ctx: RepoContext) -> tuple[str, str] | None:
     if ctx.det["variant"] == "F" or (ctx.org.get("license_chip") and lic and lic.upper().startswith("AGPL")):
         return "Licensing", rv["security"]
     if lic and lic != "NOASSERTION":
-        if not wording:
-            ctx.log("needs-input:license-wording")
         if lic == "MIT":
             if f.exists("BRAND_ASSETS.md"):
-                extra = ctx.org.get("skills_license_wording", wording).strip()
+                extra = configured_wording("skills_license_wording", wording)
+                if not extra:
+                    ctx.log("needs-input:license-wording")
                 factual = "Code, templates, and documentation are licensed under the MIT License."
                 tail = " See `LICENSE` and `BRAND_ASSETS.md`."
                 return "License", factual + (" " + extra if extra else "") + tail
             factual = "Code and documentation are licensed under the MIT License; see `LICENSE`."
         else:
             factual = f"Licensed under the {lic}; see `LICENSE`."
+        if not wording:
+            ctx.log("needs-input:license-wording")
         return "License", factual + (" " + wording if wording else "")
     ctx.log("needs-input:license")
     return None
