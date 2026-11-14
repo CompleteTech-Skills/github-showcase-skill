@@ -85,11 +85,19 @@ def test_non_complete_tech_header_uses_family_badge_colours(brand, owner):
 
 
 
-def assert_banner_bar(image, colour):
-    """Check the gradient start with a small allowance for raster rounding."""
-    expected = tuple(bytes.fromhex(colour.lstrip("#")))
-    actual = image.convert("RGB").getpixel((1, image.height - 3))
-    assert all(abs(a - b) <= 3 for a, b in zip(actual, expected)), (actual, expected)
+def assert_banner_bar(image, bar):
+    """Sample the configured gradient at pixel centers, away from shape edges."""
+    start = tuple(bytes.fromhex(bar["from"].lstrip("#")))
+    end = tuple(bytes.fromhex((bar.get("to") or bar["from"]).lstrip("#")))
+    rgb = image.convert("RGB")
+    # The bar is six pixels high by default; sample its middle to avoid
+    # antialiasing at the edges and stay inside even if its height changes.
+    y = image.height - (bar.get("height", 6) + 1) // 2
+    for x in (1, image.width // 4, image.width // 2, 3 * image.width // 4, image.width - 2):
+        t = (x + 0.5) / image.width
+        expected = tuple(round(a + (b - a) * t) for a, b in zip(start, end))
+        actual = rgb.getpixel((x, y))
+        assert all(abs(a - b) <= 3 for a, b in zip(actual, expected)), (x, actual, expected)
 
 
 def assert_wordmark_provenance(icon, svg):
@@ -100,11 +108,51 @@ def assert_wordmark_provenance(icon, svg):
 def test_banner_bar_evidence_rejects_cross_family_colour(brand):
     # The former file-existence assertion accepts this substituted foreign bar.
     from PIL import Image
-    own = brand.family("completetech")["tokens"]["bar"]["from"]
-    foreign = brand.style("jevplay-games")["tokens"]["bar"]["from"]
+    own = brand.style("jevplay-games")["tokens"]["bar"]
+    foreign = brand.family("completetech")["tokens"]["bar"]["from"]
     with pytest.raises(AssertionError):
         assert_banner_bar(Image.new("RGB", (1280, 360), foreign), own)
 
+    # A correct start with a foreign endpoint passed the former start-only check.
+    start = tuple(bytes.fromhex(own["from"].lstrip("#")))
+    end = tuple(bytes.fromhex(foreign.lstrip("#")))
+    image = Image.new("RGB", (1280, 360))
+    for x in range(image.width):
+        t = (x + 0.5) / image.width
+        colour = tuple(round(a + (b - a) * t) for a, b in zip(start, end))
+        for y in range(image.height - own.get("height", 6), image.height):
+            image.putpixel((x, y), colour)
+    assert all(abs(a - b) <= 3 for a, b in zip(image.getpixel((1, 357)), start))
+    with pytest.raises(AssertionError):
+        assert_banner_bar(image, own)
+
+
+
+def test_cli_banner_rejects_foreign_endpoint(brand, tmp_path):
+    """Render a synthetic mutant with its own start and a foreign end."""
+    import yaml
+    from PIL import Image
+
+    owner = "Jev-Engineering"
+    own = brand.style(owner)["tokens"]["bar"]
+    raw = copy.deepcopy(brand.raw)
+    raw["families"]["jev-engineering"]["tokens"]["bar"]["to"] = (
+        brand.family("completetech")["tokens"]["bar"]["from"])
+    config = tmp_path / "brand.yaml"
+    config.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps({"owner": owner, "repo": "synthetic-agent",
+        "description": "Inspect synthetic records.", "visibility": "public",
+        "language": "Python", "license": "MIT", "files": ["agent.py"]}), encoding="utf-8")
+    banner = tmp_path / "mutant.png"
+    result = run_cli("--config", config, "--meta", meta, "--no-repo-dir", "banner",
+        "--out", banner, "--scale", "1", "--allow-unmeasured", "--key-chip", "Synthetic", "--chip", "Python")
+    assert result.returncode == 0, result.stdout + result.stderr
+    with Image.open(banner) as image:
+        start = tuple(bytes.fromhex(own["from"].lstrip("#")))
+        assert all(abs(a - b) <= 3 for a, b in zip(image.convert("RGB").getpixel((1, image.height - 3)), start))
+        with pytest.raises(AssertionError):
+            assert_banner_bar(image, own)
 
 def test_wordmark_evidence_rejects_foreign_embedded_mark():
     info = {"source": "family-wordmark", "path": None}
@@ -155,7 +203,7 @@ def test_each_org_row_keeps_its_identity_across_surfaces(brand, tmp_path):
         assert banner.is_file() and card.is_file(), owner
         tokens = brand.style(owner)["tokens"]
         with Image.open(banner) as image:
-            assert_banner_bar(image, tokens["bar"]["from"])
+            assert_banner_bar(image, tokens["bar"])
         svg = card.read_text(encoding="utf-8")
         for colour in (tokens["bar"]["from"], tokens["bar"].get("to") or tokens["bar"]["from"]):
             assert colour.lower() in svg.lower(), (owner, colour)
