@@ -61,7 +61,7 @@ BADGE 1 BADGE 2 [BADGE 3] [BADGE 4]
 
 1. Language: `LANG-VER-1E3A8A?logo=LANG&logoColor=white`, with VER from `requires-python` or `engines.node` (`>=3.10` → `3.10%2B`); otherwise `language-LANG-1E3A8A`.
 2. Type: `type-CARD%20CATEGORY-005ADD`. Skills keep theirs (`agent%20skill-Claude%20%7C%20Codex-005ADD`, `output-PDF-005ADD`).
-3. License: `license-SPDX-64748B`, or `license-proprietary-64748B` for private repositories; omitted while a public repository has no license.
+3. License: `license-SPDX-64748B` from the captured license for either visibility; omitted without a captured license (`needs-input:license`). Private visibility and legal wording never supply an SPDX identifier. The configured AGPL/commercial badge requires the consistent policy inputs described below.
 4. CI, public repositories only: the Actions badge of a workflow whose file name contains `test`, else `ci`, using the current owner.
 
 Each label and message segment doubles `-` and `_` (shields.io's escapes) and is then percent-encoded, so `C#` reads `language-C%23-1E3A8A` and `#`, `?`, `/` or `%` never end the path early.
@@ -217,13 +217,15 @@ Placement: the final paragraph of `## About`; Variant E: the final line of `## C
 Legal wording comes only from the resolved organization's row in `references/brand.yaml`,
 not its display name, tier or family. See [brand-boundaries.md](brand-boundaries.md).
 The following selection matches `license_section()`; third-party detection precedes
-private/public selection, and public Security selection precedes other public licenses.
+private/public selection. Badges and public sections share license-fact and policy selection; a variant or visibility alone never supplies a license. A new `LICENSE` reference requires that file in the checkout or captured tree; otherwise retain the captured SPDX without that reference and log `needs-input:license-file`.
 
 | Case | Generated body or missing input |
 |---|---|
 | Captured third-party tree (`vendor/`, `third_party/`) or `-fork` repository | Do not derive a new section; log `needs-input:upstream`. Preserve authored upstream references. |
 | Private repository | Use exact `private_license_wording` as the complete section. Substitute an explicit `<year>` only from captured creation year; otherwise log `needs-input:license-year`. Absent wording: omit a new section and log `needs-input:license-wording`. Never infer proprietary copyright. |
-| Public Security variant F, or configured license chip with captured AGPL license | Section `## Licensing`: Available under the GNU AGPL-3.0 or a commercial license; see `LICENSE` and `LICENSING.md`. |
+| Public configured `license_chip: AGPL-3.0 or commercial`, captured AGPL-3.0 (`-only` / `-or-later` accepted), with both `LICENSE` and `LICENSING.md` present | Preserve the configured dual-license badge and standard `## Licensing` body: Available under the GNU AGPL-3.0 or a commercial license; see `LICENSE` and `LICENSING.md`. File presence supports the references; the explicit configured policy supplies the commercial wording. |
+| Public F or configured chip inconsistent with captured SPDX or lacking supported configured policy | Log `needs-input:license-policy` for owner reconciliation; generate only the factual captured license reference. F keeps its `## Licensing` heading and layout. Do not change LICENSE or infer that a policy has relicensed a repository. |
+| Configured AGPL policy missing LICENSE or LICENSING.md | Log `needs-input:license-file` or `needs-input:licensing-file`; use a plain captured-license badge and factual section without inventing missing references or commercial terms. |
 | Public MIT with `BRAND_ASSETS.md` (Skills) | Factual MIT code/templates/documentation reference plus `LICENSE` and `BRAND_ASSETS.md`. Append exact `skills_license_wording`; only when that setting is absent, fall back to `license_wording`. Empty or absent selected wording logs `needs-input:license-wording` and retains factual references. |
 | Other public MIT, every tier | Factual MIT code/documentation reference to `LICENSE`. Append exact `license_wording` only when configured; otherwise retain the factual reference and log `needs-input:license-wording`. |
 | Other captured public license (except `NOASSERTION`) | Factual captured license reference to `LICENSE`, with exact `license_wording` only when configured; otherwise log `needs-input:license-wording`. |
@@ -231,7 +233,7 @@ private/public selection, and public Security selection precedes other public li
 
 CompleteTech rows explicitly retain their existing wording. No other organization
 inherits those legal assertions. Missing input does not erase authored license text:
-header mode preserves a marked section when no replacement can be derived, and
+header mode preserves a marked section when no replacement can be derived or policy/file inputs need reconciliation, and
 upgrade retains its never-delete check. Never modify, rename or delete an existing
 LICENSE, NOTICE or COPYING file.
 
