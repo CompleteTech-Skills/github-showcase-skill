@@ -2343,8 +2343,17 @@ def doctor(estate: Estate, org: str, snap: dict, *, repo_dir: str | Path | None 
             notes.append(f"O6 pinned {have} != registry {want_pins}")
     # O9 banner
     files, _src = _dot_github_files(estate, login, repo_dir)
-    style = estate.brand.style(r.brand_key(org) or login)
-    if files.get("profile/assets/banner.jpg"):
+    identity_log = None
+    try:
+        style = estate.brand.style(r.brand_key(org) or login)
+    except NeedsInput as exc:
+        if exc.detail != "brand-identity":
+            raise
+        identity_log = exc.log
+        notes.append(f"O9 {exc.log}: {exc}")
+    if identity_log:
+        cells["O9"] = "hold"
+    elif files.get("profile/assets/banner.jpg"):
         cells["O9"] = "pass"
     elif style.get("banner") == "keep-existing" or (_tier(row) == "T1" and row.get("flagship") and files.get("profile/assets/intro.svg")):
         cells["O9"] = "n/a"
@@ -2371,7 +2380,7 @@ def doctor(estate: Estate, org: str, snap: dict, *, repo_dir: str | Path | None 
     done = all(v in ("pass", "warn", "n/a") for v in cells.values())
     return {"org": login, "tier": _tier(row), "cells": cells, "done": "yes" if done else "no", "notes": notes,
             "reads": snapshot_reads(login), "checked": date.today().isoformat(),
-            "logs": [] if has_registry else ["needs-input:registry"]}
+            "logs": ([] if has_registry else ["needs-input:registry"]) + ([identity_log] if identity_log else [])}
 
 
 def as_tsv(r: dict, header: bool = False) -> str:

@@ -87,7 +87,9 @@ def row(ctx: RepoContext) -> dict:
                                  defaults=labelsmod.defaults_for(ctx.owner, ctx.repo, repo_dir=rd, meta=ctx.meta))
         cells["R6"] = "pass" if all(o["op"] == "skip" and not o.get("log") for o in ops) else "fail"
     readme = rd / "README.md" if rd else None
-    if readme and readme.is_file():
+    if ctx.identity_pending:
+        cells["R7"] = "hold"  # README palette checks wait for approved identity, even with valid consent.
+    elif readme and readme.is_file():
         rl = readmelint.lint(ctx, readme)
         cells["R7"] = rl["result"]
         logs += rl.get("logs", [])

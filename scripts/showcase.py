@@ -118,13 +118,13 @@ def brand(args, prefer_lock=False):
     return load_brand(args.config, prefer_lock=prefer_lock)
 
 
-def context(args, b=None):
+def context(args, b=None, *, for_coverage=False):
     from ctshowcase.context import RepoContext
     from ctshowcase.meta import merged
     b = b or brand(args)
     rd = repo_dir(args)
     meta = merged(args.meta, str(rd) if rd else None)
-    return RepoContext(b, meta, rd, type_override=getattr(args, "type_override", None))
+    return RepoContext(b, meta, rd, type_override=getattr(args, "type_override", None), for_coverage=for_coverage)
 
 
 def base(cmd, ctx=None, **kw) -> dict:
@@ -488,12 +488,16 @@ def cmd_readme(args):
                             logs=ctx.logs + ["readme-shrink"]), CHECK_FAILED
     changed = after != before
     diff = "".join(difflib.unified_diff(before.splitlines(True), after.splitlines(True), "a/README.md", "b/README.md"))
-    if args.write and getattr(ctx, "badge_files", None):
+    badge_outputs = {}
+    if getattr(ctx, "badge_files", None):
         from ctshowcase import badge
         from ctshowcase.typeset import Fonts
         fonts = Fonts(ctx.brand)
         for rel, (label, message, colour) in sorted(ctx.badge_files.items()):
-            write_bytes(rd / rel, badge.svg(ctx.brand, fonts, label, message, colour).encode())
+            badge_outputs[rel] = badge.svg(ctx.brand, fonts, label, message, colour, style=ctx.style).encode()
+    if args.write:
+        for rel, data in badge_outputs.items():
+            write_bytes(rd / rel, data)
     if args.write and changed:
         path.write_text(after, encoding="utf-8")
         if contrib_new is not None:
@@ -913,7 +917,7 @@ def cmd_doctor(args):
         res = intake.estate_doctor(brand(args), _resolver_args(args, require_registry=True), metas,
                                    template_dir=args.template_dir, checkouts=args.checkouts, out=args.out)
         return res, OK
-    ctx = context(args)
+    ctx = context(args, for_coverage=True)
     ctx.brand.check_owner(ctx.owner, allow_t3=True, repo=ctx.repo, verify_signoff=False)  # read-only: doctor.row shows R7 hold
     r = doctor.row(ctx)
     fmt = args.doctor_format

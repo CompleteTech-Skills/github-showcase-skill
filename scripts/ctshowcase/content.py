@@ -71,8 +71,8 @@ def org_row(r: Resolver | None, brand, login: str, require: bool = False) -> dic
     return row
 
 
-def org_style(r: Resolver | None, brand, login: str) -> dict:
-    return brand.style(brand_key(r, login))
+def org_style(r: Resolver | None, brand, login: str, *, repo: str | None = None) -> dict:
+    return brand.style(brand_key(r, login), repo=repo)
 
 
 def in_estate(r: Resolver | None, login: str) -> bool:
@@ -1845,7 +1845,7 @@ def org_glyph(text: str, owner: str) -> str | None:
 
 def icon_colours(ctx, text: str, org: dict, resolver: Resolver, *, require_palette: bool = True) -> dict:
     """Keep estate palettes explicit; the bundled template uses the committed brand tokens."""
-    family = org_style(resolver, ctx.brand, ctx.owner)["name"]
+    family = org_style(resolver, ctx.brand, ctx.owner, repo=ctx.repo)["name"]
     colours = family_colours(text, org["brand_key"], family, resolver.aliases(ctx.owner))
     if _section(text, "Repository glyph prompt template") and not _section(text, "(b) Family palette"):
         tokens = ctx.style["tokens"]
@@ -1907,7 +1907,7 @@ def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = Non
     owner, repo = ctx.owner, ctx.repo
     org = org_row(resolver, ctx.brand, owner, require=True)
     org["canonical"], org["current"] = org["brand_key"], current_login(resolver, owner)
-    family = org_style(resolver, ctx.brand, owner)["name"]
+    family = org_style(resolver, ctx.brand, owner, repo=repo)["name"]
     logins = [org["canonical"], *resolver.aliases(owner)]  # ART_DIRECTION may name the org by any of its logins (CQ-03)
     colours = icon_colours(ctx, art_text, org, resolver, require_palette=option.upper() == "A")
     org_mark = next((g for g in (org_glyph(art_text, x) for x in logins) if g), None)
@@ -2587,7 +2587,7 @@ def _ctx(args, cli, resolver):
     key = resolver.brand_key(ctx.owner)
     if key and key != ctx.owner and not ctx.org.get("known"):
         ctx.org = org_row(resolver, ctx.brand, ctx.owner)
-        ctx.style = org_style(resolver, ctx.brand, ctx.owner)
+        ctx.style = org_style(resolver, ctx.brand, ctx.owner, repo=ctx.repo)
         ctx.logs = [x for x in ctx.logs if x != "needs-input:org-row"]
         ctx.log(f"org-alias:{key}")
     return ctx

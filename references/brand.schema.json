@@ -231,6 +231,10 @@
      "type": "number",
      "minimum": 1,
      "maximum": 21
+    },
+    "identity_pending": {
+     "type": "boolean",
+     "description": "No approved palette and mark; renderers require owner-supplied brand identity."
     }
    }
   },
@@ -319,6 +323,18 @@
       "pattern": "^[A-Za-z0-9][A-Za-z0-9-]*$"
      },
      "uniqueItems": true
+    },
+    "license_wording": {
+     "type": "string",
+     "description": "Explicit owner-supplied legal wording; absence never grants permission to infer legal claims."
+    },
+    "private_license_wording": {
+     "type": "string",
+     "description": "Explicit owner-supplied legal wording; absence never grants permission to infer legal claims."
+    },
+    "skills_license_wording": {
+     "type": "string",
+     "description": "Explicit owner-supplied legal wording; absence never grants permission to infer legal claims."
     }
    }
   }
