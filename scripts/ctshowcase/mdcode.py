@@ -20,6 +20,44 @@ import unicodedata
 # Work counters for the cached scanners (layout builds on a cache miss, inline regions examined); tests read them.
 WORK: collections.Counter = collections.Counter()
 
+_SOURCE_NUL = re.compile("\x00")
+
+
+@functools.lru_cache(maxsize=16)
+def _source_view(text: str) -> str:
+    """GFM input preprocessing, preserving one source character per position.
+
+    Only raw authored documents enter here. Peeled definition candidates keep
+    their internal NUL prefix masks; callers never treat those as raw input.
+    This view is not returned to a README writer as replacement authored text.
+    """
+    WORK['source_view_chars'] += len(text)
+    return text.replace("\x00", "\ufffd")
+
+
+@functools.lru_cache(maxsize=16)
+def _parse_views(text: str, document: str) -> tuple[str, str]:
+    """Preprocess raw source NUL, without reinterpreting masked projection NUL.
+
+    `text` may be a source-aligned masked copy. Only positions whose original
+    document actually held NUL are replacement characters; other NULs remain
+    synthetic masks. Short/no-document callers supply raw `text` instead.
+    """
+    source = _source_view(document)
+    if len(document) < len(text):
+        return _source_view(text), source
+    if source == document:
+        return text, source
+    out = None
+    for match in _SOURCE_NUL.finditer(document, 0, len(text)):
+        at = match.start()
+        if text[at] == "\x00":
+            if out is None:
+                out = list(text)
+            out[at] = "\ufffd"
+    return ("".join(out) if out is not None else text), source
+
+
 # Markdown line endings are LF, CRLF or lone CR, never Python's other
 # Unicode splitlines separators. Keep source characters and offsets intact.
 LINE_END = r"(?:\r\n|\r(?!\n)|(?<!\r)\n)"
@@ -361,6 +399,7 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
     a block, not a heading, not a line inside a fence). An HTML block span runs from its first line to just past its
     last line, excluding a terminating blank line or the line that ended its container. The final tuple records
     indented code blocks, which cannot interrupt a paragraph and are never inline regions."""
+    text = _source_view(text)
     WORK['layout_builds'] += 1
     regions: list[tuple[int, int]] = []
     fences: list[tuple[int, int]] = []
@@ -681,6 +720,7 @@ def autolink_candidates(text: str, bare: bool = True) -> tuple[tuple[int, int], 
     consumes raw backticks inside the URI. An earlier tag, title or comment
     likewise wins. A backslash can escape the opener, never the raw closer.
     """
+    text = _source_view(text)
     spans = []
     for lo, hi in inline_regions(text):
         for match in _AUTOLINK.finditer(text, lo, hi):
@@ -709,6 +749,7 @@ def _find_raw_inline_code(text: str, start: int = 0) -> tuple[int, int] | None:
     content must be non-empty. It may span single newlines within one paragraph, but the closing run must lie in the
     same inline region: no blank line, fence, heading, list item, new block quote, thematic break, setext underline,
     HTML block start (types 1-6) or table cell boundary in between. Fenced text holds no inline span."""
+    text = _source_view(text)
     los, his = _region_bounds(text)
     # Bare URLs need bracket context from the shared accepted-inline pass.
     # Leave their raw ticks available here: that scanner compares the earlier
@@ -1027,6 +1068,7 @@ def _raw_definition_matches(candidate: str, document: str):
 
 def _definition_candidates(document: str) -> str:
     """The document with code blocks and HTML comments blanked (same length), the text in which a definition is read."""
+    document = _source_view(document)
     out = list(document)
     for a, b in code_block_spans(document):
         for i in range(a, b):
@@ -1155,6 +1197,7 @@ def _inline_link_spans(document: str, fences: tuple[tuple[int, int], ...]) -> tu
     `](` consumes one of them, whether or not its destination resolves, so a completed link's opener is never reused by
     a later `](`: an orphan destination opens no span. A blank line clears the stack (a paragraph boundary). Escaped and
     inline-code brackets are text and neither open nor consume. Computed in one pass; the spans are sorted and disjoint."""
+    document = _source_view(document)
     spans: list[tuple[int, int]] = []
     html_spans = html_block_spans(document)  # raw HTML and fenced code are not link syntax
     openers: list[int] = []  # unconsumed unescaped `[` of the current paragraph, innermost last
@@ -1222,6 +1265,7 @@ def _definitions(document: str) -> tuple:
     starts a block counts, plus a definition directly after another live definition. Definitions are decided before
     inline code, so a backtick in a definition destination pairs with nothing. A bare destination must have balanced
     unescaped parentheses (CommonMark); otherwise the line is ordinary Markdown. Computed once per document."""
+    document = _source_view(document)
     continuation = continuation_starts(document)
     live: list = []
     for match in _raw_definition_matches(_definition_candidates(document), document):
@@ -1245,6 +1289,7 @@ def _definition_spans(document: str) -> tuple[tuple[int, int], ...]:
 class _HTMLTokens:
     """Raw HTML token spans and real img tags, sharing the inline precedence scan."""
     def __init__(self, text, document: str | None = None):
+        text, document = _parse_views(text, document if document is not None else text)
         self.text = text
         self.tags = []
         self.images = []
@@ -1285,6 +1330,7 @@ def _outside_code(text: str, mask_inline: bool = True) -> str:
     `mask_inline=False` still lets inline code win precedence but leaves its characters readable (reference labels).
     Autolink contents stay masked; label validity and matching always read the original source.
     The result has the same length (and newline positions) as `text`."""
+    text = _source_view(text)
     fences = _fence_spans(text)
     definitions = _definition_spans(text)  # decided before inline code: a definition destination's backtick is literal
     labels = _reference_label_spans(text)  # resolved full-reference labels: their backticks are literal too
@@ -1381,6 +1427,7 @@ def _bracket_pairs(text: str, document: str | None = None) -> dict[int, int]:
     literal text cannot open or close a description. Full reference labels
     use a separate raw lexical scan.
     """
+    text, document = _parse_views(text, document if document is not None else text)
     global _BRACKET_STEPS
     pairs: dict[int, int] = {}
     source = document if document is not None else text
@@ -1503,6 +1550,7 @@ def _accepted_inline(text: str):
     non-inline inert region, so a backtick in a resolved label is literal and an unresolved label is not consumed. Inert regions are found
     by cached lookups as in `_outside_code`, so the pass is linear. Offsets are the source offsets. It never calls
     `_outside_code`. Live reference definitions (`_definition_spans`) are inert block regions like raw HTML blocks: their brackets and backticks are literal, and the opener stack is cleared entering and leaving one."""
+    text = _source_view(text)
     global _OPENER_STEPS
     WORK['inline_precedence_builds'] += 1
     fences = _fence_spans(text)
@@ -1677,7 +1725,7 @@ def _accepted_inline(text: str):
 
 def _inline_openers_and_autolinks(text: str):
     """Compatibility view of the canonical result's brackets and autolinks."""
-    return _accepted_inline(text)[:2]
+    return _accepted_inline(_source_view(text))[:2]
 
 
 _inline_openers_and_autolinks.cache_clear = _accepted_inline.cache_clear
@@ -1721,6 +1769,7 @@ def _label_syntax(value: str) -> bool:
 
 def _label_key(value: str) -> str:
     """CommonMark reference matching folds case and whitespace, keeping escapes and entities literal."""
+    value = value.replace("\x00", "\ufffd")
     if not _label_syntax(value):
         return ""  # CommonMark labels are at most 999 source characters.
     # cmark-gfm label matching collapses only SP, HT and line endings.
@@ -1742,6 +1791,7 @@ def _reference_label_spans(document: str) -> tuple[tuple[int, int], ...]:
     pair. Only a label that names a live definition is a reference, so its backticks are literal; an unresolved label
     stays readable for inline code. Junctions inside fences or definitions are text. Computed once per document;
     the spans are sorted and never overlap."""
+    document = _source_view(document)
     keys = {_definition_key(m, document) for m in _definitions(document)}
     fences = code_block_spans(document)
     definitions = _definition_spans(document)
@@ -1802,6 +1852,7 @@ def _title_ends(text: str) -> dict[str, tuple[int, ...]]:
 def _inline_image_target(text: str, start: int) -> tuple[str, int] | None:
     """Read a Markdown destination and optional title after its opening parenthesis. Destination nesting deeper than
     32 parentheses is no link (CommonMark's limit), which bounds each call and keeps the opener pass linear."""
+    text = _source_view(text)
     global _DEST_STEPS
     pos = start + 1
     while pos < len(text) and text[pos] in _LINK_SPACE:
@@ -1886,6 +1937,7 @@ def _link_literal_spans(document: str) -> tuple[tuple[int, int], ...]:
     """Spans of resolved inline link destinations and titles, from `(` through the closing `)`. This text is literal: a
     `![...](...)` inside a link title renders no image, while a linked image in the link text is not covered. The spans
     are sorted and never overlap, because `_active_openers` skips a completed destination."""
+    document = _source_view(document)
     spans = []
     for i in sorted(_active_openers(document)):
         if document[i + 1:i + 2] != "(":
@@ -1898,6 +1950,7 @@ def _link_literal_spans(document: str) -> tuple[tuple[int, int], ...]:
 
 def _markdown_images(text: str, document: str) -> list[tuple[str, str, int, int]]:
     """Read inline and reference images with balanced alt text; definitions use first-wins labels."""
+    text, document = _parse_views(text, document)
     definitions = {}
     for match in _definitions(document):
         destination = match.group(2) if match.group(2) is not None else match.group(3)
@@ -1965,6 +2018,7 @@ def _markdown_images(text: str, document: str) -> list[tuple[str, str, int, int]
 
 def _images(text: str, document: str) -> list[tuple[str, str]]:
     """Read HTML and Markdown images, excluding Markdown-looking text in HTML attributes."""
+    text, document = _parse_views(text, document)
     parser = _HTMLTokens(text, document)
     markdown = _markdown_images(text, document)
     # Angle-delimited destinations (and HTML in alt text) belong to their Markdown image,
@@ -2008,7 +2062,7 @@ def find_inline_code(text: str, start: int = 0) -> tuple[int, int] | None:
 
 def inline_code_spans(text: str) -> tuple[tuple[int, int], ...]:
     """Accepted code spans shared by marker projection and image checking."""
-    return _accepted_inline(text)[2]
+    return _accepted_inline(_source_view(text))[2]
 
 
 def _clear_inline_code_cache():
@@ -2031,12 +2085,13 @@ def _marker_projection(text: str) -> str:
     This is only a source-aligned projection of the canonical parser result.
     General `masked` keeps HTML structure visible to README/footer callers.
     """
-    parsed = _accepted_inline(text)
-    spans = list(code_block_spans(text)) + list(parsed[1]) + list(parsed[2]) + list(parsed[3])
+    source = _source_view(text)
+    parsed = _accepted_inline(source)
+    spans = list(code_block_spans(source)) + list(parsed[1]) + list(parsed[2]) + list(parsed[3])
     # The main inline pass skips raw HTML blocks. Their tag attributes still
     # contain literal data, whereas real marker comments must remain visible.
-    blocks = html_block_spans(text)
-    for span in _HTMLTokens(text).tags:
+    blocks = html_block_spans(source)
+    for span in _HTMLTokens(source).tags:
         block = _span_at(blocks, span[0])
         if block is not None and span[1] <= block[1]:
             spans.append(span)
