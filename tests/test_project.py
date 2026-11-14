@@ -417,41 +417,77 @@ def _loopback_executable_info(gh):
 
 
 def _loopback_run(argv, env, accepted, *, preconnect_timeout=60, interaction_timeout=10):
-    """Bound both phases; acceptance is observable, but is not proof of gh readiness."""
+    """Bound both phases and clean up the process tree, including inherited handles."""
+    import signal
     import subprocess
-    import threading
+    import tempfile
 
-    process = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
-    finished = threading.Event()
-    output = []
+    # A Windows job closes over descendants even after the direct child exits. Assign
+    # before polling; if assignment fails, fail the test rather than leave an orphan.
+    job = None
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
 
-    def collect():
-        try:
-            output.append(process.communicate())
-        finally:
-            finished.set()
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.CreateJobObjectW.argtypes = [wintypes.LPVOID, wintypes.LPCWSTR]
+        kernel.CreateJobObjectW.restype = wintypes.HANDLE
+        kernel.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+        kernel.AssignProcessToJobObject.restype = wintypes.BOOL
+        kernel.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
+        kernel.TerminateJobObject.restype = wintypes.BOOL
+        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        ntdll = ctypes.WinDLL("ntdll")
+        ntdll.NtResumeProcess.argtypes = [wintypes.HANDLE]
+        ntdll.NtResumeProcess.restype = ctypes.c_long
+        job = kernel.CreateJobObjectW(None, None)
+        if not job:
+            raise ctypes.WinError(ctypes.get_last_error())
 
-    collector = threading.Thread(target=collect, daemon=True)
-    collector.start()
-    deadline = time.monotonic() + preconnect_timeout
-    phase = "pre-connection"
     try:
-        while not finished.is_set():
-            if phase == "pre-connection" and accepted.is_set():
-                phase = "interaction"
-                deadline = time.monotonic() + interaction_timeout
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                process.kill()
-                collector.join()
-                return None, phase, output[0]
-            finished.wait(min(remaining, 0.05))
-        collector.join()
-        return process.returncode, None, output[0]
+        # Files cannot be held open in a way that blocks output collection, unlike pipes.
+        with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
+            process = subprocess.Popen(argv, stdout=stdout, stderr=stderr, env=env,
+                                       start_new_session=(os.name != "nt"),
+                                       creationflags=0x00000004 if job else 0)  # CREATE_SUSPENDED
+            try:
+                if job and not kernel.AssignProcessToJobObject(job, int(process._handle)):
+                    raise ctypes.WinError(ctypes.get_last_error())
+                if job and ntdll.NtResumeProcess(int(process._handle)) != 0:
+                    raise OSError("could not resume process assigned to cleanup job")
+                deadline = time.monotonic() + preconnect_timeout
+                phase = "pre-connection"
+                while process.poll() is None:
+                    if phase == "pre-connection" and accepted.is_set():
+                        phase = "interaction"
+                        deadline = time.monotonic() + interaction_timeout
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    accepted.wait(min(remaining, 0.05)) if phase == "pre-connection" else time.sleep(
+                        min(remaining, 0.05))
+                timed_out = process.poll() is None
+            finally:
+                try:
+                    if job:
+                        if not kernel.TerminateJobObject(job, 1):
+                            raise ctypes.WinError(ctypes.get_last_error())
+                    else:
+                        try:
+                            os.killpg(process.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                    process.wait(timeout=2)
+            stdout.seek(0)
+            stderr.seek(0)
+            return (None if timed_out else process.returncode, phase if timed_out else None,
+                    (stdout.read(), stderr.read()))
     finally:
-        if process.poll() is None:
-            process.kill()
-        collector.join()
+        if job:
+            kernel.CloseHandle(job)
 
 
 def test_loopback_run_phase_deadlines():
@@ -467,6 +503,45 @@ def test_loopback_run_phase_deadlines():
     assert code is None and phase == "interaction" and output == (b"", b"")
     code, phase, output = _loopback_run([sys.executable, "-c", "print('ok')"], os.environ, threading.Event())
     assert code == 0 and phase is None and output[0].strip() == b"ok" and output[1] == b""
+
+
+def test_loopback_run_cleans_up_inherited_output_handles(tmp_path):
+    import signal
+    import subprocess
+    import sys
+
+    pid_file = tmp_path / "pid"
+    marker = tmp_path / "survived"
+    descendant = ("import os, pathlib, sys, time; "
+                  "pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); "
+                  "time.sleep(1.5); pathlib.Path(sys.argv[2]).write_text('alive')")
+    parent = ("import pathlib, subprocess, sys, time; "
+              "subprocess.Popen([sys.executable, '-c', sys.argv[1], sys.argv[2], sys.argv[3]]); "
+              "p = pathlib.Path(sys.argv[2]); "
+              "exec('while not p.exists():\\n time.sleep(0.01)'); time.sleep(30)")
+    runner = ("import os, sys, threading; from test_project import _loopback_run; "
+              "code, phase, output = _loopback_run([sys.executable, '-c', sys.argv[1], *sys.argv[2:]], "
+              "os.environ, threading.Event(), preconnect_timeout=0.5); "
+              "assert code is None and phase == 'pre-connection' and output == (b'', b'')")
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join([str(ROOT / "tests"), str(ROOT / "scripts")]))
+    completed = False
+    try:
+        subprocess.run([sys.executable, "-c", runner, parent, descendant, str(pid_file), str(marker)],
+                       env=env, check=True, timeout=5, capture_output=True)
+        completed = True
+        assert pid_file.exists(), "descendant did not start before the deadline"
+        time.sleep(1.6)
+        assert not marker.exists(), "descendant survived process-tree cleanup"
+    finally:
+        if not completed and pid_file.exists():
+            pid = int(pid_file.read_text())
+            if os.name == "nt":
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True, timeout=5)
+            else:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
 
 def test_loopback_timeout_diagnostic_redacts_output():
     import subprocess
