@@ -230,3 +230,59 @@ def test_different_agpl_version_is_not_rewritten_to_three(tmp_path, monkeypatch)
     assert "needs-input:license-policy" in out["logs"]
     assert "Licensed under the AGPL-1.0; see `LICENSE`." in out["diff"]
     assert "commercial" not in out["diff"]
+
+
+@pytest.mark.parametrize("directory", ["LICENSE", "LICENSING.md", "both"])
+def test_security_directories_are_not_license_evidence(tmp_path, monkeypatch, directory):
+    monkeypatch.setenv("SHOWCASE_ESTATE_ROOT", str(tmp_path / "empty-estate"))
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    for name in ("LICENSE", "LICENSING.md"):
+        path = checkout / name
+        if directory in (name, "both"):
+            path.mkdir()
+            (path / "nested").write_text("Synthetic terms", encoding="utf-8")
+        else:
+            path.write_text("Synthetic terms", encoding="utf-8")
+    authored = "# Synthetic\n\n## License\n\n<!-- showcase:license -->\nOwner-authored terms.\n"
+    (checkout / "README.md").write_text(authored, encoding="utf-8")
+    metadata = tmp_path / "meta.json"
+    metadata.write_text(json.dumps({"owner": "CompleteTech-Security", "repo": "synthetic-control",
+                                    "visibility": "public", "license": "AGPL-3.0",
+                                    "description": "Inspect synthetic records."}), encoding="utf-8")
+    for mode in ("scaffold", "header"):
+        result = run_cli("--meta", metadata, "--repo-dir", checkout, "readme", "--mode", mode, "--diff")
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        out = json.loads(result.stdout)
+        assert "commercial" not in out["diff"]
+        if directory in ("LICENSE", "both"):
+            assert "needs-input:license-file" in out["logs"]
+            assert "; see `LICENSE`" not in out["diff"]
+        if directory in ("LICENSING.md", "both"):
+            assert "needs-input:licensing-file" in out["logs"]
+            assert 'href="LICENSING.md"' not in out["diff"]
+        if mode == "header":
+            assert "-Owner-authored terms." not in out["diff"]
+    assert (checkout / "README.md").read_text(encoding="utf-8") == authored
+
+
+@pytest.mark.parametrize("files, supported", [
+    (["LICENSE", "LICENSING.md"], True),
+    (["LICENSE/terms", "LICENSING.md/terms"], False),
+    (["LICENSE", "LICENSE/terms", "LICENSING.md"], False),
+    (["LICENSE", "LICENSING.md/terms"], False),
+    ([], False),
+    (None, False),
+])
+@pytest.mark.parametrize("complete", [True, False, None])
+def test_captured_tree_requires_exact_unambiguous_files(brand, files, supported, complete):
+    from ctshowcase.context import RepoContext
+    from ctshowcase.meta import normalize
+    from ctshowcase.readme import license_facts, license_reference
+
+    meta = {"owner": "CompleteTech-Security", "repo": "synthetic-control", "visibility": "public",
+            "license": "AGPL-3.0", "files": files, "files_complete": complete}
+    ctx = RepoContext(brand, normalize(meta))
+    assert license_facts(ctx) == ("AGPL-3.0", supported)
+    license_present = files is not None and "LICENSE" in files and "LICENSE/terms" not in files
+    assert ("`LICENSE`" in license_reference(ctx)) == license_present

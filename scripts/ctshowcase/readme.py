@@ -133,7 +133,7 @@ def nav_line(ctx: RepoContext) -> str:
         items = [f"**{org.get('nav_name') or org.get('display_name')}**", f"[All checkers](https://github.com/{owner})"]
         if f.exists("docs/REFERENCE.md"):
             items.append("[Reference](docs/REFERENCE.md)")
-        if f.exists("LICENSING.md"):
+        if f.is_file("LICENSING.md"):
             items.append("[Licensing](LICENSING.md)")
         items.append(f"[Security]({sec})")
         return " · ".join(items)
@@ -168,7 +168,7 @@ def license_facts(ctx: RepoContext) -> tuple[str | None, bool]:
     if not lic or lic in ("NOASSERTION", "other"):
         lic = None
         ctx.log("needs-input:license")
-    if lic and not ctx.facts.exists("LICENSE"):
+    if lic and not ctx.facts.is_file("LICENSE"):
         ctx.log("needs-input:license-file")
     chip = ctx.org.get("license_chip")
     requested = ctx.public and (ctx.det["variant"] == "F" or bool(chip))
@@ -177,15 +177,15 @@ def license_facts(ctx: RepoContext) -> tuple[str | None, bool]:
         if lic.upper() not in ("AGPL-3.0", "AGPL-3.0-ONLY", "AGPL-3.0-OR-LATER") or chip != "AGPL-3.0 or commercial":
             ctx.log("needs-input:license-policy")
         else:
-            if not ctx.facts.exists("LICENSING.md"):
+            if not ctx.facts.is_file("LICENSING.md"):
                 ctx.log("needs-input:licensing-file")
-            dual = ctx.facts.exists("LICENSE") and ctx.facts.exists("LICENSING.md")
+            dual = ctx.facts.is_file("LICENSE") and ctx.facts.is_file("LICENSING.md")
     return lic, dual
 
 
 def license_reference(ctx: RepoContext) -> str:
     """Never cite a LICENSE whose presence the input does not establish."""
-    return "; see `LICENSE`." if ctx.facts.exists("LICENSE") else "."
+    return "; see `LICENSE`." if ctx.facts.is_file("LICENSE") else "."
 
 
 def badges(ctx: RepoContext) -> list[tuple[str, str, str | None]]:
@@ -352,7 +352,7 @@ def license_section(ctx: RepoContext) -> tuple[str, str] | None:
                 if not extra:
                     ctx.log("needs-input:license-wording")
                 factual = "Code, templates, and documentation are licensed under the MIT License."
-                paths = "`LICENSE` and `BRAND_ASSETS.md`" if f.exists("LICENSE") else "`BRAND_ASSETS.md`"
+                paths = "`LICENSE` and `BRAND_ASSETS.md`" if f.is_file("LICENSE") else "`BRAND_ASSETS.md`"
                 tail = f" See {paths}."
                 return heading, factual + (" " + extra if extra else "") + tail
             factual = "Code and documentation are licensed under the MIT License" + license_reference(ctx)
