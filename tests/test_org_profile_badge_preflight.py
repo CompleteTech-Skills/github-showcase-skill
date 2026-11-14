@@ -54,7 +54,7 @@ def unreadable(raw):
 
 
 def snapshot(out):
-    return {str(p.relative_to(out)): p.read_bytes() for p in out.rglob("*") if p.is_file()}
+    return {p.relative_to(out).as_posix(): p.read_bytes() for p in out.rglob("*") if p.is_file()}
 
 
 def change_registry(registry):
