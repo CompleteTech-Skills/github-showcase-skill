@@ -3,7 +3,10 @@
 The skill can report the target checkout's formatter configuration and validation
 commands. It recognizes `.prettierrc*`, `prettier.config.*`, `.editorconfig`, the
 `prettier` key and validation scripts in `package.json`, shell snippets in
-`AGENTS.md` and `CONTRIBUTING.md`, and workflow `run` steps. Reports retain their
+`AGENTS.md` and `CONTRIBUTING.md`, including inline code in run instructions,
+and workflow `run` steps. This is heuristic discovery, not a complete parser.
+Default TSV and Markdown doctor output reports tooling on stderr to preserve the
+coverage row; JSON includes it in `tooling`. Reports retain their
 source and mark commands **not run**. Discovery never executes these commands;
 workflow steps can require secrets or services unavailable in a local checkout.
 
@@ -25,6 +28,8 @@ when preservation would reject the changes.
 to retain exact bytes outside managed blocks. Bootstrap formatting of
 `CONTRIBUTING.md` accepts whitespace changes only after the normal owner-token
 replacement; any other content change refuses the whole write.
+This CLI does not generate `.github/showcase.yml` or `PROMPTS.md`; formatting
+those files is outside this head's generator support.
 
 The card SVG budget has two levels: 30,000 bytes is a target that produces an S10
 warning, while 40,000 bytes is the hard failure threshold. A warning at 31,307
