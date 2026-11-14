@@ -1,4 +1,12 @@
-"""Explicit legal wording and fail-closed brand identity regressions (#36, #40)."""
+"""Explicit wording and brand identity regressions (#36, #40, #175).
+
+The all-row evidence samples the banner's bar, inspects card SVG source and
+reported mark provenance, and examines generated README/profile text. It is
+not an exhaustive pixel, outlined-text, or embedded-image recognition test.
+SVG visual inspection needs an optional renderer; detecting arbitrary outlined
+text or marks would require an OCR/image-recognition oracle. Representative
+contact-sheet inspection remains separate from automated tests.
+"""
 import copy
 import json
 
@@ -77,9 +85,87 @@ def test_non_complete_tech_header_uses_family_badge_colours(brand, owner):
 
 
 
+def assert_banner_bar(image, bar):
+    """Sample the configured gradient at pixel centers, away from shape edges."""
+    start = tuple(bytes.fromhex(bar["from"].lstrip("#")))
+    end = tuple(bytes.fromhex((bar.get("to") or bar["from"]).lstrip("#")))
+    rgb = image.convert("RGB")
+    # The bar is six pixels high by default; sample its middle to avoid
+    # antialiasing at the edges and stay inside even if its height changes.
+    y = image.height - (bar.get("height", 6) + 1) // 2
+    for x in (1, image.width // 4, image.width // 2, 3 * image.width // 4, image.width - 2):
+        t = (x + 0.5) / image.width
+        expected = tuple(round(a + (b - a) * t) for a, b in zip(start, end))
+        actual = rgb.getpixel((x, y))
+        assert all(abs(a - b) <= 3 for a, b in zip(actual, expected)), (x, actual, expected)
+
+
+def assert_wordmark_provenance(icon, svg):
+    assert icon["source"] == "family-wordmark" and icon["path"] is None
+    assert "data:image/" not in svg.lower()
+
+
+def test_banner_bar_evidence_rejects_cross_family_colour(brand):
+    # The former file-existence assertion accepts this substituted foreign bar.
+    from PIL import Image
+    own = brand.style("jevplay-games")["tokens"]["bar"]
+    foreign = brand.family("completetech")["tokens"]["bar"]["from"]
+    with pytest.raises(AssertionError):
+        assert_banner_bar(Image.new("RGB", (1280, 360), foreign), own)
+
+    # A correct start with a foreign endpoint passed the former start-only check.
+    start = tuple(bytes.fromhex(own["from"].lstrip("#")))
+    end = tuple(bytes.fromhex(foreign.lstrip("#")))
+    image = Image.new("RGB", (1280, 360))
+    for x in range(image.width):
+        t = (x + 0.5) / image.width
+        colour = tuple(round(a + (b - a) * t) for a, b in zip(start, end))
+        for y in range(image.height - own.get("height", 6), image.height):
+            image.putpixel((x, y), colour)
+    assert all(abs(a - b) <= 3 for a, b in zip(image.getpixel((1, 357)), start))
+    with pytest.raises(AssertionError):
+        assert_banner_bar(image, own)
+
+
+
+def test_cli_banner_rejects_foreign_endpoint(brand, tmp_path):
+    """Render a synthetic mutant with its own start and a foreign end."""
+    import yaml
+    from PIL import Image
+
+    owner = "Jev-Engineering"
+    own = brand.style(owner)["tokens"]["bar"]
+    raw = copy.deepcopy(brand.raw)
+    raw["families"]["jev-engineering"]["tokens"]["bar"]["to"] = (
+        brand.family("completetech")["tokens"]["bar"]["from"])
+    config = tmp_path / "brand.yaml"
+    config.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps({"owner": owner, "repo": "synthetic-agent",
+        "description": "Inspect synthetic records.", "visibility": "public",
+        "language": "Python", "license": "MIT", "files": ["agent.py"]}), encoding="utf-8")
+    banner = tmp_path / "mutant.png"
+    result = run_cli("--config", config, "--meta", meta, "--no-repo-dir", "banner",
+        "--out", banner, "--scale", "1", "--allow-unmeasured", "--key-chip", "Synthetic", "--chip", "Python")
+    assert result.returncode == 0, result.stdout + result.stderr
+    with Image.open(banner) as image:
+        start = tuple(bytes.fromhex(own["from"].lstrip("#")))
+        assert all(abs(a - b) <= 3 for a, b in zip(image.convert("RGB").getpixel((1, image.height - 3)), start))
+        with pytest.raises(AssertionError):
+            assert_banner_bar(image, own)
+
+def test_wordmark_evidence_rejects_foreign_embedded_mark():
+    info = {"source": "family-wordmark", "path": None}
+    with pytest.raises(AssertionError):
+        assert_wordmark_provenance(info, '<image href="data:image/png;base64,foreign"/>')
+    with pytest.raises(AssertionError):
+        assert_wordmark_provenance({"source": "org-mark", "path": "foreign.png"}, "<svg/>")
+
+
 def test_each_org_row_keeps_its_identity_across_surfaces(brand, tmp_path):
     """Exercise real CLI paths for every configured row, including refusal rows."""
     import re
+    from PIL import Image
     from ctshowcase import readmelint
 
     for owner, row in brand.raw["orgs"].items():
@@ -115,6 +201,29 @@ def test_each_org_row_keeps_its_identity_across_surfaces(brand, tmp_path):
         assert rendered.returncode == 0, (owner, rendered.stdout, rendered.stderr)
         assert card_result.returncode == 0, (owner, card_result.stdout, card_result.stderr)
         assert banner.is_file() and card.is_file(), owner
+        tokens = brand.style(owner)["tokens"]
+        with Image.open(banner) as image:
+            assert_banner_bar(image, tokens["bar"])
+        svg = card.read_text(encoding="utf-8")
+        for colour in (tokens["bar"]["from"], tokens["bar"].get("to") or tokens["bar"]["from"]):
+            assert colour.lower() in svg.lower(), (owner, colour)
+        banner_icon = json.loads(rendered.stdout)["icon"]
+        card_icon = json.loads(card_result.stdout)["icon"]
+        if row.get("mark"):
+            assert banner_icon["source"] == card_icon["source"] == "org-mark", owner
+            assert banner_icon["path"] == card_icon["path"] == row["mark"], owner
+        elif row["family"] != "completetech":
+            assert_wordmark_provenance(banner_icon, svg)
+            assert_wordmark_provenance(card_icon, svg)
+        checkout = directory / "checkout"
+        checkout.mkdir()
+        consent = common[5:] if row["tier"] == "T3" else ()
+        generated = run_cli("--meta", meta, "--repo-dir", checkout, "--format", "json", *consent, "readme", "--write")
+        assert generated.returncode == 0, (owner, generated.stdout, generated.stderr)
+        cli_readme = (checkout / "README.md").read_text(encoding="utf-8")
+        if row["family"] != "completetech":
+            body = cli_readme.split("<!-- showcase:footer:start -->", 1)[0]
+            assert not re.search(r"completetech|CompleteDotTech|005ADD", body, re.I), owner
         ctx = context(brand, owner, language="Python", files=["agent.py"])
         header = readme.header(ctx)
         readme_path = directory / "README.md"
@@ -195,7 +304,7 @@ def test_profile_badges_respect_each_configured_family(brand, tmp_path, monkeypa
             "profile": {"name": "Synthetic organization", "description": "Inspect synthetic records.",
                         "blog": "https://example.invalid"}, "final_repos": [], "sections": []}}}), encoding="utf-8")
         result = run_cli("--format", "json", "org", "profile", owner, "--registry", registry,
-                         "--banner", "assets/existing.jpg")
+                         "--banner", "assets/existing.jpg", "--render", "--out-dir", directory / "output")
         payload = json.loads(result.stdout)
         if result.returncode != 0:
             assert result.returncode in (2, 4), (owner, payload)
@@ -203,6 +312,12 @@ def test_profile_badges_respect_each_configured_family(brand, tmp_path, monkeypa
             continue
         if row["family"] == "completetech":
             continue
+        profile = (directory / "output" / "profile" / "README.md").read_text(encoding="utf-8")
+        body = profile.split("<!-- showcase:footer:start -->", 1)[0]
+        # Explicit brand affiliations are facts, not leaks; focused tests cover them.
+        if "completetech" not in json.dumps(row).lower():
+            assert "completetech" not in body.lower(), owner
+            assert "completedottech" not in body.lower(), owner
         style = brand.style(owner)
         allowed = {style["tokens"].get("chip_attr", {}).get("bg"), style["tokens"].get("accent_deep")}
         for badge in (a for a in payload["assets"] if a["kind"] == "badge"):
