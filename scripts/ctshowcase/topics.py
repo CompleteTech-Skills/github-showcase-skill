@@ -134,20 +134,20 @@ def merge(ctx: RepoContext, also_in: list[str] | None = None) -> dict:
         # a fork listed in also_in also carries that org membership topic (§5.1), counted toward the maximum
         proposed = list(dict.fromkeys(["fork"] + m_topics + list(dict.fromkeys(tech))[:4]))[:limit]
         return _with_signoffs(_result(current, proposed, logs), ctx, m_orgs, m_topics, proposed)
-    if typ == "github-profile":
-        brand = org.get("brand_topic")
-        if not brand:
-            logs.append("needs-input:brand-topic")
-            # Existing topics are evidence, not permission to replace an unknown
-            # organization's identity. Keep a safe type suggestion for review,
-            # but hold every topic write until its vocabulary is supplied.
-            proposed = list(dict.fromkeys(current + ["github-profile"]))
-            return dict(_result(current, proposed, logs), plan_allowed=False)
-        proposed = ([brand] if brand else []) + ["github-profile"]
-        return _result(current, proposed, logs)
-
     brand = org.get("brand_topic")
-    proposed: list[str] = [brand] if brand else []
+    if not brand:
+        logs.append("needs-input:brand-topic")
+        # Every non-fork requires an explicit brand topic. Preserve the captured
+        # set until that vocabulary is supplied; normalization would otherwise
+        # turn missing identity into a full-replacement mutation proposal.
+        proposed = list(current)
+        if typ == "github-profile":
+            proposed = list(dict.fromkeys(current + ["github-profile"]))
+        return dict(_result(current, proposed, logs), plan_allowed=False)
+    if typ == "github-profile":
+        return _result(current, [brand, "github-profile"], logs)
+
+    proposed: list[str] = [brand]
     # family topics (§5.3 scope)
     fam = list(org.get("family_topics") or [])
     scope = org.get("family_topics_scope")

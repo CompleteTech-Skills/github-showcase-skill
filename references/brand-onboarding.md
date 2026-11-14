@@ -72,9 +72,13 @@ family. Public license sections retain only the captured license reference;
 private license sections wait for explicit wording. Adding an org to a family
 marked `identity_pending: true` also leaves its identity unresolved: rendering
 still returns `needs-input:brand-identity`, including with `--allow-unmeasured`.
-For an organization's `.github` repository without a configured `brand_topic`,
-`topics` preserves existing topics, suggests the known `github-profile` type and
-logs `needs-input:brand-topic`; it never substitutes a CompleteTech affiliation.
-The command exits 4 and emits no topic command or change record until that input
-is supplied. `adopt` holds the topic job with a pending-input step, while `doctor`
-reports R3 as `hold`. Existing explicitly configured brand topics continue to apply.
+For any non-fork repository whose organization has no configured `brand_topic`,
+`topics` preserves existing topics and logs `needs-input:brand-topic`. For `.github`
+it also suggests the known `github-profile` type. It never substitutes another
+organization's affiliation. The command exits 4 and emits no topic command or
+change record until that input is supplied, even when the current topics otherwise
+match the detected type. `adopt` holds the topic job and record with a pending-input
+step while retaining its independent proposals; `doctor` reports R3 as `hold`.
+Archived adoption still holds every mutation until the approved unarchive window.
+Forks use their separate brand-free topic rule. Existing explicitly configured
+brand topics continue to apply, including through former organization logins.
