@@ -397,6 +397,62 @@ def _paragraph_interrupts(content: str, matched: bool) -> bool:
     return _interrupts(content, 0, 0, 0)
 
 
+class _DefinitionProgress:
+    """Track a paragraph's initial definition without rescanning title prefixes."""
+
+    def __init__(self, line: str):
+        self.parts = []
+        self.state = "pending"
+        self.closer = ""
+        self.has_title = False
+        self.feed(line)
+
+    def feed(self, line: str) -> None:
+        if self.state == "invalid":
+            return
+        self.parts.append(line)
+        WORK['definition_progress_chars'] += len(line)
+        if self.state == "title":
+            # Escapes do not cross a line ending. Parenthesized titles cannot
+            # contain an unescaped opening parenthesis.
+            escaped = False
+            for char in line:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == self.closer:
+                    self.state = "pending"
+                    break
+            else:
+                return
+        candidate = "\n".join(self.parts)
+        match = REF_DEFINITION.match(candidate)
+        if match and match.end() == len(candidate) and _definition_key(match, candidate) and (
+                match.group(3) is None or _balanced_destination(match.group(3))):
+            destination_end = match.end(2) + 1 if match.group(2) is not None else match.end(3)
+            self.has_title = bool(candidate[destination_end:match.end()].strip())
+            self.state = "complete"
+            return
+        # A title may continue for arbitrarily many lines. Identify its opener
+        # once, then scan each subsequent line only once until the closer.
+        for opener, closer in ((chr(34), chr(34)), ("'", "'"), ("(", ")")):
+            trial = candidate + closer
+            match = REF_DEFINITION.match(trial)
+            if (match and match.end() == len(trial) and _definition_key(match, trial)
+                    and (match.group(3) is None or _balanced_destination(match.group(3)))):
+                self.state, self.closer = "title", closer
+                return
+        # Labels may span lines but are limited to 999 characters. A colon
+        # with no destination can also take its destination on the next line.
+        stripped = candidate.lstrip(" ")
+        if ((stripped.startswith("[") and "]:" not in stripped and len(stripped) <= 1001)
+                or (stripped.endswith(":") and "]:" in stripped and len(self.parts) == 1)):
+            self.state = "pending"
+        else:
+            self.state = "invalid"
+
+
 @functools.lru_cache(maxsize=16)
 def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, int], ...], tuple[int, ...],
                                 tuple[tuple[int, int], ...], tuple[tuple[int, int], ...], dict[int, int]]:
@@ -420,6 +476,7 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
     # An open fence: (fence run, ordered container ancestors).
     fence, fstart, table, para_depth, pos = None, 0, False, 0, 0
     para_path: tuple[tuple[str, int], ...] = ()
+    definition = None
     # Paths through open list items, outermost first. They persist across blank
     # lines; a nonblank line that cannot continue an ancestor leaves that item.
     lists: tuple[tuple[str, int], ...] = ()
@@ -504,25 +561,16 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
             table = False
         elif seg:
             para_content, matched = _paragraph_line(body, para_path)
-            if matched and _indent_columns(para_content) >= 4 and seg[0][1].lstrip(" >-+*0123456789.)\t").startswith("["):
-                # Definitions at the start of a block do not open a paragraph.
-                # Include this line so a valid multiline destination or title
-                # remains part of the definition before deciding the boundary.
-                first = block_line(seg[0][1].rstrip("\r\n"))
-                rows = [_container_path(first)[1]] + [
-                    _paragraph_line(block_line(row.rstrip("\r\n")), para_path)[0] for _, row in seg[1:]
-                ] + [para_content]
-                candidate = "\n".join(rows)
-                boundary = len(candidate) - len(para_content) - 1
-                cursor = 0
-                while match := REF_DEFINITION.match(candidate, cursor):
-                    if not _definition_key(match, candidate) or (match.group(3) is not None
-                                                               and not _balanced_destination(match.group(3))):
-                        break
-                    cursor = after_line_end(candidate, match.end())
-                if cursor == boundary + 1:
+            if definition and definition.state == "complete":
+                # A following title is part of the definition only inside the
+                # same containers. Otherwise the definition has no paragraph
+                # that could lazily continue into this line.
+                possible_title = matched and not definition.has_title and para_content.lstrip(" ").startswith(('"', "'", "("))
+                if not possible_title:
                     flush(seg)
                     seg = []
+            if seg and definition:
+                definition.feed(para_content)
             if not seg:
                 pass  # process this line as a new block below
             elif not para_content.strip(" "):
@@ -584,6 +632,7 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
         elif not _THEMATIC.match(rest) and not _THEMATIC.match(crest):
             seg, para_depth = [(at, raw)], depth
             para_path = path
+            definition = _DefinitionProgress(crest) if crest.lstrip(" ").startswith("[") else None
     if fence is not None:
         fences.append((fstart, len(text)))
     else:
