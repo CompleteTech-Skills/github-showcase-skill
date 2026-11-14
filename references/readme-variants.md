@@ -281,7 +281,11 @@ supplied repository metadata. Without repository context, a watching organizatio
 `--check` stays conservative and inspects the file because its name alone cannot
 distinguish a fork from `.github`. T3 checks with repository context require a
 current sign-off covering that repository; raw `--org` calls without repository
-context require an organization-wide sign-off.
+context require an organization-wide sign-off. Repository-aware footer checks can
+report applicability while a family's visual identity is pending: they do not
+render family artwork or supply its missing palette or mark. Consent checks still
+run before an exemption is returned; art generation remains blocked until the
+owner supplies the identity inputs.
 
 The decision 18 footer remains the explicitly configured cross-brand credit and
 the only generated `<picture>`. Its published logo URLs, markup and safe legacy
