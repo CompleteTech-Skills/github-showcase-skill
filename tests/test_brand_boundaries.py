@@ -180,3 +180,33 @@ def test_content_style_boundary_retains_the_repository_scope(brand, tmp_path):
     finally:
         signoff.reset_file(file_token)
         reset_t3_signed_off(consent_token)
+
+
+def test_profile_badges_respect_each_configured_family(brand, tmp_path, monkeypatch):
+    """Synthetic org profiles retain their own fills, or their normal refusal."""
+    import yaml
+    monkeypatch.setenv("SHOWCASE_ESTATE_ROOT", str(tmp_path / "empty"))
+    global_fill = "#" + brand.raw["badges"]["accent"].upper()
+    for owner, row in brand.raw["orgs"].items():
+        directory = tmp_path / owner
+        directory.mkdir()
+        registry = directory / "registry.yaml"
+        registry.write_text(yaml.safe_dump({"orgs": {owner: {"tier": row["tier"],
+            "profile": {"name": "Synthetic organization", "description": "Inspect synthetic records.",
+                        "blog": "https://example.invalid"}, "final_repos": [], "sections": []}}}), encoding="utf-8")
+        result = run_cli("--format", "json", "org", "profile", owner, "--registry", registry,
+                         "--banner", "assets/existing.jpg")
+        payload = json.loads(result.stdout)
+        if result.returncode != 0:
+            assert result.returncode in (2, 4), (owner, payload)
+            assert any(x.startswith(("hold", "exempt", "t3-signoff", "needs-input:brand-identity", "needs-input:badge-contrast")) for x in payload["logs"]), (owner, payload)
+            continue
+        if row["family"] == "completetech":
+            continue
+        style = brand.style(owner)
+        allowed = {style["tokens"].get("chip_attr", {}).get("bg"), style["tokens"].get("accent_deep")}
+        for badge in (a for a in payload["assets"] if a["kind"] == "badge"):
+            assert badge["colour"] in allowed, owner
+            # An explicitly configured family colour is an exception even if it matches the global accent.
+            if global_fill not in {str(c).upper() for c in allowed}:
+                assert badge["colour"].upper() != global_fill, owner

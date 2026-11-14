@@ -735,10 +735,21 @@ def public_leaks(text: str, scope: dict) -> list[str]:
                                  scope["public_texts"])))
 
 
-def _badge_colour(brand, style: dict) -> str:
+def _badge_colour(brand, style: dict, *, foreign: bool = False) -> str | None:
     from .color import contrast
     text = brand.raw["badges"]["local_text"]
     tok = style["tokens"]
+    if foreign:
+        from .badge import _foreground
+        for c in (tok.get("chip_attr", {}).get("bg"), tok.get("accent_deep")):
+            if c:
+                try:
+                    _foreground(brand, c, style)
+                    _foreground(brand, brand.raw["badges"]["local_label_bg"], style)
+                    return c
+                except NeedsInput:
+                    pass
+        return None
     for c in (tok.get("chip_attr", {}).get("bg"), tok.get("accent_deep"), "#" + str(brand.raw["badges"]["accent"])):
         if c and contrast(c, text) >= 4.5:
             return c
@@ -768,7 +779,7 @@ def _profile_private_line(estate: Estate, org: str) -> str:
 def _badges(estate: Estate, login: str, row: dict, data: dict, email: str | None) -> list[dict]:
     """Offline badges from applicable identity and contact facts (kit conflict 1)."""
     style = estate.brand.style(estate.resolver.brand_key(login) or login)
-    colour = _badge_colour(estate.brand, style)
+    colour = _badge_colour(estate.brand, style, foreign=row.get("family") != "completetech")
     tier, blog = data["tier"], data["blog"]
     out = []
     if blog:
@@ -1071,6 +1082,8 @@ def profile(estate: Estate, org: str, *, out_dir: str | Path | None = None, rend
         res["error"] = (f"{login} already has a profile README: re-templating it needs a profile-retemplate approval "
                         "(STANDARD §8.2); nothing was written. The proposed README is in `readme`.")
         return res, NEEDS_INPUT
+    if any(b["colour"] is None for b in badges):
+        raise NeedsInput("badge-contrast", "profile badges need a configured family fill and foreground with contrast >= 4.5:1")
     if out_dir:
         res["outputs"] = _write_profile(estate, org, Path(out_dir), text, data_json, card_svgs, badges, render,
                                         res["logs"], banner_asset=assets[0] if assets and assets[0]["kind"] == "org-banner" else None)
