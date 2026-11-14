@@ -60,7 +60,7 @@ def split_slug(fonts: Fonts, key: str, slug: str, size: float, maxw: float) -> l
     return best[1] if best else None
 
 
-def layout(ctx: RepoContext, fonts: Fonts, icon: str | None = None) -> tuple[Scene, dict]:
+def layout(ctx: RepoContext, fonts: Fonts, icon: str | None = None, *, keys=None, attrs=None) -> tuple[Scene, dict]:
     st = ctx.style
     tok, fk = st["tokens"], st["fonts"]
     desc = ctx.require_description()
@@ -117,7 +117,9 @@ def layout(ctx: RepoContext, fonts: Fonts, icon: str | None = None) -> tuple[Sce
     # chip row, in the banner's order: key chips (both CVE ids when they fit), then the attributes, where a bare
     # language is drawn as the language dot in its place; stars last. Overflow drops stars, then attributes from the
     # end, then folds the second key into "+1".
-    keys, attrs = chipmod.derive(ctx)
+    keys, attrs = chipmod.derive(ctx, keys, attrs)
+    explicit_keys = any(source in ("cli", "override") for _, source in keys)
+    explicit_attrs = any(source in ("cli", "override") for _, source in attrs)
     lang = ctx.meta.get("language")
     stars = ctx.meta.get("stargazers_count") or 0
     stars = stars if stars >= 10 else 0
@@ -151,8 +153,12 @@ def layout(ctx: RepoContext, fonts: Fonts, icon: str | None = None) -> tuple[Sce
         if stars:
             stars = 0
         elif attrs:
+            if explicit_attrs:
+                raise ArtFail("card-chips", "explicit attribute chips exceed the available row")
             attrs = attrs[:-1]
         elif len(keys) > 1:
+            if explicit_keys:
+                raise ArtFail("card-chips", "explicit key chips exceed the available row")
             keys = [(f"{keys[0][0]} +{len(keys) - 1}", keys[0][1])]
         else:
             raise ArtFail("card-chips", " ".join(k for k, _ in keys))
@@ -191,8 +197,8 @@ def canvas_nodes_card(style: dict) -> list:
     return canvas_nodes(style, W, H, grid_pitch=20)
 
 
-def render(ctx: RepoContext, fonts: Fonts, icon: str | None = None) -> tuple[str, Scene, dict]:
-    scene, info = layout(ctx, fonts, icon)
+def render(ctx: RepoContext, fonts: Fonts, icon: str | None = None, *, keys=None, attrs=None) -> tuple[str, Scene, dict]:
+    scene, info = layout(ctx, fonts, icon, keys=keys, attrs=attrs)
     svg = to_svg(scene, fonts, prefix="c")
     return svg, scene, info
 

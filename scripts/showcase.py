@@ -192,7 +192,11 @@ def cmd_banner(args):
         return base("banner", ctx, result="exempt", logs=[why]), OK
     gate_watching(ctx, args.allow_hold)
     ctx.require_measured(args.allow_unmeasured)
-    ctx.require_description()
+    if banner.selected_subtitle(ctx, args.subtitle) is not None:
+        if not (ctx.meta.get("description") or "").strip():
+            ctx.log("description-missing")
+    else:
+        ctx.require_description()
     out = Path(args.out) if args.out else default_out(args, "docs/images/banner.png")
     fonts = Fonts(ctx.brand)
     data, info = banner.render(ctx, fonts, scale=args.scale, budget=args.png_budget, subtitle=args.subtitle,
@@ -221,7 +225,7 @@ def cmd_card(args):
     ctx.require_measured(args.allow_unmeasured)
     out = Path(args.out) if args.out else default_out(args, "docs/images/card.svg")
     fonts = Fonts(ctx.brand)
-    svg, scene, info = card.render(ctx, fonts, args.icon)
+    svg, scene, info = card.render(ctx, fonts, args.icon, keys=args.key_chip or None, attrs=args.chip or None)
     lint = svglint.lint_bytes("card", svg.encode(), str(out))
     if lint["result"] != "PASS":
         return base("card", ctx, result="fail", lint=lint), CHECK_FAILED
@@ -248,7 +252,8 @@ def cmd_social(args):
     ctx.require_measured(args.allow_unmeasured)
     r = getattr(args, "_content_resolver", None)  # set by `content social` from its --registry/--approved* flags
     data, fmt, info = social.social_render(ctx, Fonts(ctx.brand), args.title, args.icon,
-                                           login=r.canonical(ctx.owner) if r else None)
+                                           login=r.canonical(ctx.owner) if r else None,
+                                           keys=args.key_chip or None, attrs=args.chip or None)
     out = Path(args.out) if args.out else default_out(args, "assets/social-preview.png")
     if fmt == "jpg":
         out = out.with_suffix(".jpg")
@@ -360,19 +365,31 @@ def cmd_intro(args):
 def cmd_footer(args):
     from ctshowcase import footer
     b = brand(args)
-    # the watching org's exemption covers only its forks, which `--org` cannot tell from its `.github` (which gets the
-    # footer): `--check` reads the README there instead of answering `exempt` (fail closed)
-    if args.org and not (args.check and b.owner_status(args.org) == "watching"):
-        status = b.owner_status(args.org)
-        if status in ("excluded", "hold", "t3"):
-            b.check_owner(args.org)
-        if status == "watching":
+    # Use the same repository applicability as doctor, including fork status.
+    # An explicit --org remains useful for raw markup without a checkout.
+    ctx = None
+    if args.meta or args.repo_dir is not None or (args.check and not args.org and _origin_slug(Path("."))):
+        ctx = context(args, b)
+        if args.org and not b.resolver().same(args.org, ctx.owner):
+            raise ShowcaseError("--org does not match the repository metadata", log="usage")
+        b.check_owner(ctx.owner, repo=ctx.repo)
+        reason = ctx.footer_status()
+        if reason:
+            result = "exempt" if reason.startswith("exempt") else "hold"
+            return {"command": "footer", "owner": ctx.owner, "repo": ctx.repo,
+                    "result": result, "logs": [reason]}, OK
+    elif args.org:
+        status = b.check_owner(args.org)
+        # Without repository metadata a watching owner can describe a fork or
+        # its own .github; --check must inspect the footer conservatively.
+        if status == "watching" and not args.check:
             return {"command": "footer", "owner": args.org, "result": "exempt", "logs": ["exempt"]}, OK
-        fv = b.org(args.org).get("footer", True)
-        if fv == "hold":
-            return {"command": "footer", "owner": args.org, "result": "hold", "logs": ["hold"]}, OK
-        if fv is False:
-            return {"command": "footer", "owner": args.org, "result": "exempt", "logs": ["exempt:footer"]}, OK
+        if status != "watching":
+            fv = b.org(args.org).get("footer", True)
+            if fv == "hold":
+                return {"command": "footer", "owner": args.org, "result": "hold", "logs": ["hold"]}, OK
+            if fv is False:
+                return {"command": "footer", "owner": args.org, "result": "exempt", "logs": ["exempt:footer"]}, OK
     if args.online and not args.check:
         raise ShowcaseError("--online goes with --check README.md", log="usage")
     if args.check:
@@ -1033,6 +1050,8 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--icon")
     s.add_argument("--allow-unmeasured", action="store_true")
     s.add_argument("--allow-hold", action="store_true")
+    s.add_argument("--key-chip", action="append", default=[])
+    s.add_argument("--chip", action="append", default=[])
     s.set_defaults(func=cmd_card)
 
     # deprecated alias of the contract name `content social` (same options, same file); added without `help`, so
@@ -1043,6 +1062,8 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--icon")
     s.add_argument("--allow-unmeasured", action="store_true")
     s.add_argument("--allow-hold", action="store_true")
+    s.add_argument("--key-chip", action="append", default=[])
+    s.add_argument("--chip", action="append", default=[])
     s.set_defaults(func=cmd_social)
 
     s = sub.add_parser("org-banner", help="1600x400 org profile banner JPG (.github/profile/assets/banner.jpg)")
