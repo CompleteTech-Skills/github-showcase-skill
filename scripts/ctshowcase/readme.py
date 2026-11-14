@@ -1123,10 +1123,14 @@ def header_only(ctx: RepoContext, text: str) -> str:
     if ctx.repo_dir is not None and not (ctx.repo_dir / "docs" / "images" / "banner.png").is_file():
         gen["banner"] = ""  # no image yet (for example no description): an empty block, never a broken image
         ctx.log("needs-input:banner")
+    # Preserve the existing preflight for other variants, even without a badge block.
+    # Variant J must inspect its block first because authored badges are not generated.
+    if ctx.det["variant"] != "J":
+        gen["badges"] = badge_body(ctx)
 
     def sub(m):
         b, body = m.group(1), m.group(2)
-        if b == "badges":
+        if b == "badges" and ctx.det["variant"] == "J":
             return wrap(b, badge_body(ctx, body))
         if b == "checklist":
             if re.search(r"- \[ \]", body):

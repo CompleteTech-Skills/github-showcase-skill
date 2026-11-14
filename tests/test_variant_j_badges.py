@@ -56,6 +56,19 @@ def test_variant_j_keeps_authored_badges_on_refresh(make_ctx, tmp_path, mode):
     assert again == after
 
 
+@pytest.mark.parametrize("with_block", [False, True])
+def test_header_does_not_generate_unused_variant_j_badges(make_ctx, tmp_path, monkeypatch, with_block):
+    ctx = profile_context(make_ctx, tmp_path)
+    authored = '<img src="custom.svg" alt="Custom">'
+    text = readme.wrap("badges", authored) if with_block else "# Authored\n"
+
+    def unexpected_generation(_ctx):
+        pytest.fail("authored or absent badges must not be generated")
+
+    monkeypatch.setattr(readme, "badges_md", unexpected_generation)
+    assert readme.header_only(ctx, text) == text
+
+
 def test_variant_j_without_license_does_not_invent_one(make_ctx, tmp_path):
     ctx = profile_context(make_ctx, tmp_path, license=None)
     text = readme.scaffold(ctx)
