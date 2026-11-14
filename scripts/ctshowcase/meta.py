@@ -27,8 +27,12 @@ MANIFEST_PATHS = ("pyproject.toml", "package.json", "requirements.txt", "setup.p
 
 def _license(v):
     if isinstance(v, dict):
-        v = v.get("spdx_id") or v.get("key")
-    return v or None
+        v = v.get("spdx_id") if v.get("spdx_id") is not None else v.get("key")
+    if v is None:
+        return None
+    if not isinstance(v, str):
+        raise NeedsInput("license", "license identifier must be a string")
+    return v.strip() or None
 
 
 def _og_flag(raw: dict) -> bool | None:

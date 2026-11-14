@@ -40,6 +40,8 @@ All notable changes to `github-showcase-skill` are recorded here. Versions follo
 
 ### Fixed
 
+- README license badges and sections now keep captured SPDX separate from visibility and configured policy (#165). Private visibility no longer invents a proprietary badge; Security policy conflicts or missing supporting files report needs-input and retain factual references and authored text. Evidence-consistent configured dual-license output, explicit private wording, layout and Internal callouts remain supported.
+
 - Cached T3 provenance now rechecks the complete record gate before stamping, so a wildcard verified for one repository cannot stamp another covered by a malformed withdrawal; removed, expired or changed records also stop producing stamps.
 
 - T3 sign-off (`--allow-t3`) is now context-local (contextvars) so concurrent or embedded calls cannot leak sign-off to each other; CLI behaviour unchanged.

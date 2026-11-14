@@ -97,13 +97,21 @@ def test_empty_description_empties_tagline(brand, tmp_path):
     assert "Create new CompleteTech" not in out and "needs-input:description" in ctx.logs
 
 
+
+def test_pristine_block_normalizes_template_body_before_hashing():
+    body = "\r\n## About\r\n\r\nSynthetic template.\r\n\r\n"
+    block = R.pristine_block(body)
+    assert R.bootstrap_state(block) == "pristine"
+    assert R.bootstrap_state(block.replace("Synthetic template.", "Owner edit.")) == "edited"
+
+
 def test_private_license_text_without_license_file(brand, tmp_path):
     for owner in ("CompleteTech-LLC", "CompleTetech-Security"):
         ctx = RepoContext(brand, normalize({"owner": owner, "repo": "internal-scanner", "visibility": "private",
                                             "description": "Scan hosts.", "created_at": "2024-03-01T00:00:00Z"}), tmp_path)
         text = "## License\n\n<!-- showcase:license -->\nNo license is granted.\n\nfooter\n"
         out = R.header_only(ctx, text)
-        assert "Proprietary. Copyright (c) 2024 CompleteTech LLC. All rights reserved." in out and "## License\n" in out
+        assert "No license is granted." in out and "## License\n" in out
 
 
 # -- 3: keep-existing ---------------------------------------------------------------------------------------------
