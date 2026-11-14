@@ -170,8 +170,10 @@ def test_cli_uses_family_foreground_without_recolouring_fills(profile_inputs, tm
     assert snapshot(out) == before
 
 
-def test_cli_authored_profile_still_needs_approval(profile_inputs, tmp_path):
+@pytest.mark.parametrize("family", ["completetech", "ai-ascension"])
+def test_cli_authored_profile_still_needs_approval(profile_inputs, tmp_path, family):
     raw, registry = profile_inputs
+    raw["orgs"][N]["family"] = family
     out = tmp_path / "authored-output"
     (out / "profile").mkdir(parents=True)
     (out / "profile" / "README.md").write_text("# Synthetic authored profile\n", encoding="utf-8")
@@ -183,8 +185,10 @@ def test_cli_authored_profile_still_needs_approval(profile_inputs, tmp_path):
     assert snapshot(out) == before
 
 
-def test_cli_privacy_failure_still_precedes_badge_rendering(profile_inputs, tmp_path):
+@pytest.mark.parametrize("family", ["completetech", "ai-ascension"])
+def test_cli_privacy_failure_still_precedes_badge_rendering(profile_inputs, tmp_path, family):
     raw, registry = profile_inputs
+    raw["orgs"][N]["family"] = family
     reg = yaml.safe_load(registry.read_text(encoding="utf-8"))
     reg["orgs"][N]["profile"]["description"] = f"Inspect {N}/synthetic-hidden-records."
     registry.write_text(yaml.safe_dump(reg), encoding="utf-8")
@@ -223,3 +227,48 @@ def test_cli_default_badges_keep_passing_historical_bytes(profile_inputs, tmp_pa
             # already passed, including both configured background rectangles.
             historical = badge.svg(brand, fonts, spec["label"], spec["message"], spec["colour"])
             assert (out / spec["path"]).read_bytes() == historical.encode()
+
+@pytest.mark.parametrize("family", ["ai-ascension", "jev-engineering"])
+def test_foreign_family_badges_use_configured_fill_and_contrast(profile_inputs, tmp_path, brand, family):
+    raw, registry = profile_inputs
+    raw["orgs"][N]["family"] = family
+    out = tmp_path / "foreign"
+    result = run_cli(*arguments(registry, out, config_path(tmp_path, raw), "--allow-unmeasured", "--banner", "assets/existing.jpg"))
+    assert result.returncode == 0, result.stdout + result.stderr
+    style = Brand(raw, brand.path).style(N)
+    allowed = {style["tokens"]["chip_attr"]["bg"], style["tokens"]["accent_deep"]}
+    for spec in json.loads(result.stdout)["assets"]:
+        if spec["kind"] != "badge":
+            continue
+        assert spec["colour"] in allowed
+        assert spec["colour"].upper() != "#" + raw["badges"]["accent"].upper()
+        svg = ET.fromstring((out / spec["path"]).read_bytes())
+        fills = [e.attrib["fill"] for e in svg.iter() if e.tag.endswith("rect") and "fill" in e.attrib]
+        foregrounds = [e.attrib["fill"] for e in svg.iter() if e.tag.endswith("g") and "fill" in e.attrib]
+        assert all(contrast(fg, bg) >= 4.5 for fg, bg in zip(foregrounds, fills))
+    before = snapshot(out)
+    assert run_cli(*arguments(registry, out, config_path(tmp_path, raw), "--allow-unmeasured", "--banner", "assets/existing.jpg")).returncode == 0
+    assert snapshot(out) == before
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_foreign_impossible_fill_refuses_without_writes(profile_inputs, tmp_path, existing):
+    raw, registry = profile_inputs
+    raw["orgs"][N]["family"] = "ai-ascension"
+    family = raw["families"]["ai-ascension"]
+    family["tokens"]["chip_attr"]["bg"] = "#777777"
+    family["tokens"]["accent_deep"] = "#777777"
+    raw["badges"]["local_text"] = "#777777"
+    raw["contrast_candidates"] = ["#777777"]
+    family["tokens"]["chip_key"]["fg"] = family["tokens"]["chip_attr"]["fg"] = "#777777"
+    family["canvas"]["color"] = "#777777"
+    out = tmp_path / "foreign-impossible"
+    if existing:
+        result = run_cli(*arguments(registry, out))
+        assert result.returncode == 0
+    before = snapshot(out)
+    result = run_cli(*arguments(registry, out, config_path(tmp_path, raw), "--banner", "assets/existing.jpg"))
+    assert_refusal(result)
+    assert snapshot(out) == before
+    if not existing:
+        assert not out.exists()
