@@ -33,7 +33,7 @@ with the resolved organization's family style before any profile output is
 written. If no configured foreground reaches 4.5:1 contrast on either badge
 fill, the command returns exit 4 / `needs-input:badge-contrast`; an existing
 README, data file and assets stay unchanged, and a new destination is not
-created. Badge fills remain the configured values.
+created. Foreign profile badge fills use the resolved family’s configured chip or deep accent; if neither has a usable configured foreground, the same refusal applies even without `--render`. Badge fills remain the configured values.
 
 ## Registry-free org label plans
 
