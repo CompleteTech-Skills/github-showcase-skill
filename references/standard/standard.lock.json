@@ -710,6 +710,9 @@
    "amongus",
    "nintendo"
   ],
+  "prohibited": [
+   "nsfw"
+  ],
   "standard": "ct-std-v1",
   "touchedbyanagent_domain": [
    "ble",

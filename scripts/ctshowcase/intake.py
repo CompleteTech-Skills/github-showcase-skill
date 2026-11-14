@@ -94,11 +94,11 @@ def adopt(ctx, resolver=None, *, approval_id: str | None = None, fresh: bool = F
     # §5.6 topics ------------------------------------------------------------------------------------------------
     tp = topicsmod.merge(ctx)
     logs += tp["logs"]
-    if not tp.get("plan_allowed", True):
+    if "needs-input:brand-topic" in tp["logs"]:
         pending.append({"why": "topics: organization brand topic needs explicit input before replacing the topic set",
                         "next": "Supply the organization's brand_topic in the selected brand configuration, "
                                 "then run topics or adopt again."})
-    elif not tp["equal_as_set"] and tp["proposed"]:
+    elif tp["plan_allowed"] and not tp["equal_as_set"] and tp["proposed"]:
         argv = ["gh", "api", "-X", "PUT", f"repos/{full}/topics"] + [a for x in tp["proposed"] for a in ("-f", f"names[]={x}")]
         jobs.append(_job(_jid("p3", "topics", sid), argv, full, "§5.6 topics (full ordered list; PUT replaces the set).",
                          approval_id, kind="topics"))

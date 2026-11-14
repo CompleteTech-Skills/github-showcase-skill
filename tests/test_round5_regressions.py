@@ -52,8 +52,9 @@ def test_also_in_adds_membership_topics_after_family(make_ctx):
     r = topics.merge(ctx, ["CompleteTech-Skills", "Northwind-Trading-Co", "romgenie-following-repos", "Pick-Your-AI",
                            "No-Such-Org-Here"])
     p = r["proposed"]
-    assert p[0] == "completetech" and p[1] == "completetech-skills" and p[2] == ctx.det["type"]
-    assert "completetech-llc" not in p  # no alias: an LLC membership topic is never collapsed into the brand
+    assert p[0] == "completetech-llc"  # authored topics survive separately from recommendations
+    assert p[1:4] == ["completetech", "completetech-skills", ctx.det["type"]]
+    assert "review-remove:completetech-llc" in r["logs"]  # no alias: review separately
     assert {"org-topic-home:Northwind-Trading-Co", "org-topic-none:romgenie-following-repos",
             "t3-signoff:also-in:Pick-Your-AI", "needs-input:org-topic:No-Such-Org-Here"} <= set(r["logs"])
 
