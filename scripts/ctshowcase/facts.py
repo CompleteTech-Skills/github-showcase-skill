@@ -72,6 +72,15 @@ class RepoFacts:
             return (self.dir / rel).exists()
         return rel in set(self.files) or any(f.startswith(rel.rstrip("/") + "/") for f in self.files)
 
+    def is_file(self, rel: str) -> bool:
+        """Require positive file evidence; an incomplete tree can still contain a known blob."""
+        if self.dir is not None:
+            return (self.dir / rel).is_file()
+        files = self.meta.get("files")
+        if not isinstance(files, list):
+            return False
+        return rel in files and not any(isinstance(f, str) and f.startswith(rel + "/") for f in files)
+
     def root_files(self) -> list[str]:
         return [f for f in self.files if "/" not in f]
 

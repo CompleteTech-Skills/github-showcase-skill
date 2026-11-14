@@ -13,7 +13,7 @@ from urllib.parse import quote
 from . import footer as footermod
 from .context import RepoContext
 from .detect import standard
-from .errors import ConfigError
+from .errors import ConfigError, NeedsInput
 from .mdcode import code_spans, find_blocks, masked  # noqa: F401  (code_spans: re-exported for callers)
 
 MARK = re.compile(r"<!-- showcase:([a-z-]+):start -->\n?(.*?)\n?<!-- showcase:\1:end -->", re.S)
@@ -135,7 +135,7 @@ def nav_line(ctx: RepoContext) -> str:
         items = [f"**{org.get('nav_name') or org.get('display_name')}**", f"[All checkers](https://github.com/{owner})"]
         if f.exists("docs/REFERENCE.md"):
             items.append("[Reference](docs/REFERENCE.md)")
-        if f.exists("LICENSING.md"):
+        if f.is_file("LICENSING.md"):
             items.append("[Licensing](LICENSING.md)")
         items.append(f"[Security]({sec})")
         return " · ".join(items)
@@ -155,6 +155,44 @@ def nav_line(ctx: RepoContext) -> str:
 
 def banner_html(ctx: RepoContext) -> str:
     return (f'<p align="center">\n  <img src="docs/images/banner.png" alt="{ctx.repo} by {ctx.company}" width="100%">\n</p>')
+
+
+def license_facts(ctx: RepoContext) -> tuple[str | None, bool]:
+    """Select captured SPDX and supported dual-license policy for both README surfaces.
+
+    Visibility and variant describe presentation, not licensing. Legal prose is kept
+    verbatim elsewhere; it is never parsed into a license or a commercial grant.
+    """
+    lic = ctx.meta.get("license")
+    if lic is not None and not isinstance(lic, str):
+        raise NeedsInput("license", "license identifier must be a string")
+    lic = lic.strip() if lic else None
+    if not lic or lic in ("NOASSERTION", "other"):
+        lic = None
+        ctx.log("needs-input:license")
+    if lic and not ctx.facts.is_file("LICENSE"):
+        ctx.log("needs-input:license-file")
+    private_wording = ctx.org.get("private_license_wording")
+    if (not ctx.public and lic and isinstance(private_wording, str)
+            and re.search(r"\bproprietary\b", private_wording, re.I)
+            and lic.lower() != "proprietary"):
+        ctx.log("needs-input:license-policy")
+    chip = ctx.org.get("license_chip")
+    requested = ctx.public and (ctx.det["variant"] == "F" or bool(chip))
+    dual = False
+    if requested and lic:
+        if lic.upper() not in ("AGPL-3.0", "AGPL-3.0-ONLY", "AGPL-3.0-OR-LATER") or chip != "AGPL-3.0 or commercial":
+            ctx.log("needs-input:license-policy")
+        else:
+            if not ctx.facts.is_file("LICENSING.md"):
+                ctx.log("needs-input:licensing-file")
+            dual = ctx.facts.is_file("LICENSE") and ctx.facts.is_file("LICENSING.md")
+    return lic, dual
+
+
+def license_reference(ctx: RepoContext) -> str:
+    """Never cite a LICENSE whose presence the input does not establish."""
+    return "; see `LICENSE`." if ctx.facts.is_file("LICENSE") else "."
 
 
 def badges(ctx: RepoContext) -> list[tuple[str, str, str | None]]:
@@ -182,15 +220,12 @@ def badges(ctx: RepoContext) -> list[tuple[str, str, str | None]]:
         category = standard("types")["types"][ctx.det["type"]].get("badge_category", ctx.det.get("category"))
         if category:
             out.append((f"Type {category}", f"{SHIELDS}type-{shield(category)}-{b['brand']}{extra}", None))
-    lic = ctx.meta.get("license")
-    if not ctx.public:
-        out.append(("License proprietary", f"{SHIELDS}license-proprietary-{b['neutral']}", None))
-    elif lic and lic not in ("NOASSERTION", "other"):
-        if ctx.org.get("license_chip") and lic.upper().startswith("AGPL"):
-            out.append(("AGPL-3.0 or commercial license", f"{SHIELDS}license-{shield('AGPL-3.0 | commercial')}-{b['neutral']}",
-                        "LICENSING.md" if f.exists("LICENSING.md") else None))
-        else:
-            out.append((f"License {lic}", f"{SHIELDS}license-{shield(lic)}-{b['neutral']}{extra}", None))
+    lic, dual = license_facts(ctx)
+    if dual:
+        out.append(("AGPL-3.0 or commercial license", f"{SHIELDS}license-{shield('AGPL-3.0 | commercial')}-{b['neutral']}",
+                    "LICENSING.md"))
+    elif lic:
+        out.append((f"License {lic}", f"{SHIELDS}license-{shield(lic)}-{b['neutral']}{extra}", None))
     if ctx.public and f.known:
         wf = sorted(x for x in f.files if x.startswith(".github/workflows/") and x.endswith((".yml", ".yaml")))
         pick = [x for x in wf if "test" in x.rsplit("/", 1)[-1]] or [x for x in wf if "ci" in x.rsplit("/", 1)[-1]]
@@ -393,7 +428,7 @@ def header(ctx: RepoContext, keep_banner: str | None = None, title: str | None =
 # ------------------------------------------------------------------------------------------------
 def license_section(ctx: RepoContext) -> tuple[str, str] | None:
     rv = standard("readme-variants")["license_rows"]
-    lic, f = ctx.meta.get("license"), ctx.facts
+    f = ctx.facts
     third = f.known and (ctx.repo.endswith("-fork") or any(x.startswith(("vendor/", "third_party/")) for x in f.files))
     if third:
         ctx.log("needs-input:upstream")
@@ -406,6 +441,8 @@ def license_section(ctx: RepoContext) -> tuple[str, str] | None:
             raise ConfigError(f"{key} must be a string for {ctx.owner}")
         return value.strip()
 
+    lic, dual = license_facts(ctx)
+    heading = "Licensing" if ctx.det["variant"] == "F" else "License"
     wording = configured_wording("license_wording")
     if not ctx.public:
         private = configured_wording("private_license_wording")
@@ -419,7 +456,7 @@ def license_section(ctx: RepoContext) -> tuple[str, str] | None:
                 return None
             private = private.replace("<year>", year)
         return "License", private
-    if ctx.det["variant"] == "F" or (ctx.org.get("license_chip") and lic and lic.upper().startswith("AGPL")):
+    if dual:
         return "Licensing", rv["security"]
     if lic and lic != "NOASSERTION":
         if lic == "MIT":
@@ -428,14 +465,15 @@ def license_section(ctx: RepoContext) -> tuple[str, str] | None:
                 if not extra:
                     ctx.log("needs-input:license-wording")
                 factual = "Code, templates, and documentation are licensed under the MIT License."
-                tail = " See `LICENSE` and `BRAND_ASSETS.md`."
-                return "License", factual + (" " + extra if extra else "") + tail
-            factual = "Code and documentation are licensed under the MIT License; see `LICENSE`."
+                paths = "`LICENSE` and `BRAND_ASSETS.md`" if f.is_file("LICENSE") else "`BRAND_ASSETS.md`"
+                tail = f" See {paths}."
+                return heading, factual + (" " + extra if extra else "") + tail
+            factual = "Code and documentation are licensed under the MIT License" + license_reference(ctx)
         else:
-            factual = f"Licensed under the {lic}; see `LICENSE`."
+            factual = f"Licensed under the {lic}" + license_reference(ctx)
         if not wording:
             ctx.log("needs-input:license-wording")
-        return "License", factual + (" " + wording if wording else "")
+        return heading, factual + (" " + wording if wording else "")
     ctx.log("needs-input:license")
     return None
 
@@ -526,7 +564,7 @@ def scaffold(ctx: RepoContext, existing: str = "") -> str:
             ctx.log(f"needs-input:{variant}:{h2}")
     lic = license_section(ctx)
     if lic:
-        parts.append(f"## {lic[0]}\n\n{lic[1]}")
+        parts.append(f"## {lic[0]}\n\n{managed_license(lic[1])}")
     if footer_wanted(ctx):
         parts.append(footermod.block(ctx.brand))
     return "\n\n".join(parts) + "\n"
@@ -1065,7 +1103,7 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
         if not any(h.strip().lower() in ("license", "licensing", "licence") for h, _ in sections):
             lic = license_section(ctx)
             if lic:
-                out.append(f"## {lic[0]}\n\n{lic[1]}")
+                out.append(f"## {lic[0]}\n\n{managed_license(lic[1])}")
         if want_footer:
             out.append(footermod.block(ctx.brand))
         return "\n\n".join(x for x in out if x) + "\n", removed
@@ -1106,7 +1144,7 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
     else:
         lic = license_section(ctx)
         if lic:
-            out.append(f"## {lic[0]}\n\n{lic[1]}")
+            out.append(f"## {lic[0]}\n\n{managed_license(lic[1])}")
     if want_footer:
         out.append(footermod.block(ctx.brand))
     for b in ("template-body", "checklist"):  # inserted in reverse: the checklist stays above the body
@@ -1179,21 +1217,39 @@ def reorder_lead(ctx: RepoContext, text: str) -> str:
 
 
 LICENSE_MARK = "<!-- showcase:license -->"
+LICENSE_BODY_START = "<!-- showcase:license:body:start -->"
+LICENSE_BODY_END = "<!-- showcase:license:body:end -->"
+
+
+def license_sha(body: str) -> str:
+    import hashlib
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
+def managed_license(body: str) -> str:
+    """Mark newly generated legal prose so later changes can be detected."""
+    return (f"{LICENSE_MARK}\n<!-- showcase:license:sha256={license_sha(body)} -->\n"
+            f"{LICENSE_BODY_START}\n{body}\n{LICENSE_BODY_END}")
 
 
 def license_block(ctx: RepoContext, text: str) -> str:
-    """Rewrite the paragraph after `<!-- showcase:license -->` (and its H2) from license_section(), with or without a
-    LICENSE file: private wording must be explicit; public Security gets "## Licensing". When the
-    section cannot be derived (needs-input), the existing text stays."""
-    i = masked(text).find(LICENSE_MARK)  # the first mark outside code (a documented example is left alone)
+    """Refresh only an unambiguously bounded body with a matching digest."""
+    visible = masked(text)
+    i = visible.find(LICENSE_MARK)
     if i < 0:
         return text
-    lic = license_section(ctx)
-    if not lic:
+    if any(visible.count(marker) != 1 for marker in (LICENSE_MARK, LICENSE_BODY_START, LICENSE_BODY_END)):
         return text
-    m = re.compile(re.escape(LICENSE_MARK) + r"\n(.*?)(\n\n|\n?$)", re.S).match(text, i)
-    if m:
-        text = text[:i] + LICENSE_MARK + "\n" + lic[1] + m.group(2) + text[m.end():]
+    lic = license_section(ctx)
+    if not lic or any(code in ctx.logs for code in ("needs-input:license-policy", "needs-input:license-file",
+                                                    "needs-input:licensing-file")):
+        return text
+    pattern = (re.escape(LICENSE_MARK) + r"\n<!-- showcase:license:sha256=([0-9a-f]{64}) -->\n" +
+               re.escape(LICENSE_BODY_START) + r"\n(.*?)\n" + re.escape(LICENSE_BODY_END))
+    m = re.compile(pattern, re.S).match(text, i)
+    if not m or license_sha(m.group(2)) != m.group(1):
+        return text
+    text = text[:i] + managed_license(lic[1]) + text[m.end():]
     h = re.search(r"(?m)^## (?:License|Licensing|Licence)[ \t]*\n(\n?)\Z", text[:i])
     return text[:h.start()] + f"## {lic[0]}\n" + h.group(1) + text[i:] if h else text
 
