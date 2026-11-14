@@ -14,7 +14,7 @@ from ctshowcase.meta import normalize
 
 def context(brand, owner, **meta):
     return RepoContext(brand, normalize({"owner": owner, "repo": "sample-tool", "license": "MIT",
-        "description": "Inspect synthetic records.", "visibility": "public", "files": [], **meta}))
+        "description": "Inspect synthetic records.", "visibility": "public", "files": ["LICENSE"], **meta}))
 
 
 @pytest.mark.parametrize("owner", ["LibreEvolve", "AI-Ascension", "Jev-Engineering", "Pick-Your-AI"])
