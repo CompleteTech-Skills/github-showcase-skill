@@ -36,7 +36,7 @@ def _bar(tok: dict, w: float, h: float) -> Rect:
 
 
 def social_layout(ctx: RepoContext, fonts: Fonts, title: str | None = None, icon: str | None = None,
-                  login: str | None = None) -> tuple[Scene, dict]:
+                  login: str | None = None, *, keys=None, attrs=None) -> tuple[Scene, dict]:
     """The preview scene. Its footer names the org's current login (`login`, else the brand resolver's), the slug
     the preview is uploaded to, never a former login."""
     st = ctx.style
@@ -71,7 +71,22 @@ def social_layout(ctx: RepoContext, fonts: Fonts, title: str | None = None, icon
            Circle(S_X + 120 + 6, rule_y + 2, 6, tok["plate_low"], tok["gold_trace"], 3))
     cat = None if chipmod.fallback_category(ctx) else ctx.det.get("category")
     cy = rule_y + 32
-    if cat:
+    chip_info = []
+    if keys or attrs:
+        key_values, attr_values = chipmod.derive(ctx, keys, attrs)
+        x = S_X
+        for kind, values in (("key", key_values), ("attr", attr_values)):
+            token = tok["chip_key"] if kind == "key" else tok["chip_attr"]
+            for label, source in values:
+                width = fonts.width(fk["chip"], label, 18) + 24
+                if x + width > S_X + S_TW:
+                    raise ArtFail("social-chips", "explicit chips exceed the available row")
+                sc.add(Rect(x, cy, width, 30, token["bg"], rx=15))
+                sc.add(Text(fk["chip"], label, 18, x + 12, cy + 21, token["fg"]))
+                chip_info.append({"kind": kind, "label": label, "source": source})
+                x += width + 8
+        cy += 48
+    elif cat:
         sc.add(Text(fk["card_chip_attr"], cat, 28, S_X, cy + 22, tok["accent"]))
         cy += 48
     cap = None
@@ -94,13 +109,13 @@ def social_layout(ctx: RepoContext, fonts: Fonts, title: str | None = None, icon
     sc.add(*nodes)
     sc.add(_bar(tok, SW, SH))
     return sc, {"title_lines": t_lines, "title_size": t_size, "caption_lines": cap[1], "icon": icon_info, "eyebrow": eb,
-                "footer": foot}
+                "footer": foot, "chips": chip_info}
 
 
 def social_render(ctx: RepoContext, fonts: Fonts, title: str | None = None, icon: str | None = None,
-                  login: str | None = None) -> tuple[bytes, str, dict]:
+                  login: str | None = None, *, keys=None, attrs=None) -> tuple[bytes, str, dict]:
     """(bytes, format, info): PNG within 900 KB, else JPG q85 (STANDARD §9.2)."""
-    sc, info = social_layout(ctx, fonts, title, icon, login)
+    sc, info = social_layout(ctx, fonts, title, icon, login, keys=keys, attrs=attrs)
     img = to_png_image(sc, fonts, scale=1)
     data = png_bytes(img)
     if len(data) <= SOCIAL_BUDGET:
