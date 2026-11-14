@@ -396,10 +396,14 @@ def cmd_readme(args):
     path = rd / "README.md"
     if args.no_regroup and (args.bootstrap or args.mode == "scaffold"):
         raise ShowcaseError("--no-regroup cannot be combined with --bootstrap or --mode scaffold", log="usage")
-    before = readme.read_text(path)
-    if args.no_regroup and path.is_file():
+    original = ""
+    if path.is_file():
         with path.open(encoding="utf-8", newline="") as stream:
-            before = stream.read().removeprefix("\ufeff")
+            original = stream.read()
+    before = readme.normalize_text(original)
+    if args.variant and args.variant != "auto":
+        ctx.det["variant"] = args.variant
+    ctx.local_badges = args.badges == "local"
     reason = readme.managed_reason(ctx, before)
     if reason:
         proposed = readme.header(ctx)
@@ -409,9 +413,6 @@ def cmd_readme(args):
         return base("readme", ctx, result="exempt", logs=["exempt"]), OK
     # a watching-org non-fork other than `.github`: held until decided (no README change, no --allow-hold)
     gate_watching(ctx, remedy=README_HOLD_REMEDY)
-    if args.variant and args.variant != "auto":
-        ctx.det["variant"] = args.variant
-    ctx.local_badges = args.badges == "local"
     mode = args.mode
     contrib_new = None
     if args.bootstrap:
@@ -462,8 +463,18 @@ def cmd_readme(args):
             if problems:
                 return base("readme", ctx, result="fail", mode=mode, problems=problems[:20],
                             logs=ctx.logs + ["readme-shrink"]), CHECK_FAILED
-    changed = after != before
-    diff = "".join(difflib.unified_diff(before.splitlines(True), after.splitlines(True), "a/README.md", "b/README.md"))
+    if mode == "header" or args.no_regroup:
+        problems = _authored_footer_refusal(ctx, before)
+        if problems:
+            return base("readme", ctx, result="fail", mode=mode, problems=problems,
+                        logs=ctx.logs + ["readme-shrink"]), CHECK_FAILED
+    problems = readme.ambiguous_block_changes(ctx, before, after)
+    if problems:
+        return base("readme", ctx, result="needs-input", mode=mode, problems=problems, written=False,
+                    logs=ctx.logs + ["needs-input:readme-block-ownership"]), NEEDS_INPUT
+    after = readme.restore_bytes(original, before, after)
+    changed = after != original
+    diff = "".join(difflib.unified_diff(original.splitlines(True), after.splitlines(True), "a/README.md", "b/README.md"))
     if args.write and getattr(ctx, "badge_files", None):
         from ctshowcase import badge
         from ctshowcase.typeset import Fonts
@@ -471,7 +482,7 @@ def cmd_readme(args):
         for rel, (label, message, colour) in sorted(ctx.badge_files.items()):
             write_bytes(rd / rel, badge.svg(ctx.brand, fonts, label, message, colour).encode())
     if args.write and changed:
-        with path.open("w", encoding="utf-8", newline="" if args.no_regroup else None) as stream:
+        with path.open("w", encoding="utf-8", newline="") as stream:
             stream.write(after)
         if contrib_new is not None:
             (rd / "CONTRIBUTING.md").write_text(contrib_new, encoding="utf-8")
@@ -483,6 +494,12 @@ def cmd_readme(args):
                heading_moves=readme.heading_moves(before, after))
     if args.diff or not args.write:
         if args.format == "text":
+            for move in res["heading_moves"]:
+                if move.get("ambiguous"):
+                    sys.stdout.write(f"Heading: {move['heading']} (ambiguous duplicate; "
+                                     f"old levels {move['old_levels']}, new levels {move['new_levels']})\n")
+                else:
+                    sys.stdout.write(f"Heading: {move['heading']} (H{move['from']} -> H{move['to']}: {move['new_heading']})\n")
             sys.stdout.write(diff)
             return None, OK
         res["diff"] = diff
