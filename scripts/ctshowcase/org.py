@@ -550,7 +550,24 @@ def public_slice(estate: Estate, org: str, lists_capture: dict | None = None, *,
         for node in _lists_nodes(lists_capture):
             if node.get("name", "").lower() == entry_sl["name"].lower() and node.get("slug"):
                 slug = node["slug"]
-        star = {"name": entry_sl["name"], "url": f"https://github.com/stars/{USER_LOGIN}/lists/{slug}"}
+        if row.get("family") == "completetech":
+            star = {"name": entry_sl["name"], "url": f"https://github.com/stars/{USER_LOGIN}/lists/{slug}"}
+        else:
+            # A list name does not identify its owning account. Require a
+            # captured public URL or the captured viewer and matching list slug.
+            capture = lists_capture or {}
+            viewer = capture.get("data", capture).get("viewer") or {}
+            for node in _lists_nodes(lists_capture):
+                if node.get("name", "").lower() != entry_sl["name"].lower() or node.get("isPrivate") is not False:
+                    continue
+                url = node.get("url")
+                if not url and viewer.get("login") and node.get("slug"):
+                    url = f"https://github.com/stars/{viewer['login']}/lists/{node['slug']}"
+                if url:
+                    star = {"name": entry_sl["name"], "url": url}
+                    break
+            if star is None:
+                logs.append("needs-input:star-list-url")
     data = {"std": STANDARD, "org": login, "display_name": row.get("display_name") or login, "tier": _tier(row),
             "family": fam, "mission": first_sentence(desc), "blog": prof.get("blog") or "",
             "featured": featured, "sections": sections, "forks": [entry(n) for n in forks],
@@ -728,19 +745,45 @@ def _badge_colour(brand, style: dict) -> str:
     return "#" + str(brand.raw["badges"]["accent"])
 
 
+def _profile_affiliation(estate: Estate, org: str) -> str | None:
+    """Keep the configured CompleteTech family; foreign relationships need an exact final description sentence."""
+    row = estate.resolver.brand_org(org)
+    if row.get("family") == "completetech":
+        return "A CompleteTech LLC organization" if _tier(row) == "T1" else "Steward: CompleteTech LLC"
+    reg = estate.resolver.registry_org(org)
+    description = (reg.get("profile") or {}).get("description") or row.get("description") or ""
+    last = re.split(r"(?<=[.!?])\s+", description.strip())[-1]
+    for phrase in ("A CompleteTech LLC organization", "Steward: CompleteTech LLC"):
+        if last == phrase + ".":
+            return phrase
+    return None
+
+
+def _profile_private_line(estate: Estate, org: str) -> str:
+    if estate.resolver.brand_org(org).get("family") == "completetech":
+        return PRIVATE_LINE
+    return "No public repositories are currently showcased."
+
+
 def _badges(estate: Estate, login: str, row: dict, data: dict, email: str | None) -> list[dict]:
-    """3–5 offline badges (kit conflict 1): website, X (T1), steward link, organizations, security or contact."""
+    """Offline badges from applicable identity and contact facts (kit conflict 1)."""
     style = estate.brand.style(estate.resolver.brand_key(login) or login)
     colour = _badge_colour(estate.brand, style)
     tier, blog = data["tier"], data["blog"]
     out = []
     if blog:
         out.append(("website", "Website", _host(blog).removeprefix("www."), blog))
-    if tier == "T1":
+    affiliation = _profile_affiliation(estate, login)
+    complete_family = row.get("family") == "completetech"
+    if complete_family and tier == "T1":
         out.append(("x", "X", f"@{X_HANDLE}", f"https://x.com/{X_HANDLE}"))
-    if tier != "T1" or _host(blog) not in ("www.complete.tech", "complete.tech"):
-        out.append(("steward", "Steward", estate.brand.strings["company"], estate.brand.strings["website"]))
-    out.append(("organizations", "Organizations", "All CompleteTech", DIRECTORY))
+    if affiliation:
+        if not complete_family or tier != "T1" or _host(blog) not in ("www.complete.tech", "complete.tech"):
+            label = "Steward" if complete_family or affiliation.startswith("Steward:") else "Organization"
+            out.append(("steward", label, estate.brand.strings["company"], estate.brand.strings["website"]))
+        out.append(("organizations", "Organizations", "All CompleteTech", DIRECTORY))
+    else:
+        out.append(("github", "GitHub", login, f"https://github.com/{login}"))
     if email:
         out.append(("contact", "Contact", "email", f"mailto:{email}"))
     else:
@@ -854,12 +897,13 @@ def _table(entries: list[dict]) -> list[str]:
 
 
 def _link_row(estate: Estate, login: str, row: dict) -> str:
-    tier = _tier(row)
     files = ("SECURITY.md",) if row.get("family") == "romgenie" else ("CONTRIBUTING.md", "SUPPORT.md", "SECURITY.md")
     parts = [f'<a href="https://github.com/{login}/.github/blob/main/{f}">{f.split(".")[0].title()}</a>' for f in files]
     if row.get("family") == "touchedbyanagent":
         return ""  # no steward line or CompleteTech text until STANDARD §12.5 #4
-    parts.append("A CompleteTech LLC organization" if tier == "T1" else "Steward: CompleteTech LLC")
+    affiliation = _profile_affiliation(estate, login)
+    if affiliation:
+        parts.append(affiliation)
     return '<p align="center">' + " · ".join(parts) + "</p>"
 
 
@@ -890,11 +934,16 @@ def profile_readme(estate: Estate, org: str, data: dict, *, banner: str | None =
         out.append(f'  <a href="{b["href"]}"><img src="{src}" alt="{_attr(b["label"] + ": " + b["message"])}" '
                    'height="20"></a>')
     out += ["</p>", ""]
+    affiliation = _profile_affiliation(estate, login)
     contact = ([f"[complete.tech]({estate.brand.strings['website']})", f"[@{X_HANDLE} on X](https://x.com/{X_HANDLE})"]
-               if data["tier"] == "T1" else ([f"[{_host(data['blog'])}]({data['blog']})"] if data["blog"] else []))
-    out += [" · ".join(contact + [f"[All CompleteTech organizations]({DIRECTORY})"]), ""]
+               if row.get("family") == "completetech" and data["tier"] == "T1"
+               else ([f"[{_host(data['blog'])}]({data['blog']})"] if data["blog"] else []))
+    if affiliation:
+        contact.append(f"[All CompleteTech organizations]({DIRECTORY})")
+    if contact:
+        out += [" · ".join(contact), ""]
     if data["public_repo_count"] == 0:
-        out += [PRIVATE_LINE, ""]
+        out += [_profile_private_line(estate, login), ""]
     else:
         if data["featured"]:
             out += ["## Featured", "", *_cards_html(login, data["featured"], no_card)]
@@ -908,7 +957,7 @@ def profile_readme(estate: Estate, org: str, data: dict, *, banner: str | None =
                 out += ["### Archived", "", *_table(data["archived"])]
             out += [AS_IS_LINE, ""]
         if data["also_from"] or data["siblings"]:
-            out += ["## Also from CompleteTech", ""]
+            out += ["## Also from CompleteTech" if affiliation else "## Related projects and organizations", ""]
             out += _cards_html(login, data["also_from"], no_card)
             if data["siblings"]:
                 out += ["Sibling organizations: " + " · ".join(f"[{s['name']}](https://github.com/{s['login']})"
@@ -941,6 +990,8 @@ def profile(estate: Estate, org: str, *, out_dir: str | Path | None = None, rend
                       log=f"t3-signoff:{code}:{login}/.github")
     data, logs = public_slice(estate, org, lists_capture, allow_t3=allow_t3)
     email = _email(estate, login, reg, email_approved)[0]
+    if row.get("family") != "completetech" and not (reg.get("profile") or {}).get("email"):
+        email = None  # Approval to use an email does not configure a foreign organization's address.
     flagship = _tier(row) == "T1" and row.get("flagship")
     key = estate.resolver.brand_key(org) or login
     style = estate.brand.style(key)
@@ -2325,9 +2376,9 @@ def doctor(estate: Estate, org: str, snap: dict, *, repo_dir: str | Path | None 
                            _public_texts(data))
         cells["O3"] = "fail" if missing or leaks else "pass"
         notes += [f"O3 not listed: {f}" for f in missing] + [f"O3 leak: {h}" for h in leaks]
-        if data["public_repo_count"] == 0 and PRIVATE_LINE not in text:
+        if data["public_repo_count"] == 0 and _profile_private_line(estate, org) not in text:
             cells["O3"] = "fail"
-            notes.append("O3 the private-org line is missing")
+            notes.append("O3 the zero-public profile line is missing")
     # O4 health
     h, _ = health(estate, org, repo_dir=repo_dir, allow_t3=allow_t3)
     cells["O4"] = {"pass": "pass", "fail": "fail"}.get(h["result"], "unknown")
