@@ -1,11 +1,13 @@
 """Public onboarding failures preserve files and outside identities stay their own."""
 import json
+from pathlib import Path
 
 import pytest
 from PIL import Image
 
 from conftest import ROOT, meta_dict, run_cli
-from ctshowcase.config import load_yaml_text, schema_errors, yaml
+from ctshowcase.brand_commands import _write_onboarding
+from ctshowcase.config import load_brand, load_yaml_text, lock_text, schema_errors, yaml
 from test_brand_onboarding_cli import family_args
 
 
@@ -15,6 +17,28 @@ def copied_config(tmp_path):
     config.parent.mkdir(parents=True)
     config.write_bytes((ROOT / "references" / "brand.yaml").read_bytes())
     return config
+
+
+def test_write_preserves_crlf_yaml_under_windows_newline_translation(copied_config, monkeypatch):
+    # A Windows text writer expands every LF, including those already in CRLF.
+    original_write_text = Path.write_text
+
+    def windows_write_text(path, data, *args, **kwargs):
+        return original_write_text(path, data.replace("\n", "\r\n"), *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", windows_write_text)
+    raw = load_yaml_text(copied_config.read_text(encoding="utf-8"))
+    raw["brand_strings"]["synthetic_multiline"] = "first line\nsecond line"
+    source = yaml.safe_dump(raw, sort_keys=False).replace("\n", "\r\n").encode("utf-8")
+    copied_config.write_bytes(source)
+    brand = load_brand(copied_config)
+    lock = copied_config.with_name("brand.lock.json")
+
+    _write_onboarding(brand, source, source.decode("utf-8"), lock, lock_text(brand.raw), None)
+
+    assert copied_config.read_bytes() == source
+    assert json.loads(lock.read_text(encoding="utf-8")) == load_yaml_text(copied_config.read_text(encoding="utf-8"))
+    assert json.loads(lock.read_text(encoding="utf-8"))["brand_strings"]["synthetic_multiline"] == "first line\nsecond line"
 
 
 @pytest.mark.parametrize("existing_lock", [False, True])

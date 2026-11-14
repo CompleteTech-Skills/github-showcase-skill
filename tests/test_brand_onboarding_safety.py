@@ -155,18 +155,17 @@ def test_failed_restore_still_cleans_mark_and_reports_incomplete_rollback(isolat
     lock = isolated_config.with_name("brand.lock.json")
     lock.write_bytes(b"previous lock\n")
     before = isolated_config.read_bytes()
-    original_text = Path.write_text
     original_bytes = Path.write_bytes
-    def fail_partial_lock(self, data, *args, **kwargs):
-        if self == lock:
-            original_bytes(self, b"partial lock")
-            raise OSError("synthetic full disk")
-        return original_text(self, data, *args, **kwargs)
+    lock_attempts = 0
     def fail_restore_lock(self, data, *args, **kwargs):
+        nonlocal lock_attempts
         if self == lock:
+            lock_attempts += 1
+            if lock_attempts == 1:
+                original_bytes(self, b"partial lock")
+                raise OSError("synthetic full disk")
             raise OSError("synthetic restoration failure")
         return original_bytes(self, data, *args, **kwargs)
-    monkeypatch.setattr(Path, "write_text", fail_partial_lock)
     monkeypatch.setattr(Path, "write_bytes", fail_restore_lock)
     args = args_for(isolated_config, "add-org", "--family", "completetech", "--org", "Northwind-Atomic",
                     "--display-name", "Northwind Atomic", "--tier", "T2", "--footer", "no",

@@ -71,8 +71,10 @@ def _write_onboarding(brand: Brand, original: bytes, text: str, lock: Path,
             with mark[0].open("xb") as stream:
                 mark_created = True
                 stream.write(mark[1])
-        brand.path.write_text(text, encoding="utf-8")
-        lock.write_text(serialized_lock, encoding="utf-8")
+        # The validated YAML can already contain CRLF. Text-mode newline
+        # translation on Windows would turn it into CRCRLF and change values.
+        brand.path.write_bytes(text.encode("utf-8"))
+        lock.write_bytes(serialized_lock.encode("utf-8"))
     except OSError as exc:
         # Each recovery is independent: a failed lock restoration must never
         # prevent removing the newly copied mark or restoring the configuration.
