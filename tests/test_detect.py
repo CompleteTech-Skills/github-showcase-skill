@@ -123,3 +123,80 @@ def test_mobile_explicit_variant_keeps_variant_contract():
     mobile = {"type": "mobile-app", "variant": "C"}
     assert "Platforms" not in dict(required_sections(mobile))
     assert "Install" in dict(required_sections(mobile))
+
+@pytest.mark.parametrize("name", ["generated-issues.json", "exports/exported-planning.json"])
+def test_named_exports_excluded_from_metadata_and_checkout(tmp_path, name):
+    files = {name: "x" * 1000, "main.py": "print(1)"}
+    for path, data in files.items():
+        target = tmp_path / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(data, encoding="utf-8")
+    meta = {"files": list(files), "file_sizes": {k: len(v) for k, v in files.items()}}
+    assert detect_type(meta) == detect_type(meta, RepoFacts(meta, tmp_path)) == ("workspace", 25)
+
+
+@pytest.mark.parametrize("name", ["issues.json", "generated-issues-data.json", "data/issues.json"])
+@pytest.mark.parametrize("data_size,want", [(49, "workspace"), (50, "dataset"), (51, "dataset")])
+def test_real_issue_data_and_inclusive_threshold(name, data_size, want):
+    meta = {"files": [name, "main.py"], "file_sizes": {name: data_size, "main.py": 100 - data_size}}
+    assert detect_type(meta)[0] == want
+
+
+def test_docs_administration_does_not_mask_code():
+    meta = {"files": ["README.md", "docs/guide.md", ".gitignore", ".gitattributes", ".editorconfig", "CODEOWNERS"]}
+    assert detect_type(meta) == ("documentation", 25)
+    meta["files"].append("src/main.py")
+    assert detect_type(meta) == ("workspace", 25)
+
+
+@pytest.mark.parametrize("path", ["app/AndroidManifest.xml", "App/App.xcodeproj/project.pbxproj"])
+@pytest.mark.parametrize("checkout", [False, True])
+def test_mobile_cli_and_variants(tmp_path, path, checkout):
+    import json
+    from conftest import run_cli, meta_dict
+    target = tmp_path / "repo"
+    target.mkdir()
+    mobile = target / path
+    mobile.parent.mkdir(parents=True, exist_ok=True)
+    mobile.write_text("mobile", encoding="utf-8")
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict(files=[path])), encoding="utf-8")
+    location = ["--repo-dir", target] if checkout else ["--no-repo-dir"]
+    result = run_cli("--meta", meta, *location, "doctor", "--format", "json")
+    assert result.returncode in (0, 1), result.stderr
+    row = json.loads(result.stdout)
+    assert (row["type"], row["variant"]) == ("mobile-app", "B")
+    if not checkout:
+        return  # README scaffolding requires a checkout.
+    for variant, expected in [("B", "Platforms"), ("C", "Usage")]:
+        result = run_cli("--meta", meta, *location, "--format", "json", "readme", "--mode", "scaffold", "--variant", variant)
+        assert expected in result.stdout, result.stderr
+
+
+def test_actual_resolver_aliases_for_type_and_variant():
+    from ctshowcase.detect import detect
+    from ctshowcase.resolver import Resolver
+    resolver = Resolver(registry={"orgs": {"CompleteTech-Security": {"former_slugs": ["Northwind-Old-Security"]},
+                                          "CompleteTech-Skills": {"former_slugs": ["Northwind-Old-Skills"]}}})
+    for owner in ("Northwind-Old-Security", "CompleteTech-Security"):
+        assert detect({"owner": owner, "files": ["main.py"]}, same_owner=resolver.same)["type"] == "security-check"
+    for owner in ("Northwind-Old-Skills", "CompleteTech-Skills"):
+        assert detect({"owner": owner, "files": ["SKILL.md"]}, same_owner=resolver.same)["variant"] == "A"
+
+@pytest.mark.parametrize("checkout", [False, True])
+@pytest.mark.parametrize("files,want", [({"main.py": "x", "generated-issues.json": "x" * 1000}, "workspace"),
+                                        ({"README.md": "docs", ".gitignore": "*.pyc"}, "documentation")])
+def test_cli_classification_and_suggestion(tmp_path, checkout, files, want):
+    import json
+    from conftest import meta_dict, run_cli
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for name, contents in files.items():
+        (repo / name).write_text(contents, encoding="utf-8")
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict(files=list(files), file_sizes={k: len(v) for k, v in files.items()})), encoding="utf-8")
+    location = ["--repo-dir", repo] if checkout else ["--no-repo-dir"]
+    result = run_cli("--meta", meta, *location, "doctor", "--format", "json")
+    row = json.loads(result.stdout)
+    assert row["type"] == want
+    assert any(log.startswith(f"type-suggestion:{want}:") for log in row["logs"])

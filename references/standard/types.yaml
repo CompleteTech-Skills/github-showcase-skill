@@ -15,6 +15,8 @@ deps:
 # Planning and issue exports are administration, not repository datasets.
 dataset_exclude_dirs: [planning, .planning, issues, .github, node_modules, vendor, dist, build]
 dataset_exclude_files: [package.json, package-lock.json, tsconfig.json, composer.json, composer.lock]
+# Ordinary repository administration does not make a documentation repository code.
+documentation_exclude_files: [.gitignore, .gitattributes, .editorconfig, CODEOWNERS]
 types:
   fork:             {variant: G, category: null}
   backup:           {variant: H, category: null}

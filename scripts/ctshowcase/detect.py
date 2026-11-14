@@ -111,7 +111,8 @@ def detect_type(meta: dict, facts: RepoFacts | None = None, same_owner=None) -> 
         data = sum(v for k, v in sizes.items() if k.endswith((".csv", ".json", ".parquet")))
         if data and data * 2 >= sum(sizes.values()):
             return "dataset", 24
-    substantive = [f for f in files if substantive_path(f)]
+    substantive = [f for f in files if substantive_path(f)
+                   and PurePosixPath(f).name not in t.get("documentation_exclude_files", [])]
     if substantive and all(PurePosixPath(f).suffix.lower() in (".md", ".rst", ".txt", ".adoc")
                            or PurePosixPath(f).name in ("LICENSE", "COPYING") for f in substantive):
         return "documentation", 25
@@ -124,7 +125,8 @@ def substantive_path(path: str) -> bool:
     parts = PurePosixPath(path).parts
     excluded = set(standard("types").get("dataset_exclude_dirs", []))
     names = set(standard("types").get("dataset_exclude_files", []))
-    return bool(parts) and not any(p in excluded for p in parts[:-1]) and parts[-1] not in names
+    return (bool(parts) and not any(p in excluded for p in parts[:-1]) and parts[-1] not in names
+            and not re.fullmatch(r"(?:generated|exported)-(?:issues|planning)\.json", parts[-1], re.IGNORECASE))
 
 
 def substantive_sizes(facts: RepoFacts) -> dict[str, int]:

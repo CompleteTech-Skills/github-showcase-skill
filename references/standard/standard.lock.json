@@ -858,6 +858,12 @@
     "streamlit"
    ]
   },
+  "documentation_exclude_files": [
+   ".gitignore",
+   ".gitattributes",
+   ".editorconfig",
+   "CODEOWNERS"
+  ],
   "domain_tlds": [
    "com",
    "tech",
