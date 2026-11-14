@@ -14,11 +14,11 @@ CLI = Path(__file__).resolve().parents[1] / 'scripts' / 'showcase.py'
 def lint(tmp_path, source):
     meta = tmp_path / 'meta.json'
     meta.write_text(json.dumps({'owner': 'Northwind-Trading-Co', 'repo': '.github',
-                                'license': 'MIT', 'files': ['README.md']}))
+                                'license': 'MIT', 'files': ['README.md']}), encoding='utf-8')
     readme = tmp_path / 'README.md'
-    readme.write_text('# Probe\n\n' + source + '\n')
+    readme.write_text('# Probe\n\n' + source + '\n', encoding='utf-8')
     result = subprocess.run([sys.executable, str(CLI), '--meta', str(meta), '--repo-dir', str(tmp_path),
-                             'lint', 'readme', str(readme)], capture_output=True, text=True, timeout=15)
+                             'lint', 'readme', str(readme)], capture_output=True, encoding='utf-8', timeout=15)
     return json.loads(result.stdout)['fails']
 
 
@@ -37,6 +37,23 @@ def test_destination_entities_cli(tmp_path, reference, written, actual, wrong):
     assert f'R7 local image does not resolve: {actual}' in lint(tmp_path, image)
     (tmp_path / actual).write_bytes(b'correct')
     assert f'R7 local image does not resolve: {actual}' not in lint(tmp_path, image)
+
+
+def test_lint_unicode_with_legacy_default_encoding(tmp_path, monkeypatch):
+    # Simulate a Windows locale for both fixture writes and subprocess decoding.
+    write_text = Path.write_text
+
+    def legacy_write_text(path, data, encoding=None, **kwargs):
+        return write_text(path, data, encoding=encoding or 'cp1252', **kwargs)
+
+    monkeypatch.setattr(Path, 'write_text', legacy_write_text)
+    monkeypatch.setattr(subprocess, '_text_encoding', lambda: 'cp1252')
+    image = '![Shot](x©.png)'
+    missing = 'R7 local image does not resolve: x©.png'
+    assert missing in lint(tmp_path, image)
+    assert 'x©.png'.encode('utf-8') in (tmp_path / 'README.md').read_bytes()
+    (tmp_path / 'x©.png').write_bytes(b'correct')
+    assert missing not in lint(tmp_path, image)
 
 
 @pytest.mark.parametrize('image,problem', [
