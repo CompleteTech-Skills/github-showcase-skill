@@ -1,5 +1,6 @@
 import json
 import shutil
+from pathlib import Path
 
 import pytest
 
@@ -110,6 +111,32 @@ def test_cli_dry_run_and_write(tmp_path):
     assert p.returncode == 0 and (tmp_path / "README.md").read_text(encoding="utf-8") != before
     rec = json.loads((tmp_path / "rec.jsonl").read_text(encoding="utf-8").splitlines()[0])
     assert rec["std"] == "ct-std-v1" and rec["kind"] == "readme"
+
+
+def test_cli_write_preserves_authored_lf_under_windows_translation(tmp_path, monkeypatch, capsys):
+    import showcase
+
+    path = tmp_path / "README.md"
+    authored = b"# Example\n\nAuthored line one.\nAuthored line two.\n"
+    path.write_bytes(b"<!-- showcase:banner:start -->\nold banner\n<!-- showcase:banner:end -->\n\n" + authored)
+    banner = tmp_path / "docs/images/banner.png"
+    banner.parent.mkdir(parents=True)
+    banner.write_bytes(b"synthetic banner")
+    original_write_text = Path.write_text
+
+    def windows_write_text(self, data, *args, **kwargs):
+        if self == path:
+            return self.write_bytes(data.replace("\n", "\r\n").encode("utf-8"))
+        return original_write_text(self, data, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", windows_write_text)
+    meta = FIX / "CompleteTech-LLC__LoL_OBS_Overlay.json"
+    assert showcase.main(["--meta", str(meta), "--repo-dir", str(tmp_path), "readme", "--mode", "header",
+                          "--write"]) == 0
+    assert json.loads(capsys.readouterr().out)["written"] is True
+    result = path.read_bytes()
+    assert authored in result
+    assert b"\r\n" not in result
 
 
 @pytest.mark.skipif(not (ROOT.parent / "template" / "README.md").is_file(), reason="template checkout not beside the skill")
