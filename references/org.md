@@ -28,6 +28,13 @@ Every action takes `ORG` (any former login resolves, see below), `--registry`, `
 
 O5 (`labels.yml` and the org repository defaults), O7 (X account), O8 (listed on the CompleteDotTech profile) and O10 (the org's Workstreams project, `project lint`) stay with the orchestrator.
 
+With `org profile ORG --render --out-dir DIR`, every local badge is rendered
+with the resolved organization's family style before any profile output is
+written. If no configured foreground reaches 4.5:1 contrast on either badge
+fill, the command returns exit 4 / `needs-input:badge-contrast`; an existing
+README, data file and assets stay unchanged, and a new destination is not
+created. Badge fills remain the configured values.
+
 ## Registry-free org label plans
 
 `python3 $S org labels ORG --repos-from-gh --jobs jobs.jsonl` uses the committed brand identity and paginated `gh api -X GET` reads. It discovers every repository visible to the authenticated account, captures live labels and recursive file trees, and emits the existing per-repository `gh` argv and writer jobs. It reads no estate registry, metadata directory or decision files; combining those inputs with this mode is a usage error. Former org logins still resolve through `brand.yaml`. GitHub access failures stop the plan instead of pretending the org is empty; an unavailable or truncated tree cannot release a rename. A successfully captured empty live label list is known empty, whereas an empty legacy metadata list remains unknown.
