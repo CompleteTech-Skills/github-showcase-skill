@@ -19,7 +19,8 @@ def test_authored_extra_in_tagline_still_protected(make_ctx):
     before = readme.scaffold(make_ctx(description="Run the previous workflow for teams."))
     before = before.replace("**Run the previous workflow for teams.**", "**Run the previous workflow for teams.**\nAn authored explanation.")
     after, removed = readme.upgrade(make_ctx(description="Run the current workflow for teams."), before)
-    assert any("An authored explanation" in p for p in readme.preservation(before, after, removed))
+    assert "An authored explanation." in after
+    assert readme.preservation(before, after, removed) == []
 
 
 def test_marker_example_and_unmarked_tagline_not_exempted():

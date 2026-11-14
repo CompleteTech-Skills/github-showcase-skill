@@ -6,6 +6,7 @@ those blocks. Content is never invented (§1.5 rule 2) and never lost (§7.1 res
 from __future__ import annotations
 
 import re
+import difflib
 from collections import Counter
 from pathlib import Path
 from urllib.parse import quote
@@ -26,7 +27,7 @@ BOM = "\ufeff"
 def normalize_text(text: str) -> str:
     """README text as the tools read it: LF line endings, no leading UTF-8 byte order mark (a BOM would hide the H1
     from every `^#` match)."""
-    text = text.replace("\r\n", "\n")
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
     return text[1:] if text.startswith(BOM) else text
 
 
@@ -98,12 +99,9 @@ def product_name(ctx: RepoContext) -> str:
 def split_sections(text: str) -> tuple[str, list[tuple[str, str]]]:
     """(preamble, [(heading text, body)]) split at H2 outside code fences."""
     pre, sections, cur_h, buf = [], [], None, []
-    fence = None
-    for line in text.splitlines():
-        m = re.match(r"^(```+|~~~+)", line)
-        if m:
-            fence = None if fence and line.startswith(fence) else (fence or m.group(1))
-        if fence is None and re.match(r"^## (?!#)", line):
+    clean = masked(text)
+    for line, visible in zip(text.splitlines(), clean.splitlines()):
+        if re.match(r"^## (?!#)", visible):
             if cur_h is None:
                 pre = buf
             else:
@@ -366,7 +364,12 @@ def tagline_body(ctx: RepoContext, existing: str | None = None, text: str = "") 
     gives an empty block, never "****"."""
     desc = (ctx.meta.get("description") or "").strip()
     if desc:
-        return f'<p align="center"><b>{desc}</b></p>' if ctx.det["variant"] == "F" else f"**{desc}**"
+        generated = f'<p align="center"><b>{desc}</b></p>' if ctx.det["variant"] == "F" else f"**{desc}**"
+        if existing and "\n" in existing:
+            first, rest = existing.split("\n", 1)
+            if re.fullmatch(r'(?:\*\*[^\n]+\*\*|<p align="center"><b>[^\n]+</b></p>)', first):
+                return generated + "\n" + rest
+        return generated
     ctx.log("needs-input:description")
     if existing is None or not existing.strip() or inherited_tagline(ctx, existing, text):
         return ""
@@ -1307,7 +1310,17 @@ def managed_reason(ctx: RepoContext, text: str) -> str | None:
         return "readme.managed is true in the repository configuration"
     # Restrict heuristics to the introductory ownership notice, including YAML
     # front matter and HTML comments. A later usage example is not an owner.
-    for line in text.splitlines()[:20]:
+    lines = text.lstrip(BOM).splitlines()[:20]
+    intro = "\n".join(lines)
+    notices = re.findall(r"<!--.*?(?:-->|\Z)", intro, re.S)
+    if lines and lines[0].strip() == "---":
+        for line in lines[1:]:
+            if line.strip() == "---":
+                break
+            if re.match(r"\s*generated[_-]by\s*:\s*\S", line, re.I):
+                return "generator ownership notice in the first 20 lines"
+            notices.append(line)
+    for line in notices:
         if re.search(r"\b(?:generated\s+by|do\s+not\s+edit)\b", line, re.I):
             return "generator ownership notice in the first 20 lines"
     return None
@@ -1322,16 +1335,65 @@ def heading_moves(before: str, after: str) -> list[dict]:
     old, new = headings(before), headings(after)
     used, moves = set(), []
     renames = standard("readme-variants")["renames"]
+    def key(title):
+        normalized = EMOJI.sub("", title).strip()
+        return renames.get(normalized.lower(), normalized).casefold()
+    ambiguous = {key(title) for _, title in old if sum(key(t) == key(title) for _, t in old) > 1
+                 or sum(key(t) == key(title) for _, t in new) > 1}
+    for name in sorted(ambiguous):
+        old_group = [(level, title) for level, title in old if key(title) == name]
+        new_group = [(level, title) for level, title in new if key(title) == name]
+        if old_group != new_group:
+            moves.append({"heading": old_group[0][1], "ambiguous": True,
+                          "old_levels": [level for level, _ in old_group],
+                          "new_levels": [level for level, _ in new_group]})
     for level, title in old:
+        if key(title) in ambiguous:
+            continue
         normalized = EMOJI.sub("", title).strip()
         normalized = renames.get(normalized.lower(), normalized)
-        for i, (new_level, new_title) in enumerate(new):
-            if i not in used and new_title.casefold() == normalized.casefold():
-                used.add(i)
-                if (level, title) != (new_level, new_title):
-                    moves.append({"heading": title, "from": level, "to": new_level, "new_heading": new_title})
-                break
+        candidates = [(i, new_level, new_title) for i, (new_level, new_title) in enumerate(new)
+                      if i not in used and new_title.casefold() == normalized.casefold()]
+        if candidates:
+            i, new_level, new_title = min(candidates, key=lambda item: item[1] != level)
+            used.add(i)
+            if (level, title) != (new_level, new_title):
+                moves.append({"heading": title, "from": level, "to": new_level, "new_heading": new_title})
     return moves
+
+
+
+def ambiguous_block_changes(ctx: RepoContext, before: str, after: str) -> list[str]:
+    """Refuse replacement when a marker alone cannot establish ownership of its body."""
+    remaining = list(find_blocks(MARK, after))
+    problems = []
+    for block in find_blocks(MARK, before):
+        name, body = block.group(1), block.group(2)
+        matches = [m for m in remaining if m.group(1) == name]
+        exact = next((m for m in matches if m.group(2) == body), None)
+        if exact:
+            remaining.remove(exact)
+            continue
+        replacement = matches[0] if len(matches) == 1 else None
+        if replacement:
+            remaining.remove(replacement)
+        if not body.strip():
+            continue
+        if name == "tagline" and replacement:
+            first, sep, rest = body.partition("\n")
+            new_first, new_sep, new_rest = replacement.group(2).partition("\n")
+            if (re.fullmatch(r'(?:\*\*[^\n]+\*\*|<p align="center"><b>[^\n]+</b></p>)', first)
+                    and (not sep or (new_sep and rest == new_rest))):
+                continue
+        if name == "footer" and is_footer_copy(body, ctx.brand, own_site=True):
+            continue
+        if name == "badges" and (generated_badges(body) or (replacement and generated_badges(replacement.group(2))
+                and GENERATED_BADGES.fullmatch(replacement.group(2)).group(2) == badge_sha(body))):
+            continue
+        if name == "banner" and body == banner_html(ctx):
+            continue
+        problems.append(f"needs-input:readme-block-ownership: {name} block contains content whose ownership is unclear")
+    return problems
 
 
 def nonws(s: str) -> int:
@@ -1357,9 +1419,10 @@ def preservation(before: str, after: str, removed: list[str]) -> list[str]:
             return wrap("badges", "")
         # Only the exact generated tagline shape is owned: never exempt an
         # arbitrary paragraph, comment, duplicate or extra line inside markers.
-        if m.group(1) == "tagline" and re.fullmatch(
-                r"(?:\*\*[^\n*]+\*\*|<p align=\"center\"><b>[^\n<>]+</b></p>)", body):
-            return wrap("tagline", "")
+        if m.group(1) == "tagline":
+            first, sep, rest = body.partition("\n")
+            if re.fullmatch(r'(?:\*\*[^\n]+\*\*|<p align="center"><b>[^\n]+</b></p>)', first):
+                return wrap("tagline", rest if sep else "")
         return m.group(0)
 
     before = _sub_blocks(before, omit_owned_badges)
@@ -1385,3 +1448,29 @@ def read_text(path: Path) -> str:
     """A README's text without a leading byte order mark ('' when missing)."""
     text = path.read_text(encoding="utf-8") if path.is_file() else ""
     return text[1:] if text.startswith(BOM) else text
+
+
+def restore_bytes(original: str, before: str, after: str) -> str:
+    """Retain original line endings on unchanged text and use local endings for inserted text."""
+    raw = original.removeprefix(BOM)
+    offsets = [0]
+    endings = []
+    i = 0
+    while i < len(raw):
+        if raw[i] == "\r":
+            e = "\r\n" if raw[i:i + 2] == "\r\n" else "\r"
+            endings.append((len(offsets) - 1, e))
+            i += len(e)
+        else:
+            if raw[i] == "\n":
+                endings.append((len(offsets) - 1, "\n"))
+            i += 1
+        offsets.append(i)
+    out = [BOM if original.startswith(BOM) else ""]
+    for tag, a, b, c, d in difflib.SequenceMatcher(None, before, after, autojunk=False).get_opcodes():
+        if tag == "equal":
+            out.append(raw[offsets[a]:offsets[b]])
+        elif tag in ("replace", "insert"):
+            eol = min(endings, key=lambda x: abs(x[0] - a))[1] if endings else "\n"
+            out.append(after[c:d].replace("\n", eol))
+    return "".join(out)

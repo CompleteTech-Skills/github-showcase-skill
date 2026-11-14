@@ -262,7 +262,7 @@ The logo files are the existing masters published under this skill's `assets/bra
 | `header` | Touches the marker blocks only (what the Action runs). Authored text outside the blocks comes back byte-identical, fenced code included (a marker block, `<!-- showcase:license -->` or template-body block shown inside fenced or inline code is an example, never regenerated); blank lines are tidied only inside regenerated blocks and where a block meets authored text (a removed block leaves one blank line). With no description the tagline block is kept as written (logged `needs-input:description`), except an inherited tagline, which is emptied: the block holds exactly a tagline of the template the repository was generated from (`meta` `template_taglines`: the template README's tagline block, the first one outside code, when the repository was generated and today), or, only when those are unknown, the template body is still pristine; never in the template repository itself (R2: the tagline is the description, never another repository's line), and the paragraph after `<!-- showcase:license -->` (and its heading) is rewritten from the license table whenever it can be derived |
 | `--bootstrap` | Template only. The block between `<!-- showcase:template-body:start -->` and `:end -->` starts with `<!-- showcase:template-body:pristine sha256=HEX -->`, the hash of the block's generated text. While the block still matches its hash byte for byte, bootstrap replaces it with the scaffolded variant body for this repository (each section holds only an HTML comment naming the facts it needs) under a new hash, rebuilds the header for the variant (Variant F: no H1; a CVE slug titles as `Acme CVE-2026-12345 Check`; the tagline block carries over and follows the `header` rule, so with no description a tagline written for the repository stays and only an inherited one is emptied), writes the license section from the table above (with or without a `LICENSE` file; a private repository reads "Proprietary...", a public Security repository gets `## Licensing`), and rewrites the owner tokens in `CONTRIBUTING.md` (only links to the template owner's `.github`; a link to another org's or an upstream's contributing guide or security policy stays as written). Because the hash still matches, a later run re-bootstraps when the type changes (the code landed, or `type:` was set in `.github/showcase.yml`). Once a person edits the block, the hash no longer matches: the marker is dropped (`bootstrap:edited`), the README goes through `upgrade` with the never-drop-a-line check, and the block is never rewritten again. A no-op when the markers are absent. |
 
-The default is a dry run that prints a unified diff; `--write` writes `README.md`. A leading UTF-8 byte order mark is dropped before any mode reads the README (and by `lint readme`), so it never hides the H1. G and H only insert the hero banner block and their callout on top and append the footer; nothing else changes. A README that already opens with a blockquote keeps it. The G callout needs the parent in the metadata (`parent.full_name`, from `meta --from-gh`); without it the callout is skipped and `fork-parent-missing` is logged. The H callout needs the archive date and reason from the registry, so `readme` logs `needs-input:archive-callout` instead of writing it. Watching-org forks are never changed.
+The default is a dry run that prints a unified diff; `--write` writes `README.md`. A leading UTF-8 byte order mark is ignored when parsing and retained on write. G and H only insert the hero banner block and their callout on top and append the footer; nothing else changes. A README that already opens with a blockquote keeps it. The G callout needs the parent in the metadata (`parent.full_name`, from `meta --from-gh`); without it the callout is skipped and `fork-parent-missing` is logged. The H callout needs the archive date and reason from the registry, so `readme` logs `needs-input:archive-callout` instead of writing it. Watching-org forks are never changed.
 
 ## What `lint readme` checks
 
@@ -273,7 +273,7 @@ The hero banner first, then the nav line (or the nav line first with `readme.nav
 `readme --mode header` refreshes existing showcase marker blocks. `readme --no-regroup`
 also leaves the authored headings, section order and text between those blocks unchanged;
 it does not add scaffold sections. A normal upgrade reports `heading_moves` separately
-in its JSON dry run, including each old and new heading level.
+in its JSON and text dry runs, including each old and new heading level.
 
 The preservation guard allows a description change to replace a single generated bold
 tagline (or the security variant's centered bold paragraph) inside a real
@@ -281,7 +281,8 @@ tagline (or the security variant's centered bold paragraph) inside a real
 code remain protected. Badge ownership continues to use the generated-content digest.
 
 A README owned by another generator is not rewritten. A `Generated by` or `DO NOT EDIT`
-notice in its first 20 lines (including HTML comments and front matter), or
+notice in an HTML comment or front matter in its first 20 lines, a front-matter
+`generated_by` key, or
 `readme.managed: true` in `.github/showcase.yml`, yields `needs-input:readme-managed`.
 The dry run still returns the proposed header so it can be integrated into that
 repository's generator; `--write` refuses before any README or badge file is written.
@@ -299,3 +300,9 @@ readme:
 These values are operator-supplied facts. They never replace a section that already
 has authored content. An absent required section without facts stays omitted with
 its existing `needs-input` diagnostic.
+
+When refreshing a changed marker block, content whose generated ownership cannot be
+established causes `needs-input:readme-block-ownership` before files or records are
+written. Review and resolve the block before retrying. Duplicate heading titles whose
+old and new occurrences cannot be paired reliably appear in `heading_moves` with
+`ambiguous: true` and their old and new level lists instead of guessed moves.
