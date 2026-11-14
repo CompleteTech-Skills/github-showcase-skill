@@ -20,6 +20,23 @@ from ctshowcase.errors import NeedsInput
 from ctshowcase.meta import normalize
 
 
+def is_complete_tech_identity(owner, row):
+    # The estate standard identifies CompleteDotTech as the personal profile;
+    # Northwind is the documented fictional CompleteTech demonstration.
+    # Neither exception depends on the family assignment being tested.
+    return owner in {"CompleteDotTech", "Northwind-Trading-Co"} or row["display_name"].startswith("CompleteTech")
+
+
+def assert_independent_family(owner, row):
+    if not is_complete_tech_identity(owner, row):
+        assert row["family"] != "completetech", owner
+
+
+def assert_no_complete_tech_leak(owner, text):
+    import re
+    assert not re.search(r"completetech|CompleteDotTech|005ADD", text, re.I), owner
+
+
 def context(brand, owner, **meta):
     return RepoContext(brand, normalize({"owner": owner, "repo": "sample-tool", "license": "MIT",
         "description": "Inspect synthetic records.", "visibility": "public", "files": ["LICENSE"], **meta}))
@@ -54,12 +71,19 @@ def test_complete_tech_existing_wording_is_explicit(brand):
 
 
 def test_all_non_complete_tech_rows_have_independent_families(brand):
-    # CompleteDotTech is the owner's profile and Northwind is the documented
-    # fictional CompleteTech demo. Neither is a third-party brand.
     for owner, org in brand.raw["orgs"].items():
-        if owner in ("CompleteDotTech", "Northwind-Trading-Co") or org["display_name"].startswith("CompleteTech"):
-            continue
-        assert org["family"] != "completetech", owner
+        assert_independent_family(owner, org)
+
+
+def test_foreign_identity_controls_detect_wrong_family_and_output():
+    row = {"display_name": "Synthetic Foreign Organization", "family": "completetech"}
+    assert not is_complete_tech_identity("synthetic-foreign", row)
+    with pytest.raises(AssertionError):
+        assert_independent_family("synthetic-foreign", row)
+    for leak in ("CompleteTech LLC", "CompleteDotTech", "#005ADD"):
+        with pytest.raises(AssertionError):
+            assert_no_complete_tech_leak("synthetic-foreign", f"Synthetic output {leak}")
+    assert_no_complete_tech_leak("synthetic-foreign", "Synthetic output with its own identity")
 
 
 def test_unconfigured_ticketstub_identity_never_inherits_palette(brand, tmp_path):
@@ -164,7 +188,6 @@ def test_wordmark_evidence_rejects_foreign_embedded_mark():
 
 def test_each_org_row_keeps_its_identity_across_surfaces(brand, tmp_path):
     """Exercise real CLI paths for every configured row, including refusal rows."""
-    import re
     from PIL import Image
     from ctshowcase import readmelint
 
@@ -212,7 +235,7 @@ def test_each_org_row_keeps_its_identity_across_surfaces(brand, tmp_path):
         if row.get("mark"):
             assert banner_icon["source"] == card_icon["source"] == "org-mark", owner
             assert banner_icon["path"] == card_icon["path"] == row["mark"], owner
-        elif row["family"] != "completetech":
+        elif not is_complete_tech_identity(owner, row):
             assert_wordmark_provenance(banner_icon, svg)
             assert_wordmark_provenance(card_icon, svg)
         checkout = directory / "checkout"
@@ -221,9 +244,9 @@ def test_each_org_row_keeps_its_identity_across_surfaces(brand, tmp_path):
         generated = run_cli("--meta", meta, "--repo-dir", checkout, "--format", "json", *consent, "readme", "--write")
         assert generated.returncode == 0, (owner, generated.stdout, generated.stderr)
         cli_readme = (checkout / "README.md").read_text(encoding="utf-8")
-        if row["family"] != "completetech":
+        if not is_complete_tech_identity(owner, row):
             body = cli_readme.split("<!-- showcase:footer:start -->", 1)[0]
-            assert not re.search(r"completetech|CompleteDotTech|005ADD", body, re.I), owner
+            assert_no_complete_tech_leak(owner, body)
         ctx = context(brand, owner, language="Python", files=["agent.py"])
         header = readme.header(ctx)
         readme_path = directory / "README.md"
@@ -232,9 +255,9 @@ def test_each_org_row_keeps_its_identity_across_surfaces(brand, tmp_path):
         assert not any("D13" in item or "off-palette" in item for item in linted["fails"]), (owner, linted)
         assert run_cli("lint", "banner", banner).returncode == 0, owner
         assert run_cli("lint", "svg", "--kind", "card", card).returncode == 0, owner
-        if row["family"] != "completetech":
+        if not is_complete_tech_identity(owner, row):
             for source in (rendered.stdout, card.read_text(encoding="utf-8"), header):
-                assert not re.search(r"completetech|CompleteDotTech|005ADD", source, re.I), owner
+                assert_no_complete_tech_leak(owner, source)
 
 
 @pytest.mark.parametrize("command", ["banner", "card", "readme", "social", "icon"])
@@ -310,7 +333,7 @@ def test_profile_badges_respect_each_configured_family(brand, tmp_path, monkeypa
             assert result.returncode in (2, 4), (owner, payload)
             assert any(x.startswith(("hold", "exempt", "t3-signoff", "needs-input:brand-identity", "needs-input:badge-contrast")) for x in payload["logs"]), (owner, payload)
             continue
-        if row["family"] == "completetech":
+        if is_complete_tech_identity(owner, row):
             continue
         profile = (directory / "output" / "profile" / "README.md").read_text(encoding="utf-8")
         body = profile.split("<!-- showcase:footer:start -->", 1)[0]
