@@ -560,17 +560,18 @@ def cmd_topics(args):
         res = Resolver.from_paths(ctx.brand, None if args.registry == "auto" else args.registry, require_registry=True)
         also_in = topics.registry_also_in(res, ctx.owner, ctx.repo)
     r = topics.merge(ctx, also_in)
-    allowed = r.get("plan_allowed", True)
+    allowed = r["plan_allowed"]
     if args.records and allowed and not r["equal_as_set"]:
         rec = records.record(ctx.owner, ctx.repo, "topics", "topics", r["current"], r["proposed"], "§5.6 merge")
         _stamp_signoff_ids(rec, r.get("signoff_ids"), ctx)
         records.append(args.records, [rec])
-    out = base("topics", ctx, result=("pass" if r["equal_as_set"] else "fail") if allowed else "needs-input",
-               **{k: v for k, v in r.items() if k != "logs"},
-               logs=ctx.logs + r["logs"])
+    brand_hold = "needs-input:brand-topic" in r["logs"]
+    complete = allowed and r["equal_as_set"] and "needs-input:topics-capacity" not in r["logs"]
+    out = base("topics", ctx, result="needs-input" if brand_hold else "pass" if complete else "fail",
+               **{k: v for k, v in r.items() if k != "logs"}, logs=ctx.logs + r["logs"])
     if args.gh and allowed and not r["equal_as_set"]:
         out["gh"] = topics.gh_command(ctx.owner, ctx.repo, r["proposed"])
-    return out, (OK if r["equal_as_set"] else CHECK_FAILED) if allowed else NEEDS_INPUT
+    return out, NEEDS_INPUT if brand_hold else OK if complete else CHECK_FAILED
 
 
 def cmd_labels(args):
