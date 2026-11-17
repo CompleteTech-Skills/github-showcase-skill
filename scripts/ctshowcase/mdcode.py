@@ -630,6 +630,20 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
                 if not possible_title and not list_continuation:
                     flush(seg)
                     seg = []
+                    if para_content.strip(" ") and not _paragraph_interrupts(para_content, matched):
+                        # The paragraph that held the definition is still open,
+                        # so a line that cannot interrupt it (four-space or tab
+                        # indent, type 7 HTML, an ordered item other than 1)
+                        # continues it, lazily too. cmark-gfm removes the
+                        # definition and renders this line as paragraph text,
+                        # never as indented code (#7 review r1.1.F1).
+                        seg = [(at, raw)]
+                        conts.add(at)
+                        if matched:
+                            prefixes[at] = source_prefix_chars(raw, len(body) - len(para_content))
+                        stripped = para_content.lstrip(" ")
+                        definition = _DefinitionProgress(stripped) if stripped.startswith("[") else None
+                        continue
             if seg and definition:
                 was_complete = definition.state == "complete"
                 definition.feed(para_content)
@@ -2251,7 +2265,7 @@ def _markdown_images(text: str, document: str) -> list[tuple[str, str, int, int]
     return sources
 
 
-def _images(text: str, document: str) -> list[tuple[str, str]]:
+def _image_entries(text: str, document: str) -> list[tuple[str, str, bool]]:
     """Read HTML and Markdown images, excluding Markdown-looking text in HTML attributes."""
     text, document = _parse_views(text, document)
     parser = _HTMLTokens(text, document)
@@ -2279,13 +2293,17 @@ def _images(text: str, document: str) -> list[tuple[str, str]]:
         return _span_at(spans, start) is not None
     def in_link_literal(start):
         return _span_at(link_spans, start) is not None
-    result = [(written_alt(alt, start), source) for alt, source, start, end in markdown
+    result = [(written_alt(alt, start), source, False) for alt, source, start, end in markdown
               if not in_definition(start) and not inside(tags, start, end) and not in_link_literal(start)]
     kept = set(tags)
-    result += [(alt, source) for alt, source, start, end in parser.images
+    result += [(alt, source, True) for alt, source, start, end in parser.images
                if (start, end) in kept and not in_definition(start) and not in_link_literal(start)]
     return result
 
+
+
+def _images(text: str, document: str) -> list[tuple[str, str]]:
+    return [(alt, source) for alt, source, _ in _image_entries(text, document)]
 
 
 def find_inline_code(text: str, start: int = 0) -> tuple[int, int] | None:

@@ -136,3 +136,35 @@ def test_readme_plan_does_not_rewrite_authored_line_endings(tmp_path, ending):
     assert result.returncode in (0, 1), result.stderr
     assert json.loads(result.stdout)['command'] == 'readme'
     assert path.read_bytes() == authored
+
+
+@pytest.mark.parametrize('ending', ENDINGS)
+def test_readme_write_preserves_authored_line_endings(tmp_path, ending):
+    # #160: `readme --write` refreshes a managed block without rewriting the
+    # README's authored CRLF or lone-CR endings as LF.
+    meta = tmp_path / 'meta.json'
+    meta.write_text(json.dumps({'owner': 'Northwind-Trading-Co', 'repo': '.github',
+                                'license': 'MIT', 'files': ['README.md']}), encoding='utf-8')
+    path = tmp_path / 'README.md'
+    authored = ('# Probe\n\n<!-- showcase:badges:start -->\n<!-- showcase:badges:end -->\n\n'
+                'Authored text  \nMore\n').replace('\n', ending)
+    path.write_bytes(authored.encode())
+    result = run_cli('--meta', meta, '--repo-dir', tmp_path, 'readme', '--write', '--mode', 'header')
+    assert result.returncode in (0, 1), result.stderr
+    assert json.loads(result.stdout)['written'] is True
+    written = path.read_bytes().decode()
+    assert '![Type GitHub profile]' in written
+    assert written.endswith(('\n\nAuthored text  \nMore\n').replace('\n', ending))
+    # every line ending in the written file is the authored one
+    assert written.count(ending) == written.replace('\r\n', '\n').replace('\r', '\n').count('\n')
+    again = run_cli('--meta', meta, '--repo-dir', tmp_path, 'readme', '--write', '--mode', 'header')
+    assert json.loads(again.stdout)['result'] == 'unchanged'
+    assert path.read_bytes().decode() == written
+
+
+def test_restore_line_endings_keeps_each_unchanged_line_ending():
+    raw = '# Probe\r\n\rold\nkept\r\nlast'
+    before = '# Probe\n\nold\nkept\nlast'
+    after = '# Probe\n\nnew\nadded\nkept\nlast'
+    assert readme.restore_line_endings(raw, before, after) == '# Probe\r\n\rnew\r\nadded\r\nkept\r\nlast'
+    assert readme.restore_line_endings('a\nb\n', 'a\nb\n', 'a\nc\n') == 'a\nc\n'

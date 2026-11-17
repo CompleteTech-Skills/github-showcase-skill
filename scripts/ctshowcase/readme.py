@@ -5,6 +5,7 @@ those blocks. Content is never invented (§1.5 rule 2) and never lost (§7.1 res
 """
 from __future__ import annotations
 
+import difflib
 import re
 from collections import Counter
 from pathlib import Path
@@ -1408,3 +1409,45 @@ def read_text(path: Path) -> str:
     """A README's text without a leading byte order mark ('' when missing)."""
     text = path.read_text(encoding="utf-8") if path.is_file() else ""
     return text[1:] if text.startswith(BOM) else text
+
+
+_LINE_END = re.compile(r"\r\n|\r|\n")
+
+
+def restore_line_endings(raw: str, before: str, after: str) -> str:
+    """`after` with the authored line endings of `raw` restored (#160).
+
+    `read_text` decodes with universal newlines, so `before` holds one LF for
+    every CRLF, lone CR or LF in `raw` (the file's own text, BOM removed).
+    Each line `after` keeps unchanged from `before` takes its original
+    ending back; a new or edited line takes the README's most common ending.
+    An LF-only README is returned unchanged.
+    """
+    endings = _LINE_END.findall(raw)
+    if not endings or all(e == "\n" for e in endings):
+        return after
+    counts = Counter(endings)
+    common = counts.most_common(1)[0][0]
+    if len(counts) == 1:
+        return after.replace("\n", common)
+    old, new = before.split("\n"), after.split("\n")
+    # One ending follows every line but the last; the last line has none.
+    if len(old) != len(endings) + 1:
+        return after.replace("\n", common)  # not a universal-newline view of raw: keep the style only
+    out_ends = [common] * (len(new) - 1)
+    # Unchanged leading and trailing lines map one to one; only the edited
+    # middle needs a line diff.
+    head = 0
+    while head < len(old) - 1 and head < len(new) - 1 and old[head] == new[head]:
+        out_ends[head] = endings[head]
+        head += 1
+    tail = 0
+    while (tail < len(old) - 1 - head and tail < len(new) - 1 - head
+           and old[-2 - tail] == new[-2 - tail]):
+        out_ends[-1 - tail] = endings[-1 - tail]
+        tail += 1
+    matcher = difflib.SequenceMatcher(None, old[head:len(old) - 1 - tail], new[head:len(new) - 1 - tail])
+    for i, j, size in matcher.get_matching_blocks():
+        for k in range(size):
+            out_ends[head + j + k] = endings[head + i + k]
+    return "".join(line + end for line, end in zip(new, out_ends)) + new[-1]

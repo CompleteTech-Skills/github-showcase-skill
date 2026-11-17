@@ -69,6 +69,7 @@ from .mdcode import (  # noqa: F401 (compatibility re-exports)
     _inline_image_target,
     _link_literal_spans,
     _markdown_images,
+    _image_entries,
     _images,
 )
 
@@ -313,11 +314,11 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
             fails.append("D18 footer fail:duplicate")
     # alt text, local images
     visible = _outside_code(plain)
-    for alt, source in _images(visible, plain):
+    for alt, source, is_html in _image_entries(visible, plain):
         if not alt.strip():
             fails.append(f"R7 image without alt text: {source[:40]}")
         if source:
-            _local(path, source, fails, example="examples" in source)
+            _local(path, source, fails, example=is_html and "examples" in source)
     body = _outside_code(plain)
     ph = re.search(rv["placeholder_regex"], body)
     if ph or re.search(r"<…>|<\.\.\.>", body):

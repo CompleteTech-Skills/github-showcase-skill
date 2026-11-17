@@ -88,14 +88,24 @@ def test_deep_list_cli_and_container_alignment(tmp_path):
     assert mdcode._images(text, text) == [('shown', 'missing.png')]
 
 
+# GFM oracle (cmarkgfm 2025.10.22, GitHub's cmark-gfm fork; PR #13 review r1.1.F1): an indented line after a
+# reference definition continues the paragraph the definition is removed from, so it is never indented code.
+# '[a]: /url\n    `example\n![Shot](missing.png)\n`' renders '<p><code>example ![Shot](missing.png) </code></p>'
+# in all three containers below: the backtick pairs and no image renders, while an image written on the
+# indented line itself renders. These expectations previously asserted the indented-code reading.
 @pytest.mark.parametrize('prefix,indent', [('', '    '), ('> ', '>     '), ('- ', '      ')])
-def test_definition_followed_by_indented_code_cli(tmp_path, prefix, indent):
+def test_definition_followed_by_indented_line_continues_paragraph_cli(tmp_path, prefix, indent):
     source = (prefix + '[a]: /url\n' + indent + '`example\n'
               + '![Shot](missing.png)\n![Bad](https://img.shields.io/badge/x-x-ABCDEF)\n`')
     fails = lint(tmp_path, source)
+    assert 'R7 local image does not resolve: missing.png' not in fails
+    assert 'R7 off-palette badge colour ABCDEF' not in fails
+    assert mdcode.code_block_spans(source) == ()
+    shown = (prefix + '[a]: /url\n' + indent + 'see ![Shot](missing.png) '
+             '![Bad](https://img.shields.io/badge/x-x-ABCDEF)')
+    fails = lint(tmp_path, shown)
     assert 'R7 local image does not resolve: missing.png' in fails
     assert 'R7 off-palette badge colour ABCDEF' in fails
-    assert mdcode.code_block_spans(source)[0][0] == source.index(indent + '`example')
 
 
 def test_definition_code_boundary_controls(tmp_path):
@@ -103,7 +113,9 @@ def test_definition_code_boundary_controls(tmp_path):
     missing = 'R7 local image does not resolve: missing.png'
     assert missing not in lint(tmp_path, '[a]: /url extra\n    `example\n' + image + '\n`')
     assert missing not in lint(tmp_path, 'paragraph\n[a]: /url\n    `example\n' + image + '\n`')
-    assert missing in lint(tmp_path, '[a]: /url\n    "title"\n    `example\n' + image + '\n`')
+    # oracle: '<p><code>example ![Shot](missing.png) </code></p>' (the title ends the definition)
+    assert missing not in lint(tmp_path, '[a]: /url\n    "title"\n    `example\n' + image + '\n`')
+    assert missing in lint(tmp_path, '[a]: /url\n    "title"\n    ' + image)
     assert missing not in lint(tmp_path, '```\n[a]: /url\n    `example\n```\n`' + image + '`')
 
 
@@ -174,3 +186,35 @@ def test_nested_container_suffix_copy_is_linear():
         path, rest = mdcode._container_path(MeasuredString('- ' * depth + 'text*'))
         assert len(path) == depth and rest == 'text*'
         assert MeasuredString.copied <= 4 * depth + 20
+
+
+# GFM oracle (cmarkgfm 2025.10.22): each source renders its image after the definition is removed.
+@pytest.mark.parametrize('source', [
+    '[r]: https://example.com\n    see ![Shot](docs/images/missing.png)',
+    '[r]: https://example.com\n\tsee ![Shot](docs/images/missing.png)',
+    '[r]: u\n  "t"\n    ![Shot](docs/images/missing.png)',
+    '- [r]: u\n      ![Shot](docs/images/missing.png)',
+    '> [r]: u\n    ![Shot](docs/images/missing.png)',
+    '- > [r]: u\n      ![Shot](docs/images/missing.png)',
+    '> - [r]: u\n    ![Shot](docs/images/missing.png)',
+    '[r]: u\n    <img src="docs/images/missing.png" alt="Shot">',
+])
+def test_indented_line_after_definition_keeps_its_images_cli(tmp_path, source):
+    # PR #13 review r1.1.F1: main reported these images; the shared parser must not hide them as indented code.
+    assert 'R7 local image does not resolve: docs/images/missing.png' in lint(tmp_path, source)
+
+
+def test_indented_badge_after_definition_is_palette_checked_cli(tmp_path):
+    source = '[r]: https://example.com\n    ![License](https://img.shields.io/badge/license-MIT-FF0000)'
+    assert 'R7 off-palette badge colour FF0000' in lint(tmp_path, source)
+    blank = '[r]: https://example.com\n\n    ![License](https://img.shields.io/badge/license-MIT-FF0000)'
+    assert 'R7 off-palette badge colour FF0000' not in lint(tmp_path, blank)  # a blank line makes it code
+
+
+def test_local_image_size_limit_matches_readme_syntax(tmp_path):
+    examples = tmp_path / 'examples'
+    examples.mkdir()
+    (examples / 'screen.png').write_bytes(bytes(450_000))
+    source = 'examples/screen.png'
+    assert f'R7 image over 300000 B: {source}' in lint(tmp_path, f'![Screen]({source})')
+    assert f'R7 image over 300000 B: {source}' not in lint(tmp_path, f'<img alt="Screen" src="{source}">')
