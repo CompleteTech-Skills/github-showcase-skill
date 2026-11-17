@@ -162,40 +162,55 @@ def gate_watching(ctx, allow_hold=False, remedy=HOLD_REMEDY) -> None:
         raise ShowcaseError(f"{ctx.owner}/{ctx.repo} is in the watching org but is not a fork: {remedy}", log=why)
 
 
-def write_art(ctx, out: Path, data: bytes, *, format_generated: bool, preview=None, **extra) -> None:
-    """Prepare the optional preview and sidecar before writing any art outputs."""
+def _sidecar_path(out: Path) -> Path | None:
+    from ctshowcase.fingerprint import SIDECAR
+
+    return out.parent / SIDECAR if out.parent.name == "images" and out.parent.parent.name == "docs" else None
+
+
+def _sidecar_text(ctx, out: Path, record: dict) -> str:
     from ctshowcase import fingerprint as fp
-    sidecar = out.parent / fp.SIDECAR if out.parent.name == "images" and out.parent.parent.name == "docs" else None
+
+    # The immutable ID distinguishes a rename or transfer from art copied into a different repository.
+    repo_id = ctx.meta.get("id")
+    if isinstance(repo_id, int) and not isinstance(repo_id, bool):
+        record = dict(record, repository_id=repo_id)
+    return fp.sidecar_text(out.parent, fp.inputs(ctx.meta, ctx.repo_dir), ctx.brand.sha256, out.name, record)
+
+
+def maybe_sidecar(ctx, out: Path, record: dict) -> None:
+    if (sidecar := _sidecar_path(out)) is not None:
+        sidecar.write_text(_sidecar_text(ctx, out, record), encoding="utf-8")
+
+
+def write_art(ctx, out: Path, data: bytes, *, format_generated: bool, preview=None, **extra) -> None:
+    """Prepare the optional preview and formatted sidecar before writing any art outputs."""
+    sidecar = _sidecar_path(out)
     destinations = [out] + ([sidecar] if sidecar else []) + ([preview[0]] if preview else [])
     for i, path in enumerate(destinations):
         for other in destinations[:i]:
             if path.resolve() == other.resolve() or (path.exists() and other.exists() and path.samefile(other)):
                 raise ShowcaseError("art output paths must be distinct", log="usage")
-    sidecar_text = None
-    if sidecar is not None:
-        record = {"sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data), **extra}
-        repo_id = ctx.meta.get("id")
-        if isinstance(repo_id, int) and not isinstance(repo_id, bool):
-            record["repository_id"] = repo_id
-        original = fp.sidecar_text(out.parent, fp.inputs(ctx.meta, ctx.repo_dir), ctx.brand.sha256, out.name, record)
-        sidecar_text = original
-        if format_generated:
-            from ctshowcase.formatting import format_text
-            sidecar_text = format_text(ctx.repo_dir, sidecar, original)
-            try:
-                unchanged = json.loads(sidecar_text) == json.loads(original)
-            except ValueError:
-                unchanged = False
-            if not unchanged:
-                raise ShowcaseError("formatter changed the art sidecar data", log="formatter-content")
+    record = {"sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data), **extra}
+    formatted = None
+    if sidecar is not None and format_generated:
+        from ctshowcase.formatting import format_text
+
+        original = _sidecar_text(ctx, out, record)
+        formatted = format_text(ctx.repo_dir, sidecar, original)
+        try:
+            unchanged = json.loads(formatted) == json.loads(original)
+        except ValueError:
+            unchanged = False
+        if not unchanged:
+            raise ShowcaseError("formatter changed the art sidecar data", log="formatter-content")
     write_bytes(out, data)
     if preview:
         write_bytes(*preview)
-    if sidecar is not None:
-        if format_generated:
-            write_bytes(sidecar, sidecar_text.encode("utf-8"))
-        else:
-            sidecar.write_text(sidecar_text, encoding="utf-8")
+    if sidecar is not None and formatted is not None:
+        write_bytes(sidecar, formatted.encode("utf-8"))
+    else:
+        maybe_sidecar(ctx, out, record)
 
 
 def write_bytes(path: Path, data: bytes) -> None:
