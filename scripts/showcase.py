@@ -891,7 +891,7 @@ def cmd_adopt(args):
     else:
         m = M.from_gh(args.slug)
     rd = Path(args.repo_dir) if args.repo_dir and not args.no_repo_dir else None
-    ctx = RepoContext(b, m, rd, type_override=getattr(args, "type_override", None))
+    ctx = RepoContext(b, m, rd, type_override=getattr(args, "type_override", None), metadata_path=args.meta)
     if ctx.style.get("hold") or b.resolver().family_hold(ctx.owner):
         # STANDARD §12.5 #4: a family on hold gets only the decision 18 footer (as `org labels` refuses it): no
         # settings, topics, label, security or social-preview jobs

@@ -403,3 +403,21 @@ def test_docs_only_cli_excludes_only_its_uncaptured_metadata_input(tmp_path, tra
         _tree(tmp_path, {"genuine-data.json": "{}"})
         with_code = run_cli(*args, "meta")
         assert json.loads(with_code.stdout)["detected"]["type"] == "workspace"
+
+
+def test_docs_only_adopt_matches_topics_with_local_metadata_input(tmp_path):
+    files = {"README.md": "# Northwind handbook\n", "docs/guide.md": "# Maintainer guide\n"}
+    _tree(tmp_path, files)
+    capture = tmp_path / "capture.snapshot.json"
+    owner, repo = "CompleteTech-Skills", "northwind-handbook"
+    capture.write_text(json.dumps(meta_dict(owner=owner, repo=repo, files=list(files), files_complete=True)),
+                       encoding="utf-8")
+    args = ["--meta", capture, "--repo-dir", tmp_path, "--format", "json"]
+    topics = run_cli(*args, "topics")
+    adopted = run_cli(*args, "adopt", f"{owner}/{repo}")
+    assert topics.returncode == 1, topics.stdout + topics.stderr
+    assert adopted.returncode == 0, adopted.stdout + adopted.stderr
+    assert "documentation" in json.loads(topics.stdout)["proposed"]
+    result = json.loads(adopted.stdout)
+    assert result["type"] == "documentation"
+    assert any(log.startswith("type-suggestion:documentation:docs-only") for log in result["logs"])
