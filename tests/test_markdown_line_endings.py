@@ -340,3 +340,55 @@ def test_unclosed_raw_text_in_quote_does_not_hide_later_managed_block(tmp_path, 
     written = path.read_bytes()
     assert written.startswith(quote.replace("\n", ending).encode("utf-8"))
     assert b"![Type GitHub profile]" in written and b"![License MIT]" in written
+
+
+def test_managed_marker_expansion_keeps_the_authored_lf_blank(tmp_path):
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps({"owner": "Northwind-Trading-Co", "repo": ".github",
+                                "license": "MIT", "files": ["README.md"]}), encoding="utf-8")
+    path = tmp_path / "README.md"
+    original = (b"# Probe\r\r<!-- showcase:badges:start --><!-- showcase:badges:end -->"
+                b"\r\n\nAuthored A\rAuthored B\rAuthored C\r")
+    path.write_bytes(original)
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--mode", "header", "--write")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert path.read_bytes().endswith(b"<!-- showcase:badges:end -->\r\n\nAuthored A\rAuthored B\rAuthored C\r")
+
+
+@pytest.mark.parametrize("ending", ENDINGS)
+def test_readme_upgrade_retains_non_markdown_separators(tmp_path, ending):
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps({"owner": "Northwind-Trading-Co", "repo": ".github",
+                                "license": "MIT", "files": ["README.md"]}), encoding="utf-8")
+    path = tmp_path / "README.md"
+    authored = "Authored A\u2028and B\u2029and C\u0085and D\vwith final separator\u2028"
+    raw = ("# Probe\n\n## About\n\n" + authored + "\n").replace("\n", ending).encode("utf-8")
+    path.write_bytes(raw)
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--write")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (authored + ending).encode("utf-8") in path.read_bytes()
+
+
+@pytest.mark.parametrize("ending", ENDINGS)
+def test_authored_license_marker_examples_in_textarea_are_never_rewritten(tmp_path, ending):
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps({"owner": "Northwind-Trading-Co", "repo": ".github",
+                                "license": "MIT", "files": ["README.md", "LICENSE"]}), encoding="utf-8")
+    (tmp_path / "LICENSE").write_text("Synthetic license file.", encoding="utf-8")
+    path = tmp_path / "README.md"
+    example = "<textarea>\n" + readme.managed_license("This is authored demonstration text.") + "\n</textarea>"
+    live = readme.managed_license("Old generated license prose.")
+    path.write_bytes(("# Probe\n\n" + example + "\n\n## License\n\n" + live + "\n")
+                     .replace("\n", ending).encode("utf-8"))
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--mode", "header", "--write")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert example.replace("\n", ending).encode("utf-8") in path.read_bytes()
+    assert b"Old generated license prose." not in path.read_bytes()
+
+
+def test_lead_reorder_cannot_modify_indented_marker_examples(make_ctx):
+    ctx = make_ctx()
+    assert not readme.nav_first(ctx)
+    example = readme.wrap("nav", "sample") + "\n\n" + readme.wrap("banner", "sample")
+    authored = "\n".join("    " + line for line in example.split("\n"))
+    assert readme.reorder_lead(ctx, authored) == authored

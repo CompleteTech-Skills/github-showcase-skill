@@ -31,6 +31,14 @@ def normalize_text(text: str) -> str:
     return text[1:] if text.startswith(BOM) else text
 
 
+def source_lines(text: str) -> list[str]:
+    """Split only at Markdown line endings, keeping other source characters."""
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    if not lines[-1]:
+        lines.pop()
+    return lines
+
+
 def start(b):
     return f"<!-- showcase:{b}:start -->"
 
@@ -100,7 +108,7 @@ def split_sections(text: str) -> tuple[str, list[tuple[str, str]]]:
     """(preamble, [(heading text, body)]) split at H2 outside code fences."""
     pre, sections, cur_h, buf = [], [], None, []
     fence = None
-    for line in text.splitlines():
+    for line in source_lines(text):
         m = re.match(r"^(```+|~~~+)", line)
         if m:
             fence = None if fence and line.startswith(fence) else (fence or m.group(1))
@@ -570,7 +578,7 @@ def scaffold(ctx: RepoContext, existing: str = "") -> str:
     co = callout(ctx)
     if co:
         parts.append(co)
-    keep = [ln for ln in existing.splitlines() if ln.strip() and not ln.startswith("# ")]
+    keep = [ln for ln in source_lines(existing) if ln.strip(" \t") and not ln.startswith("# ")]
     for h2, req in order:
         if h2 in ("License", "Licensing"):
             continue
@@ -664,7 +672,7 @@ def callout_only(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
     m = BANNER_BLOCK.match(text.lstrip("\n"))
     if m:  # our banner block is already on top (a re-run): keep it, look for the callout under it
         body = text.lstrip("\n")[m.end():]
-    first = next((ln for ln in body.splitlines() if ln.strip()), "")
+    first = next((ln for ln in source_lines(body) if ln.strip()), "")
     out = body
     if not first.lstrip().startswith(">"):
         if ctx.det["variant"] == "G":
@@ -687,7 +695,7 @@ def callout_only(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
             for fm in find_blocks(MARK, out):
                 if fm.group(1) == "footer" and is_footer_copy(fm.group(2), ctx.brand):
                     kept.append(out[pos:fm.start()])
-                    removed += [ln for ln in fm.group(2).splitlines() if ln.strip()]
+                    removed += [ln for ln in source_lines(fm.group(2)) if ln.strip()]
                     had_footer = True
                     pos = fm.end()
             out = "".join(kept) + out[pos:]
@@ -699,7 +707,7 @@ def callout_only(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
             out = out.rstrip("\n") + "\n\n" + footermod.block(ctx.brand) + "\n"
             # Report only the removed footer lines that the replacement footer does not carry again (multiset
             # difference), so a re-emitted line never counts as lost content in the preservation check.
-            kept = Counter(ln.strip() for ln in footermod.block(ctx.brand).splitlines() if ln.strip())
+            kept = Counter(ln.strip() for ln in source_lines(footermod.block(ctx.brand)) if ln.strip())
             rest = []
             for ln in removed:
                 if kept[ln.strip()] > 0:
@@ -928,7 +936,7 @@ def is_footer_copy(block: str, brand, loose_src: bool = False, own_site: bool = 
                        for parts in urls)
         return alt_ok
 
-    for line in block.splitlines():
+    for line in source_lines(block):
         if not line.strip():
             continue
         if not all(tag_ok(m) for m in FOOTER_TAG.finditer(line)):
@@ -952,7 +960,7 @@ def drop_old_footer(text: str, brand, loose_src: bool = False, own_site: bool = 
     tail = body[m.start():]
     if not tail.rstrip().endswith(f"</{m.group(1)}>") or not is_footer_like(tail, brand) or not is_footer_copy(tail, brand, loose_src, own_site):
         return text, []
-    return body[:m.start()].rstrip() + "\n", [ln for ln in tail.splitlines() if ln.strip()]
+    return body[:m.start()].rstrip() + "\n", [ln for ln in source_lines(tail) if ln.strip()]
 
 
 def _unreemitted(lines: list[str], kept: Counter) -> list[str]:
@@ -992,11 +1000,11 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
     # never-drop-a-line guard, so only the old lines it does not carry again are reported as removed.
     kept: Counter = Counter()
     if want_footer:
-        kept = Counter(ln.strip() for ln in footermod.block(ctx.brand).splitlines() if ln.strip())
+        kept = Counter(ln.strip() for ln in source_lines(footermod.block(ctx.brand)) if ln.strip())
     if want_footer and blocks.get("footer") and is_footer_copy(blocks["footer"], ctx.brand):
         # A configured publication-path change replaces only our recognized footer, not authored credits or partner
         # images inside a similarly named block.
-        for ln in blocks["footer"].splitlines():
+        for ln in source_lines(blocks["footer"]):
             if ln.strip():
                 if kept[ln.strip()] > 0:
                     kept[ln.strip()] -= 1
@@ -1009,7 +1017,7 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
     preserve = ctx.repo in (ctx.org.get("readme_preserve") or []) or len(text.encode()) > 15000
     pre, sections = split_sections(body)
     keep_pre: list[str] = []
-    lines = pre.splitlines()
+    lines = source_lines(pre)
     if _leading_banner(pre) and (ctx.tier == "T2" or preserve):
         preserve = True
         # q57 `pres`: the hero goes above the README's own banner (kept directly under it), or nothing is added
@@ -1022,7 +1030,7 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
         if old_tag is not None:
             tag = tagline_body(ctx, old_tag, text)
             if old_tag.strip() and not tag:  # an inherited tagline, emptied on purpose (not a lost line)
-                removed += [ln for ln in old_tag.splitlines() if ln.strip()]
+                removed += [ln for ln in source_lines(old_tag) if ln.strip()]
             keep["tagline"] = tag
         if variant == "J" and "badges" in blocks:
             keep["badges"] = badge_body(ctx, blocks["badges"])
@@ -1030,7 +1038,7 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
         if want_footer:
             body, _ = drop_old_footer(body, ctx.brand, own_site=True)  # its lines are already in `removed`
         pre, sections = split_sections(body)
-        lines = pre.splitlines()
+        lines = source_lines(pre)
     # an unmarked bold line opening the preamble is an old tagline. With a description it is replaced; without one it
     # is carried into an empty tagline block (header rule), and a second one stays as authored text: never erased
     carry: list[str] = []
@@ -1088,7 +1096,7 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
                 (removed if (x is unit[0] or x is unit[-1] or is_header_line(x)) else keep_pre).append(x)
         else:
             keep_pre.extend(unit)
-    intro = "\n".join(keep_pre).strip()
+    intro = "\n".join(keep_pre).strip(" \t\n")
     # sections: renames, mapping, Notes demotion, License last
     renames = rv["renames"]
     order = [h for h, _ in rv["variants"].get(variant, [])]
@@ -1112,7 +1120,8 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
             if variant == "D" and name.lower() == "status" and "Findings" not in placed:
                 placed["Findings"] = b.strip("\n")
                 continue
-            notes.append(f"### {clean}\n{b.rstrip()}" if b.strip() else f"### {clean}")
+            content = b.rstrip(" \t\n")
+            notes.append(f"### {clean}\n{content}" if content else f"### {clean}")
     out = []
     if preserve:
         # §7.0 preserve list: additive only. The hero banner block goes on top (q57 `pres` default, "Banner above the
@@ -1125,7 +1134,8 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
         if intro:
             out.append(intro)
         for h, b in sections:
-            out.append(f"## {h}\n{b.rstrip()}" if b.strip() else f"## {h}")
+            content = b.rstrip(" \t\n")
+            out.append(f"## {h}\n{content}" if content else f"## {h}")
         if not any(h.strip().lower() in ("license", "licensing", "licence") for h, _ in sections):
             lic = license_section(ctx)
             if lic:
@@ -1141,7 +1151,7 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
         if old_tag and old_tag.strip() and not new_tag:
             # an inherited tagline is emptied (header mode does the same): its lines are dropped on purpose, so the
             # never-delete check must not report them as lost
-            removed += [ln for ln in old_tag.splitlines() if ln.strip()]
+            removed += [ln for ln in source_lines(old_tag) if ln.strip()]
         out.append(header(ctx, tagline=new_tag, existing_badges=blocks.get("badges")))
         co = callout(ctx)
         if co and co not in intro:
@@ -1155,7 +1165,8 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
         if h in ("License", "Licensing"):
             continue
         if h in placed:
-            out.append(f"## {h}\n\n{placed[h].strip()}" if placed[h].strip() else f"## {h}")
+            content = placed[h].strip(" \t\n")
+            out.append(f"## {h}\n\n{content}" if content else f"## {h}")
         elif dict(rv["variants"][variant]).get(h) == "R" and not preserve:
             body = section_facts(ctx, h)
             if body:
@@ -1166,7 +1177,8 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
         nb = "\n\n".join(x for x in ([existing_notes] if existing_notes else []) + notes)
         out.append(f"## Notes\n\n{nb}")
     if license_body:
-        out.append(f"## {license_body[0]}\n\n{license_body[1].strip()}")
+        content = license_body[1].strip(" \t\n")
+        out.append(f"## {license_body[0]}\n\n{content}")
     else:
         lic = license_section(ctx)
         if lic:
@@ -1230,22 +1242,26 @@ def _sub_blocks(text: str, sub) -> str:
     return _seam(out, text[pos:]) if pos else text
 
 
-LEAD_PAIR = re.compile(r"\A(\s*)(" + re.escape(start("nav")) + r".*?" + re.escape(end("nav")) + r")(\s*)(" +
-                       re.escape(start("banner")) + r".*?" + re.escape(end("banner")) + r")", re.S)
-LEAD_PAIR_REV = re.compile(r"\A(\s*)(" + re.escape(start("banner")) + r".*?" + re.escape(end("banner")) + r")(\s*)(" +
-                           re.escape(start("nav")) + r".*?" + re.escape(end("nav")) + r")", re.S)
-
-
 def reorder_lead(ctx: RepoContext, text: str) -> str:
-    """Swap a README's leading nav and banner marker blocks into the configured §7.1 order (q57 `nav`), so READMEs
-    written before the order changed follow it on the next header refresh. Only the two adjacent top blocks move."""
-    pat = LEAD_PAIR_REV if nav_first(ctx) else LEAD_PAIR
-    return pat.sub(lambda m: m.group(1) + m.group(4) + m.group(3) + m.group(2), text, count=1)
+    """Swap adjacent, genuinely managed leading blocks into the configured §7.1 order."""
+    blocks = find_blocks(MARK, text)
+    if len(blocks) < 2:
+        return text
+    first, second = blocks[:2]
+    reverse = ("banner", "nav") if nav_first(ctx) else ("nav", "banner")
+    if (first.group(1), second.group(1)) != reverse:
+        return text
+    prefix = text[:first.start()]
+    seam = text[first.end():second.start()]
+    if prefix.strip(" \t\n") or seam.strip(" \t\n"):
+        return text
+    return prefix + second.group(0) + seam + first.group(0) + text[second.end():]
 
 
 LICENSE_MARK = "<!-- showcase:license -->"
 LICENSE_BODY_START = "<!-- showcase:license:body:start -->"
 LICENSE_BODY_END = "<!-- showcase:license:body:end -->"
+LICENSE_MARKERS = re.compile("|".join(map(re.escape, (LICENSE_MARK, LICENSE_BODY_START, LICENSE_BODY_END))))
 
 
 def license_sha(body: str) -> str:
@@ -1261,12 +1277,10 @@ def managed_license(body: str) -> str:
 
 def license_block(ctx: RepoContext, text: str) -> str:
     """Refresh only an unambiguously bounded body with a matching digest."""
-    visible = masked(text)
-    i = visible.find(LICENSE_MARK)
-    if i < 0:
+    markers = find_blocks(LICENSE_MARKERS, text)
+    if [match.group() for match in markers] != [LICENSE_MARK, LICENSE_BODY_START, LICENSE_BODY_END]:
         return text
-    if any(visible.count(marker) != 1 for marker in (LICENSE_MARK, LICENSE_BODY_START, LICENSE_BODY_END)):
-        return text
+    i = markers[0].start()
     lic = license_section(ctx)
     if not lic or any(code in ctx.logs for code in ("needs-input:license-policy", "needs-input:license-file",
                                                     "needs-input:licensing-file")):
@@ -1274,7 +1288,7 @@ def license_block(ctx: RepoContext, text: str) -> str:
     pattern = (re.escape(LICENSE_MARK) + r"\n<!-- showcase:license:sha256=([0-9a-f]{64}) -->\n" +
                re.escape(LICENSE_BODY_START) + r"\n(.*?)\n" + re.escape(LICENSE_BODY_END))
     m = re.compile(pattern, re.S).match(text, i)
-    if not m or license_sha(m.group(2)) != m.group(1):
+    if not m or m.end() != markers[-1].end() or license_sha(m.group(2)) != m.group(1):
         return text
     text = text[:i] + managed_license(lic[1]) + text[m.end():]
     h = re.search(r"(?m)^## (?:License|Licensing|Licence)[ \t]*\n(\n?)\Z", text[:i])
@@ -1444,10 +1458,11 @@ def preservation(before: str, after: str, removed: list[str], *, ctx: RepoContex
         return m.group(0)
 
     before = _sub_blocks(before, omit_owned_badges)
-    b_lines = Counter(ln.strip() for ln in before.splitlines() if ln.strip() and not ln.strip().startswith("<!-- showcase:"))
+    before_lines = (line.strip(" \t") for line in source_lines(before))
+    b_lines = Counter(line for line in before_lines if line and not line.startswith("<!-- showcase:"))
     for r in removed:
-        b_lines[r.strip()] -= 1
-    a_lines = Counter(ln.strip() for ln in after.splitlines() if ln.strip())
+        b_lines[r.strip(" \t")] -= 1
+    a_lines = Counter(line.strip(" \t") for line in source_lines(after) if line.strip(" \t"))
     for ln, n in b_lines.items():
         if n <= 0:
             continue
@@ -1566,15 +1581,23 @@ def restore_line_endings(raw: str, before: str, after: str) -> str:
         if i not in used:
             remaining[old[i]].append(endings[i])
     out_ends = endings[:head]
+    from_source = [True] * head
     for i in new_middle:
-        line = new[i]
         if i in anchored:
             out_ends.append(endings[anchored[i]])
+            from_source.append(True)
+        elif source := remaining.get(new[i]):
+            out_ends.append(source.popleft())
+            from_source.append(True)
         else:
-            out_ends.append(remaining[line].popleft() if remaining.get(line) else common)
+            out_ends.append(common)
+            from_source.append(False)
     out_ends.extend(endings[old_count - tail:])
-    # A lone CR followed by an empty LF line would read back as one CRLF.
+    from_source.extend([True] * tail)
+    # CR and an adjacent LF would be read back as one CRLF. Use CRLF for a
+    # newly rendered line first, preserving the ending of a retained line.
     for i in range(1, len(out_ends)):
         if not new[i] and out_ends[i - 1] == "\r" and out_ends[i] == "\n":
-            out_ends[i] = "\r\n"
+            target = i - 1 if from_source[i] and not from_source[i - 1] else i
+            out_ends[target] = "\r\n"
     return "".join(line + end for line, end in zip(new, out_ends)) + new[-1]

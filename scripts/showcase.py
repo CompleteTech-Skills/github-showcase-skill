@@ -487,7 +487,7 @@ def cmd_readme(args):
             after = readme.header_only(ctx, before)
     else:
         if mode == "auto":
-            mode = "scaffold" if len([ln for ln in before.splitlines() if ln.strip()]) < 3 else "upgrade"
+            mode = "scaffold" if len([ln for ln in readme.source_lines(before) if ln.strip(" \t")]) < 3 else "upgrade"
         removed = []
         if mode == "scaffold":
             after = readme.scaffold(ctx, before)
