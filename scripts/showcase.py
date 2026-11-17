@@ -44,7 +44,7 @@ def emit(args, obj: dict) -> None:
         if obj.get("owner"):
             head += f" ({obj['owner']}" + (f"/{obj['repo']})" if obj.get("repo") else ")")
         print(head)
-        for k in ("out", "outputs", "text", "proposed", "logs"):
+        for k in ("out", "outputs", "text", "proposed", "logs", "staged_description"):
             if obj.get(k):
                 print(f"  {k}: {obj[k]}")
         return
@@ -520,10 +520,11 @@ def cmd_readme(args):
         path.write_bytes(after.encode("utf-8"))
         if contrib_new is not None:
             (rd / "CONTRIBUTING.md").write_text(contrib_new, encoding="utf-8")
-    if args.write:
-        from ctshowcase.staged import record_output
+    if args.write and str(ctx.meta.get("description") or "").strip():
+        from ctshowcase.staged import record_output, tagline_blocks
         from ctshowcase.fingerprint import file_record
-        record_output(ctx, path, file_record(path))
+        if readme.tagline_body(ctx).strip() in tagline_blocks(after):
+            record_output(ctx, path, file_record(path))
     if args.records and changed:
         records.append(args.records, [records.record(ctx.owner, ctx.repo, "readme", "README.md", before, after,
                                                      f"§7 variant {ctx.det['variant']} ({mode})")])
@@ -532,7 +533,7 @@ def cmd_readme(args):
     if args.diff or not args.write:
         if args.format == "text":
             if getattr(ctx, "staged_description", None) is not None:
-                sys.stderr.write("staged-description\n")
+                sys.stderr.write(f"staged-description: {json.dumps(ctx.staged_description, ensure_ascii=False)}\n")
             sys.stdout.write(diff)
             return None, OK
         res["diff"] = diff
@@ -722,8 +723,13 @@ def cmd_fingerprint(args):
     out_dir = (rd or Path(".")) / args.out_dir if not Path(args.out_dir).is_absolute() else Path(args.out_dir)
     inp = fp.inputs(m, rd)
     f = fp.fingerprint(inp, fp.config_sha256())
-    old = fp.read_sidecar(out_dir).get("fingerprint")
-    changed = f != old
+    selected = None
+    if args.outputs is not None or args.readme is not None:
+        art = {"banner": "banner.png", "card": "card.svg"}
+        selected = {art[kind] for kind in (args.outputs or "").split(",") if kind in art}
+        if args.readme in ("header", "bootstrap"):
+            selected.add("README.md")
+    changed = fp.outputs_changed(fp.read_sidecar(out_dir), f, selected)
     if args.github_output and os.environ.get("GITHUB_OUTPUT"):
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
             fh.write(f"changed={'true' if changed else 'false'}\nfingerprint={f}\n")
@@ -1190,6 +1196,8 @@ def parser() -> argparse.ArgumentParser:
     s = sub.add_parser("fingerprint", help="input fingerprint vs docs/images/.showcase.json")
     s.add_argument("--out-dir", default="docs/images")
     s.add_argument("--github-output", action="store_true")
+    s.add_argument("--outputs", help="restrict the check to selected Action art surfaces (comma-separated banner,card)")
+    s.add_argument("--readme", help="include README provenance for Action modes header and bootstrap")
     s.set_defaults(func=cmd_fingerprint)
 
     s = sub.add_parser("fonts", help="verify or fetch the pinned OFL fonts")

@@ -84,12 +84,25 @@ def read_sidecar(out_dir: Path) -> dict:
     return {}
 
 
+def outputs_changed(data: dict, current: str, selected: set[str] | None = None) -> bool:
+    """Compare recorded outputs independently, falling back to the original cache for legacy records."""
+    previous = data.get("fingerprint")
+    records = [record for name, record in (data.get("outputs") or {}).items()
+               if selected is None or name in selected]
+    if not records:
+        return previous != current
+    return any(record.get("staged_description") or record.get("fingerprint", previous) != current
+               for record in records)
+
+
 def write_sidecar(out_dir: Path, inp: dict, cfg_sha: str, name: str, record: dict) -> Path:
     data = read_sidecar(out_dir)
-    outputs = dict(data.get("outputs") or {})
-    outputs[name] = record
+    previous = data.get("fingerprint")
+    outputs = {key: {"fingerprint": previous, **value} for key, value in (data.get("outputs") or {}).items()}
+    current = fingerprint(inp, cfg_sha)
+    outputs[name] = dict(record, fingerprint=current)
     data = {"schema": 1, "skill_version": __version__, "standard": STANDARD, "config_sha256": cfg_sha, "inputs": inp,
-            "fingerprint": fingerprint(inp, cfg_sha), "outputs": outputs}
+            "fingerprint": current, "outputs": outputs}
     p = out_dir / SIDECAR
     p.write_text(json.dumps(data, sort_keys=True, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
     return p

@@ -202,3 +202,83 @@ def test_cli_ordinary_refresh_replaces_only_its_staged_records(tmp_path, surface
         path = (target / "docs/images" / key) if "/" not in key and key != "README.md" else target / key
         assert after[key]["sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
         assert "staged_description" not in after[key]
+
+
+def test_fingerprint_uses_configured_output_records(tmp_path):
+    capture = tmp_path / "meta.json"
+    capture.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    target = tmp_path / "repo"
+    (target / ".github").mkdir(parents=True)
+    (target / ".github/showcase.yml").write_text("chips:\n  key: ['Triage']\n  attrs: ['Python']\n", encoding="utf-8")
+    common = ["--meta", capture, "--repo-dir", target, "--format", "json"]
+    commands = [("banner", "--description", "Route support requests."), ("card",)]
+
+    def run(*args):
+        result = run_cli(*common, *args)
+        assert result.returncode == 0, result.stdout + result.stderr
+        return json.loads(result.stdout)
+
+    for command in commands:
+        run(*command)
+    assert run("fingerprint", "--outputs", "banner,card")["changed"] is True
+    assert run("fingerprint", "--outputs", "card")["changed"] is False
+    run("banner")
+    assert run("fingerprint", "--outputs", "banner,card")["changed"] is False
+    run("readme", "--mode", "scaffold", "--write", "--description", "Route support requests.")
+    assert run("fingerprint", "--outputs", "banner,card", "--readme", "header")["changed"] is True
+    assert run("fingerprint", "--outputs", "banner,card", "--readme", "none")["changed"] is False
+    run("readme", "--mode", "header", "--write")
+    assert run("fingerprint", "--outputs", "banner,card", "--readme", "header")["changed"] is False
+
+
+def test_fingerprint_preserves_legacy_records_on_partial_write(tmp_path):
+    from ctshowcase.fingerprint import fingerprint, outputs_changed, write_sidecar
+
+    old = fingerprint({"description": "Old description."}, "config")
+    sidecar = tmp_path / ".showcase.json"
+    sidecar.write_text(json.dumps({"fingerprint": old, "outputs": {"banner.png": {"sha256": "banner-hash"}}}),
+                       encoding="utf-8")
+    assert not outputs_changed(read_sidecar(tmp_path), old, {"banner.png"})
+    inputs = {"description": "New description."}
+    write_sidecar(tmp_path, inputs, "config", "card.svg", {"sha256": "card-hash"})
+    current = fingerprint(inputs, "config")
+    data = read_sidecar(tmp_path)
+    assert outputs_changed(data, current, {"banner.png", "card.svg"})
+    assert not outputs_changed(data, current, {"card.svg"})
+
+
+@pytest.mark.parametrize("variant,mode,body", [
+    ("B", "header", None),
+    ("B", "header", "# An unmanaged README\n"),
+    ("G", "upgrade", "# An unmanaged README\n\nA paragraph.\n"),
+    ("H", "upgrade", "# An unmanaged README\n\nA paragraph.\n"),
+])
+def test_readme_only_records_a_rendered_tagline(tmp_path, variant, mode, body):
+    capture = tmp_path / "meta.json"
+    capture.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    path = tmp_path / "README.md"
+    if body is not None:
+        path.write_text(body, encoding="utf-8")
+    common = ["--meta", capture, "--repo-dir", tmp_path, "readme", "--mode", mode, "--variant", variant, "--write"]
+    for options in ([], ["--description", "Route support requests."]):
+        result = run_cli(*common, *options)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert not (tmp_path / "docs/images/.showcase.json").exists()
+    if body is None:
+        assert not path.exists()
+
+
+def test_staged_social_blocks_upload_jobs(tmp_path):
+    capture = tmp_path / "meta.json"
+    capture.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    output = tmp_path / "social.png"
+    jobs = tmp_path / "jobs.jsonl"
+    common = ["--meta", capture, "--repo-dir", tmp_path, "--format", "json", "content", "social",
+              "--job", "--jobs", jobs, "--out", output]
+    result = run_cli(*common, "--description", "Route support requests.")
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "staged-description:upload" in json.loads(result.stdout)["logs"]
+    assert not output.exists() and not jobs.exists()
+    live = run_cli(*common)
+    assert live.returncode == 0, live.stdout + live.stderr
+    assert json.loads(jobs.read_text(encoding="utf-8"))["kind"] == "browser"

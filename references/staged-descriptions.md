@@ -11,17 +11,20 @@ and for the rendered description. This does not approve the sentence for
 publication: run the normal description check and submit the proposal to the
 orchestrator's writer queue.
 
-Each successfully written output has its own `staged_description` record in
+Each staged artifact has its own `staged_description` record in
 `docs/images/.showcase.json`. Records for other outputs are retained, so rendering
 only the card does not claim the banner was refreshed. For explicit output paths
 outside the target checkout, the sidecar is placed beside that output; metadata-only
 rendering uses that location too. README dry runs report the proposal without
-writing a sidecar; `readme --write` records it even if the README is already current.
+writing a sidecar. `readme --write` records the proposal when the resulting
+README has a managed tagline with that text, including an already-current tagline.
+`content social --job` requires rendering from captured metadata.
 An ordinary render replaces the record for each refreshed output with its current
 hash and no staged description, while leaving untouched output records intact.
 Card PNG previews have their own records. Banner and card records retain the
-captured repository ID when available. The sidecar's top-level inputs and
-fingerprint describe the most recent recorded output, not every retained record.
+captured repository ID when available. The sidecar's top-level inputs and fingerprint describe the most recent recorded
+output. Each output has its own input fingerprint. The Action checks the records
+for its configured banner, card and README surfaces before skipping generation.
 
 `doctor` compares each managed tagline block with what `readme` would write for the
 live description in the supplied metadata (`readme.tagline_body`, the one place that

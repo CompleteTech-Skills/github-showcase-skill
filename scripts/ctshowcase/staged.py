@@ -66,6 +66,13 @@ def tagline_forms(ctx) -> set[str]:
     return forms
 
 
+def tagline_blocks(text: str) -> list[str]:
+    from .mdcode import find_blocks
+    from .readme import MARK, normalize_text
+
+    return [m.group(2).strip() for m in find_blocks(MARK, normalize_text(text)) if m.group(1) == "tagline"]
+
+
 def tagline_drift(ctx, text: str) -> bool:
     """True when a managed tagline block differs from what `readme` would write for the live description.
 
@@ -73,11 +80,7 @@ def tagline_drift(ctx, text: str) -> bool:
     examples are ignored. An absent or unmanaged tagline is R7's concern, not drift. With an empty live description
     there is nothing to compare: readme keeps the authored tagline under needs-input:description, so it is not drift.
     """
-    from .mdcode import find_blocks
-    from .readme import MARK, normalize_text
-
-    text = normalize_text(text)
-    blocks = [m.group(2).strip() for m in find_blocks(MARK, text) if m.group(1) == "tagline"]
+    blocks = tagline_blocks(text)
     if not blocks or not str(ctx.meta.get("description") or "").strip():
         return False
     forms = tagline_forms(ctx)

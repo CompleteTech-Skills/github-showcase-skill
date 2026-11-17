@@ -44,7 +44,7 @@ inputs:
 
 outputs:
   changed:
-    description: "true when the inputs fingerprint differs from docs/images/.showcase.json"
+    description: "true when selected showcase outputs need a refresh"
     value: ${{ steps.fp.outputs.changed }}
   fingerprint:
     description: "sha256 of the canonical showcase inputs"
@@ -87,7 +87,12 @@ runs:
     - id: fp
       if: steps.meta.outputs.skip != 'true'
       shell: bash
-      run: python3 "$GITHUB_ACTION_PATH/scripts/showcase.py" --meta "$RUNNER_TEMP/meta.json" --repo-dir . fingerprint --github-output
+      env:
+        SHOWCASE_OUTPUTS: ${{ inputs.outputs }}
+        SHOWCASE_README: ${{ inputs.readme }}
+      run: >-
+        python3 "$GITHUB_ACTION_PATH/scripts/showcase.py" --meta "$RUNNER_TEMP/meta.json" --repo-dir .
+        fingerprint --github-output --outputs "$SHOWCASE_OUTPUTS" --readme "$SHOWCASE_README"
 
     - if: steps.meta.outputs.skip != 'true' && (steps.fp.outputs.changed == 'true' || inputs.force == 'true')
       uses: actions/setup-python@v5

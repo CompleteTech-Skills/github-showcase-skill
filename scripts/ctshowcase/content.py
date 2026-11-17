@@ -2623,6 +2623,11 @@ def cmd_content(args, cli=None):
     resolver = _resolver(args, cli)
     head = {"command": "content", "action": act}
     if act == "social":
+        if args.job and args.description is not None:
+            from .staged import prepare
+            prepare({}, args.description)
+            raise ShowcaseError("render from captured metadata to emit a social preview upload job",
+                                log="staged-description:upload")
         owner, srepo, _ = _owner_repo(args, cli, None)
         if owner:
             resolver.check_owner(owner, allow_hold=args.allow_hold, repo=srepo)
