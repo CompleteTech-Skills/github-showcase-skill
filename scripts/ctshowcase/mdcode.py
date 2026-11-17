@@ -159,11 +159,11 @@ def _run_end(text: str, i: int) -> int:
 
 def _quotes(body: str) -> tuple[int, str]:
     """(block-quote depth, remainder) of a line: the `>` markers are container syntax, not paragraph content."""
-    depth = 0
-    while m := _QUOTE.match(body):
+    depth, pos = 0, 0
+    while m := _QUOTE.match(body, pos):
         depth += 1
-        body = body[m.end():]
-    return depth, body
+        pos = m.end()
+    return depth, body[pos:]
 
 
 def block_line(body: str) -> str:
@@ -186,12 +186,13 @@ def source_prefix_chars(body: str, columns: int) -> int:
 
 def _strip_quotes(body: str, depth: int) -> str:
     """`body` with at most `depth` leading block-quote markers removed: deeper `>` characters stay content."""
+    pos = 0
     for _ in range(depth):
-        m = _QUOTE.match(body)
+        m = _QUOTE.match(body, pos)
         if not m:
             break
-        body = body[m.end():]
-    return body
+        pos = m.end()
+    return body[pos:]
 
 
 def _indent_columns(body: str, start: int = 0) -> int:
@@ -229,34 +230,31 @@ def _containers(body: str) -> tuple[int, int, str]:
     """(block-quote depth, list-item content column, remainder): quote and item markers are peeled in any order, so
     `- ```x`, `1. ```x`, `- > ```x` and `> - ```x` all reach the same remainder. The column is the summed width of the
     item prefixes, measured on the quote-stripped line; it is 0 when the line has no item marker."""
-    depth, col, cursor, rest = 0, 0, 0, body
+    depth, col, column, pos = 0, 0, 0, 0
     while True:
-        if m := _QUOTE.match(rest):
+        if m := _QUOTE.match(body, pos):
             depth += 1
-            cursor += len(rest[:m.end()])
-        elif m := _ITEM_PREFIX.match(rest):
+            column += m.end() - pos
+        elif m := _ITEM_AT.match(body, pos):
             # Tabs are expanded at four-column stops, not counted as one byte.
-            # Consume the complete 1..4-column padding, including mixed spaces
-            # and tabs; otherwise a fence is assigned to the wrong container.
-            marker = re.match(r"^ {0,3}(?:[-+*]|[0-9]{1,9}[.)])", rest)
-            marker_end = marker.end()
-            marker_col = cursor + marker_end
-            end, padded_col = marker_end, marker_col
-            while end < len(rest) and rest[end] in " \t":
-                padded_col = ((padded_col // 4 + 1) * 4 if rest[end] == "\t" else padded_col + 1)
+            marker = _MARKER_AT.match(body, pos)
+            end = marker.end()
+            marker_col = column + end - pos
+            padded_col = marker_col
+            while end < len(body) and body[end] in " \t":
+                padded_col = ((padded_col // 4 + 1) * 4 if body[end] == "\t" else padded_col + 1)
                 end += 1
-            if 0 < padded_col - marker_col <= 4 and end < len(rest):
-                col += padded_col - cursor
-                cursor = padded_col
-                rest = rest[end:]
+            if 0 < padded_col - marker_col <= 4 and end < len(body):
+                col += padded_col - column
+                column, pos = padded_col, end
                 continue
-            previous = cursor
-            for char in rest[:m.end()]:
-                cursor = (cursor // 4 + 1) * 4 if char == "\t" else cursor + 1
-            col += cursor - previous
+            previous = column
+            for char in body[pos:m.end()]:
+                column = (column // 4 + 1) * 4 if char == "\t" else column + 1
+            col += column - previous
         else:
-            return depth, col, rest
-        rest = rest[m.end():]
+            return depth, col, body[pos:]
+        pos = m.end()
 
 
 def _container_path(body: str) -> tuple[tuple[tuple[str, int], ...], str]:

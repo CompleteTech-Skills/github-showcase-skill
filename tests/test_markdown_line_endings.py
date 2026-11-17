@@ -208,3 +208,17 @@ def test_restore_line_endings_pairs_repeated_rows_in_occurrence_order():
     after = 'new start\n' + 'repeat\n' * 60_000 + 'new end\n'
     restored = readme.restore_line_endings(raw, readme.normalize_text(raw), after)
     assert restored == raw.replace('start', 'new start').replace('end', 'new end')
+
+
+def test_restore_line_endings_uses_context_for_surviving_duplicate():
+    raw = 'start\rshared\r\nmanaged anchor\nshared\rauthored anchor\nend\n'
+    after = 'start\nchanged\nmanaged anchor\nshared\nauthored new\nend\n'
+    restored = readme.restore_line_endings(raw, readme.normalize_text(raw), after)
+    assert '\nmanaged anchor\nshared\rauthored new\n' in restored
+
+
+def test_restore_line_endings_keeps_authored_copy_of_new_nav_row():
+    raw = '<!-- showcase:nav:start -->\nold nav\n<!-- showcase:nav:end -->\n\nrow\r\n\nnext\n'
+    after = readme.normalize_text(raw).replace('old nav', 'row')
+    restored = readme.restore_line_endings(raw, readme.normalize_text(raw), after)
+    assert restored == raw.replace('old nav', 'row')

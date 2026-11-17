@@ -464,12 +464,12 @@ def cmd_readme(args):
             ctx.log("bootstrap:edited")
             base_text = readme.drop_pristine(before)
             after, removed = readme.upgrade(ctx, base_text)
-            if readme.preservation(base_text, after, removed):
+            if readme.preservation(base_text, after, removed, ctx=ctx):
                 # a marked footer that holds authored content (partner or foreign image) must never be regenerated
                 refusal = _authored_footer_refusal(ctx, base_text)
                 if refusal:
                     return base("readme", ctx, result="fail", mode="bootstrap",
-                                problems=refusal + readme.preservation(base_text, after, removed)[:19],
+                                problems=refusal + readme.preservation(base_text, after, removed, ctx=ctx)[:19],
                                 logs=ctx.logs + ["readme-shrink"]), CHECK_FAILED
                 ctx.log("readme-shrink")
                 after, removed = readme.header_only(ctx, base_text), []
@@ -485,7 +485,7 @@ def cmd_readme(args):
             after = readme.header_only(ctx, before)
         else:
             after, removed = readme.upgrade(ctx, before)
-            problems = readme.preservation(before, after, removed)
+            problems = readme.preservation(before, after, removed, ctx=ctx)
             if problems:
                 return base("readme", ctx, result="fail", mode=mode, problems=problems[:20],
                             logs=ctx.logs + ["readme-shrink"]), CHECK_FAILED

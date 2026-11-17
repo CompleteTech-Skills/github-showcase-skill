@@ -241,3 +241,29 @@ def test_reference_bare_destination_allows_unmatched_openers_cli(tmp_path):
     rejected = source.replace('missing(', 'missing)').replace('x=((', 'x=))')
     fails = lint(tmp_path, rejected)
     assert not any('missing).png' in fail or 'off-palette badge colour ABCDEF' in fail for fail in fails)
+
+
+@pytest.mark.parametrize('source', [
+    '![Shot][img]\n\n[img]: docs/images/%00.png',
+    '<img src=docs/images/%00.png>',
+    '![Shot](docs/images/%00.png)',
+])
+def test_local_image_nul_percent_escape_reports_missing_cli(tmp_path, source):
+    assert 'R7 local image does not resolve: docs/images/%00.png' in lint(tmp_path, source)
+
+
+def test_deep_quote_helpers_materialize_only_returned_suffix():
+    class MeasuredString(str):
+        copied = 0
+
+        def __getitem__(self, key):
+            result = super().__getitem__(key)
+            if isinstance(key, slice):
+                type(self).copied += len(result)
+            return result
+
+    source = MeasuredString('> ' * 4000 + 'content')
+    assert mdcode._quotes(source) == (4000, 'content')
+    assert mdcode._strip_quotes(source, 4000) == 'content'
+    assert mdcode._containers(source) == (4000, 0, 'content')
+    assert MeasuredString.copied == 3 * len('content')

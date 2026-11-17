@@ -363,7 +363,12 @@ def _extra_footer(text: str) -> bool:
 def _local(readme: Path, src: str, fails: list, example: bool = False):
     if re.match(r"^(https?:|data:|#)", src):
         return
-    p = (readme.parent / unquote(src.split("#")[0].split("?")[0])).resolve()  # docs/My%20Shot.png names "My Shot.png"
+    # Percent escapes can decode to an invalid filesystem path.
+    try:
+        p = (readme.parent / unquote(src.split("#")[0].split("?")[0])).resolve()
+    except (OSError, ValueError):
+        fails.append(f"R7 local image does not resolve: {src}")
+        return
     if not p.is_file():
         fails.append(f"R7 local image does not resolve: {src}")
         return

@@ -275,12 +275,15 @@ def _eol_normalized(body: str) -> str:
     return body.replace("\r\n", "\n").replace("\r", "\n").strip("\n")
 
 
+def _legacy_badge_body(brand, body: str, style: dict | None = None) -> bool:
+    return legacy_profile_badges(brand, body, style) or _eol_normalized(body) in template_badge_bodies(brand)
+
+
 def badge_body(ctx: RepoContext, existing: str | None = None) -> str:
     """Refresh owned rows; a missing or changed digest makes a J block authored."""
     if ctx.det["variant"] != "J":
         return badges_html(ctx) if ctx.det["variant"] == "F" else badges_md(ctx)
-    is_legacy = (legacy_profile_badges(ctx.brand, existing or "", ctx.style)
-                 or _eol_normalized(existing or "") in template_badge_bodies(ctx.brand))
+    is_legacy = _legacy_badge_body(ctx.brand, existing or "", ctx.style)
     has_license_row = "![License " in (existing or "") or "![AGPL-3.0 or commercial license]" in (existing or "")
     if is_legacy and has_license_row and ctx.public and (ctx.meta.get("license") or "").upper() in ("", "NOASSERTION", "OTHER"):
         return existing  # missing metadata cannot disprove an authored license claim
@@ -288,7 +291,7 @@ def badge_body(ctx: RepoContext, existing: str | None = None) -> str:
         return existing
     body = badges_md(ctx)
     previous = GENERATED_BADGES.fullmatch(existing or "")
-    # The replaces digest must preserve significant whitespace (badge_sha), matching preservation().
+    # Record the exact prior body for the preservation check to independently verify.
     replaced_digest = badge_sha(existing) if is_legacy else previous.group(2) if previous else None
     replaces = f" replaces={replaced_digest}" if replaced_digest else ""
     return f"<!-- showcase:badges:generated sha256={badge_sha(body)}{replaces} -->\n{body}"
@@ -958,6 +961,10 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
     if variant in ("G", "H"):
         return callout_only(ctx, normalize_text(text))
     text = normalize_text(text)
+    if variant == "J":
+        badge_blocks = [m for m in find_blocks(MARK, text) if m.group(1) == "badges"]
+        if len(badge_blocks) > 1 or any(m.group(0) != wrap("badges", m.group(2)) for m in badge_blocks):
+            return header_only(ctx, text), []
     body, blocks = _strip_markers(text)
     want_footer = footer_wanted(ctx)
     removed: list[str] = []
@@ -1169,7 +1176,8 @@ def header_only(ctx: RepoContext, text: str) -> str:
     def sub(m):
         b, body = m.group(1), m.group(2)
         if b == "badges" and ctx.det["variant"] == "J":
-            return wrap(b, badge_body(ctx, body))
+            fresh = badge_body(ctx, body)
+            return m.group(0) if fresh == body else wrap(b, fresh)
         if b == "checklist":
             if re.search(r"- \[ \]", body):
                 return m.group(0)
@@ -1374,24 +1382,47 @@ def nonws(s: str) -> int:
     return len(re.sub(r"\s", "", s))
 
 
-def preservation(before: str, after: str, removed: list[str]) -> list[str]:
+def preservation(before: str, after: str, removed: list[str], *, ctx: RepoContext | None = None) -> list[str]:
     """Every original non-header line survives (heading lines may be renamed); size drop <= 10%."""
-    # A new generated block can explicitly identify the legacy body it replaced. This binds the
-    # one-time migration exemption to exact old content, not arbitrary authored rows elsewhere.
-    replacements = set()
-    for block in find_blocks(MARK, after):
-        if block.group(1) == "badges" and generated_badges(block.group(2)):
-            match = GENERATED_BADGES.fullmatch(block.group(2))
+    # A digest in the output is only a claim. Exempt at most one prior block
+    # per claim and independently verify that the prior rows are strict legacy.
+    prior_badges = Counter(m.group(2) for m in find_blocks(MARK, before) if m.group(1) == "badges")
+    current_blocks = [m for m in find_blocks(MARK, after) if m.group(1) == "badges"]
+    current_badges = Counter(m.group(2) for m in current_blocks)
+    replacements = Counter()
+    for body, count in (current_badges - prior_badges).items():
+        if generated_badges(body):
+            match = GENERATED_BADGES.fullmatch(body)
             if match.group(2):
-                replacements.add(match.group(2))
+                replacements[match.group(2)] += count
+    brand = ctx.brand if ctx else None
+    style = ctx.style if ctx else None
+    retained = Counter(m.group(0) for m in current_blocks)
+    problems = []
 
     def omit_owned_badges(m):
-        # The digest must preserve significant whitespace (badge_sha), matching badge_body's replaces=.
-        owned = generated_badges(m.group(2)) or badge_sha(m.group(2)) in replacements
-        return wrap("badges", "") if m.group(1) == "badges" and owned else m.group(0)
+        nonlocal brand
+        if m.group(1) != "badges":
+            return m.group(0)
+        body = m.group(2)
+        if generated_badges(body):
+            return wrap("badges", "")
+        if retained[m.group(0)]:
+            retained[m.group(0)] -= 1
+            return m.group(0)
+        digest = badge_sha(body)
+        if replacements[digest]:
+            if brand is None:
+                from .config import load_brand
+                brand = load_brand(prefer_lock=True)
+            if _legacy_badge_body(brand, body, style):
+                replacements[digest] -= 1
+                return wrap("badges", "")
+        if body.strip() and (ctx is None or ctx.det["variant"] == "J"):
+            problems.append(f"lost badge block: {body.strip()[:60]}")
+        return m.group(0)
 
     before = _sub_blocks(before, omit_owned_badges)
-    problems = []
     b_lines = Counter(ln.strip() for ln in before.splitlines() if ln.strip() and not ln.strip().startswith("<!-- showcase:"))
     for r in removed:
         b_lines[r.strip()] -= 1
@@ -1447,12 +1478,39 @@ def restore_line_endings(raw: str, before: str, after: str) -> str:
     tail = 0
     while tail < min(old_count, new_count) - head and old[old_count - 1 - tail] == new[new_count - 1 - tail]:
         tail += 1
+    old_middle = range(head, old_count - tail)
+    new_middle = range(head, new_count - tail)
+    anchored = {}
+    used = set()
+
+    def unique_context(lines, indexes, offsets):
+        keys = {}
+        for i in indexes:
+            key = tuple(lines[i + offset] if i + offset >= 0 else None for offset in offsets)
+            keys[key] = i if key not in keys else None
+        return keys
+
+    # Prefer unchanged neighbours when a line appears more than once.
+    # Every pass visits each line at most once.
+    for offsets in ((-1, 0, 1), (-1, 0), (0, 1)):
+        old_keys = unique_context(old, old_middle, offsets)
+        for key, new_index in unique_context(new, new_middle, offsets).items():
+            old_index = old_keys.get(key)
+            if new_index is not None and old_index is not None and new_index not in anchored and old_index not in used:
+                anchored[new_index] = old_index
+                used.add(old_index)
+
     remaining = defaultdict(deque)
-    for i in range(head, old_count - tail):
-        remaining[old[i]].append(endings[i])
+    for i in old_middle:
+        if i not in used:
+            remaining[old[i]].append(endings[i])
     out_ends = endings[:head]
-    for line in new[head:new_count - tail]:
-        out_ends.append(remaining[line].popleft() if remaining.get(line) else common)
+    for i in new_middle:
+        line = new[i]
+        if i in anchored:
+            out_ends.append(endings[anchored[i]])
+        else:
+            out_ends.append(remaining[line].popleft() if remaining.get(line) else common)
     out_ends.extend(endings[old_count - tail:])
     # A lone CR followed by an empty LF line would read back as one CRLF.
     for i in range(1, len(out_ends)):

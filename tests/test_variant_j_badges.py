@@ -692,3 +692,32 @@ def test_single_block_legacy_migration_still_passes_without_shrink_and_is_stable
     assert readme.preservation(before, after, removed) == []
     again, removed_again = run(after)
     assert again == after and readme.preservation(after, again, removed_again) == []
+
+
+def test_output_badge_marker_cannot_authorize_loss_of_custom_rows(make_ctx, tmp_path):
+    ctx = profile_context(make_ctx, tmp_path)
+    custom = '![Custom](img.svg)'
+    retained = readme.badge_body(ctx)
+    claimed = retained.replace(' -->', f' replaces={readme.badge_sha(custom)} -->', 1)
+    before = readme.wrap('badges', retained) + '\n\n' + readme.wrap('badges', custom)
+    after = readme.wrap('badges', claimed)
+    assert any(custom in problem for problem in readme.preservation(before, after, [], ctx=ctx))
+
+
+def test_large_upgrade_retains_separate_authored_badge_blocks(make_ctx, tmp_path):
+    ctx, text = two_block_changed_license(make_ctx, tmp_path)
+    text += '\n' + 'Long authored paragraph. ' * 800 + '\n'
+    path = tmp_path / 'README.md'
+    path.write_bytes(text.encode())
+    profile_cli(ctx, tmp_path, 'readme', '--mode', 'upgrade', '--write')
+    bodies = [m.group(2) for m in readme.find_blocks(readme.MARK, path.read_text(encoding='utf-8'))
+              if m.group(1) == 'badges']
+    assert len(bodies) == 2 and bodies[0] == INDENTED_MIT
+    assert readme.generated_badges(bodies[1]) and 'License Apache-2.0' in bodies[1]
+
+
+def test_header_keeps_same_line_authored_badge_markers(make_ctx, tmp_path):
+    ctx = profile_context(make_ctx, tmp_path)
+    row = readme.start('badges') + '![Custom](img.svg)' + readme.end('badges')
+    assert readme.header_only(ctx, row) == row
+    assert readme.upgrade(ctx, row) == (row, [])
