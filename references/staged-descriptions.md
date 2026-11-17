@@ -3,7 +3,8 @@
 Pass `--description "A reviewed sentence."` to `banner`, `card`, `content social`
 or `readme` to render from that proposal without changing the captured metadata
 file or GitHub's About text. The hidden `social-preview` alias accepts the same
-option. An empty or multiline value returns `needs-input:description`.
+option. An empty or multiline value, or a value containing a managed README
+marker, returns `needs-input:description`.
 
 The command reports `staged-description` and the proposed text, its SHA-256 and
 the captured live description's SHA-256. It uses the proposal for type detection
@@ -18,17 +19,20 @@ outside the target checkout, the sidecar is placed beside that output; metadata-
 rendering uses that location too. README dry runs report the proposal without
 writing a sidecar. `readme --write` records the proposal when the resulting
 README has a managed tagline with that text, including an already-current tagline.
-`content social --job` requires rendering from captured metadata.
+Staged social previews default to `assets/.showcase-staging/social-preview.png`.
+An explicit staged path must also be inside a `.showcase-staging` directory.
+`content social --job` requires captured metadata and a live output path outside
+that directory. Staging a preview leaves previously queued live files intact.
 An ordinary render replaces the record for each refreshed output with its current
 hash and no staged description, while leaving untouched output records intact.
 Card PNG previews have their own records. Banner and card records retain the
 captured repository ID when available. The sidecar's top-level inputs and
-fingerprint describe the most recent recorded output. Before skipping generation,
+fingerprint describe the latest canonical banner or card artifact. Before skipping generation,
 the Action checks the selected banner and card for current records in a sidecar
 with per-output fingerprints. It also checks any existing README record when
 README refresh is enabled. Older sidecars use the top-level fingerprint.
-A selected art surface with no record is rechecked on the next run, including
-a surface whose renderer reports an exemption.
+Canonical art with a stable exemption can cache that decision when no artifact
+is present. Other selected art without a record is rechecked on the next run.
 
 `doctor` compares each managed tagline block with what `readme` would write for the
 live description in the supplied metadata (`readme.tagline_body`, the one place that
@@ -40,6 +44,6 @@ or unmanaged tagline.
 
 When the live description is empty, `readme` preserves an authored tagline and
 logs `needs-input:description`. `doctor` still reports drift if the current
-README matches the staged artifact hash and its managed tagline carries that
-proposal. Upgrades for variants G (fork) and H (archive) write a callout.
+managed tagline matches the recorded staged tagline digest, even after edits
+elsewhere in the README. Upgrades for variants G (fork) and H (archive) write a callout.
 `doctor` also checks any managed tagline those upgrades preserve.

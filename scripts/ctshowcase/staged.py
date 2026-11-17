@@ -3,10 +3,13 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import re
 from pathlib import Path
 
 from . import fingerprint as fp
-from .errors import NeedsInput
+from .errors import NeedsInput, ShowcaseError
+
+SOCIAL_STAGING = ".showcase-staging"
 
 
 def prepare(meta: dict, description: str | None) -> tuple[dict, dict | None]:
@@ -16,13 +19,26 @@ def prepare(meta: dict, description: str | None) -> tuple[dict, dict | None]:
     text = description.strip()
     if not text or "\n" in text or "\r" in text:
         raise NeedsInput("description", "--description needs one non-empty line")
+    if re.search(r"<!--\s*showcase:", text, re.I):
+        raise NeedsInput("description", "--description may not contain managed README markers")
     captured = str(meta.get("description") or "")
     info = {"text": text, "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
             "live_description_sha256": hashlib.sha256(captured.encode("utf-8")).hexdigest()}
     return dict(meta, description=text), info
 
 
-def record_output(ctx, path: Path, record: dict) -> Path | None:
+def check_social_path(path: Path, *, staged: bool, job: bool) -> None:
+    in_staging = SOCIAL_STAGING in map(str.casefold, path.absolute().parent.parts)
+    resolves_to_staging = SOCIAL_STAGING in map(str.casefold, path.resolve().parent.parts)
+    if staged and not (in_staging and resolves_to_staging):
+        raise ShowcaseError(f"a staged social preview needs an output inside {SOCIAL_STAGING}",
+                            log="staged-description:path")
+    if job and (in_staging or resolves_to_staging):
+        raise ShowcaseError("a social preview upload job needs a live output path",
+                            log="staged-description:upload")
+
+
+def record_output(ctx, path: Path, record: dict, *, always: bool = False) -> Path | None:
     """Record staged output beside external art, or in a checkout's docs/images sidecar.
 
     A per-output record remains truthful when only one of several surfaces is refreshed.
@@ -33,10 +49,18 @@ def record_output(ctx, path: Path, record: dict) -> Path | None:
     root = Path(ctx.repo_dir).resolve() if ctx.repo_dir else None
     if root is not None and path.is_relative_to(root):
         directory = root / "docs" / "images"
-        name = path.name if path.parent == directory else path.relative_to(root).as_posix()
+        relative = path.relative_to(root).as_posix()
+        if path.parent == directory and path.name != "README.md":
+            name = path.name
+        elif (path.parent == root and path.name != "README.md") or path.parent == directory:
+            name = "./" + relative
+        else:
+            name = relative
+        summarize = path.parent == directory and name in fp.ART_NAMES and "exempt" not in record
     else:
         directory, name = path.parent, path.name
-    if info is None and name not in (fp.read_sidecar(directory).get("outputs") or {}):
+        summarize = True
+    if not always and info is None and name not in fp.output_records(fp.read_sidecar(directory)):
         return None
     directory.mkdir(parents=True, exist_ok=True)
     if isinstance(ctx.meta.get("id"), int) and not isinstance(ctx.meta.get("id"), bool):
@@ -44,7 +68,7 @@ def record_output(ctx, path: Path, record: dict) -> Path | None:
     if info is not None:
         record = dict(record, staged_description=info)
     return fp.write_sidecar(directory, fp.inputs(ctx.meta, ctx.repo_dir), ctx.brand.sha256, name,
-                            record)
+                            record, summarize=summarize)
 
 
 def tagline_forms(ctx) -> set[str]:
@@ -72,12 +96,23 @@ def tagline_blocks(text: str) -> list[str]:
     return [m.group(2).strip() for m in find_blocks(MARK, normalize_text(text)) if m.group(1) == "tagline"]
 
 
+def tagline_digest(body: str) -> str:
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
 def _matches_staged_readme(ctx, blocks: list[str], path: Path | None) -> bool:
     if path is None or ctx.repo_dir is None:
         return False
-    record = (fp.read_sidecar(ctx.repo_dir / "docs/images").get("outputs") or {}).get("README.md", {})
-    proposal = (record.get("staged_description") or {}).get("text")
-    if not isinstance(proposal, str) or not proposal.strip() or record.get("sha256") != fp.file_record(path)["sha256"]:
+    outputs = fp.output_records(fp.read_sidecar(ctx.repo_dir / "docs/images"))
+    record = outputs.get("README.md")
+    info = record.get("staged_description") if isinstance(record, dict) else None
+    proposal = info.get("text") if isinstance(info, dict) else None
+    if not isinstance(proposal, str) or not proposal.strip():
+        return False
+    digest = record.get("tagline_sha256")
+    if digest is not None:
+        return any(tagline_digest(block) == digest for block in blocks)
+    if record.get("sha256") != fp.file_record(path)["sha256"]:
         return False
     staged = copy.copy(ctx)
     staged.meta = dict(ctx.meta, description=proposal)
@@ -88,8 +123,8 @@ def tagline_drift(ctx, text: str, path: Path | None = None) -> bool:
     """True when a managed tagline block differs from what `readme` would write for the live description.
 
     Only the managed tagline block is compared, never a matching sentence elsewhere in the README, and fenced code
-    examples are ignored. With an empty live description, authored taglines are preserved. An unchanged README
-    with a managed tagline matching its recorded staged proposal demonstrates drift even against an empty About.
+    examples are ignored. With an empty live description, authored taglines are preserved. A managed tagline matching
+    its recorded staged digest demonstrates drift even against an empty About.
     """
     blocks = tagline_blocks(text)
     if not blocks:

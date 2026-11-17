@@ -18,22 +18,22 @@ import subprocess
 import sys
 from pathlib import Path
 
+from ctshowcase.fingerprint import ART_NAMES, output_records, read_sidecar
+
 IMAGES = Path("docs/images")
 SIDECAR = IMAGES / ".showcase.json"
 TEMPLATE_REPO = "CompleteTech-LLC/completetech-repo-template"  # intake.TEMPLATE_REPO, the `new --template` default
 
 
 def _sidecar() -> dict:
-    try:
-        return json.loads(SIDECAR.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
+    return read_sidecar(IMAGES)
 
 
 def _recorded_ids(data: dict) -> set[str]:
-    """Repository ids the sidecar's output records carry (showcase.py writes `repository_id` from `meta --from-gh`)."""
-    outs = data.get("outputs") if isinstance(data.get("outputs"), dict) else {}
-    return {str(r["repository_id"]) for r in outs.values() if isinstance(r, dict) and r.get("repository_id") is not None}
+    """Repository IDs attached to the canonical banner and card artifacts."""
+    return {str(record["repository_id"]) for name, record in output_records(data).items()
+            if name in ART_NAMES and isinstance(record, dict) and not record.get("exempt")
+            and record.get("repository_id") is not None}
 
 
 def foreign(full_name: str) -> bool:
@@ -45,7 +45,7 @@ def foreign(full_name: str) -> bool:
     fingerprint, which changed with the slug, regenerates it. A template repository is never foreign to itself."""
     data = _sidecar()
     inp = data.get("inputs") or {}
-    if not inp or os.environ.get("SHOWCASE_IS_TEMPLATE") == "true":
+    if not isinstance(inp, dict) or not inp or os.environ.get("SHOWCASE_IS_TEMPLATE") == "true":
         return False
     named = f"{inp.get('owner')}/{inp.get('repo')}"
     ids, rid = _recorded_ids(data), (os.environ.get("GITHUB_REPOSITORY_ID") or "").strip()
@@ -76,7 +76,7 @@ def drop(name: str) -> None:
     data = _sidecar()
     if not data:
         return
-    outs = dict(data.get("outputs") or {})
+    outs = dict(output_records(data))
     outs.pop(name, None)
     if outs:
         data["outputs"] = outs

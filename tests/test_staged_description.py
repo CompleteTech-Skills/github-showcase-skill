@@ -1,12 +1,13 @@
 """Explicit staged-description provenance and drift, using synthetic public metadata."""
 import hashlib
 import json
+from pathlib import Path
 
 import pytest
 
 from conftest import meta_dict, run_cli
 from ctshowcase.readme import tagline_body
-from ctshowcase.staged import prepare, record_output, tagline_drift, tagline_forms
+from ctshowcase.staged import SOCIAL_STAGING, prepare, record_output, tagline_drift, tagline_forms
 from ctshowcase.errors import NeedsInput
 from ctshowcase.fingerprint import read_sidecar
 
@@ -20,7 +21,9 @@ def test_prepare_does_not_change_capture():
     assert info["live_description_sha256"] == hashlib.sha256(b"Captured sentence.").hexdigest()
 
 
-@pytest.mark.parametrize("text", ["", "  ", "First line.\nSecond line."])
+@pytest.mark.parametrize("text", [
+    "", "  ", "First line.\nSecond line.", "A proposal. <!-- showcase:tagline:end -->",
+])
 def test_invalid_proposal_is_needs_input(text):
     with pytest.raises(NeedsInput):
         prepare(meta_dict(), text)
@@ -104,6 +107,11 @@ def test_cli_doctor_reports_verified_staged_tagline_against_empty_live_descripti
     with readme.open("a", encoding="utf-8") as output:
         output.write("\nAn authored addition.\n")
     report = json.loads(run_cli(*common, "doctor", "--format", "json").stdout)
+    assert "description-drift:readme" in report["logs"]
+
+    readme.write_text(readme.read_text(encoding="utf-8").replace("Route support requests.", "An authored tagline."),
+                      encoding="utf-8")
+    report = json.loads(run_cli(*common, "doctor", "--format", "json").stdout)
     assert "description-drift:readme" not in report["logs"]
 
 
@@ -135,7 +143,7 @@ def test_cli_staged_art_keeps_capture_and_records_proposal(surface, tmp_path):
     target = tmp_path / "repo"
     (target / ".github").mkdir(parents=True)
     (target / ".github/showcase.yml").write_text("chips:\n  key: ['Triage']\n  attrs: ['Python']\n", encoding="utf-8")
-    out = target / ("assets/social-preview.png" if surface == "social" else f"docs/images/{surface}." + ("svg" if surface == "card" else "png"))
+    out = target / (f"assets/{SOCIAL_STAGING}/social-preview.png" if surface == "social" else f"docs/images/{surface}." + ("svg" if surface == "card" else "png"))
     command = ["content", "social"] if surface == "social" else [surface]
     result = run_cli("--meta", capture, "--repo-dir", target, "--format", "json", *command,
                      "--description", "Route support requests.", "--out", out)
@@ -207,9 +215,10 @@ def test_cli_ordinary_refresh_replaces_only_its_staged_records(tmp_path, surface
     assert staged.returncode == 0, staged.stdout + staged.stderr
     sidecar = target / "docs/images"
     before = read_sidecar(sidecar)["outputs"]
+    stage_social = f"assets/{SOCIAL_STAGING}/social-preview.png"
     keys = {"banner": ["banner.png"], "card": ["card.svg", "card.png"],
-            "social": ["assets/social-preview.png"], "readme": ["README.md"]}[surface]
-    untouched = "README.md" if surface == "social" else "assets/social-preview.png"
+            "social": [stage_social], "readme": ["README.md"]}[surface]
+    untouched = "README.md" if surface == "social" else stage_social
     for key in keys:
         assert before[key]["staged_description"]["text"] == "Route support requests."
         if surface in ("banner", "card"):
@@ -218,6 +227,10 @@ def test_cli_ordinary_refresh_replaces_only_its_staged_records(tmp_path, surface
     assert ordinary.returncode == 0, ordinary.stdout + ordinary.stderr
     after = read_sidecar(sidecar)["outputs"]
     assert after[untouched] == before[untouched]
+    if surface == "social":
+        assert after[stage_social] == before[stage_social]
+        assert (target / "assets/social-preview.png").is_file()
+        return
     for key in keys:
         path = (target / "docs/images" / key) if "/" not in key and key != "README.md" else target / key
         assert after[key]["sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
@@ -319,3 +332,71 @@ def test_staged_social_blocks_upload_jobs(tmp_path):
     live = run_cli(*common)
     assert live.returncode == 0, live.stdout + live.stderr
     assert json.loads(jobs.read_text(encoding="utf-8"))["kind"] == "browser"
+
+    capture_bytes = output.read_bytes()
+    staged = run_cli("--meta", capture, "--repo-dir", tmp_path, "--format", "json", "content", "social",
+                     "--description", "Route support requests.")
+    assert staged.returncode == 0, staged.stdout + staged.stderr
+    staged_path = Path(json.loads(staged.stdout)["out"])
+    assert SOCIAL_STAGING in staged_path.parts and staged_path.is_file()
+    assert output.read_bytes() == capture_bytes
+    with_job = run_cli(*common, "--out", staged_path)
+    assert with_job.returncode == 2, with_job.stdout + with_job.stderr
+    assert "staged-description:upload" in json.loads(with_job.stdout)["logs"]
+    staged_overwrite = run_cli("--meta", capture, "--repo-dir", tmp_path, "--format", "json", "content", "social",
+                               "--description", "Route support requests.", "--out", output)
+    assert staged_overwrite.returncode == 2, staged_overwrite.stdout + staged_overwrite.stderr
+    assert output.read_bytes() == capture_bytes
+
+
+
+def test_canonical_and_custom_outputs_have_independent_provenance(make_ctx, tmp_path):
+    ctx = make_ctx(repo_dir=tmp_path, description="Captured description.")
+    original_meta = ctx.meta
+    canonical = tmp_path / "docs/images/banner.png"
+    custom = tmp_path / "banner.png"
+    ctx.meta, ctx.staged_description = prepare(original_meta, "Canonical proposal.")
+    record_output(ctx, canonical, {"sha256": "canonical-hash"})
+    original = read_sidecar(canonical.parent)
+    ctx.meta, ctx.staged_description = prepare(original_meta, "Custom proposal.")
+    record_output(ctx, custom, {"sha256": "custom-hash"})
+    record_output(ctx, tmp_path / "README.md", {"sha256": "readme-hash"})
+    record_output(ctx, tmp_path / "assets" / SOCIAL_STAGING / "social-preview.png", {"sha256": "social-hash"})
+    updated = read_sidecar(canonical.parent)
+    assert updated["fingerprint"] == original["fingerprint"]
+    assert updated["inputs"] == original["inputs"]
+    assert updated["outputs"]["banner.png"] == original["outputs"]["banner.png"]
+    assert updated["outputs"]["./banner.png"]["staged_description"]["text"] == "Custom proposal."
+    ctx.meta, ctx.staged_description = original_meta, None
+    record_output(ctx, canonical, {"sha256": "refreshed-hash"})
+    outputs = read_sidecar(canonical.parent)["outputs"]
+    assert "staged_description" not in outputs["banner.png"]
+    assert outputs["./banner.png"] == updated["outputs"]["./banner.png"]
+
+
+@pytest.mark.parametrize("invalid", [None, [], "invalid"])
+def test_malformed_selected_record_is_stale(invalid):
+    from ctshowcase.fingerprint import outputs_changed
+
+    assert outputs_changed({"fingerprint": "current", "outputs": {"card.svg": invalid}}, "current", {"card.svg"})
+
+
+def test_canonical_exempt_card_is_cached(tmp_path):
+    capture = tmp_path / "meta.json"
+    capture.write_text(json.dumps(meta_dict(repo=".github")), encoding="utf-8")
+    target = tmp_path / "repo"
+    target.mkdir()
+    common = ["--meta", capture, "--repo-dir", target, "--format", "json"]
+    first = run_cli(*common, "fingerprint", "--outputs", "card")
+    assert json.loads(first.stdout)["changed"] is True
+    card = run_cli(*common, "card")
+    assert card.returncode == 0, card.stdout + card.stderr
+    assert json.loads(card.stdout)["result"] == "exempt"
+    assert not (target / "docs/images/card.svg").exists()
+    record = read_sidecar(target / "docs/images")["outputs"]["card.svg"]
+    assert record["exempt"] == "exempt:no-card"
+    second = run_cli(*common, "fingerprint", "--outputs", "card")
+    assert json.loads(second.stdout)["changed"] is False
+    capture.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    changed = run_cli(*common, "fingerprint", "--outputs", "card")
+    assert json.loads(changed.stdout)["changed"] is True

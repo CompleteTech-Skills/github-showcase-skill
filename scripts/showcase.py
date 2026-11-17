@@ -170,18 +170,22 @@ def gate_watching(ctx, allow_hold=False, remedy=HOLD_REMEDY) -> None:
 
 
 def maybe_sidecar(ctx, out: Path, record: dict) -> None:
-    from ctshowcase import fingerprint as fp
     from ctshowcase.staged import record_output
-    if record_output(ctx, out, record) is not None:
+
+    record_output(ctx, out, record, always=out.parent.name == "images" and out.parent.parent.name == "docs")
+
+
+def record_art_exemption(ctx, kind: str, out: str | None, reason: str) -> None:
+    from ctshowcase.fingerprint import ART_RECORDS
+    from ctshowcase.staged import record_output
+
+    if (ctx.repo_dir is None or getattr(ctx, "staged_description", None) is not None
+            or ctx.style.get("hold") or ctx.watching_status() == "hold:watching-non-fork"
+            or reason not in ("exempt:no-card", "exempt:profile-readme", "exempt:placeholder-org")):
         return
-    if out.parent.name == "images" and out.parent.parent.name == "docs":
-        inp = fp.inputs(ctx.meta, ctx.repo_dir)
-        # the repository's immutable id (`meta --from-gh`): `action_prepare.py foreign` tells a rename or transfer
-        # (same id) from art copied out of another repository (a template copy gets a new id). Kept out of the
-        # fingerprint inputs, so the fingerprint is unchanged.
-        if isinstance(ctx.meta.get("id"), int) and not isinstance(ctx.meta.get("id"), bool):
-            record = dict(record, repository_id=ctx.meta["id"])
-        fp.write_sidecar(out.parent, inp, ctx.brand.sha256, out.name, record)
+    canonical = ctx.repo_dir.resolve() / "docs" / "images" / ART_RECORDS[kind]
+    if (out is None or Path(out).resolve() == canonical) and not canonical.exists():
+        record_output(ctx, canonical, {"exempt": reason}, always=True)
 
 
 def write_bytes(path: Path, data: bytes) -> None:
@@ -200,6 +204,7 @@ def cmd_banner(args):
     gate_owner(ctx, args.allow_hold)
     why = ctx.art_status()["banner"]
     if why and why.startswith("exempt"):
+        record_art_exemption(ctx, "banner", args.out, why)
         return base("banner", ctx, result="exempt", logs=[why]), OK
     gate_watching(ctx, args.allow_hold)
     ctx.require_measured(args.allow_unmeasured)
@@ -231,6 +236,7 @@ def cmd_card(args):
     gate_owner(ctx, args.allow_hold)
     why = ctx.art_status()["card"]
     if why and why.startswith("exempt"):
+        record_art_exemption(ctx, "card", args.out, why)
         return base("card", ctx, result="exempt", logs=[why]), OK
     gate_watching(ctx, args.allow_hold)
     ctx.require_measured(args.allow_unmeasured)
@@ -255,6 +261,7 @@ def cmd_card(args):
 
 def cmd_social(args):
     from ctshowcase import social
+    from ctshowcase.staged import SOCIAL_STAGING, check_social_path, record_output
     from ctshowcase.typeset import Fonts
     ctx = context(args)
     # R10 (ctx.social_applicable) includes backups and the personal-profile capstone: render whatever adopt uploads,
@@ -263,15 +270,28 @@ def cmd_social(args):
             (ctx.det["type"] in ("backup", "github-profile") and not ctx.social_applicable()):
         return base("social-preview", ctx, result="exempt", logs=["exempt:no-social-preview"]), OK
     ctx.require_measured(args.allow_unmeasured)
+    staged = getattr(ctx, "staged_description", None) is not None
+    job = getattr(args, "job", False)
+    default_path = f"assets/{SOCIAL_STAGING}/social-preview.png" if staged else "assets/social-preview.png"
+    out = Path(args.out) if args.out else default_out(args, default_path)
+    check_social_path(out, staged=staged, job=job)
     r = getattr(args, "_content_resolver", None)  # set by `content social` from its --registry/--approved* flags
     data, fmt, info = social.social_render(ctx, Fonts(ctx.brand), args.title, args.icon,
                                            login=r.canonical(ctx.owner) if r else None,
                                            keys=args.key_chip or None, attrs=args.chip or None)
-    out = Path(args.out) if args.out else default_out(args, "assets/social-preview.png")
     if fmt == "jpg":
         out = out.with_suffix(".jpg")
-    write_bytes(out, data)
-    from ctshowcase.staged import record_output
+        check_social_path(out, staged=staged, job=job)
+    if staged:
+        from tempfile import TemporaryDirectory
+
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with TemporaryDirectory(dir=out.parent) as temporary:
+            source = Path(temporary) / out.name
+            source.write_bytes(data)
+            source.replace(out)
+    else:
+        write_bytes(out, data)
     from ctshowcase.fingerprint import file_record
     record_output(ctx, out, file_record(out))
     res = base("social-preview", ctx, result="ok", out=str(out), bytes=len(data), format=fmt, **info)
@@ -521,10 +541,12 @@ def cmd_readme(args):
         if contrib_new is not None:
             (rd / "CONTRIBUTING.md").write_text(contrib_new, encoding="utf-8")
     if args.write and str(ctx.meta.get("description") or "").strip():
-        from ctshowcase.staged import record_output, tagline_blocks
+        from ctshowcase.staged import record_output, tagline_blocks, tagline_digest
         from ctshowcase.fingerprint import file_record
-        if readme.tagline_body(ctx).strip() in tagline_blocks(after):
-            record_output(ctx, path, file_record(path))
+        tagline = readme.tagline_body(ctx).strip()
+        if tagline in tagline_blocks(after):
+            extra = {"tagline_sha256": tagline_digest(tagline)} if getattr(ctx, "staged_description", None) else {}
+            record_output(ctx, path, file_record(path, **extra))
     if args.records and changed:
         records.append(args.records, [records.record(ctx.owner, ctx.repo, "readme", "README.md", before, after,
                                                      f"§7 variant {ctx.det['variant']} ({mode})")])

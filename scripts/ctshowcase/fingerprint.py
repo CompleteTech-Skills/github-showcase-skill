@@ -11,6 +11,7 @@ from .config import LOCK, canonical
 
 SIDECAR = ".showcase.json"
 ART_RECORDS = {"banner": "banner.png", "card": "card.svg"}
+ART_NAMES = frozenset(ART_RECORDS.values())
 
 
 def config_sha256(brand=None) -> str:
@@ -79,36 +80,48 @@ def read_sidecar(out_dir: Path) -> dict:
     p = out_dir / SIDECAR
     if p.is_file():
         try:
-            return json.loads(p.read_text(encoding="utf-8"))
-        except ValueError:
+            data = json.loads(p.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except (OSError, ValueError):
             return {}
     return {}
+
+
+def output_records(data: dict) -> dict:
+    outputs = data.get("outputs")
+    return outputs if isinstance(outputs, dict) else {}
 
 
 def outputs_changed(data: dict, current: str, selected: set[str] | None = None) -> bool:
     """Compare recorded outputs independently, falling back to the original cache for legacy records."""
     previous = data.get("fingerprint")
-    outputs = data.get("outputs") or {}
-    if selected is not None and any("fingerprint" in record for record in outputs.values()):
-        required_art = selected.intersection(ART_RECORDS.values())
+    if "outputs" in data and not isinstance(data["outputs"], dict):
+        return True
+    outputs = output_records(data)
+    modern = any(isinstance(record, dict) and "fingerprint" in record for record in outputs.values())
+    if selected is not None and modern:
+        required_art = selected.intersection(ART_NAMES)
         if required_art.difference(outputs):
             return True
     records = [record for name, record in outputs.items()
                if selected is None or name in selected]
     if not records:
         return previous != current
-    return any(record.get("staged_description") or record.get("fingerprint", previous) != current
+    return any(not isinstance(record, dict) or record.get("staged_description")
+               or record.get("fingerprint", previous) != current
                for record in records)
 
 
-def write_sidecar(out_dir: Path, inp: dict, cfg_sha: str, name: str, record: dict) -> Path:
+def write_sidecar(out_dir: Path, inp: dict, cfg_sha: str, name: str, record: dict, *, summarize: bool = True) -> Path:
     data = read_sidecar(out_dir)
     previous = data.get("fingerprint")
-    outputs = {key: {"fingerprint": previous, **value} for key, value in (data.get("outputs") or {}).items()}
+    outputs = {key: {"fingerprint": previous, **value} if isinstance(value, dict) else value
+               for key, value in output_records(data).items()}
     current = fingerprint(inp, cfg_sha)
     outputs[name] = dict(record, fingerprint=current)
-    data = {"schema": 1, "skill_version": __version__, "standard": STANDARD, "config_sha256": cfg_sha, "inputs": inp,
-            "fingerprint": current, "outputs": outputs}
+    data.update(schema=1, skill_version=__version__, standard=STANDARD, outputs=outputs)
+    if summarize:
+        data.update(config_sha256=cfg_sha, inputs=inp, fingerprint=current)
     p = out_dir / SIDECAR
     p.write_text(json.dumps(data, sort_keys=True, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
     return p
