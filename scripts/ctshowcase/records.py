@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from . import STANDARD
+from .output_lock import output_lock
 
 
 def record(owner: str, repo: str, kind: str, target: str, before, after, rule: str) -> dict:
@@ -34,6 +35,7 @@ def append(path: str | Path | None, recs: list[dict]) -> None:
     if not path or not recs:
         return
     p = Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    with p.open("a", encoding="utf-8") as fh:
-        fh.write(json_lines(recs))
+    with output_lock(p):
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with p.open("a", encoding="utf-8") as fh:
+            fh.write(json_lines(recs))

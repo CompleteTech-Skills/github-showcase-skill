@@ -3,7 +3,9 @@ import importlib.util
 import json
 import os
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Event
 from types import SimpleNamespace
 
 import pytest
@@ -657,6 +659,24 @@ def test_workflow_preflight_reports_simple_validator_chain(tmp_path):
     ]
 
 
+def test_workflow_preflight_handles_quoted_arguments_without_exposing_them(tmp_path):
+    repo, meta = target(tmp_path)
+    workflows = repo / ".github/workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "validation.yml").write_text(
+        "jobs:\n  validate:\n    steps:\n"
+        '      - run: npx prettier --check "**/*" && npm run lint && npm run typecheck\n'
+        "      - run: echo 'synthetic value && npm run test' && npm run contracts\n"
+        '      - run: echo "synthetic value \\" && npm run verify" && npm run validate\n',
+        encoding="utf-8")
+    result = run_cli("--meta", meta, "--repo-dir", repo, "doctor", "--format", "json")
+    assert json.loads(result.stdout)["tooling"]["validators"] == [
+        {"source": ".github/workflows", "command": command, "status": "not run"}
+        for command in ("npx prettier --check", "npm run lint", "npm run typecheck", "npm run contracts",
+                        "npm run validate")
+    ]
+
+
 @pytest.mark.parametrize("failure", ["directory", "replacement"])
 def test_formatted_readme_and_explicit_records_publish_together(tmp_path, monkeypatch, failure):
     import showcase
@@ -697,3 +717,56 @@ def test_formatted_readme_and_explicit_records_publish_together(tmp_path, monkey
         assert queued.startswith(b'{"previous":true}\n')
     assert showcase.main(argv) == 0
     assert log.read_bytes() == queued
+
+
+
+def test_formatted_readme_queue_replacement_serializes_normal_append(tmp_path, monkeypatch):
+    import showcase
+    from ctshowcase import records
+
+    repo, meta = target(tmp_path)
+    (repo / "README.md").write_text("# Northwind\n", encoding="utf-8")
+    queue = tmp_path / "queue.jsonl"
+    queue.write_text('{"previous": true}\n', encoding="utf-8")
+    appended = {"ordinary": True}
+    start_append = Event()
+    append_opened = Event()
+    append_finished = Event()
+    opened_paths = []
+    original_open = Path.open
+    original_replace = Path.replace
+
+    def observe_open(path, mode="r", *args, **kwargs):
+        if mode == "a+b" or (path == queue and mode == "a"):
+            if start_append.is_set() and not append_opened.is_set():
+                opened_paths.append(path)
+                append_opened.set()
+        return original_open(path, mode, *args, **kwargs)
+
+    def append_record():
+        assert start_append.wait(10)
+        records.append(queue, [appended])
+        append_finished.set()
+
+    def replace_at_race(source, destination):
+        if destination == queue:
+            start_append.set()
+            assert append_opened.wait(10)
+            if opened_paths[0] == queue:
+                # With an unlocked writer, finish its append before replacing the queue.
+                assert append_finished.wait(10)
+        return original_replace(source, destination)
+
+    monkeypatch.setattr("ctshowcase.formatting.format_text", lambda _root, _path, text: text)
+    monkeypatch.setattr(Path, "open", observe_open)
+    monkeypatch.setattr(Path, "replace", replace_at_race)
+    with ThreadPoolExecutor(max_workers=1) as workers:
+        writer = workers.submit(append_record)
+        assert showcase.main(["--meta", str(meta), "--repo-dir", str(repo), "readme", "--mode", "scaffold",
+                              "--write", "--format-generated", "--records", str(queue)]) == 0
+        writer.result(timeout=10)
+
+    previous, formatted_readme, ordinary = map(json.loads, queue.read_text(encoding="utf-8").splitlines())
+    assert previous == {"previous": True}
+    assert formatted_readme["target"] == "README.md"
+    assert ordinary == appended

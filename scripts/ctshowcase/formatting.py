@@ -1,17 +1,14 @@
 """Read-only target tooling discovery and explicitly requested, local Prettier formatting."""
 from __future__ import annotations
 
-import hashlib
 import json
-import os
 import re
 import shutil
 import stat
 import subprocess
 import tempfile
-import time
 import xml.etree.ElementTree as ET
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -27,6 +24,9 @@ VALIDATOR_COMMAND = re.compile(
     r"|(?:cargo|go|dotnet|npm|pnpm|yarn|bun|make|just)\s+(?:run\s+)?"
     r"(?:test|check|contracts|lint|typecheck|validate|verify|format)(?:[:_-][A-Za-z0-9:_-]+)?)(?=\s|$|[;&|])",
     re.I,
+)
+SIMPLE_SHELL_COMMAND = re.compile(
+    r"""(?:[A-Za-z0-9_ :./@=\t-]|'[^'\r\n]*'|"(?:[^"\\$`\r\n]|\\[^\r\n])*")+"""
 )
 DISPLAY_ARGUMENTS = {".", "-q", "-v", "--", "--check", "--write", "--fix", "--quiet", "--verbose", "check", "discover"}
 
@@ -242,36 +242,6 @@ def write_formatted_outputs(outputs: list[tuple[Path, bytes]], *,
             raise
 
 
-@contextmanager
-def sidecar_lock(path: Path | None):
-    """Serialize a sidecar read/format/write across local generator processes."""
-    if path is None:
-        yield
-        return
-    key = hashlib.sha256(os.fsencode(os.path.normcase(str(path.resolve())))).hexdigest()
-    directory = Path(tempfile.gettempdir()) / "showcase-sidecar-locks"
-    directory.mkdir(exist_ok=True)
-    with (directory / key).open("a+b") as lock:
-        if os.name == "nt":
-            import msvcrt
-
-            deadline = time.monotonic() + 90
-            while True:
-                try:
-                    lock.seek(0)
-                    msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
-                    break
-                except OSError:
-                    if time.monotonic() >= deadline:
-                        raise NeedsInput("formatter", "another generator still holds the sidecar lock")
-                    time.sleep(0.1)
-        else:
-            import fcntl
-
-            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-        yield  # closing the file releases the lock on both platforms
-
-
 def _display_validator(command: str) -> str | None:
     """Report a command prefix and recognized flags without echoing arbitrary arguments or shell tails."""
     match = VALIDATOR_COMMAND.match(command.strip())
@@ -287,9 +257,21 @@ def _display_validator(command: str) -> str | None:
 
 
 def _display_validators(command: str):
-    """Recognize simple shell conjunctions without parsing untrusted shell arguments."""
-    parts = [part.strip() for part in command.split("&&")]
-    if any(not re.fullmatch(r"[A-Za-z0-9_ :./@=\t-]+", part) for part in parts):
+    """Recognize simple conjunctions with literal quoted arguments."""
+    command = command.strip()
+    parts = []
+    offset = 0
+    while match := SIMPLE_SHELL_COMMAND.match(command, offset):
+        if not (part := match.group().strip()):
+            break
+        parts.append(part)
+        offset = match.end()
+        if offset == len(command):
+            break
+        if not command.startswith("&&", offset):
+            break
+        offset += 2
+    if match is None or match.end() != len(command):
         parts = [command]
     for part in parts:
         if display := _display_validator(part):

@@ -183,10 +183,10 @@ def _sidecar_text(ctx, out: Path, record: dict) -> str:
 
 
 def maybe_sidecar(ctx, out: Path, record: dict) -> None:
-    from ctshowcase.formatting import sidecar_lock
+    from ctshowcase.output_lock import output_lock
 
     if (sidecar := _sidecar_path(out)) is not None:
-        with sidecar_lock(sidecar):
+        with output_lock(sidecar):
             sidecar.write_text(_sidecar_text(ctx, out, record), encoding="utf-8")
 
 
@@ -199,7 +199,8 @@ def ensure_distinct_outputs(*destinations: Path) -> None:
 
 def write_art(ctx, out: Path, data: bytes, *, format_generated: bool, preview=None, **extra) -> None:
     """Prepare the optional preview and formatted sidecar before writing any art outputs."""
-    from ctshowcase.formatting import format_text, same_json, sidecar_lock, target_relative, write_formatted_outputs
+    from ctshowcase.formatting import format_text, same_json, target_relative, write_formatted_outputs
+    from ctshowcase.output_lock import output_lock
 
     sidecar = _sidecar_path(out)
     destinations = [out] + ([sidecar] if sidecar else []) + ([preview[0]] if preview else [])
@@ -211,7 +212,7 @@ def write_art(ctx, out: Path, data: bytes, *, format_generated: bool, preview=No
         if sidecar is not None:
             target_relative(root, sidecar)
     record = {"sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data), **extra}
-    with sidecar_lock(sidecar):
+    with output_lock(sidecar):
         summary = _sidecar_text(ctx, out, record) if sidecar is not None else None
         if sidecar is not None and summary is not None and format_generated:
             formatted = format_text(ctx.repo_dir, sidecar, summary)
@@ -623,7 +624,8 @@ def cmd_readme(args):
             if contrib_new is not None:
                 outputs.append((contrib_path, contrib_new.encode("utf-8")))
         if args.format_generated:
-            from ctshowcase.formatting import sidecar_lock, write_formatted_outputs
+            from ctshowcase.formatting import write_formatted_outputs
+            from ctshowcase.output_lock import output_lock
             capture = getattr(ctx, "meta_path", None)
             ensure_distinct_outputs(*(target for target, _ in outputs), *([capture] if capture else []))
             snapshots = [(path, original_readme)]
@@ -642,7 +644,7 @@ def cmd_readme(args):
             if record_path is not None:
                 encoded = records.json_lines(change_records).replace("\n", os.linesep).encode("utf-8")
                 append_output = (record_path, encoded)
-            with sidecar_lock(record_path):
+            with output_lock(record_path):
                 if record_path is not None:
                     ensure_distinct_outputs(record_path, path, contrib_path, *(rd / rel for rel in badge_outputs),
                                             *([capture] if capture else []))
