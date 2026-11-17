@@ -377,7 +377,8 @@ def test_validation_discovery_keeps_workflow_names_as_strings(tmp_path):
     ]
 
 
-def test_markdown_wrapper_protects_live_alerts_and_leaves_fenced_examples(tmp_path):
+@pytest.mark.parametrize("bom", ["", "\ufeff"])
+def test_markdown_wrapper_protects_live_alerts_and_leaves_fenced_examples(tmp_path, bom):
     import shutil
 
     if shutil.which("node") is None:
@@ -396,6 +397,40 @@ exports.__debug = {parse: async (input, options, details) => {
                              {type: "code"}]}};
 }};
 ''', encoding="utf-8")
-    raw = "# Example\n\n> [!NOTE]\n> Authored text.\n\n```text\n> [!TIP]\n> Example.\n```\n"
+    raw = bom + "# Example\n\n> [!NOTE]\n> Authored text.\n\n```text\n> [!TIP]\n> Example.\n```\n"
     formatted = format_text(tmp_path, tmp_path / "README.md", raw)
     assert formatted == raw.replace("> [!NOTE]", "<!-- prettier-ignore -->\n\n> [!NOTE]", 1)
+
+
+def test_svg_wrapper_retains_the_target_parser_override(tmp_path):
+    import shutil
+
+    if shutil.which("node") is None:
+        pytest.skip("Node.js is needed for the SVG formatter")
+    local_prettier(tmp_path)
+    entry = tmp_path / "node_modules/prettier/index.cjs"
+    entry.write_text(
+        'exports.resolveConfig = async () => ({parser: "target-xml"});\n'
+        'exports.format = async (input, options) => {\n'
+        '    if (options.parser !== "target-xml") throw new Error("target parser was overridden");\n'
+        '    return input;\n'
+        '};\n', encoding="utf-8")
+    svg = '<svg xmlns="http://www.w3.org/2000/svg"><path d="M 1 1"/></svg>\n'
+    assert format_text(tmp_path, tmp_path / "card.svg", svg) == svg
+
+
+def test_markdown_wrapper_rejects_a_non_idempotent_format(tmp_path):
+    import shutil
+
+    from ctshowcase.errors import ShowcaseError
+
+    if shutil.which("node") is None:
+        pytest.skip("Node.js is needed for the Markdown formatter")
+    local_prettier(tmp_path)
+    entry = tmp_path / "node_modules/prettier/index.cjs"
+    entry.write_text(
+        'exports.resolveConfig = async () => ({});\n'
+        'exports.format = async (input) => input + "\\n";\n'
+        'exports.__debug = {parse: async () => ({ast: {}})};\n', encoding="utf-8")
+    with pytest.raises(ShowcaseError, match="could not verify Markdown content"):
+        format_text(tmp_path, tmp_path / "README.md", "# Example\n")

@@ -640,3 +640,60 @@ def test_reformatted_managed_nav_is_idempotent_and_authored_nav_is_preserved(tmp
     readme.write_bytes(authored)
     assert showcase.main(args) == 1
     assert readme.read_bytes() == authored
+
+
+def test_workflow_preflight_reports_simple_validator_chain(tmp_path):
+    repo, meta = target(tmp_path)
+    workflows = repo / ".github/workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "validation.yml").write_text(
+        "name: 2026-11-17\njobs:\n  validate:\n    steps:\n"
+        "      - run: npm run format && npm run lint && npm run typecheck && npm run contracts\n"
+        "      - run: echo 'literal && npm run test'\n", encoding="utf-8")
+    result = run_cli("--meta", meta, "--repo-dir", repo, "doctor", "--format", "json")
+    assert json.loads(result.stdout)["tooling"]["validators"] == [
+        {"source": ".github/workflows", "command": "npm run " + name, "status": "not run"}
+        for name in ("format", "lint", "typecheck", "contracts")
+    ]
+
+
+@pytest.mark.parametrize("failure", ["directory", "replacement"])
+def test_formatted_readme_and_explicit_records_publish_together(tmp_path, monkeypatch, failure):
+    import showcase
+
+    repo, meta = target(tmp_path)
+    readme = repo / "README.md"
+    original = b"# Human Title\n\nAuthored overview.\n\n## About\n\nExisting information.\n"
+    readme.write_bytes(original)
+    log = tmp_path / "queue.jsonl"
+    if failure == "directory":
+        log.mkdir()
+    else:
+        log.write_bytes(b'{"previous":true}\n')
+    monkeypatch.setattr("ctshowcase.formatting.format_text", lambda _root, _path, text: text)
+    argv = ["--meta", str(meta), "--repo-dir", str(repo), "readme", "--write", "--format-generated",
+            "--records", str(log)]
+    replace = Path.replace
+
+    def fail_log(source, destination):
+        if destination == log:
+            raise PermissionError("synthetic change record replacement failure")
+        return replace(source, destination)
+
+    with monkeypatch.context() as failing:
+        if failure == "replacement":
+            failing.setattr(Path, "replace", fail_log)
+        assert showcase.main(argv) == 2
+    assert readme.read_bytes() == original
+    if failure == "directory":
+        log.rmdir()
+    else:
+        assert log.read_bytes() == b'{"previous":true}\n'
+
+    assert showcase.main(argv) == 0
+    queued = log.read_bytes()
+    assert json.loads(queued.splitlines()[-1])["target"] == "README.md"
+    if failure == "replacement":
+        assert queued.startswith(b'{"previous":true}\n')
+    assert showcase.main(argv) == 0
+    assert log.read_bytes() == queued

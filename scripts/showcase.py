@@ -606,7 +606,11 @@ def cmd_readme(args):
                                         code=CHECK_FAILED)
                 drawing = formatted
             badge_outputs[rel] = drawing.encode("utf-8")
-    if args.format_generated and args.records and changed:
+    change_records = []
+    if args.records and changed:
+        change_records.append(records.record(ctx.owner, ctx.repo, "readme", "README.md", before, after,
+                                             f"§7 variant {ctx.det['variant']} ({mode})"))
+    if args.format_generated and change_records:
         capture = getattr(ctx, "meta_path", None)
         ensure_distinct_outputs(Path(args.records), path, contrib_path, *(rd / rel for rel in badge_outputs),
                                 *([capture] if capture else []))
@@ -619,7 +623,7 @@ def cmd_readme(args):
             if contrib_new is not None:
                 outputs.append((contrib_path, contrib_new.encode("utf-8")))
         if args.format_generated:
-            from ctshowcase.formatting import write_formatted_outputs
+            from ctshowcase.formatting import sidecar_lock, write_formatted_outputs
             capture = getattr(ctx, "meta_path", None)
             ensure_distinct_outputs(*(target for target, _ in outputs), *([capture] if capture else []))
             snapshots = [(path, original_readme)]
@@ -633,16 +637,25 @@ def cmd_readme(args):
                                         code=CHECK_FAILED)
             for target, _ in outputs:
                 target_relative(rd, target)
-            write_formatted_outputs(outputs, repo_root=ctx.format_root, snapshots=dict(snapshots))
+            record_path = Path(args.records) if change_records else None
+            append_output = None
+            if record_path is not None:
+                encoded = records.json_lines(change_records).replace("\n", os.linesep).encode("utf-8")
+                append_output = (record_path, encoded)
+            with sidecar_lock(record_path):
+                if record_path is not None:
+                    ensure_distinct_outputs(record_path, path, contrib_path, *(rd / rel for rel in badge_outputs),
+                                            *([capture] if capture else []))
+                write_formatted_outputs(outputs, repo_root=ctx.format_root, snapshots=dict(snapshots),
+                                        append_output=append_output)
         else:
             for target, data in outputs:
                 if target == contrib_path:
                     contrib_path.write_text(contrib_new, encoding="utf-8")
                 else:
                     write_bytes(target, data)
-    if args.records and changed:
-        records.append(args.records, [records.record(ctx.owner, ctx.repo, "readme", "README.md", before, after,
-                                                     f"§7 variant {ctx.det['variant']} ({mode})")])
+    if change_records and not (args.format_generated and args.write):
+        records.append(args.records, change_records)
     res = base("readme", ctx, result="changed" if changed else "unchanged", mode="bootstrap" if args.bootstrap else mode,
                variant=ctx.det["variant"], written=bool(args.write and changed))
     if args.diff or not args.write:

@@ -62,9 +62,10 @@ function alertTypes(node, source, types = []) {
 }
 async function protectAlerts(prettier, input, options) {
     if (!input.includes("[!")) return { text: input, alerts: [] };
-    const source = input.replace(/\r\n?/g, "\n");
+    const source = input.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
     const tree = (await prettier.__debug.parse(source, options)).ast;
-    const lines = [0, ...Array.from(input.matchAll(/\r\n|\r|\n/g), match => match.index + match[0].length)];
+    const first = input.startsWith("\uFEFF") ? 1 : 0;
+    const lines = [first, ...Array.from(input.matchAll(/\r\n|\r|\n/g), match => match.index + match[0].length)];
     const ending = (input.match(/\r\n|\r|\n/) || ["\n"])[0];
     const offsets = [];
     const alerts = [];
@@ -100,17 +101,18 @@ async function main() {
     const settings = await prettier.resolveConfig(filepath, { config, editorconfig: false });
     const extension = path.extname(filepath).toLowerCase();
     const markdown = extension === ".md";
-    const options = { ...(markdown ? { parser: "markdown" } : {}), ...editor, ...settings, filepath };
-    if (extension === ".svg") options.parser = "html";
+    const defaults = markdown ? { parser: "markdown" } : extension === ".svg" ? { parser: "html" } : {};
+    const options = { ...defaults, ...editor, ...settings, filepath };
     const { text, alerts } = markdown ? await protectAlerts(prettier, input, options) : { text: input, alerts: [] };
     const formatted = await prettier.format(text, options);
     if (markdown) {
         const original = await prettier.__debug.parse(text, options, { massage: true });
         const candidate = await prettier.__debug.parse(formatted, options, { massage: true });
-        const source = formatted.replace(/\r\n?/g, "\n");
+        const source = formatted.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
         const preserved = !alerts.length ||
             isDeepStrictEqual(alerts, alertTypes((await prettier.__debug.parse(source, options)).ast, source));
-        if (!preserved || !isDeepStrictEqual(original.ast, candidate.ast)) {
+        if (!preserved || !isDeepStrictEqual(original.ast, candidate.ast) ||
+            (await prettier.format(formatted, options)) !== formatted) {
             process.exitCode = 1;
             return;
         }
@@ -192,27 +194,30 @@ def _file_state(path: Path) -> tuple[int, ...] | None:
 
 def write_formatted_outputs(outputs: list[tuple[Path, bytes]], *,
                             repo_root: Path | None = None,
-                            snapshots: dict[Path, bytes | None] | None = None) -> None:
+                            snapshots: dict[Path, bytes | None] | None = None,
+                            append_output: tuple[Path, bytes] | None = None) -> None:
     """Prepare every replacement on its destination filesystem, then publish or roll back the group."""
     snapshots = snapshots or {}
     with ExitStack() as scratch:
         prepared = []
-        for destination, data in outputs:
+        for destination, data in outputs + ([append_output] if append_output else []):
+            append = append_output is not None and destination == append_output[0]
             path = destination.parent.resolve() / destination.name
-            if repo_root is not None and not path.is_relative_to(repo_root):
+            if not append and repo_root is not None and not path.is_relative_to(repo_root):
                 raise ShowcaseError("formatter destination must be inside the target checkout", log="usage")
             initial = _file_state(path)
             path.parent.mkdir(parents=True, exist_ok=True)
             working = Path(scratch.enter_context(tempfile.TemporaryDirectory(dir=path.parent)))
             replacement = working / "output"
             backup = working / "original"
-            replacement.write_bytes(data)
             previous = None
             if initial is not None:
                 # Keep the old entry's access check even where directory permissions allow replacing it.
                 with path.open("r+b") as stream:
                     previous = stream.read()
                 backup.write_bytes(previous)
+            replacement.write_bytes((previous or b"") + data if append else data)
+            if initial is not None:
                 mode = stat.S_IMODE(initial[2])
                 replacement.chmod(mode)
                 backup.chmod(mode)
@@ -279,6 +284,16 @@ def _display_validator(command: str) -> str | None:
             break
         display.append(arg)
     return " ".join(display)
+
+
+def _display_validators(command: str):
+    """Recognize simple shell conjunctions without parsing untrusted shell arguments."""
+    parts = [part.strip() for part in command.split("&&")]
+    if any(not re.fullmatch(r"[A-Za-z0-9_ :./@=\t-]+", part) for part in parts):
+        parts = [command]
+    for part in parts:
+        if display := _display_validator(part):
+            yield display
 
 
 def same_json(original: str, formatted: str) -> bool:
@@ -378,14 +393,14 @@ def discover(repo_dir: Path | None) -> dict:
         for match in re.finditer(r"^```(?:bash|sh|shell|console)\s*\n(.*?)^```", text, re.M | re.S):
             for line in match.group(1).splitlines():
                 command = line.strip().removeprefix("$ ")
-                if display := _display_validator(command):
+                for display in _display_validators(command):
                     validators.append({"source": name, "command": display, "status": "not run"})
         prose = re.sub(r"^```[^\n]*\n.*?^```[^\n]*", "", text, flags=re.M | re.S)
         for line in prose.splitlines():
             if not re.search(r"\b(?:run|execute)\b", line, re.I):
                 continue
             for command in re.findall(r"`([^`\n]+)`", line):
-                if display := _display_validator(command):
+                for display in _display_validators(command):
                     validators.append({"source": name, "command": display, "status": "not run"})
     workflows = root / ".github" / "workflows"
     for path in _children(root, workflows):
@@ -407,7 +422,7 @@ def discover(repo_dir: Path | None) -> dict:
                 if isinstance(run, str):
                     for line in run.splitlines():
                         command = line.strip()
-                        if display := _display_validator(command):
+                        for display in _display_validators(command):
                             validators.append({"source": source, "command": display, "status": "not run"})
     declared = _prettier_version(package)
     version = declared if _exact_version(declared) else None

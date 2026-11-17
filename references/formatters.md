@@ -11,7 +11,7 @@ Default TSV and Markdown doctor output reports tooling on stderr to preserve the
 coverage row; JSON includes it in `tooling`. Reports retain their
 source category and mark commands **not run**. Package scripts appear by name,
 and workflows appear under `.github/workflows`. Instructions and workflow steps
-show recognized command prefixes and flags. Discovery shows exact Prettier
+show recognized command prefixes and flags, including simple `&&` chains. Discovery shows exact Prettier
 versions and reports other declarations as unsupported without displaying them.
 Discovery never executes these commands.
 
@@ -34,8 +34,10 @@ Text is passed on stdin with its final target path, so Prettier uses the target'
 configuration. The caller still applies the usual content-preservation and
 output-path checks before writing. A formatter failure leaves the requested
 output unwritten. The related files are prepared before any are replaced. If a
-replacement fails, Showcase restores earlier files in the group. README and CONTRIBUTING formatting requires the pinned
-Prettier's Markdown AST check (`--debug-check`) to pass. GitHub alerts are protected with a Prettier ignore comment on their enclosing
+replacement fails, Showcase restores earlier files in the group. An explicit
+README change record participates in the same write. README and CONTRIBUTING
+formatting checks the Markdown AST and repeat-format stability with the pinned
+Prettier. GitHub alerts are protected with a Prettier ignore comment on their enclosing
 Markdown block, and Showcase refreshes the
 ownership digest of a pristine template body after formatting. Bootstrap
 applies the normal CONTRIBUTING owner-token replacement before formatting.
@@ -49,6 +51,6 @@ bytes is not evidence that rendering failed. A synthetic long-slug, long-chip
 case passes the SVG validator; chip layout
 also retains its overflow/refusal rules. No budget is raised to hide warnings.
 
-SVG formatting uses Prettier's HTML parser. Showcase compares the output's XML
+SVG formatting uses Prettier's HTML parser when the target supplies no parser override. Showcase compares the output's XML
 structure to the original drawing. A Prettier ignore comment preserves the
 accessible title. To include SVGs in a later bare `prettier --check`, declare an override such as `{"overrides":[{"files":"*.svg","options":{"parser":"html"}}]}` in the target Prettier configuration. Other target formatting options continue to apply. The skill does not modify formatter configuration.
