@@ -57,13 +57,13 @@ def test_formatter_uses_stdin_local_exact_version_without_shell(tmp_path, monkey
 
     def run(argv, **kwargs):
         called.append((argv, kwargs))
-        return SimpleNamespace(returncode=0, stdout="# Formatted\n", stderr="")
+        return SimpleNamespace(returncode=0, stdout=b"# Formatted\n", stderr=b"")
 
     monkeypatch.setattr("ctshowcase.formatting.subprocess.run", run)
     assert format_text(tmp_path, tmp_path / "README.md", "# Formatted") == "# Formatted\n"
     argv, kwargs = called[0]
     assert argv[0] == "/node" and argv[-2:] == ["--stdin-filepath", "README.md"]
-    assert kwargs["input"] == "# Formatted" and not kwargs.get("shell")
+    assert kwargs["input"] == b"# Formatted" and not kwargs.get("shell")
     assert not (tmp_path / "README.md").exists()
 
 
@@ -97,5 +97,5 @@ def test_npm_lock_pin_is_supported(tmp_path, monkeypatch):
     local_prettier(tmp_path, pin="^3.6.2")
     (tmp_path / "package-lock.json").write_text(json.dumps({"packages": {"node_modules/prettier": {"version": "3.6.2"}}}))
     monkeypatch.setattr("ctshowcase.formatting.shutil.which", lambda _: "/node")
-    monkeypatch.setattr("ctshowcase.formatting.subprocess.run", lambda *a, **k: SimpleNamespace(returncode=0, stdout="ok", stderr=""))
+    monkeypatch.setattr("ctshowcase.formatting.subprocess.run", lambda *a, **k: SimpleNamespace(returncode=0, stdout=b"ok", stderr=b""))
     assert format_text(tmp_path, tmp_path / "README.md", "ok") == "ok"

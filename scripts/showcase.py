@@ -228,7 +228,8 @@ def cmd_card(args):
     svg, scene, info = card.render(ctx, fonts, args.icon, keys=args.key_chip or None, attrs=args.chip or None)
     if args.format_generated:
         from ctshowcase.formatting import format_text
-        svg = format_text(ctx.repo_dir, out, svg)
+        # Prettier's HTML parser wraps SVG title text, which must equal aria-label.
+        svg = format_text(ctx.repo_dir, out, svg.replace("\n<title>", "\n<!-- prettier-ignore -->\n<title>", 1))
     lint = svglint.lint_bytes("card", svg.encode(), str(out))
     if lint["result"] != "PASS":
         return base("card", ctx, result="fail", lint=lint), CHECK_FAILED
@@ -240,8 +241,15 @@ def cmd_card(args):
         if isinstance(ctx.meta.get("id"), int) and not isinstance(ctx.meta["id"], bool):
             record["repository_id"] = ctx.meta["id"]
         sidecar_path = out.parent / fp.SIDECAR
-        sidecar = (sidecar_path, format_text(ctx.repo_dir, sidecar_path,
-                   fp.sidecar_text(out.parent, fp.inputs(ctx.meta, ctx.repo_dir), ctx.brand.sha256, out.name, record)))
+        original = fp.sidecar_text(out.parent, fp.inputs(ctx.meta, ctx.repo_dir), ctx.brand.sha256, out.name, record)
+        formatted = format_text(ctx.repo_dir, sidecar_path, original)
+        try:
+            unchanged = json.loads(formatted) == json.loads(original)
+        except ValueError:
+            unchanged = False
+        if not unchanged:
+            raise ShowcaseError("formatter changed the card sidecar data", log="formatter-content")
+        sidecar = (sidecar_path, formatted)
     write_bytes(out, svg.encode())
     outputs = [str(out)]
     if args.png:
@@ -448,6 +456,9 @@ def cmd_readme(args):
     if rd is None:
         raise ShowcaseError("readme needs the repository checkout (--repo-dir DIR, or run inside it)", log="usage")
     path = rd / "README.md"
+    if args.format_generated and getattr(args, "no_regroup", False):
+        raise ShowcaseError("--no-regroup preserves outside bytes and cannot be combined with --format-generated",
+                            log="usage")
     before = readme.read_text(path)
     if ctx.watching_status() == "exempt:watching-fork":
         return base("readme", ctx, result="exempt", logs=["exempt"]), OK

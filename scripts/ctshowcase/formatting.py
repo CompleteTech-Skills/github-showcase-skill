@@ -27,6 +27,11 @@ def _mapping(value) -> dict:
     return value if isinstance(value, dict) else {}
 
 
+def _prettier_version(package: dict):
+    dependencies = {**_mapping(package.get("dependencies")), **_mapping(package.get("devDependencies"))}
+    return dependencies.get("prettier")
+
+
 def discover(repo_dir: Path | None) -> dict:
     """Report declared tooling with source evidence. Never execute a discovered command."""
     if repo_dir is None:
@@ -67,7 +72,7 @@ def discover(repo_dir: Path | None) -> dict:
                 continue
             try:
                 data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-            except (OSError, yaml.YAMLError):
+            except (OSError, UnicodeError, yaml.YAMLError):
                 continue
             if not isinstance(data, dict):
                 continue
@@ -84,8 +89,7 @@ def discover(repo_dir: Path | None) -> dict:
                     if isinstance(step, dict) and isinstance(step.get("run"), str):
                         validators.append({"source": f"{path.relative_to(root).as_posix()}#jobs.{job}",
                                            "command": step["run"].strip(), "status": "not run"})
-    dependencies = {**_mapping(package.get("dependencies")), **_mapping(package.get("devDependencies"))}
-    return {"formatters": configs, "prettier_version": dependencies.get("prettier"),
+    return {"formatters": configs, "prettier_version": _prettier_version(package),
             "validators": validators, "status": "not run"}
 
 
@@ -103,8 +107,7 @@ def format_text(repo_dir: Path | None, destination: Path, text: str) -> str:
         relative = destination.relative_to(root)
     except ValueError as error:
         raise ShowcaseError("formatter destination must be inside the target checkout", log="usage") from error
-    details = discover(root)
-    version = details.get("prettier_version")
+    version = _prettier_version(_json(root / "package.json"))
     exact = r"\d+\.\d+\.\d+(?:-[\w.-]+)?"
     if not isinstance(version, str):
         raise NeedsInput("formatter", "declare prettier in the target package.json")
@@ -135,10 +138,13 @@ def format_text(repo_dir: Path | None, destination: Path, text: str) -> str:
     if destination.suffix.lower() == ".svg":
         argv += ["--parser", "html"]
     try:
-        result = subprocess.run(argv, cwd=root, input=text,
-                                text=True, encoding="utf-8", capture_output=True, timeout=60, check=False)
+        result = subprocess.run(argv, cwd=root, input=text.encode("utf-8"),
+                                capture_output=True, timeout=60, check=False)
     except (OSError, subprocess.SubprocessError) as error:
         raise NeedsInput("formatter", "the target's pinned Prettier could not run") from error
     if result.returncode:
-        raise ShowcaseError(f"target Prettier failed: {result.stderr.strip()}", log="formatter-failed")
-    return result.stdout
+        raise ShowcaseError("target Prettier failed; verify its configuration and plugins", log="formatter-failed")
+    try:
+        return result.stdout.decode("utf-8")
+    except UnicodeError as error:
+        raise ShowcaseError("target Prettier returned invalid UTF-8", log="formatter-failed") from error

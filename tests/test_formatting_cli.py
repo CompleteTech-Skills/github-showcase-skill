@@ -51,6 +51,9 @@ def test_no_regroup_cannot_silently_reformat_outside_bytes(tmp_path):
     (repo / "README.md").write_bytes(original.encode())
     result = run_cli("--meta", meta, "--repo-dir", repo, "readme", "--write", "--no-regroup", "--format-generated")
     assert result.returncode == 2
+    message = result.stdout + result.stderr
+    assert ("cannot be combined with --format-generated" in message
+            or "unrecognized arguments: --no-regroup" in message)
     assert (repo / "README.md").read_bytes() == original.encode()
     assert not (repo / "docs").exists()
 
@@ -69,6 +72,7 @@ def test_card_formats_asset_and_sidecar_before_writing(tmp_path, monkeypatch):
         calls.append(Path(path).name)
         if Path(path).suffix == ".json":
             return json.dumps(json.loads(value), indent=2) + "\n"
+        assert "<!-- prettier-ignore -->\n<title>" in value
         return value
 
     monkeypatch.setattr("ctshowcase.formatting.format_text", format_value)
