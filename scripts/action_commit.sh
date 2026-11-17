@@ -25,10 +25,18 @@ if [ -n "$icon_removed" ]; then
   git rm -q --cached -- assets/icon.png
 fi
 if [ -n "$prepare" ]; then
-  staged_index="$(python "$prepare" staged-index)"
+  # Commit the same index snapshot the guard evaluates. The caller's index retains any later edits.
+  index="$(git rev-parse --path-format=absolute --git-path index)"
+  snapshot="$(mktemp "$(dirname -- "$index")/showcase-index.XXXXXXXX")"
+  trap 'rm -f -- "$snapshot" "$snapshot.lock"' EXIT
+  cp -- "$index" "$snapshot"
+  export GIT_INDEX_FILE="$snapshot"
+  index_args=(staged-index)
+  [ -z "$icon_removed" ] || index_args+=(icon-removal)
+  staged_index="$(python "$prepare" "${index_args[@]}")"
   staged_worktree="$(python "$prepare" staged)"
   if [ "$staged_index" = "true" ] || [ "$staged_worktree" = "true" ]; then
-    echo "::warning title=CompleteTech Showcase::commit skipped while unpublished staged output is present"
+    echo "::warning title=CompleteTech Showcase::commit skipped while unpublished staged output or unrelated index changes are present"
     exit 0
   fi
 fi

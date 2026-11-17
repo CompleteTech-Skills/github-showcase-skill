@@ -866,3 +866,61 @@ def test_staged_noop_readme_records_exact_existing_crlf_bytes(tmp_path):
     record = read_sidecar(target / "docs/images")["outputs"]["README.md"]
     assert record["sha256"] == hashlib.sha256(original).hexdigest()
     assert record["bytes"] == len(original)
+
+
+@pytest.mark.parametrize("metadata_only", [False, True])
+def test_social_preview_staging_cannot_land_inside_action_artifact_paths(tmp_path, metadata_only):
+    capture = tmp_path / "capture.json"
+    capture.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    output = repo / "docs/images" / SOCIAL_STAGING / "preview.png"
+    checkout = ["--no-repo-dir"] if metadata_only else ["--repo-dir", repo]
+    result = run_cli("--meta", capture, *checkout, "--format", "json", "content", "social",
+                     "--description", "Unpublished draft.", "--out", output, cwd=repo)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "staged-description:path" in json.loads(result.stdout)["logs"]
+    assert not output.exists()
+
+
+@pytest.mark.requires_bash
+@pytest.mark.parametrize("pre_staged", [False, True])
+def test_action_will_not_commit_a_private_preview_already_in_index(tmp_path, pre_staged):
+    import os
+    import subprocess
+
+    import yaml
+    from conftest import ROOT, run_bash
+
+    def git(*args):
+        return subprocess.run(["git", *args], cwd=tmp_path, capture_output=True, text=True, check=True).stdout
+
+    git("init", "-q")
+    git("-c", "user.name=Synthetic", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-qm", "base")
+    initial = git("rev-parse", "HEAD")
+    private = tmp_path / "assets" / SOCIAL_STAGING
+    private.mkdir(parents=True)
+    (private / "preview.png").write_bytes(b"synthetic staged preview")
+    (private / ".showcase.json").write_text(
+        '{"outputs":{"preview.png":{"staged_description":{"text":"Unpublished draft"}}}}', encoding="utf-8")
+    if pre_staged:
+        git("add", "--", f"assets/{SOCIAL_STAGING}")
+    images = tmp_path / "docs/images"
+    images.mkdir(parents=True)
+    (images / "banner.png").write_bytes(b"live banner")
+    definition = yaml.safe_load((ROOT / "action.yml").read_text(encoding="utf-8"))
+    script = next(step["run"] for step in definition["runs"]["steps"]
+                  if "action_commit.sh" in step.get("run", ""))
+    env = {**os.environ, "GITHUB_ACTION_PATH": str(ROOT), "SHOWCASE_DRY_RUN": "1",
+           "SHOWCASE_COMMIT_MESSAGE": "Synthetic no-op", "SHOWCASE_ON_PROTECTED": "fail"}
+    result = run_bash(script, cwd=tmp_path, env=env)
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    if pre_staged:
+        assert "commit skipped" in result.stdout
+        assert git("rev-parse", "HEAD") == initial
+        assert f"assets/{SOCIAL_STAGING}/preview.png" in git("diff", "--cached", "--name-only")
+    else:
+        assert "would push" in result.stdout
+        assert git("rev-parse", "HEAD") != initial
+        assert git("diff", "--cached", "--name-only") == ""
+        assert git("show", "--format=", "--name-only", "HEAD").strip() == "docs/images/banner.png"

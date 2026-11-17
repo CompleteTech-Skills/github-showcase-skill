@@ -28,11 +28,14 @@ def prepare(meta: dict, description: str | None) -> tuple[dict, dict | None]:
     return dict(meta, description=text), info
 
 
-def check_social_path(path: Path, *, staged: bool, job: bool) -> None:
+def check_social_path(path: Path, *, staged: bool, job: bool, checkout: Path | None = None) -> None:
     in_staging = SOCIAL_STAGING in map(str.casefold, path.absolute().parent.parts)
     resolves_to_staging = SOCIAL_STAGING in map(str.casefold, path.resolve().parent.parts)
     if staged and not (in_staging and resolves_to_staging):
         raise ShowcaseError(f"a staged social preview needs an output inside {SOCIAL_STAGING}",
+                            log="staged-description:path")
+    if staged and _action_managed_path(path, checkout):
+        raise ShowcaseError("staged social previews must stay outside Action-managed paths",
                             log="staged-description:path")
     if job and (in_staging or resolves_to_staging):
         raise ShowcaseError("a social preview upload job needs a live output path",
@@ -71,10 +74,26 @@ def check_capture(capture: Path | None, *destinations: Path) -> None:
         raise ShowcaseError("write destination overlaps the metadata capture", log="staged-description:path")
 
 
+def _action_managed_path(path: Path, checkout: Path | None) -> bool:
+    candidates = (path.absolute(), path.resolve())
+    roots = {(checkout or Path.cwd()).resolve()}
+    for destination in candidates:
+        enclosing = next((parent for parent in destination.parents if (parent / ".git").exists()), None)
+        if enclosing is not None:
+            roots.add(enclosing.resolve())
+    for root in roots:
+        images = root / "docs/images"
+        markdown = tuple((root / name).resolve() for name in ("README.md", "CONTRIBUTING.md"))
+        for destination in candidates:
+            if (destination.is_relative_to(images) or destination.is_relative_to(images.resolve())
+                    or any(_aliases(destination, file) for file in markdown)):
+                return True
+    return False
+
+
 def check_auxiliary(capture: Path | None, checkout: Path | None, *paths: Path) -> None:
     check_capture(capture, *paths)
     for path in paths:
-        resolved = path.resolve()
         if path.is_symlink() or (path.exists() and (not path.is_file() or path.stat().st_nlink > 1)):
             raise ShowcaseError("staged reports must use an unlinked regular file", log="staged-description:path")
         if path.is_file():
@@ -82,15 +101,8 @@ def check_auxiliary(capture: Path | None, checkout: Path | None, *paths: Path) -
                 signature = stream.read(8)
             if signature.startswith((b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff")):
                 raise ShowcaseError("staged reports must not replace an existing image", log="staged-description:path")
-        roots = {(checkout or Path.cwd()).resolve()}
-        # Explicit metadata-only destinations can still land in this or another checked-out repository.
-        enclosing = next((parent for parent in resolved.parents if (parent / ".git").exists()), None)
-        if enclosing is not None:
-            roots.add(enclosing)
-        for root in roots:
-            if (resolved.is_relative_to((root / "docs/images").resolve())
-                    or any(_aliases(resolved, (root / name).resolve()) for name in ("README.md", "CONTRIBUTING.md"))):
-                raise ShowcaseError("staged reports must stay outside Action-managed paths", log="staged-description:path")
+        if _action_managed_path(path, checkout):
+            raise ShowcaseError("staged reports must stay outside Action-managed paths", log="staged-description:path")
 
 
 def check_outputs(ctx, *paths: Path, auxiliary: tuple[Path, ...] = ()) -> None:

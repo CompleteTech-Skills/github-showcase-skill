@@ -309,14 +309,14 @@ def cmd_social(args):
     job = getattr(args, "job", False)
     default_path = f"assets/{SOCIAL_STAGING}/social-preview.png" if staged else "assets/social-preview.png"
     out = Path(args.out) if args.out else default_out(args, default_path)
-    check_social_path(out, staged=staged, job=job)
+    check_social_path(out, staged=staged, job=job, checkout=ctx.repo_dir)
     r = getattr(args, "_content_resolver", None)  # set by `content social` from its --registry/--approved* flags
     data, fmt, info = social.social_render(ctx, Fonts(ctx.brand), args.title, args.icon,
                                            login=r.canonical(ctx.owner) if r else None,
                                            keys=args.key_chip or None, attrs=args.chip or None)
     if fmt == "jpg":
         out = out.with_suffix(".jpg")
-        check_social_path(out, staged=staged, job=job)
+        check_social_path(out, staged=staged, job=job, checkout=ctx.repo_dir)
     report = getattr(args, "report", None)
     check_outputs(ctx, out, auxiliary=(Path(report),) if staged and report else ())
     write_rendered_art(ctx, (out, data, {}), summarize_art=False)

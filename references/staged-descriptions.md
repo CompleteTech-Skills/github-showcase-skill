@@ -23,7 +23,8 @@ README has a managed tagline with that text, including an already-current taglin
 Explicit report and change-record destinations must stay outside the files the
 Action commits. The capture, output and provenance destinations must be distinct.
 Staged social previews default to `assets/.showcase-staging/social-preview.png`.
-An explicit staged path must also be inside a `.showcase-staging` directory.
+An explicit staged path uses a `.showcase-staging` directory outside the
+files the Action commits.
 A preview's sidecar stays beside the private image outside the canonical Action
 artifact group. Reports also preserve existing PNG or JPEG output files.
 `content social --job` requires captured metadata and a live output path outside
@@ -56,5 +57,6 @@ elsewhere in the README. Upgrades for variants G (fork) and H (archive) write a 
 `doctor` also checks any managed tagline those upgrades preserve.
 
 The composite Action checks the canonical, nested art and root sidecars for staged
-records before committing and checks the staged Git blobs for proposals. Local
+records before committing and checks the staged Git blobs for proposals and
+unrelated index changes. Local
 writes to each output group share a sidecar lock. A partial live refresh preserves unrelated staged records and cannot authorize their publication.

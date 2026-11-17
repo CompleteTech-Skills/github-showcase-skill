@@ -102,8 +102,17 @@ def has_staged_outputs() -> bool:
                if path.exists() or path.is_symlink())
 
 
-def has_staged_index() -> bool:
-    """Check the sidecar blobs Git will publish, even if the files change after git add."""
+def has_staged_index(*, allow_icon_removal: bool = False) -> bool:
+    """Check the exact index and prevent grouped commits from including unrelated files."""
+    changes = subprocess.run(["git", "diff", "--cached", "--name-status", "--no-renames", "-z"],
+                             check=True, capture_output=True, timeout=30)
+    columns = changes.stdout.split(b"\0")
+    for status, path in zip(columns[::2], columns[1::2]):
+        if path.startswith(b"docs/images/") or path in (b"docs/images", b"README.md", b"CONTRIBUTING.md"):
+            continue
+        if allow_icon_removal and status == b"D" and path == b"assets/icon.png":
+            continue
+        return True  # the bare git commit would include these pre-existing staged changes
     result = subprocess.run(["git", "ls-files", "--stage", "-z", "--", IMAGES.as_posix(), SIDECAR.name],
                             check=True, capture_output=True, timeout=30)
     for item in result.stdout.split(b"\0"):
@@ -184,9 +193,11 @@ def summary(meta: str) -> None:
 
 
 if __name__ == "__main__":
-    if sys.argv[1:] in (["staged"], ["staged-index"]):
-        check = has_staged_outputs if sys.argv[1] == "staged" else has_staged_index
-        print("true" if check() else "false")
+    if sys.argv[1:] == ["staged"]:
+        print("true" if has_staged_outputs() else "false")
+        sys.exit(0)
+    if sys.argv[1:] in (["staged-index"], ["staged-index", "icon-removal"]):
+        print("true" if has_staged_index(allow_icon_removal=len(sys.argv) == 3) else "false")
         sys.exit(0)
     if not (len(sys.argv) == 3 and sys.argv[1] in ("foreign", "drop", "summary")
             or len(sys.argv) == 4 and sys.argv[1] == "foreign" and sys.argv[3] in ART_NAMES):
