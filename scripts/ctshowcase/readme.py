@@ -275,15 +275,25 @@ def _eol_normalized(body: str) -> str:
     return body.replace("\r\n", "\n").replace("\r", "\n").strip("\n")
 
 
-def _legacy_badge_body(brand, body: str, style: dict | None = None) -> bool:
-    return legacy_profile_badges(brand, body, style) or _eol_normalized(body) in template_badge_bodies(brand)
+def _legacy_badge_body(brand, body: str, style: dict | None = None, *, ci_matches=None) -> bool:
+    return (legacy_profile_badges(brand, body, style, ci_matches=ci_matches)
+            or _eol_normalized(body) in template_badge_bodies(brand))
+
+
+def _legacy_ci_matches(ctx, owner: str, repo: str) -> bool:
+    if ctx.same_repo(f"{owner}/{repo}"):
+        return True
+    # A personal profile repository can have the former account's spelling.
+    return (repo.casefold() == owner.casefold() and ctx.same_owner(owner)
+            and ctx.same_owner(ctx.owner, ctx.repo))
 
 
 def badge_body(ctx: RepoContext, existing: str | None = None) -> str:
     """Refresh owned rows; a missing or changed digest makes a J block authored."""
     if ctx.det["variant"] != "J":
         return badges_html(ctx) if ctx.det["variant"] == "F" else badges_md(ctx)
-    is_legacy = _legacy_badge_body(ctx.brand, existing or "", ctx.style)
+    is_legacy = _legacy_badge_body(ctx.brand, existing or "", ctx.style,
+                                  ci_matches=lambda owner, repo: _legacy_ci_matches(ctx, owner, repo))
     has_license_row = "![License " in (existing or "") or "![AGPL-3.0 or commercial license]" in (existing or "")
     if is_legacy and has_license_row and ctx.public and (ctx.meta.get("license") or "").upper() in ("", "NOASSERTION", "OTHER"):
         return existing  # missing metadata cannot disprove an authored license claim
@@ -310,7 +320,7 @@ def template_badge_bodies(brand) -> tuple[str, str]:
     return template_badge_body(brand), f"![Type {category}](docs/images/badges/{slug}.svg)"
 
 
-def legacy_profile_badges(brand, body: str, style: dict | None = None) -> bool:
+def legacy_profile_badges(brand, body: str, style: dict | None = None, *, ci_matches=None) -> bool:
     """Recognize the old generator's ordered language/license/CI rows without today's metadata.
 
     A type row, custom markup, altered alt/URL pair or duplicate kind makes the block authored.
@@ -350,7 +360,8 @@ def legacy_profile_badges(brand, body: str, style: dict | None = None) -> bool:
             suffixes = ["?logo=nodedotjs&logoColor=white"]
         elif alt in ("CI", "Tests"):
             ci = re.fullmatch(r"https://github\.com/([A-Za-z0-9-]+)/(\.github|[A-Za-z0-9-]+)/actions/workflows/([^/?#]+\.ya?ml)/badge\.svg", url)
-            if not ci or link != url.removesuffix("/badge.svg") or ci.group(2).lower() not in (".github", ci.group(1).lower()):
+            if (not ci or link != url.removesuffix("/badge.svg") or ci_matches is None
+                    or not ci_matches(ci.group(1), ci.group(2))):
                 return False
             name = ci.group(3)
             expected = "Tests" if "test" in name else "CI" if "ci" in name else None
@@ -1400,6 +1411,9 @@ def preservation(before: str, after: str, removed: list[str], *, ctx: RepoContex
     brand = ctx.brand if ctx else None
     style = ctx.style if ctx else None
     retained = Counter(m.group(0) for m in current_blocks)
+
+    def ci_matches(owner, repo):
+        return ctx is not None and _legacy_ci_matches(ctx, owner, repo)
     problems = []
 
     def omit_owned_badges(m):
@@ -1417,7 +1431,7 @@ def preservation(before: str, after: str, removed: list[str], *, ctx: RepoContex
             if brand is None:
                 from .config import load_brand
                 brand = load_brand(prefer_lock=True)
-            if _legacy_badge_body(brand, body, style):
+            if _legacy_badge_body(brand, body, style, ci_matches=ci_matches):
                 replacements[digest] -= 1
                 return wrap("badges", "")
         if body.strip() and (ctx is None or ctx.det["variant"] == "J"):

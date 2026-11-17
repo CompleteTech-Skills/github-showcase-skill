@@ -14,8 +14,18 @@ from conftest import ROOT
 def profile_context(make_ctx, tmp_path, **kwargs):
     (tmp_path / "docs/images").mkdir(parents=True)
     (tmp_path / "docs/images/banner.png").write_bytes(b"banner")
-    return make_ctx(repo_dir=tmp_path, repo=".github", language=None,
+    return make_ctx(repo_dir=tmp_path, repo=kwargs.pop("repo", ".github"), language=None,
                     description="Community health files for Northwind Trading Co.", **kwargs)
+
+
+
+def use_northwind_former_login(ctx):
+    from copy import deepcopy
+    from ctshowcase.config import Brand
+
+    raw = deepcopy(ctx.brand.raw)
+    raw["orgs"]["Northwind-Trading-Co"]["former_slugs"].append("Old-Northwind")
+    ctx.brand = Brand(raw, ctx.brand.path)
 
 
 def badge_block(text):
@@ -310,6 +320,7 @@ def test_legacy_badges_migrate_independently_of_current_metadata(make_ctx, tmp_p
     elif scenario == "local-license":
         legacy = "![License MIT](docs/images/badges/license-mit.svg)"
     elif scenario == "owner":
+        use_northwind_former_login(ctx)
         (tmp_path / ".github/workflows").mkdir(parents=True)
         (tmp_path / ".github/workflows/ci.yml").write_text("name: CI\n", encoding="utf-8")
         legacy = ("![License MIT](https://img.shields.io/badge/license-MIT-64748B)\n"
@@ -333,7 +344,7 @@ def test_legacy_badges_migrate_independently_of_current_metadata(make_ctx, tmp_p
         assert "license-MIT-" not in body and "license-mit.svg" not in body
     assert "Old-Northwind" not in body and "JavaScript" not in body
     assert "Authored paragraph to retain." in after
-    assert readme.preservation(before, after, removed) == []
+    assert readme.preservation(before, after, removed, ctx=ctx) == []
     again = readme.upgrade(ctx, after)[0] if mode == "upgrade" else readme.header_only(ctx, after)
     assert again == after
 
@@ -449,14 +460,17 @@ def test_cli_html_alt_backticks_remain_literal(make_ctx, tmp_path):
 
 @pytest.mark.parametrize("repo, migrates", [("Old-Northwind", True), (".github", True), ("Elsewhere", False)])
 def test_legacy_ci_badge_recognizes_personal_profile_repository(make_ctx, tmp_path, repo, migrates):
-    ctx = profile_context(make_ctx, tmp_path)
+    current = ".github" if repo == ".github" else "Northwind-Trading-Co"
+    ctx = profile_context(make_ctx, tmp_path, repo=current)
+    ctx.det["variant"] = "J"
+    use_northwind_former_login(ctx)
     url = f"https://github.com/Old-Northwind/{repo}/actions/workflows/ci.yml"
     authored = f"![License MIT](https://img.shields.io/badge/license-MIT-64748B)\n[![CI]({url}/badge.svg)]({url})"
     before = readme.wrap("badges", authored) + "\n\nAuthored paragraph to retain.\n"
     after, removed = readme.upgrade(ctx, before)
     assert (authored not in badge_block(after)) is migrates
     assert "Authored paragraph to retain." in after
-    assert readme.preservation(before, after, removed) == []
+    assert readme.preservation(before, after, removed, ctx=ctx) == []
 
 
 def test_cli_markdown_alt_backticks_remain_literal(make_ctx, tmp_path):
@@ -484,13 +498,15 @@ def test_cli_angle_bracketed_shield_destinations_use_palette_tokens(make_ctx, tm
 
 
 def test_legacy_ci_badge_profile_repository_matches_owner_case_insensitively(make_ctx, tmp_path):
-    ctx = profile_context(make_ctx, tmp_path)
+    ctx = profile_context(make_ctx, tmp_path, repo="Northwind-Trading-Co")
+    ctx.det["variant"] = "J"
+    use_northwind_former_login(ctx)
     url = "https://github.com/Old-Northwind/old-northwind/actions/workflows/ci.yml"
     authored = f"![License MIT](https://img.shields.io/badge/license-MIT-64748B)\n[![CI]({url}/badge.svg)]({url})"
     before = readme.wrap("badges", authored) + "\n\nAuthored paragraph to retain.\n"
     after, removed = readme.upgrade(ctx, before)
     assert authored not in badge_block(after)
-    assert readme.preservation(before, after, removed) == []
+    assert readme.preservation(before, after, removed, ctx=ctx) == []
 
 
 def test_legacy_language_badge_with_family_palette_migrates(make_ctx, tmp_path):
@@ -726,3 +742,19 @@ def test_header_keeps_same_line_authored_badge_markers(make_ctx, tmp_path):
     template += "\n\n" + readme.pristine_block("## About\n\nTemplate.")
     template = readme._sub_blocks(template, lambda m: row if m.group(1) == "badges" else m.group(0))
     assert row in readme.bootstrap(ctx, template)
+
+
+
+@pytest.mark.parametrize("mode", ["header", "upgrade"])
+def test_variant_j_preserves_foreign_profile_workflow_badge(make_ctx, tmp_path, mode):
+    ctx = profile_context(make_ctx, tmp_path)
+    use_northwind_former_login(ctx)
+    remote = "https://github.com/Northwind-Partners/.github/actions/workflows/test.yml"
+    row = f"[![Tests]({remote}/badge.svg)]({remote})"
+    before = readme.wrap("badges", row) + "\n\nAuthored notes.\n"
+    if mode == "upgrade":
+        after, removed = readme.upgrade(ctx, before)
+    else:
+        after, removed = readme.header_only(ctx, before), []
+    assert badge_block(after) == row
+    assert not readme.preservation(before, after, removed, ctx=ctx)

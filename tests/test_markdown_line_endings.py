@@ -222,3 +222,62 @@ def test_restore_line_endings_keeps_authored_copy_of_new_nav_row():
     after = readme.normalize_text(raw).replace('old nav', 'row')
     restored = readme.restore_line_endings(raw, readme.normalize_text(raw), after)
     assert restored == raw.replace('old nav', 'row')
+
+
+@pytest.mark.parametrize('ending', ENDINGS)
+def test_markup_on_managed_comment_line_is_not_a_rendered_markdown_image(tmp_path, ending):
+    meta = tmp_path / 'meta.json'
+    meta.write_text(json.dumps({'owner': 'Northwind-Trading-Co', 'repo': '.github',
+                                'license': 'MIT', 'files': ['README.md']}), encoding='utf-8')
+    path = tmp_path / 'README.md'
+    line = '<!-- showcase:badges:start -->![Shot](missing.png)<!-- showcase:badges:end -->'
+    path.write_bytes(('# Probe\n\n' + line + '\n').replace('\n', ending).encode('utf-8'))
+    result = run_cli('--meta', meta, '--repo-dir', tmp_path, 'lint', 'readme', path)
+    assert 'R7 local image does not resolve: missing.png' not in json.loads(result.stdout)['fails']
+    path.write_bytes(('# Probe\n\n' + line.replace('-->![', '-->\n![').replace('png)<!--', 'png)\n<!--') + '\n')
+                     .replace('\n', ending).encode('utf-8'))
+    control = run_cli('--meta', meta, '--repo-dir', tmp_path, 'lint', 'readme', path)
+    assert 'R7 local image does not resolve: missing.png' in json.loads(control.stdout)['fails']
+
+
+@pytest.mark.parametrize('ending', ENDINGS)
+def test_dry_run_patch_applies_to_original_readme_bytes(tmp_path, ending):
+    import shutil
+    import subprocess
+
+    git = shutil.which('git')
+    if not git:
+        pytest.skip('Git is required to verify application of the unified diff')
+    meta = tmp_path / 'meta.json'
+    meta.write_text(json.dumps({'owner': 'Northwind-Trading-Co', 'repo': '.github',
+                                'license': 'MIT', 'files': ['README.md']}), encoding='utf-8')
+    path = tmp_path / 'README.md'
+    original = ('\ufeff# Probe\n\n<!-- showcase:badges:start -->\n<!-- showcase:badges:end -->\n\n'
+                'Authored text without final newline').replace('\n', ending).encode('utf-8')
+    path.write_bytes(original)
+    args = ('--meta', meta, '--repo-dir', tmp_path, 'readme', '--mode', 'header')
+    plan = run_cli(*args)
+    assert plan.returncode in (0, 1), plan.stderr
+    patch = tmp_path / 'plan.patch'
+    patch.write_bytes(json.loads(plan.stdout)['diff'].encode('utf-8'))
+    written = run_cli(*args, '--write')
+    assert json.loads(written.stdout)['written']
+    expected = path.read_bytes()
+    path.write_bytes(original)
+    applied = subprocess.run([git, 'apply', '--whitespace=nowarn', str(patch)], cwd=tmp_path, capture_output=True)
+    assert applied.returncode == 0, applied.stderr
+    assert path.read_bytes() == expected
+
+
+def test_bare_reference_controls_check_visible_images_and_palette(tmp_path):
+    meta = tmp_path / 'meta.json'
+    meta.write_text(json.dumps({'owner': 'Northwind-Trading-Co', 'repo': '.github',
+                                'license': 'MIT', 'files': ['README.md']}), encoding='utf-8')
+    path = tmp_path / 'README.md'
+    source = ('# Probe\n\n![Shot][x] ![Badge][y]\n\n'
+              '[x]: docs/miss\x01ing.png\n[y]: https://img.shields.io/badge/type-a\x01-FF0000\n')
+    path.write_bytes(source.encode('utf-8'))
+    result = run_cli('--meta', meta, '--repo-dir', tmp_path, 'lint', 'readme', path)
+    failures = json.loads(result.stdout)['fails']
+    assert 'R7 local image does not resolve: docs/miss%01ing.png' in failures
+    assert 'R7 off-palette badge colour FF0000' in failures

@@ -424,6 +424,16 @@ def _authored_footer_refusal(ctx, text):
     return []
 
 
+def readme_diff(before: str, after: str) -> str:
+    """A unified patch over exact file bytes, using Git's LF line framing."""
+    def patch_lines(text):
+        *lines, tail = text.split("\n")
+        return [line + "\n" for line in lines] + ([tail] if tail else [])
+
+    diff = difflib.unified_diff(patch_lines(before), patch_lines(after), "a/README.md", "b/README.md")
+    return "".join(line if line.endswith("\n") else line + "\n\\ No newline at end of file\n" for line in diff)
+
+
 def cmd_readme(args):
     from ctshowcase import readme, records
     ctx = context(args)
@@ -490,7 +500,8 @@ def cmd_readme(args):
                 return base("readme", ctx, result="fail", mode=mode, problems=problems[:20],
                             logs=ctx.logs + ["readme-shrink"]), CHECK_FAILED
     changed = after != before
-    diff = "".join(difflib.unified_diff(before.splitlines(True), after.splitlines(True), "a/README.md", "b/README.md"))
+    bom = readme.BOM if raw.startswith(readme.BOM) else ""
+    restored = bom + readme.restore_line_endings(raw, before, after) if changed else raw
     badge_outputs = {}
     if getattr(ctx, "badge_files", None):
         from ctshowcase import badge
@@ -502,8 +513,6 @@ def cmd_readme(args):
         for rel, data in badge_outputs.items():
             write_bytes(rd / rel, data)
     if changed and (args.write or args.records):
-        bom = readme.BOM if raw.startswith(readme.BOM) else ""
-        restored = bom + readme.restore_line_endings(raw, before, after)
         if args.write:
             path.write_bytes(restored.encode("utf-8"))
             if contrib_new is not None:
@@ -514,8 +523,13 @@ def cmd_readme(args):
     res = base("readme", ctx, result="changed" if changed else "unchanged", mode="bootstrap" if args.bootstrap else mode,
                variant=ctx.det["variant"], written=bool(args.write and changed))
     if args.diff or not args.write:
+        diff = readme_diff(raw, restored)
         if args.format == "text":
-            sys.stdout.write(diff)
+            output = getattr(sys.stdout, "buffer", None)
+            if output is None:
+                sys.stdout.write(diff)
+            else:
+                output.write(diff.encode("utf-8"))
             return None, OK
         res["diff"] = diff
     return res, OK

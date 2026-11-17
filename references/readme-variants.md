@@ -81,7 +81,6 @@ Each label and message segment doubles `-` and `_` (shields.io's escapes) and is
 
 The table shows CompleteTech defaults. Each family uses its configured `badge_brand` and `badge_accent` in `references/brand.yaml`; shared neutral tokens remain configured there. AI-Ascension keeps its badges unchanged. Never infer CompleteTech colours for another family. Local badges (`--badges local`) retain those fills and select configured foregrounds meeting 4.5:1 for label and value text; if none qualifies, generation returns `needs-input:badge-contrast` before writing. Repository READMEs default to shields.io; local rendering does not establish remote rendering parity. Pending identities require owner-supplied palette and mark (`needs-input:brand-identity`), even after consent.
 
-Compatibility limit: bare reference destinations with ASCII control characters or unbalanced unescaped parentheses are treated as ordinary Markdown under the published GFM grammar. Native cmark-gfm may still render images from such definitions, so they can escape file and palette checks or undercount valid badges; use angle-delimited destinations or escape the parentheses. No native-exact guarantee is made for these forms.
 
 ## Shared rules (MUST)
 

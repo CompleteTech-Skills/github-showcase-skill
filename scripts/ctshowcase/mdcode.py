@@ -1012,7 +1012,7 @@ _NL = LINE_END
 _SOFT_NL = _NL + rf"(?![ \t\x00]*{_NL})"
 REF_DEFINITION = re.compile(
     rf"(?:\A|(?<=\n)|(?<=\r)(?!\n))\x00* {{0,3}}\[((?:\\.|[^\[\]\\\r\n]|{_SOFT_NL})+)\]:"
-    rf"[ \t\x00]*(?:{_NL}[ \t\x00]*)?(?:<((?:\\[^\r\n]|[^<>\\\r\n])*)>|((?!<)[^\x00-\x20\x7f]+?))"
+    rf"[ \t\x00]*(?:{_NL}[ \t\x00]*)?(?:<((?:\\[^\r\n]|[^<>\\\r\n])*)>|((?!<)[^\x00 \t\r\n]+?))"
     rf"(?:(?:[ \t]+|[ \t\x00]*{_NL}[ \t\x00]*)(?:\"(?:\\.|\\(?={_NL})|[^\"\\\r\n]|{_SOFT_NL})*\"|"
     rf"'(?:\\.|\\(?={_NL})|[^'\\\r\n]|{_SOFT_NL})*'|\((?:\\.|\\(?={_NL})|[^()\\\r\n]|{_SOFT_NL})*\)))?"
     r"[ \t]*(?=\r|\n|\Z)")
@@ -2203,6 +2203,8 @@ def _markdown_images(text: str, document: str) -> list[tuple[str, str, int, int]
     for match in _definitions(document):
         destination = match.group(2) if match.group(2) is not None else match.group(3)
         target = _destination_value(destination)
+        if match.group(3) is not None:
+            target = re.sub(r"[\x01-\x1f\x7f]", lambda m: f"%{ord(m[0]):02X}", target)
         definitions.setdefault(_definition_key(match, document), target)
     spans = _definition_spans(document)  # definition titles are never rendered as images
     html_spans = html_block_spans(document)  # raw HTML blocks are literal: Markdown image syntax there is text
