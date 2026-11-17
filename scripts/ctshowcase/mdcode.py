@@ -457,7 +457,7 @@ class _DefinitionProgress:
         candidate = "\n".join(self.parts)
         match = REF_DEFINITION.match(candidate)
         if match and match.end() == len(candidate) and _definition_key(match, candidate) and (
-                match.group(3) is None or _valid_reference_destination(match.group(3))):
+                match.group(3) is None or _balanced_destination(match.group(3), allow_unmatched_openers=True)):
             destination_end = match.end(2) + 1 if match.group(2) is not None else match.end(3)
             self.has_title = bool(candidate[destination_end:match.end()].strip())
             self.state = "complete"
@@ -468,7 +468,7 @@ class _DefinitionProgress:
             trial = candidate + closer
             match = REF_DEFINITION.match(trial)
             if (match and match.end() == len(trial) and _definition_key(match, trial)
-                    and (match.group(3) is None or _valid_reference_destination(match.group(3)))
+                    and (match.group(3) is None or _balanced_destination(match.group(3), allow_unmatched_openers=True))
                     and match.end(2 if match.group(2) is not None else 3) < len(candidate)
                     and candidate[match.end(2) + 1 if match.group(2) is not None else match.end(3):]
                     .lstrip(" \t\r\n\x00").startswith(opener)):
@@ -1277,7 +1277,7 @@ def _definition_candidates(document: str) -> str:
     for match in _raw_definition_matches(candidate, document):
         if not _definition_key(match, document):
             continue
-        if match.group(3) is not None and not _valid_reference_destination(match.group(3)):
+        if match.group(3) is not None and not _balanced_destination(match.group(3), allow_unmatched_openers=True):
             continue
         if match.start() in continuation and previous_end != match.start():
             continue
@@ -1429,11 +1429,10 @@ def _inline_link_spans(document: str, fences: tuple[tuple[int, int], ...]) -> tu
     return tuple(spans)
 
 
-def _valid_reference_destination(dest: str) -> bool:
-    """cmark-gfm bare reference destinations reject unmatched closing parentheses.
+def _balanced_destination(dest: str, *, allow_unmatched_openers: bool = False) -> bool:
+    """Check destination parentheses, treating escaped parentheses as literal.
 
-    An unmatched opening parenthesis is valid because a definition has no
-    inline closing delimiter. Escaped parentheses are literal.
+    cmark-gfm accepts unmatched openers in bare reference definitions.
     """
     depth, i = 0, 0
     while i < len(dest):
@@ -1448,7 +1447,7 @@ def _valid_reference_destination(dest: str) -> bool:
             if depth < 0:
                 return False
         i += 1
-    return True
+    return allow_unmatched_openers or depth == 0
 
 
 @functools.lru_cache(maxsize=16)
@@ -1464,7 +1463,7 @@ def _definitions(document: str) -> tuple:
     for match in _raw_definition_matches(_definition_candidates(document), document):
         if not _definition_key(match, document):
             continue
-        if match.group(3) is not None and not _valid_reference_destination(match.group(3)):
+        if match.group(3) is not None and not _balanced_destination(match.group(3), allow_unmatched_openers=True):
             continue  # a malformed bare destination is not a definition: the line stays ordinary Markdown
         if match.start() in continuation and not (live and after_line_end(document, live[-1].end()) == match.start()):
             continue
