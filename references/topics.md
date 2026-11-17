@@ -71,8 +71,12 @@ Family topics apply only to non-fork repos other than `.github`, in this order:
 | 21 | `pyproject.toml` or `setup.py`, or `package.json` with `main` or `exports` | `library` |
 | 22 | owner `CompleteTech-LLC-AI-Research`, or `*.ipynb` ≥ 50% of files | `research` |
 | 23 | slug matches `-in-\d+-steps$` | `tutorial` |
-| 24 | `*.csv`, `*.json` and `*.parquet` ≥ 50% of bytes | `dataset` |
+| 24 | `*.csv`, `*.json` and `*.parquet` ≥ 50% of substantive bytes (see below) | `dataset` |
 | 25 | otherwise | `workspace` |
+
+Rule 24 counts captured `file_sizes` only (a checkout re-measures those captured paths, so a file outside the captured tree, such as the `--meta` file the composite Action writes, is never counted; without captured sizes the rule is skipped). It leaves out paths under the `dataset_exclude_dirs` of `standard/types.yaml` (`planning/`, `.planning/`, `issues/`, `.github/`, `node_modules/`, `vendor/`, `dist/`, `build/`), the `dataset_exclude_files` package and config names, and files named `generated-issues.json`, `exported-issues.json`, `generated-planning.json` or `exported-planning.json` (any case). Other issue data stays eligible.
+
+Low-confidence results log `type-suggestion:<type>:<reason>`: `dataset-near-threshold` (rule 24 with a data share below `dataset_confident_share`, 60%), `docs-only` (rule 25 for a tree of only `.md`, `.rst`, `.txt`, `.adoc`, `LICENSE` or `COPYING` files once `documentation_exclude_files` such as `.gitignore` and `CODEOWNERS` are set aside) and `file-tree-unknown` (no checkout and no captured tree). Review it and set `type:` in `.github/showcase.yml` (or pass `--type`); an explicit type suppresses the suggestion. A documentation-only repository stays `workspace`: the type topics are a closed list and no `documentation` type topic is added.
 
 **The 24 type topics are reserved.** A repo carries exactly one of them, and only as its type topic.
 
