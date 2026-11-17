@@ -164,7 +164,7 @@ def gate_watching(ctx, allow_hold=False, remedy=HOLD_REMEDY) -> None:
 def maybe_sidecar(ctx, out: Path, record: dict) -> None:
     from ctshowcase import fingerprint as fp
     if out.parent.name == "images" and out.parent.parent.name == "docs":
-        inp = fp.inputs(ctx.meta, ctx.repo_dir, same_owner=ctx.same_owner)
+        inp = fp.inputs(ctx.meta, ctx.repo_dir, same_owner=lambda a, b: ctx.brand.resolver().same(a, b))
         # the repository's immutable id (`meta --from-gh`): `action_prepare.py foreign` tells a rename or transfer
         # (same id) from art copied out of another repository (a template copy gets a new id). Kept out of the
         # fingerprint inputs, so the fingerprint is unchanged.
