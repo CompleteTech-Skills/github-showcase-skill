@@ -128,12 +128,14 @@ runs:
         # a new repository) must never show under this repository's name. Decide once, before anything is written.
         # Only proof counts (a template's sidecar, or another repository id than GITHUB_REPOSITORY_ID): after a
         # rename or transfer the art and assets/icon.png are this repository's own and are kept.
-        foreign="$("${P[@]}" foreign "$GITHUB_REPOSITORY")"
+        "${P[@]}" foreign "$GITHUB_REPOSITORY" > /dev/null
+        foreign_banner="$("${P[@]}" foreign "$GITHUB_REPOSITORY" banner.png)"
+        foreign_card="$("${P[@]}" foreign "$GITHUB_REPOSITORY" card.svg)"
         # Exit 4 (needs-input: no description yet, a palette awaiting ct-std-v1.1), exit 2 (a family on hold) and
         # an "exempt" result are expected states, not failures: annotate, skip that output, keep the run green.
         skipped=0
         art() {
-          local kind="$1" file="$2"; shift 2
+          local kind="$1" file="$2" foreign="$3"; shift 3
           local rc=0 result
           "${S[@]}" --format json "$kind" --out "docs/images/$file" "$@" > "$RUNNER_TEMP/art.json" || rc=$?
           cat "$RUNNER_TEMP/art.json"
@@ -155,10 +157,10 @@ runs:
         }
         # Bash 3.2 treats an empty array as unset under nounset; expand only when populated.
         if [[ ",$SHOWCASE_OUTPUTS," == *",banner,"* ]]; then
-          art banner banner.png --allow-few-chips ${extra[@]+"${extra[@]}"}
+          art banner banner.png "$foreign_banner" --allow-few-chips ${extra[@]+"${extra[@]}"}
         fi
         if [[ ",$SHOWCASE_OUTPUTS," == *",card,"* ]]; then
-          art card card.svg --png "$RUNNER_TEMP/card.png" ${extra[@]+"${extra[@]}"}
+          art card card.svg "$foreign_card" --png "$RUNNER_TEMP/card.png" ${extra[@]+"${extra[@]}"}
         fi
         # A held repository (exit 2: a watching-org repository that is neither a fork nor `.github`) keeps its
         # README untouched until someone decides; like a held art family, that skips the output and keeps the run green.

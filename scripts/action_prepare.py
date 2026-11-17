@@ -6,6 +6,7 @@
                                          $GITHUB_REPOSITORY_ID), and then remove the copied icon (assets/icon.png
                                          whose sha256 is the one that sidecar recorded). A sidecar that only names
                                          another slug (a rename or transfer) prints "false" and keeps every file.
+  action_prepare.py foreign OWNER/REPO NAME  check a canonical banner or card without removing the icon
   action_prepare.py drop NAME            remove docs/images/NAME and its sidecar record (the sidecar too when empty)
   action_prepare.py summary META_JSON    append the describe and topics proposals to $GITHUB_STEP_SUMMARY
 """
@@ -21,7 +22,7 @@ from pathlib import Path
 # Keep direct and runpy entry points equivalent when the caller's CWD is a target checkout.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from ctshowcase.fingerprint import ART_NAMES, output_records, read_sidecar  # noqa: E402
+from ctshowcase.fingerprint import ART_NAMES, output_records, read_sidecar, replace_bytes  # noqa: E402
 
 IMAGES = Path("docs/images")
 SIDECAR = IMAGES / ".showcase.json"
@@ -39,7 +40,7 @@ def _recorded_ids(data: dict) -> set[str]:
             and record.get("repository_id") is not None}
 
 
-def foreign(full_name: str) -> bool:
+def foreign(full_name: str, artifact: str | None = None) -> bool:
     """True only when the art provably came from another repository; then a copied icon is removed (decision 12).
 
     Proof is a template's sidecar (its recorded type is `template`, or it names the template repository) or a recorded
@@ -47,17 +48,29 @@ def foreign(full_name: str) -> bool:
     art after a rename, a transfer or an org rename (the slug is not an identity): nothing is removed and the
     fingerprint, which changed with the slug, regenerates it. A template repository is never foreign to itself."""
     data = _sidecar()
+    if os.environ.get("SHOWCASE_IS_TEMPLATE") == "true":
+        return False
+    rid = (os.environ.get("GITHUB_REPOSITORY_ID") or "").strip()
+    if artifact is not None:
+        record = output_records(data).get(artifact)
+        if rid and isinstance(record, dict) and not record.get("exempt"):
+            artifact_id = record.get("repository_id")
+            if artifact_id is not None:
+                return str(artifact_id) != rid
+
     inp = data.get("inputs") or {}
-    if not isinstance(inp, dict) or not inp or os.environ.get("SHOWCASE_IS_TEMPLATE") == "true":
+    if not isinstance(inp, dict) or not inp:
         return False
     named = f"{inp.get('owner')}/{inp.get('repo')}"
-    ids, rid = _recorded_ids(data), (os.environ.get("GITHUB_REPOSITORY_ID") or "").strip()
+    ids = _recorded_ids(data)
     if rid and ids and ids == {rid}:
         return False  # the same repository under another name
     if named.lower() == full_name.lower():
         return False
     template = inp.get("type") == "template" or named.lower() == TEMPLATE_REPO.lower()
     other_id = bool(rid and ids and rid not in ids)
+    if artifact is not None:
+        return template or other_id
     icon = Path("assets/icon.png")
     copied = icon.is_file() and inp.get("icon_sha256") and \
         hashlib.sha256(icon.read_bytes()).hexdigest() == inp["icon_sha256"]
@@ -83,7 +96,7 @@ def drop(name: str) -> None:
     outs.pop(name, None)
     if outs:
         data["outputs"] = outs
-        SIDECAR.write_text(json.dumps(data, sort_keys=True, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+        replace_bytes(SIDECAR, (json.dumps(data, sort_keys=True, indent=1, ensure_ascii=False) + "\n").encode("utf-8"))
     else:
         SIDECAR.unlink()
 
@@ -129,10 +142,11 @@ def summary(meta: str) -> None:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3 or sys.argv[1] not in ("foreign", "drop", "summary"):
+    if not (len(sys.argv) == 3 and sys.argv[1] in ("foreign", "drop", "summary")
+            or len(sys.argv) == 4 and sys.argv[1] == "foreign" and sys.argv[3] in ART_NAMES):
         sys.exit(__doc__)
     if sys.argv[1] == "foreign":
-        print("true" if foreign(sys.argv[2]) else "false")
+        print("true" if foreign(*sys.argv[2:]) else "false")
     elif sys.argv[1] == "drop":
         drop(sys.argv[2])
     else:

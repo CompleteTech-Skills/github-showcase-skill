@@ -176,12 +176,12 @@ def maybe_sidecar(ctx, out: Path, record: dict) -> None:
 
 
 def record_art_exemption(ctx, kind: str, out: str | None, reason: str) -> None:
-    from ctshowcase.fingerprint import ART_RECORDS
+    from ctshowcase.fingerprint import ART_EXEMPTIONS, ART_RECORDS
     from ctshowcase.staged import record_output
 
     if (ctx.repo_dir is None or getattr(ctx, "staged_description", None) is not None
             or ctx.style.get("hold") or ctx.watching_status() == "hold:watching-non-fork"
-            or reason not in ("exempt:no-card", "exempt:profile-readme", "exempt:placeholder-org")):
+            or reason not in ART_EXEMPTIONS):
         return
     canonical = ctx.repo_dir.resolve() / "docs" / "images" / ART_RECORDS[kind]
     if (out is None or Path(out).resolve() == canonical) and not canonical.exists():
@@ -282,17 +282,11 @@ def cmd_social(args):
     if fmt == "jpg":
         out = out.with_suffix(".jpg")
         check_social_path(out, staged=staged, job=job)
+    from ctshowcase.fingerprint import file_record, replace_bytes
     if staged:
-        from tempfile import TemporaryDirectory
-
-        out.parent.mkdir(parents=True, exist_ok=True)
-        with TemporaryDirectory(dir=out.parent) as temporary:
-            source = Path(temporary) / out.name
-            source.write_bytes(data)
-            source.replace(out)
+        replace_bytes(out, data, private=True)
     else:
         write_bytes(out, data)
-    from ctshowcase.fingerprint import file_record
     record_output(ctx, out, file_record(out))
     res = base("social-preview", ctx, result="ok", out=str(out), bytes=len(data), format=fmt, **info)
     if args.command == "social-preview":  # the hidden, deprecated top-level alias of `content social`

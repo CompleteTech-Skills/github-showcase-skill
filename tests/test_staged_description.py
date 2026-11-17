@@ -269,11 +269,11 @@ def test_fingerprint_preserves_legacy_records_on_partial_write(tmp_path):
 
     old = fingerprint({"description": "Old description."}, "config")
     sidecar = tmp_path / ".showcase.json"
-    sidecar.write_text(json.dumps({"fingerprint": old, "outputs": {"banner.png": {"sha256": "banner-hash"}}}),
+    sidecar.write_text(json.dumps({"fingerprint": old, "outputs": {"banner.png": {"sha256": "b" * 64}}}),
                        encoding="utf-8")
     assert not outputs_changed(read_sidecar(tmp_path), old, {"banner.png"})
     inputs = {"description": "New description."}
-    write_sidecar(tmp_path, inputs, "config", "card.svg", {"sha256": "card-hash"})
+    write_sidecar(tmp_path, inputs, "config", "card.svg", {"sha256": "c" * 64})
     current = fingerprint(inputs, "config")
     data = read_sidecar(tmp_path)
     assert outputs_changed(data, current, {"banner.png", "card.svg"})
@@ -285,15 +285,15 @@ def test_fingerprint_requires_selected_art_records_in_modern_sidecars(tmp_path):
 
     inputs = {"description": "Captured description."}
     current = fingerprint(inputs, "config")
-    legacy = {"fingerprint": current, "outputs": {"card.svg": {"sha256": "card-hash"}}}
+    legacy = {"fingerprint": current, "outputs": {"card.svg": {"sha256": "c" * 64}}}
     selected = {"banner.png", "card.svg", "README.md"}
     assert not outputs_changed(legacy, current, selected)
 
-    write_sidecar(tmp_path, inputs, "config", "card.svg", {"sha256": "card-hash"})
+    write_sidecar(tmp_path, inputs, "config", "card.svg", {"sha256": "c" * 64})
     modern = read_sidecar(tmp_path)
     assert outputs_changed(modern, current, selected)
     assert not outputs_changed(modern, current, {"card.svg", "README.md"})
-    write_sidecar(tmp_path, inputs, "config", "banner.png", {"sha256": "banner-hash"})
+    write_sidecar(tmp_path, inputs, "config", "banner.png", {"sha256": "b" * 64})
     assert not outputs_changed(read_sidecar(tmp_path), current, selected)
 
 
@@ -374,7 +374,7 @@ def test_canonical_and_custom_outputs_have_independent_provenance(make_ctx, tmp_
     assert outputs["./banner.png"] == updated["outputs"]["./banner.png"]
 
 
-@pytest.mark.parametrize("invalid", [None, [], "invalid"])
+@pytest.mark.parametrize("invalid", [None, [], {}, "invalid", {"exempt": "unknown"}])
 def test_malformed_selected_record_is_stale(invalid):
     from ctshowcase.fingerprint import outputs_changed
 
@@ -400,3 +400,62 @@ def test_canonical_exempt_card_is_cached(tmp_path):
     capture.write_text(json.dumps(meta_dict()), encoding="utf-8")
     changed = run_cli(*common, "fingerprint", "--outputs", "card")
     assert json.loads(changed.stdout)["changed"] is True
+
+
+@pytest.mark.parametrize("link_kind", ["hard", "symbolic"])
+def test_sidecar_replacement_keeps_linked_live_preview(tmp_path, link_kind):
+    from ctshowcase.fingerprint import write_sidecar
+
+    live = tmp_path / "live.png"
+    live.write_bytes(b"existing live preview")
+    sidecar = tmp_path / ".showcase.json"
+    try:
+        if link_kind == "hard":
+            sidecar.hardlink_to(live)
+        else:
+            sidecar.symlink_to(live)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"{link_kind} links are unavailable: {exc}")
+
+    write_sidecar(tmp_path, {"description": "Staged preview."}, "config", "staged.png", {"sha256": "a" * 64})
+    assert live.read_bytes() == b"existing live preview"
+    assert not sidecar.is_symlink()
+    assert read_sidecar(tmp_path)["outputs"]["staged.png"]["sha256"] == "a" * 64
+
+
+def test_staged_preview_replacement_retains_posix_permissions(tmp_path):
+    import os
+    import stat
+
+    from ctshowcase.fingerprint import replace_bytes
+
+    if os.name != "posix":
+        pytest.skip("POSIX permission bits required")
+    path = tmp_path / "preview.png"
+    replace_bytes(path, b"first proposal", private=True)
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    path.chmod(0o640)
+    replace_bytes(path, b"updated proposal", private=True)
+    assert path.read_bytes() == b"updated proposal"
+    assert stat.S_IMODE(path.stat().st_mode) == 0o640
+
+
+def test_action_classifies_foreign_art_individually(tmp_path, monkeypatch):
+    import action_prepare
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GITHUB_REPOSITORY_ID", "275")
+    monkeypatch.delenv("SHOWCASE_IS_TEMPLATE", raising=False)
+    images = tmp_path / "docs/images"
+    images.mkdir(parents=True)
+    data = {
+        "inputs": {"owner": "Northwind", "repo": "current"},
+        "outputs": {
+            "banner.png": {"repository_id": 274},
+            "card.svg": {"repository_id": 275},
+        },
+    }
+    (images / ".showcase.json").write_text(json.dumps(data), encoding="utf-8")
+    assert action_prepare.foreign("Northwind/current", "banner.png")
+    assert not action_prepare.foreign("Northwind/current", "card.svg")
+    assert not action_prepare.foreign("Northwind/current")

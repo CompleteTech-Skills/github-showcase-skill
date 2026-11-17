@@ -49,6 +49,8 @@ def record_output(ctx, path: Path, record: dict, *, always: bool = False) -> Pat
     root = Path(ctx.repo_dir).resolve() if ctx.repo_dir else None
     if root is not None and path.is_relative_to(root):
         directory = root / "docs" / "images"
+        if not directory.resolve().is_relative_to(root):
+            raise ShowcaseError("the showcase sidecar must stay inside the target checkout", log="staged-description:path")
         relative = path.relative_to(root).as_posix()
         if path.parent == directory and path.name != "README.md":
             name = path.name

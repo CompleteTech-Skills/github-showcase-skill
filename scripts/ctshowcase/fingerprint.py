@@ -3,8 +3,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import stat
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from . import STANDARD, __version__
 from .config import LOCK, canonical
@@ -12,6 +15,7 @@ from .config import LOCK, canonical
 SIDECAR = ".showcase.json"
 ART_RECORDS = {"banner": "banner.png", "card": "card.svg"}
 ART_NAMES = frozenset(ART_RECORDS.values())
+ART_EXEMPTIONS = ("exempt:no-card", "exempt:profile-readme", "exempt:placeholder-org")
 
 
 def config_sha256(brand=None) -> str:
@@ -78,7 +82,7 @@ def fingerprint(inp: dict, cfg_sha: str) -> str:
 
 def read_sidecar(out_dir: Path) -> dict:
     p = out_dir / SIDECAR
-    if p.is_file():
+    if not p.is_symlink() and p.is_file():
         try:
             data = json.loads(p.read_text(encoding="utf-8"))
             return data if isinstance(data, dict) else {}
@@ -103,13 +107,45 @@ def outputs_changed(data: dict, current: str, selected: set[str] | None = None) 
         required_art = selected.intersection(ART_NAMES)
         if required_art.difference(outputs):
             return True
-    records = [record for name, record in outputs.items()
-               if selected is None or name in selected]
+    records = {name: record for name, record in outputs.items() if selected is None or name in selected}
     if not records:
         return previous != current
-    return any(not isinstance(record, dict) or record.get("staged_description")
-               or record.get("fingerprint", previous) != current
-               for record in records)
+    for name, record in records.items():
+        if not isinstance(record, dict) or record.get("staged_description"):
+            return True
+        if record.get("fingerprint", previous) != current:
+            return True
+        if name in ART_NAMES and record.get("exempt") in ART_EXEMPTIONS and record.get("fingerprint") == current:
+            continue
+        digest = record.get("sha256")
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            return True
+    return False
+
+
+def replace_bytes(path: Path, data: bytes, *, private: bool = False) -> None:
+    """Replace the directory entry instead of writing through an existing link."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        existing = path.lstat()
+    except FileNotFoundError:
+        existing = None
+    regular = existing is not None and stat.S_ISREG(existing.st_mode)
+    if private and existing is not None:
+        if not regular:
+            raise OSError(f"staged output is not a regular file: {path}")
+        # An atomic rename only needs directory permissions. Retain the existing file's write check.
+        fd = os.open(path, os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0))
+        os.close(fd)
+
+    with TemporaryDirectory(dir=path.parent) as directory:
+        source = Path(directory) / path.name
+        source.write_bytes(data)
+        if existing is not None and regular:
+            source.chmod(existing.st_mode & 0o777)
+        elif private:
+            source.chmod(0o600)
+        source.replace(path)
 
 
 def write_sidecar(out_dir: Path, inp: dict, cfg_sha: str, name: str, record: dict, *, summarize: bool = True) -> Path:
@@ -123,7 +159,7 @@ def write_sidecar(out_dir: Path, inp: dict, cfg_sha: str, name: str, record: dic
     if summarize:
         data.update(config_sha256=cfg_sha, inputs=inp, fingerprint=current)
     p = out_dir / SIDECAR
-    p.write_text(json.dumps(data, sort_keys=True, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    replace_bytes(p, (json.dumps(data, sort_keys=True, indent=1, ensure_ascii=False) + "\n").encode("utf-8"))
     return p
 
 
