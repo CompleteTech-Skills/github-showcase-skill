@@ -200,3 +200,11 @@ def test_restore_line_endings_preserves_moved_authored_lines():
     after = 'top\n## About\nabout\n## License\nold\n'
     restored = readme.restore_line_endings(raw, readme.normalize_text(raw), after)
     assert restored == 'top\n## About\nabout\r\n## License\nold\n'
+
+
+
+def test_restore_line_endings_pairs_repeated_rows_in_occurrence_order():
+    raw = 'start\n' + 'repeat\rrepeat\r\nrepeat\n' * 20_000 + 'end\n'
+    after = 'new start\n' + 'repeat\n' * 60_000 + 'new end\n'
+    restored = readme.restore_line_endings(raw, readme.normalize_text(raw), after)
+    assert restored == raw.replace('start', 'new start').replace('end', 'new end')

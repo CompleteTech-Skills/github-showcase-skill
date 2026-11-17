@@ -5,7 +5,6 @@ those blocks. Content is never invented (§1.5 rule 2) and never lost (§7.1 res
 """
 from __future__ import annotations
 
-import difflib
 import re
 from collections import Counter, defaultdict, deque
 from pathlib import Path
@@ -1439,37 +1438,22 @@ def restore_line_endings(raw: str, before: str, after: str) -> str:
     # One ending follows every line but the last; the last line has none.
     if len(old) != len(endings) + 1:
         return after.replace("\n", common)  # not a universal-newline view of raw: keep the style only
-    aligned = {}
-    # Unchanged leading and trailing lines map one to one; only the edited
-    # middle needs a line diff.
+    # Keep the unchanged edges anchored. Match the remaining equal lines
+    # by occurrence, including lines moved during section reordering.
+    old_count, new_count = len(old) - 1, len(new) - 1
     head = 0
-    while head < len(old) - 1 and head < len(new) - 1 and old[head] == new[head]:
-        aligned[head] = head
+    while head < min(old_count, new_count) and old[head] == new[head]:
         head += 1
     tail = 0
-    while (tail < len(old) - 1 - head and tail < len(new) - 1 - head
-           and old[-2 - tail] == new[-2 - tail]):
-        aligned[len(new) - 2 - tail] = len(old) - 2 - tail
+    while tail < min(old_count, new_count) - head and old[old_count - 1 - tail] == new[new_count - 1 - tail]:
         tail += 1
-    matcher = difflib.SequenceMatcher(None, old[head:len(old) - 1 - tail], new[head:len(new) - 1 - tail])
-    for i, j, size in matcher.get_matching_blocks():
-        for k in range(size):
-            aligned[head + j + k] = head + i + k
-    # Reordered sections fall outside the ordered diff. Match each remaining
-    # equal line to one unused original occurrence.
-    used = set(aligned.values())
     remaining = defaultdict(deque)
-    for i, line in enumerate(old[:-1]):
-        if i not in used:
-            remaining[line].append(endings[i])
-    out_ends = []
-    for i, line in enumerate(new[:-1]):
-        if i in aligned:
-            out_ends.append(endings[aligned[i]])
-        elif remaining.get(line):
-            out_ends.append(remaining[line].popleft())
-        else:
-            out_ends.append(common)
+    for i in range(head, old_count - tail):
+        remaining[old[i]].append(endings[i])
+    out_ends = endings[:head]
+    for line in new[head:new_count - tail]:
+        out_ends.append(remaining[line].popleft() if remaining.get(line) else common)
+    out_ends.extend(endings[old_count - tail:])
     # A lone CR followed by an empty LF line would read back as one CRLF.
     for i in range(1, len(out_ends)):
         if not new[i] and out_ends[i - 1] == "\r" and out_ends[i] == "\n":

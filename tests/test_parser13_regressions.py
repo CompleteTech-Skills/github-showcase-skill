@@ -227,3 +227,17 @@ def test_local_image_size_limit_matches_readme_syntax(tmp_path):
     source = 'examples/screen.png'
     assert f'R7 image over 300000 B: {source}' in lint(tmp_path, f'![Screen]({source})')
     assert f'R7 image over 300000 B: {source}' not in lint(tmp_path, f'<img alt="Screen" src="{source}">')
+
+
+
+def test_reference_bare_destination_allows_unmatched_openers_cli(tmp_path):
+    # cmark-gfm accepts unmatched opening parentheses in reference destinations.
+    source = ('![Shot][shot] ![Bad][bad]\n\n'
+              '[shot]: docs/images/missing(.png\n'
+              '[bad]: https://img.shields.io/badge/type-Thing-ABCDEF?x=((\n')
+    fails = lint(tmp_path, source)
+    assert 'R7 local image does not resolve: docs/images/missing(.png' in fails
+    assert 'R7 off-palette badge colour ABCDEF' in fails
+    rejected = source.replace('missing(', 'missing)').replace('x=((', 'x=))')
+    fails = lint(tmp_path, rejected)
+    assert not any('missing).png' in fail or 'off-palette badge colour ABCDEF' in fail for fail in fails)
