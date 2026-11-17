@@ -843,3 +843,26 @@ def test_stale_live_readme_plan_cannot_clear_concurrent_staged_provenance(tmp_pa
     assert showcase.main([*common, "--mode", "header", "--write"]) == 1
     assert path.read_bytes() == staged_text
     assert "staged_description" in read_sidecar(target / "docs/images")["outputs"]["README.md"]
+
+
+def test_staged_noop_readme_records_exact_existing_crlf_bytes(tmp_path):
+    capture = tmp_path / "capture.json"
+    capture.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    target = tmp_path / "repo"
+    target.mkdir()
+    common = ["--meta", capture, "--repo-dir", target, "--format", "json", "readme",
+              "--description", "Unpublished draft.", "--write"]
+    assert run_cli(*common, "--mode", "scaffold").returncode == 0
+    command = [*common, "--mode", "header"]
+    first = run_cli(*command)
+    assert first.returncode == 0, first.stdout + first.stderr
+    path = target / "README.md"
+    original = path.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+    path.write_bytes(original)
+    second = run_cli(*command)
+    assert second.returncode == 0, second.stdout + second.stderr
+    assert json.loads(second.stdout)["result"] == "unchanged"
+    assert path.read_bytes() == original
+    record = read_sidecar(target / "docs/images")["outputs"]["README.md"]
+    assert record["sha256"] == hashlib.sha256(original).hexdigest()
+    assert record["bytes"] == len(original)

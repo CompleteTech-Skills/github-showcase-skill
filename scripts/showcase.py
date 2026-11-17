@@ -580,7 +580,8 @@ def cmd_readme(args):
             if staged:
                 tagline = readme.tagline_body(ctx).strip()
                 if tagline in tagline_blocks(after):
-                    record_output(ctx, path, bytes_record(after.encode("utf-8"), tagline_sha256=tagline_digest(tagline)))
+                    rendered = after.encode("utf-8") if changed else original or b""
+                    record_output(ctx, path, bytes_record(rendered, tagline_sha256=tagline_digest(tagline)))
             for rel, data in badge_outputs.items():
                 write_artifact(ctx, rd / rel, data)
             if changed:
