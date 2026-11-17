@@ -6,7 +6,7 @@ those blocks. Content is never invented (§1.5 rule 2) and never lost (§7.1 res
 from __future__ import annotations
 
 import re
-from bisect import bisect_right
+from bisect import bisect_left, bisect_right
 from collections import Counter, defaultdict, deque
 from pathlib import Path
 from urllib.parse import quote
@@ -15,7 +15,9 @@ from . import footer as footermod
 from .context import RepoContext
 from .detect import required_sections, standard
 from .errors import ConfigError, NeedsInput
-from .mdcode import MANAGED_BLOCK_PATTERN, after_line_end, code_block_spans, code_spans, find_blocks, masked  # noqa: F401  (code_spans: re-exported for callers)
+from .mdcode import (  # noqa: F401  (code_spans: re-exported for callers)
+    MANAGED_BLOCK_PATTERN, after_line_end, code_block_spans, code_spans, find_blocks, html_block_spans, masked,
+)
 
 MARK = MANAGED_BLOCK_PATTERN
 EMOJI = re.compile("[\U0001F000-\U0001FAFF☀-➿⬀-⯿️‍]")
@@ -115,12 +117,8 @@ def product_name(ctx: RepoContext) -> str:
 def split_sections(text: str) -> tuple[str, list[tuple[str, str]]]:
     """(preamble, [(heading text, body)]) split at H2 outside code fences."""
     pre, sections, cur_h, buf = [], [], None, []
-    fence = None
-    for line in source_lines(text):
-        m = re.match(r"^(```+|~~~+)", line)
-        if m:
-            fence = None if fence and line.startswith(fence) else (fence or m.group(1))
-        if fence is None and re.match(r"^## (?!#)", line):
+    for line, visible in zip(source_lines(text), source_lines(masked(text)), strict=True):
+        if re.match(r"^## (?!#)", visible):
             if cur_h is None:
                 pre = buf
             else:
@@ -520,7 +518,11 @@ def license_section(ctx: RepoContext) -> tuple[str, str] | None:
 
 
 def section_facts(ctx: RepoContext, h2: str) -> str | None:
-    """Body for a scaffolded section, only from repo facts; None means omit + needs-input."""
+    """Body for a missing section from supplied or captured repository facts."""
+    supplied = (ctx.override.get("readme") or {}).get("sections") or {}
+    body = supplied.get(h2, "").strip("\r\n")
+    if body.strip():
+        return body
     f = ctx.facts
     if h2 == "Workflow Diagram" and f.read("assets/diagrams/workflow.mmd"):
         return ("Source: [assets/diagrams/workflow.mmd](assets/diagrams/workflow.mmd).\n\n```mermaid\n"
@@ -1222,8 +1224,10 @@ def upgrade(ctx: RepoContext, text: str, *, already_normalized: bool = False) ->
     return "\n\n".join(x for x in out if x) + "\n", removed
 
 
-def header_only(ctx: RepoContext, text: str, *, already_normalized: bool = False) -> str:
+def header_only(ctx: RepoContext, text: str, *, already_normalized: bool = False,
+                preserve_structure: bool = False) -> str:
     """Replace only existing marker blocks (what the Action runs)."""
+    original = text
     if not already_normalized:
         text = normalize_text(text)
     gen = {"nav": nav_line(ctx), "banner": banner_html(ctx), "footer": footermod.markup(ctx.brand)}
@@ -1232,12 +1236,12 @@ def header_only(ctx: RepoContext, text: str, *, already_normalized: bool = False
         ctx.log("needs-input:banner")
     # Preserve the existing preflight for other variants, even without a badge block.
     # Variant J must inspect its block first because authored badges are not generated.
-    if ctx.det["variant"] != "J":
+    if ctx.det["variant"] != "J" and not preserve_structure:
         gen["badges"] = badge_body(ctx)
 
     def sub(m):
         b, body = m.group(1), m.group(2)
-        if b == "badges" and ctx.det["variant"] == "J":
+        if b == "badges" and (preserve_structure or ctx.det["variant"] == "J"):
             fresh = badge_body(ctx, body)
             return m.group(0) if fresh == body else wrap(b, fresh)
         if b == "checklist":
@@ -1250,7 +1254,32 @@ def header_only(ctx: RepoContext, text: str, *, already_normalized: bool = False
         if b in gen:
             return wrap(b, re.sub(r"\n{3,}", "\n\n", gen[b]))
         return m.group(0)
+    if preserve_structure:
+        return _replace_blocks_in_source(original, text, sub)
     return license_block(ctx, reorder_lead(ctx, _sub_blocks(text, sub)))
+
+
+def _replace_blocks_in_source(original: str, normalized: str, sub) -> str:
+    """Splice blocks into their source spans, leaving all other bytes in place."""
+    bom = int(original.startswith(BOM))
+    dropped = [m.start() - bom - count
+               for count, m in enumerate(re.finditer(r"\r\n", original))]
+
+    def source_offset(index):
+        return index + bom + bisect_left(dropped, index)
+
+    out, pos = [], 0
+    for match in find_blocks(MARK, normalized):
+        replacement = sub(match)
+        if replacement == match.group(0):
+            continue
+        start, end = source_offset(match.start()), source_offset(match.end())
+        endings = re.findall(r"\r\n|[\r\n]", original[start:end])
+        local = iter(endings)
+        replacement = re.sub(r"\n", lambda _: next(local, endings[0] if endings else "\n"), replacement)
+        out.extend((original[pos:start], replacement))
+        pos = end
+    return "".join(out) + original[pos:]
 
 
 def _seam(left: str, right: str) -> str:
@@ -1557,6 +1586,50 @@ def managed_reason(ctx: RepoContext, text: str) -> str | None:
     if any(MANAGED_NOTICE.search(notice) for notice in notices):
         return "generator ownership notice in the first 20 lines"
     return None
+
+
+def heading_moves(before: str, after: str, variant: str) -> list[dict]:
+    """Report changes to matched ATX headings, with duplicate matches marked as ambiguous."""
+    if before == after:
+        return []
+    rules = standard("readme-variants")
+    renames = rules["renames"]
+    aliases = {alias.casefold(): heading.casefold()
+               for heading, names in rules["aliases_for_status"].get(variant, {}).items() for alias in names}
+    pattern = re.compile(r"(?m)^ {0,3}(#{1,6})[ \t]+(.*)$")
+
+    def headings(text):
+        text = normalize_text(text)
+        clean = list(masked(text))
+        for start, end in html_block_spans(text):
+            clean[start:end] = ["\n" if ch == "\n" else "\x00" for ch in clean[start:end]]
+        groups = {}
+        for match in pattern.finditer("".join(clean)):
+            title = re.sub(r"[ \t]+#+[ \t]*$", "", text[match.start(2):match.end(2)]).strip()
+            key = EMOJI.sub("", title).strip()
+            key = renames.get(key.lower(), key).casefold()
+            groups.setdefault(key, []).append((len(match[1]), title))
+        return groups
+
+    old, new = headings(before), headings(after)
+    moves = []
+    for key, previous in old.items():
+        alternate = aliases.get(key)
+        if key not in new and alternate and alternate not in old:
+            key = alternate
+        current = new.get(key)
+        if not current or previous == current:
+            continue
+        if len(previous) != 1 or len(current) != 1:
+            if Counter(previous) != Counter(current):
+                moves.append({"heading": previous[0][1], "ambiguous": True,
+                              "old_levels": [level for level, _ in previous],
+                              "new_levels": [level for level, _ in current]})
+            continue
+        old_level, old_title = previous[0]
+        new_level, new_title = current[0]
+        moves.append({"heading": old_title, "from": old_level, "to": new_level, "new_heading": new_title})
+    return moves
 
 
 def nonws(s: str) -> int:

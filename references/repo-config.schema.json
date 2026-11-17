@@ -131,6 +131,18 @@
         },
         "footer": {
           "type": "boolean"
+        },
+        "sections": {
+          "type": "object",
+          "propertyNames": {
+            "minLength": 1
+          },
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 20000
+          },
+          "description": "Operator-authored Markdown for absent variant sections."
         }
       }
     },
