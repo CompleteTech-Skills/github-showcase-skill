@@ -200,6 +200,21 @@ def test_bootstrap_keeps_authored_badges_outside_pristine_body(make_ctx, tmp_pat
     assert badge_block(after) == authored
 
 
+
+def test_bootstrap_keeps_duplicate_authored_badge_blocks(make_ctx, tmp_path):
+    ctx = profile_context(make_ctx, tmp_path)
+    text = readme.header(ctx, title=readme.TEMPLATE_H1) + "\n\n" + readme.pristine_block("## About\n\nTemplate.")
+    first = "![Community](https://img.shields.io/badge/type-community-005ADD)"
+    second = "![MIT](https://img.shields.io/badge/license-MIT-64748B)"
+    blocks = readme.wrap("badges", first) + "\n\n" + readme.wrap("badges", second)
+    text = readme._sub_blocks(text, lambda m: blocks if m.group(1) == "badges" else m.group(0))
+    path = tmp_path / "README.md"
+    path.write_bytes(text.encode())
+    assert profile_cli(ctx, tmp_path, "readme", "--bootstrap", "--write")["written"] is True
+    after = path.read_text(encoding="utf-8")
+    assert [m.group(2) for m in readme.find_blocks(readme.MARK, after) if m.group(1) == "badges"] == [first, second]
+
+
 def profile_cli(ctx, tmp_path, *args, expected_code=0):
     meta = tmp_path / "meta.json"
     meta.write_text(json.dumps(ctx.meta), encoding="utf-8")

@@ -192,3 +192,11 @@ def test_restore_line_endings_preserves_paragraph_after_lone_cr():
     restored = readme.restore_line_endings(raw, readme.normalize_text(raw), after)
     assert restored == 'A\r\r\nB\nC\n'
     assert readme.normalize_text(restored) == after
+
+
+
+def test_restore_line_endings_preserves_moved_authored_lines():
+    raw = 'top\n## License\nold\n## About\nabout\r\n'
+    after = 'top\n## About\nabout\n## License\nold\n'
+    restored = readme.restore_line_endings(raw, readme.normalize_text(raw), after)
+    assert restored == 'top\n## About\nabout\r\n## License\nold\n'

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import difflib
 import re
-from collections import Counter
+from collections import Counter, defaultdict, deque
 from pathlib import Path
 from urllib.parse import quote
 
@@ -1339,7 +1339,12 @@ def bootstrap(ctx: RepoContext, text: str) -> str:
         if not h1 or h1.group(1).strip() in (TEMPLATE_H1, auto, slug_title(ctx.repo)):
             # the tagline block carries over (tagline_body), so a line the owner wrote survives the rebuild and only an
             # inherited one is emptied, exactly as header_only decides it
-            blocks = {m.group(1): m.group(2) for m in find_blocks(MARK, hm.group(0))}
+            markers = find_blocks(MARK, hm.group(0))
+            if variant == "J" and sum(m.group(1) == "badges" for m in markers) > 1:
+                # Refresh each independently so rebuilding the header cannot
+                # collapse separate authored badge blocks into a single block.
+                return header_only(ctx, text)
+            blocks = {m.group(1): m.group(2) for m in markers}
             old = blocks.get("tagline")
             new_header = header(ctx, title=auto, tagline=tagline_body(ctx, old, text),
                                 existing_badges=blocks.get("badges"))
@@ -1434,22 +1439,37 @@ def restore_line_endings(raw: str, before: str, after: str) -> str:
     # One ending follows every line but the last; the last line has none.
     if len(old) != len(endings) + 1:
         return after.replace("\n", common)  # not a universal-newline view of raw: keep the style only
-    out_ends = [common] * (len(new) - 1)
+    aligned = {}
     # Unchanged leading and trailing lines map one to one; only the edited
     # middle needs a line diff.
     head = 0
     while head < len(old) - 1 and head < len(new) - 1 and old[head] == new[head]:
-        out_ends[head] = endings[head]
+        aligned[head] = head
         head += 1
     tail = 0
     while (tail < len(old) - 1 - head and tail < len(new) - 1 - head
            and old[-2 - tail] == new[-2 - tail]):
-        out_ends[-1 - tail] = endings[-1 - tail]
+        aligned[len(new) - 2 - tail] = len(old) - 2 - tail
         tail += 1
     matcher = difflib.SequenceMatcher(None, old[head:len(old) - 1 - tail], new[head:len(new) - 1 - tail])
     for i, j, size in matcher.get_matching_blocks():
         for k in range(size):
-            out_ends[head + j + k] = endings[head + i + k]
+            aligned[head + j + k] = head + i + k
+    # Reordered sections fall outside the ordered diff. Match each remaining
+    # equal line to one unused original occurrence.
+    used = set(aligned.values())
+    remaining = defaultdict(deque)
+    for i, line in enumerate(old[:-1]):
+        if i not in used:
+            remaining[line].append(endings[i])
+    out_ends = []
+    for i, line in enumerate(new[:-1]):
+        if i in aligned:
+            out_ends.append(endings[aligned[i]])
+        elif remaining.get(line):
+            out_ends.append(remaining[line].popleft())
+        else:
+            out_ends.append(common)
     # A lone CR followed by an empty LF line would read back as one CRLF.
     for i in range(1, len(out_ends)):
         if not new[i] and out_ends[i - 1] == "\r" and out_ends[i] == "\n":
