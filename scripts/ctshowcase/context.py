@@ -11,10 +11,10 @@ from .facts import RepoFacts
 
 class RepoContext:
     def __init__(self, brand: Brand, meta: dict, repo_dir: str | Path | None = None, type_override: str | None = None,
-                 *, for_coverage: bool = False):
+                 *, for_coverage: bool = False, metadata_path: str | Path | None = None):
         self.brand, self.meta = brand, meta
         self.repo_dir = Path(repo_dir) if repo_dir else None
-        self.facts = RepoFacts(meta, repo_dir)
+        self.facts = RepoFacts(meta, repo_dir, metadata_path=metadata_path)
         self.override, self.override_sha = load_repo_override(repo_dir) if repo_dir else ({}, None)
         if not self.override and not repo_dir:
             # metadata only: the override `meta --from-gh` captured (either spelling), validated like a checkout's

@@ -381,3 +381,25 @@ def test_cli_checkout_holding_only_the_meta_file_is_not_a_dataset(tmp_path):
     result = run_cli("--meta", "meta.json", "--repo-dir", ".", "doctor", "--format", "json", cwd=tmp_path)
     row = json.loads(result.stdout)
     assert row["type"] == "workspace", result.stderr
+
+
+@pytest.mark.parametrize("tracked_capture", [False, True])
+def test_docs_only_cli_excludes_only_its_uncaptured_metadata_input(tmp_path, tracked_capture):
+    children = {"README.md": "# Northwind\n", "docs/guide.md": "# Guide\n"}
+    name = "capture.snapshot.json"
+    _tree(tmp_path, children)
+    captured = list(children) + ([name] if tracked_capture else [])
+    capture = tmp_path / name
+    capture.write_text(json.dumps(meta_dict(files=captured, files_complete=True)), encoding="utf-8")
+    args = ["--meta", capture, "--repo-dir", tmp_path]
+    expected = "workspace" if tracked_capture else "documentation"
+    result = run_cli(*args, "meta")
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["detected"]["type"] == expected
+    doctor = run_cli(*args, "doctor", "--format", "json")
+    assert json.loads(doctor.stdout)["type"] == expected
+
+    if not tracked_capture:
+        _tree(tmp_path, {"genuine-data.json": "{}"})
+        with_code = run_cli(*args, "meta")
+        assert json.loads(with_code.stdout)["detected"]["type"] == "workspace"

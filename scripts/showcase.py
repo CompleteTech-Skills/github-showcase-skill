@@ -124,7 +124,8 @@ def context(args, b=None, *, for_coverage=False):
     b = b or brand(args)
     rd = repo_dir(args)
     meta = merged(args.meta, str(rd) if rd else None)
-    return RepoContext(b, meta, rd, type_override=getattr(args, "type_override", None), for_coverage=for_coverage)
+    return RepoContext(b, meta, rd, type_override=getattr(args, "type_override", None), for_coverage=for_coverage,
+                       metadata_path=args.meta)
 
 
 def base(cmd, ctx=None, **kw) -> dict:
@@ -164,7 +165,9 @@ def gate_watching(ctx, allow_hold=False, remedy=HOLD_REMEDY) -> None:
 def maybe_sidecar(ctx, out: Path, record: dict) -> None:
     from ctshowcase import fingerprint as fp
     if out.parent.name == "images" and out.parent.parent.name == "docs":
-        inp = fp.inputs(ctx.meta, ctx.repo_dir, same_owner=lambda a, b: ctx.brand.resolver().same(a, b))
+        metadata_path = getattr(getattr(ctx, "facts", None), "metadata_path", None)
+        inp = fp.inputs(ctx.meta, ctx.repo_dir, same_owner=lambda a, b: ctx.brand.resolver().same(a, b),
+                        metadata_path=metadata_path)
         # the repository's immutable id (`meta --from-gh`): `action_prepare.py foreign` tells a rename or transfer
         # (same id) from art copied out of another repository (a template copy gets a new id). Kept out of the
         # fingerprint inputs, so the fingerprint is unchanged.
@@ -682,7 +685,7 @@ def cmd_meta(args):
     else:
         rd = repo_dir(args)
         m = M.merged(args.meta, str(rd) if rd else None)
-    m["detected"] = detect(m, RepoFacts(m, None if args.from_gh else rd), type_override=args.type_override,
+    m["detected"] = detect(m, RepoFacts(m, None if args.from_gh else rd, metadata_path=args.meta), type_override=args.type_override,
                            same_owner=b.resolver().same if b else None)
     if b:
         try:
@@ -706,7 +709,7 @@ def cmd_fingerprint(args):
     m = merged(args.meta, str(rd) if rd else None)
     out_dir = (rd or Path(".")) / args.out_dir if not Path(args.out_dir).is_absolute() else Path(args.out_dir)
     b = brand(args, prefer_lock=True) if args.config else None
-    inp = fp.inputs(m, rd, same_owner=b.resolver().same if b else None)
+    inp = fp.inputs(m, rd, same_owner=b.resolver().same if b else None, metadata_path=args.meta)
     f = fp.fingerprint(inp, fp.config_sha256(b))
     old = fp.read_sidecar(out_dir).get("fingerprint")
     changed = f != old

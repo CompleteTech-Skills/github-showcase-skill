@@ -29,9 +29,11 @@ def _req_name(line: str) -> str | None:
 
 
 class RepoFacts:
-    def __init__(self, meta: dict | None = None, repo_dir: str | Path | None = None):
+    def __init__(self, meta: dict | None = None, repo_dir: str | Path | None = None, *,
+                 metadata_path: str | Path | None = None):
         self.meta = meta or {}
         self.dir = Path(repo_dir) if repo_dir else None
+        self.metadata_path = Path(metadata_path) if metadata_path else None
         self._files: list[str] | None = None
 
     # -- raw access ---------------------------------------------------------------------------------

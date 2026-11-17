@@ -186,9 +186,19 @@ def documentation_type(facts: RepoFacts) -> str | None:
     if not facts.known or facts.meta.get("files_complete", True) is not True:
         return None
     admin = set(standard("types").get("documentation_exclude_files", []))
-    paths = [captured_path(path) for path in facts.meta.get("files", []) or []] if facts.dir is None else [
-        captured_path(path) for path in facts.files
-    ]
+    if facts.dir is None:
+        paths = [captured_path(path) for path in facts.meta.get("files", []) or []]
+    else:
+        files = facts.files
+        if facts.metadata_path is not None:
+            root = facts.dir.resolve()
+            path = facts.metadata_path.parent.resolve() / facts.metadata_path.name
+            if path.is_relative_to(root):
+                local_capture = path.relative_to(root).as_posix()
+                captured = facts.meta.get("files")
+                if not isinstance(captured, list) or local_capture not in captured:
+                    files = [name for name in files if name != local_capture]
+        paths = [captured_path(path) for path in files]
     if any(path is None for path in paths):
         return None
     rest = [path for path in paths if path is not None and substantive_path(path) and path.name not in admin]
