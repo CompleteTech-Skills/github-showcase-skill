@@ -737,21 +737,41 @@ def test_action_refuses_a_staged_proposal_captured_in_the_git_index(tmp_path):
     definition = yaml.safe_load((ROOT / "action.yml").read_text(encoding="utf-8"))
     script = next(step["run"] for step in definition["runs"]["steps"]
                   if "action_commit.sh" in step.get("run", ""))
-    injected = r'''
-git() {
-  if [ "$1" = "add" ]; then
-    printf '%s\n' '{"outputs":{"card.svg":{"staged_description":{"text":"Unpublished draft"}}}}' > docs/images/.showcase.json
-    printf '%s\n' 'staged drawing' > docs/images/card.svg
-    command git "$@" || return "$?"
-    printf '%s\n' '{"outputs":{}}' > docs/images/.showcase.json
-  else
-    command git "$@"
-  fi
+    wrapper = tmp_path / "capture_index.py"
+    wrapper.write_text(r'''
+import runpy
+import subprocess
+import sys
+from pathlib import Path
+
+original_run = subprocess.run
+
+
+def observe_add(argv, *args, **kwargs):
+    if argv[:2] != ["git", "add"]:
+        return original_run(argv, *args, **kwargs)
+    sidecar = Path("docs/images/.showcase.json")
+    sidecar.write_text('{"outputs":{"card.svg":{"staged_description":{"text":"Unpublished draft"}}}}',
+                       encoding="utf-8")
+    Path("docs/images/card.svg").write_text("staged drawing", encoding="utf-8")
+    result = original_run(argv, *args, **kwargs)
+    sidecar.write_text('{"outputs":{}}', encoding="utf-8")
+    return result
+
+
+subprocess.run = observe_add
+sys.argv.pop(0)
+runpy.run_path(sys.argv[0], run_name="__main__")
+''', encoding="utf-8")
+    injected = '''
+python() {
+  command python "$SHOWCASE_TEST_INDEX_WRAPPER" "$@"
 }
-export -f git
+export -f python
 '''
     env = {**os.environ, "GITHUB_ACTION_PATH": str(ROOT), "SHOWCASE_DRY_RUN": "1",
-           "SHOWCASE_COMMIT_MESSAGE": "Synthetic no-op", "SHOWCASE_ON_PROTECTED": "fail"}
+           "SHOWCASE_COMMIT_MESSAGE": "Synthetic no-op", "SHOWCASE_ON_PROTECTED": "fail",
+           "SHOWCASE_TEST_INDEX_WRAPPER": str(wrapper)}
     result = run_bash(injected + script, cwd=tmp_path, env=env)
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert "commit skipped" in result.stdout
