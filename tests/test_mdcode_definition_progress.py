@@ -53,7 +53,10 @@ def test_definition_progress_bounded(head, tail):
 @pytest.mark.parametrize('source,expected', [
     ('[a]: /url extra\n    `\n![x](missing.png)\n`\n', []),
     ('> [a]: /url\n> "title\n> ![x](missing.png)\n> end"\n', []),
-    ('> [a]: /url\n    `\n![x](missing.png)\n`\n', [('x', 'missing.png')]),
+    # cmark-gfm keeps both lazy lines in the quote paragraph, so the image is code.
+    ('> [a]: /url\n    `\n![x](missing.png)\n`\n', []),
+    ('> [a]: /url\n    ![x](missing.png)\n', [('x', 'missing.png')]),
+    ('> [a]: /url\n\n    `\n![x](missing.png)\n`\n', [('x', 'missing.png')]),
     ('[a]: /url (bad (title)\n![x](missing.png)\n', [('x', 'missing.png')]),
 ])
 def test_definition_and_invalid_controls(source, expected):
