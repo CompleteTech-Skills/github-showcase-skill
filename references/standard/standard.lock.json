@@ -880,8 +880,10 @@
    "docs/images/card.svg",
    "docs/images/card.png",
    "docs/images/intro.svg",
+   "assets/intro.svg",
    "assets/icon.png",
-   "assets/social-preview.png"
+   "assets/social-preview.png",
+   "assets/social-preview.jpg"
   ],
   "standard": "ct-std-v1",
   "types": {

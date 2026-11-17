@@ -218,6 +218,8 @@ def test_showcase_outputs_do_not_change_documentation_type(tmp_path, checkout):
         "docs/images/card.svg": "synthetic card bytes",
         "docs/images/badges/type-documentation.svg": "synthetic badge bytes",
         "assets/icon.png": "synthetic icon bytes",
+        "assets/intro.svg": "synthetic introduction bytes",
+        "assets/social-preview.jpg": "synthetic JPEG preview bytes",
     }
     if checkout:
         _tree(tmp_path, files)
