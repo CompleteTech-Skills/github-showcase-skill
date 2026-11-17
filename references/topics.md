@@ -72,11 +72,11 @@ Family topics apply only to non-fork repos other than `.github`, in this order:
 | 22 | owner `CompleteTech-LLC-AI-Research`, or `*.ipynb` ≥ 50% of files | `research` |
 | 23 | slug matches `-in-\d+-steps$` | `tutorial` |
 | 24 | `*.csv`, `*.json` and `*.parquet` ≥ 50% of substantive bytes (see below) | `dataset` |
-| 25 | otherwise | `workspace` |
+| 25 | Documentation-only tree with a guide beyond top-level housekeeping, otherwise fallback | `documentation` or `workspace` |
 
 Rule 24 uses captured `file_sizes` from a repository tree. It skips classification when the sizes are absent or the capture is explicitly incomplete. It uses the same captured byte counts with or without a checkout. With a captured file list, every substantive path in the list must have a valid size, and extra size entries are ignored. Legacy captures with only a size map use its paths as the file list. It leaves out paths under the `dataset_exclude_dirs` of `standard/types.yaml` (`planning/`, `.planning/`, `.github/`, `node_modules/`, `vendor/`, `dist/`, `build/`), the `dataset_exclude_files` package and config names, root issue snapshots matching `issues/issue-<number>.json`, and files named `generated-issues.json`, `exported-issues.json`, `generated-planning.json` or `exported-planning.json` (any case). Other issue data stays eligible.
 
-Low-confidence results log `type-suggestion:<type>:<reason>:override-key=type` with reasons `dataset-near-threshold` (rule 24 with a data share below `dataset_confident_share`, 60%), `docs-only` (rule 25 for a tree of only `.md`, `.rst`, `.txt`, `.adoc`, `LICENSE` or `COPYING` files once `documentation_exclude_files` such as `.gitignore` and `CODEOWNERS` are set aside), `file-tree-unknown` (no checkout and no captured tree), and `file-tree-incomplete` (workspace fallback with an explicitly incomplete capture). Review it and set `type:` in `.github/showcase.yml` (or pass `--type`); an explicit type suppresses the suggestion. The closed type vocabulary uses the `workspace` fallback for documentation-only repositories.
+Low-confidence results log `type-suggestion:<type>:<reason>:override-key=type` with reasons `dataset-near-threshold` (rule 24 with a data share below `dataset_confident_share`, 60%), `docs-only` (rule 25 for a tree of only `.md`, `.rst`, `.txt`, `.adoc`, `LICENSE` or `COPYING` files once `documentation_exclude_files` such as `.gitignore` and `CODEOWNERS` are set aside), `file-tree-unknown` (no checkout and no captured tree), and `file-tree-incomplete` (workspace fallback with an explicitly incomplete capture). Review it and set `type:` in `.github/showcase.yml` (or pass `--type`); an explicit type suppresses the suggestion. A documentation-only tree with a dedicated guide gets `documentation`. A tree containing only top-level housekeeping documents keeps the `workspace` fallback.
 
 **The 24 type topics are reserved.** A repo carries exactly one of them, and only as its type topic.
 
@@ -91,7 +91,7 @@ Low-confidence results log `type-suggestion:<type>:<reason>:override-key=type` w
 | `fork` | G outside romgenie-following-repos (hero banner, fork note, footer; the note's short form when 0-ahead; review q27); in the watching org no README change | no card |
 | `backup` (and every repo about to be archived) | H | no card |
 | `github-profile` | J (`.github`) or the CompleteDotTech profile rules (`CompleteDotTech/CompleteDotTech`) | no card |
-| `infrastructure`, `hardware`, `workspace` | I when private; C when public | Infrastructure, Hardware, Workspace |
+| `infrastructure`, `hardware`, `documentation`, `workspace` | I when private, C when public | Infrastructure, Hardware, Documentation, Workspace |
 
 A private repo on variants A–E keeps that variant, adds the I callout and the private License text (row 7 in [readme-variants.md](readme-variants.md)), and its nav line ends with ` · Internal`.
 

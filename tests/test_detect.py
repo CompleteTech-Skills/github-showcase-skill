@@ -122,6 +122,23 @@ def test_explicitly_invalid_capture_is_not_a_legacy_size_map(fields):
     assert detect_type(meta) == ("workspace", 25)
 
 
+
+@pytest.mark.parametrize("fields", [
+    {"files": None}, {"files": ["rows.csv", "main.py"], "files_complete": None},
+])
+def test_metadata_cli_preserves_explicitly_unknown_capture(tmp_path, fields):
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(meta_dict(file_sizes={"rows.csv": 90, "main.py": 10}, **fields)), encoding="utf-8")
+    result = run_cli("--meta", meta, "--no-repo-dir", "meta")
+    assert result.returncode == 0, result.stderr
+    output = json.loads(result.stdout)
+    assert "files" in output
+    assert output["detected"]["type"] == "workspace"
+    if "files_complete" in fields:
+        assert output["files_complete"] is None
+        assert "file-tree-incomplete" in output["detected"]["suggestion"]
+
+
 def test_dataset_share_keeps_the_inclusive_cutoff_exact():
     large = 2 ** 54
     meta = {"file_sizes": {"rows.csv": large - 1, "main.py": large}}
@@ -173,12 +190,16 @@ def test_incomplete_tree_does_not_claim_docs_only_or_dataset(tmp_path, name, che
     assert det["suggestion"] == "type-suggestion:workspace:file-tree-incomplete:override-key=type"
 
 
-def test_docs_only_repo_stays_workspace_with_suggestion(make_ctx):
+def test_dedicated_docs_repo_gets_documentation_type_and_sections(make_ctx):
     files = ["README.md", "docs/guide.md", "docs/faq.rst", "LICENSE", ".gitignore", ".gitattributes", ".editorconfig",
              "CODEOWNERS"]
     ctx = make_ctx(files=files)
-    assert (ctx.det["type"], ctx.det["rule"]) == ("workspace", 25)
-    assert "type-suggestion:workspace:docs-only:override-key=type" in ctx.logs
+    assert (ctx.det["type"], ctx.det["rule"]) == ("documentation", 25)
+    assert "type-suggestion:documentation:docs-only:override-key=type" in ctx.logs
+    from ctshowcase.detect import required_sections, standard
+    assert "documentation" in standard("topics")["type_topics"]
+    assert [name for name, _ in required_sections(ctx.det)] == ["About", "Documentation", "License"]
+    assert detect({"files": files + ["src/main.py"]})["type"] == "workspace"
     assert "suggestion" not in detect({"files": files + ["src/main.py"]})
 
 
@@ -259,8 +280,8 @@ def test_meta_explicit_type_resolves_low_confidence_suggestion(tmp_path):
 @pytest.mark.parametrize("checkout", [False, True])
 @pytest.mark.parametrize("files,want,log", [
     (PLANNING, "workspace", None),
-    ({"README.md": "# Northwind handbook\n", "docs/guide.md": "Guide.\n", ".gitignore": "*.pyc\n"}, "workspace",
-     "type-suggestion:workspace:docs-only:override-key=type"),
+    ({"README.md": "# Northwind handbook\n", "docs/guide.md": "Guide.\n", ".gitignore": "*.pyc\n"}, "documentation",
+     "type-suggestion:documentation:docs-only:override-key=type"),
     ({"rows.csv": "a,b\n" * 30, "main.py": "x" * 100}, "dataset", "type-suggestion:dataset:dataset-near-threshold:override-key=type")])
 def test_cli_doctor_type_and_suggestion(tmp_path, checkout, files, want, log):
     repo = tmp_path / "repo"

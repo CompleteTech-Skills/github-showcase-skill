@@ -111,7 +111,10 @@ def normalize(raw: dict) -> dict:
     # has_pages and size come from the REST capture; releases/deployments/packages/environments are the About
     # sidebar counts (adopt, content sidebar); size == 0 is the estate doctor's empty-repository rule
     # id / node_id: the repository's immutable identity (a rename or transfer keeps it; a template copy gets a new one)
-    for k in ("id", "node_id", "files", "files_complete", "manifests", "file_sizes", "pushed_at", "last_substantive_commit",
+    for k in ("files", "files_complete"):
+        if k in raw:
+            m[k] = raw[k]  # explicit unknown evidence must not become a legacy size-only capture
+    for k in ("id", "node_id", "manifests", "file_sizes", "pushed_at", "last_substantive_commit",
               "last_substantive_sha", "has_pages", "size", "releases", "deployments", "packages", "environments"):
         if raw.get(k) is not None:
             m[k] = raw[k]

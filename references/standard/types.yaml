@@ -43,4 +43,5 @@ types:
   research:         {variant: D, category: Research}
   tutorial:         {variant: C, category: Tutorial}
   dataset:          {variant: D, category: Dataset}
+  documentation:    {variant: C, variant_private: I, category: Documentation}
   workspace:        {variant: C, variant_private: I, category: Workspace}

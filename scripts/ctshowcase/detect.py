@@ -116,7 +116,7 @@ def detect_type(meta: dict, facts: RepoFacts | None = None, same_owner=None) -> 
     share = dataset_share(facts)
     if share is not None and share * 2 >= 1:
         return "dataset", 24
-    return "workspace", 25
+    return documentation_type(facts) or "workspace", 25
 
 
 DATA_SUFFIXES = (".csv", ".json", ".parquet")
@@ -179,18 +179,24 @@ def dataset_share(facts: RepoFacts) -> Fraction | None:
     return Fraction(sum(v for k, v in sizes.items() if k.endswith(DATA_SUFFIXES)), total)
 
 
-def docs_only(facts: RepoFacts) -> bool:
-    """True when the known tree holds only documentation once repository administration files are set aside."""
+def documentation_type(facts: RepoFacts) -> str | None:
+    """Distinguish dedicated documentation from a workspace with a README and housekeeping files."""
     if not facts.known or facts.meta.get("files_complete", True) is not True:
-        return False
+        return None
     admin = set(standard("types").get("documentation_exclude_files", []))
     paths = [captured_path(path) for path in facts.meta.get("files", []) or []] if facts.dir is None else [
         captured_path(path) for path in facts.files
     ]
     if any(path is None for path in paths):
-        return False
+        return None
     rest = [path for path in paths if path is not None and substantive_path(path) and path.name not in admin]
-    return bool(rest) and all(path.suffix.lower() in DOC_SUFFIXES or path.name in ("LICENSE", "COPYING") for path in rest)
+    if not rest or any(path.suffix.lower() not in DOC_SUFFIXES and path.name not in ("LICENSE", "COPYING")
+                       for path in rest):
+        return None
+    boilerplate = {"readme", "license", "copying", "contributing", "changelog", "code_of_conduct", "security"}
+    if any(len(path.parts) > 1 or path.stem.lower() not in boilerplate for path in rest):
+        return "documentation"
+    return "workspace"
 
 
 def type_suggestion(rule: int, facts: RepoFacts) -> str | None:
@@ -204,7 +210,7 @@ def type_suggestion(rule: int, facts: RepoFacts) -> str | None:
         threshold = Fraction(str(standard("types").get("dataset_confident_share", 0.6)))
         if share is not None and share < threshold:
             return "dataset-near-threshold"
-    if rule == 25 and docs_only(facts):
+    if rule == 25 and documentation_type(facts):
         return "docs-only"
     return None
 

@@ -108,6 +108,7 @@ The table shows CompleteTech defaults. Each family uses its configured `badge_br
 | B Mobile app | `mobile-app` | About R · Install R · Features R · Platforms R · Quick Start R · Build O · Status O · License R |
 | B App / website | `website`, `web-app`, `chrome-extension` | About R · Live Site R (link only) · Features R · Tech Stack R · Quick Start R (local dev) · Deployment O · Status O · License R |
 | C Library / tool / CLI / MCP server | `cli`, `library`, `api`, `mcp-server`, `bot`, `discord-bot`, `plugin`, `template`, `tutorial`, `agent-skills` outside Skills; public `infrastructure`, `hardware`, `workspace` | About R · Install R · Quick Start R · Usage R (`### Tools` then `### Client Setup` for MCP) · Configuration O · Workflow Diagram O · Development O · License R |
+| C or I Documentation | `documentation` uses C for public and I for private | About R · Documentation R · License R |
 | D Research | `research`, `dataset` | About R · Findings R (or Status if there are none) · Method R · Data and Sources R · Reproduce O · Limits R · Citation O · License R |
 | E Game | `game` | About R · Play R (live link) · How to Play R · Run Locally O · Credits and Disclaimer R · License R |
 | F Security check | `security-check` | Quick Start R · The Report R · Version Rules R · Configuration Observations O · Limits R · Reference O · Licensing R |

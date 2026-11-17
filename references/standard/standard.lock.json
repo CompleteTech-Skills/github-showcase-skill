@@ -201,6 +201,20 @@
    "vs"
   ],
   "type_sections": {
+   "documentation": [
+    [
+     "About",
+     "R"
+    ],
+    [
+     "Documentation",
+     "R"
+    ],
+    [
+     "License",
+     "R"
+    ]
+   ],
    "mobile-app": [
     [
      "About",
@@ -779,6 +793,7 @@
    "github-profile",
    "infrastructure",
    "hardware",
+   "documentation",
    "workspace"
   ]
  },
@@ -893,6 +908,11 @@
    "discord-bot": {
     "category": "Discord bot",
     "variant": "C"
+   },
+   "documentation": {
+    "category": "Documentation",
+    "variant": "C",
+    "variant_private": "I"
    },
    "fork": {
     "category": null,
