@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from ctshowcase import footer, readme
+from ctshowcase import footer, readme, readmelint
 from ctshowcase.context import RepoContext
 from ctshowcase.meta import load_file
 from conftest import FIX, ROOT, run_cli
@@ -54,6 +54,30 @@ def test_renames_and_notes(brand, tmp_path, make_ctx):
     assert "✨" not in after and after.index("## Notes") < after.index("## License")
     assert "## About\n\nIntro text." in after
     assert readme.preservation(text, after, removed) == []
+
+
+def test_mobile_sections_apply_to_readme_modes(tmp_path, make_ctx):
+    ctx = make_ctx(files=["app/src/main/AndroidManifest.xml"])
+    assert ctx.det["type"] == "mobile-app"
+    scaffold = readme.scaffold(ctx)
+    assert {"needs-input:B:Install", "needs-input:B:Platforms"} <= set(ctx.logs)
+    assert "needs-input:B:Live Site" not in ctx.logs and "needs-input:B:Tech Stack" not in ctx.logs
+
+    bootstrap = readme.bootstrap(ctx, readme.pristine_block("Template body."))
+    assert "## Install" in bootstrap and "## Platforms" in bootstrap
+    assert "## Live Site" not in bootstrap and "## Tech Stack" not in bootstrap
+
+    before = "# Northwind Mobile\n\n## Platforms\n\nAndroid.\n\n## Installation\n\nUse the test installer.\n"
+    after, removed = readme.upgrade(ctx, before)
+    assert after.index("## Install\n") < after.index("## Platforms\n")
+    assert readme.preservation(before, after, removed) == []
+
+    path = tmp_path / "README.md"
+    path.write_text(scaffold, encoding="utf-8")
+    lint = readmelint.lint(ctx, path)
+    incomplete = set(lint["logs"])
+    assert {"needs-input:B:Install", "needs-input:B:Platforms"} <= incomplete
+    assert not {"needs-input:B:Live Site", "needs-input:B:Tech Stack"} & incomplete
 
 
 def test_shrink_guard(tmp_path):

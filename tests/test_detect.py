@@ -57,11 +57,12 @@ def _tree(root, files):
     for name, content in files.items():
         path = root / name
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
+        # Match captured byte counts even on platforms that translate text newlines.
+        path.write_bytes(content.encode("utf-8"))
 
 
 def _sized(files, **kw):
-    return meta_dict(files=list(files), file_sizes={k: len(v) for k, v in files.items()}, **kw)
+    return meta_dict(files=list(files), file_sizes={k: len(v.encode("utf-8")) for k, v in files.items()}, **kw)
 
 
 PLANNING = {"pipeline.py": "print('Northwind')\n", "planning/backlog.json": "[]" * 5000,
