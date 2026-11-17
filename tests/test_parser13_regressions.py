@@ -145,12 +145,21 @@ def test_nested_list_thematic_scan_is_bounded(monkeypatch, ending, tmp_path):
     ('', '/url', '    '), ('> ', '> /url', '    '), ('- ', '  /url', '      '),
 ])
 def test_split_destination_keeps_code_boundary_cli(tmp_path, ending, prefix, destination, indent):
+    # The definition leaves its paragraph open, so the backticks pair in each container.
     source = (prefix + '[a]:\n' + destination + '\n' + indent + '`\n'
-              '![Shot](missing.png)\n![Bad](https://img.shields.io/badge/x-x-ABCDEF)\n`').replace('\n', ending)
+              '![Shot](missing.png)\n![Bad](https://img.shields.io/badge/x-x-ABCDEF)\n`'
+              '\n\n![Reference][a]').replace('\n', ending)
+    missing = 'R7 local image does not resolve: missing.png'
+    off_palette = 'R7 off-palette badge colour ABCDEF'
     fails = lint(tmp_path, source)
-    assert 'R7 local image does not resolve: missing.png' in fails
-    assert 'R7 off-palette badge colour ABCDEF' in fails
-    assert ('Shot', 'missing.png') in mdcode._images(mdcode._outside_code(source), source)
+    assert missing not in fails
+    assert off_palette not in fails
+    assert mdcode._images(mdcode._outside_code(source), source) == [('Reference', '/url')]
+    shown = source.replace('`', 'text')
+    fails = lint(tmp_path, shown)
+    assert missing in fails
+    assert off_palette in fails
+    assert ('Shot', 'missing.png') in mdcode._images(mdcode._outside_code(shown), shown)
 
 
 @pytest.mark.parametrize('opener,closer', [('\"', '\"'), ("'", "'"), ('(', ')')])

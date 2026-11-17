@@ -15,7 +15,15 @@ def test_multiline_reference_offsets_resolve_both_images_cli(tmp_path, ending):
 @pytest.mark.parametrize("title", ['"bad" extra', "(bad) extra", "'bad' extra"])
 def test_invalid_optional_title_keeps_definition_boundary_cli(tmp_path, title):
     source = f'[a]: /url\n    {title}\n    `\n![Shot](docs/images/missing.png)\n`\n'
-    assert MISSING in cli_fails(tmp_path, source, "\n")
+    assert_optional_title_fallback(tmp_path, source, "\n")
+
+
+def assert_optional_title_fallback(tmp_path, source, ending):
+    # Invalid next-line titles stay in the paragraph after the valid definition.
+    source += "\n![Reference][a]\n"
+    assert MISSING not in cli_fails(tmp_path, source, ending)
+    assert mdcode._images(mdcode._outside_code(source), source) == [('Reference', '/url')]
+    assert MISSING in cli_fails(tmp_path, source.replace('`', 'text'), ending)
 
 
 def test_nested_continuations_materialize_linear_amount():
@@ -42,7 +50,7 @@ def test_unterminated_optional_title_falls_back_cli(tmp_path, ending, opener, pr
     source = (f'{prefix}[a]: /url\n{continuation}    {opener}unfinished\n'
               f'{continuation}    `\n{continuation}![Shot](docs/images/missing.png)\n'
               f'{continuation}`\n')
-    assert MISSING in cli_fails(tmp_path, source, ending)
+    assert_optional_title_fallback(tmp_path, source, ending)
 
 
 @pytest.mark.parametrize("ending", ["\n", "\r\n"])
