@@ -441,3 +441,50 @@ def test_documentation_type_ignores_linked_worktree_checkout_pointer(tmp_path):
     facts = RepoFacts({}, worktree)
     assert facts.files == ["README.md", "docs/guide.md"]
     assert detect_type({}, facts) == ("documentation", 25)
+
+
+@pytest.mark.parametrize("checkout", [False, True])
+@pytest.mark.parametrize("scope,expected", [("", "workspace"),
+                                            ("for: Northwind-Trading-Co/other-repo\n", "documentation")])
+def test_meta_advice_respects_scoped_repository_type(tmp_path, checkout, scope, expected):
+    config = "type: workspace\n" + scope
+    files = {"README.md": "# Handbook\n", "docs/guide.md": "# Guide\n", ".github/showcase.yml": config}
+    repo = tmp_path / "repo"
+    if checkout:
+        _tree(repo, files)
+    capture = tmp_path / "capture.json"
+    data = meta_dict(files=list(files))
+    data["manifests"] = {".github/showcase.yml": config}
+    capture.write_text(json.dumps(data), encoding="utf-8")
+    args = ["--meta", capture, *(["--repo-dir", repo] if checkout else ["--no-repo-dir"])]
+    snapshot = run_cli(*args, "meta")
+    assert snapshot.returncode == 0, snapshot.stderr
+    detected = json.loads(snapshot.stdout)["detected"]
+    assert detected["type"] == expected
+    assert ("suggestion" in detected) == (expected == "documentation")
+    doctor = run_cli(*args, "doctor", "--format", "json")
+    assert json.loads(doctor.stdout)["type"] == expected
+
+    explicit = run_cli(*args, "--type", "cli", "meta")
+    assert json.loads(explicit.stdout)["detected"]["type"] == "cli"
+
+
+@pytest.mark.parametrize("checkout", [False, True])
+@pytest.mark.parametrize("manifest", [False, True])
+def test_authored_build_code_prevents_docs_only_classification(tmp_path, checkout, manifest):
+    files = {"README.md": "# Handbook\n", "docs/guide.md": "# Guide\n", "build/tool.js": "console.log('guide');\n"}
+    manifests = {"package.json": '{"scripts":{"build":"node build/tool.js"}}'} if manifest else {}
+    files.update(manifests)
+    repo = tmp_path / "repo"
+    if checkout:
+        _tree(repo, files)
+    capture = tmp_path / "capture.json"
+    data = _sized(files, manifests=manifests) if not checkout else meta_dict()
+    capture.write_text(json.dumps(data), encoding="utf-8")
+    args = ["--meta", capture, *(["--repo-dir", repo] if checkout else ["--no-repo-dir"])]
+    snapshot = run_cli(*args, "meta")
+    detected = json.loads(snapshot.stdout)["detected"]
+    assert detected["type"] == "workspace"
+    assert "suggestion" not in detected
+    doctor = run_cli(*args, "doctor", "--format", "json")
+    assert json.loads(doctor.stdout)["type"] == "workspace"

@@ -9,6 +9,29 @@ from .errors import ConfigError, NeedsInput
 from .facts import RepoFacts
 
 
+def same_repository(full_name: str, owner: str, repo: str, resolver=None) -> bool:
+    """Check the exact repository, including approved renames and transfers."""
+    if not isinstance(full_name, str) or full_name.count("/") != 1:
+        return False
+
+    def same_slug(first, second):
+        first_owner, first_repo = first.split("/", 1)
+        second_owner, second_repo = second.split("/", 1)
+        return (first_repo.lower() == second_repo.lower() and
+                (resolver.same(first_owner, second_owner) if resolver else
+                 bool(first_owner and second_owner) and first_owner.lower() == second_owner.lower()))
+
+    current = f"{owner}/{repo}"
+    if same_slug(full_name, current):
+        return True
+    if resolver:
+        for candidate, expected in ((full_name, current), (current, full_name)):
+            prior = resolver.repo_before(candidate)
+            if prior and resolver.repo_action_approved(prior[1]) and same_slug(prior[0], expected):
+                return True
+    return False
+
+
 class RepoContext:
     def __init__(self, brand: Brand, meta: dict, repo_dir: str | Path | None = None, type_override: str | None = None,
                  *, for_coverage: bool = False, metadata_path: str | Path | None = None):
@@ -79,22 +102,7 @@ class RepoContext:
         return res.same(a, b) if res else bool(a and b) and a.lower() == b.lower()
 
     def same_repo(self, full_name: str) -> bool:
-        """True when OWNER/REPO names this repository: the owner through the resolver, the name case-insensitively,
-        or the slug an approved repository rename or transfer gives it (`Resolver.repo_before`)."""
-        if not isinstance(full_name, str) or full_name.count("/") != 1:
-            return False
-        o, r = full_name.split("/")
-        if r.lower() == str(self.repo).lower() and self.same_owner(o):
-            return True
-        res = self._resolver()
-        for a, b in ((full_name, f"{self.owner}/{self.repo}"), (f"{self.owner}/{self.repo}", full_name)):
-            hit = res.repo_before(a) if res else None
-            if hit and res.repo_action_approved(hit[1]):
-                ho, hr = hit[0].split("/", 1)
-                bo, br = b.split("/", 1)
-                if hr.lower() == br.lower() and self.same_owner(ho, bo):
-                    return True
-        return False
+        return same_repository(full_name, self.owner, self.repo, self._resolver())
 
     # -- identity --------------------------------------------------------------------------------------
     @property

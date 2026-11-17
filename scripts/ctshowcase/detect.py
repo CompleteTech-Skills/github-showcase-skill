@@ -136,16 +136,19 @@ def captured_path(path: object) -> PurePosixPath | None:
     return parsed
 
 
+def _generated_or_exported_path(parsed: PurePosixPath, spec: dict) -> bool:
+    parts = parsed.parts
+    return bool(parsed.as_posix() in spec.get("showcase_artifact_paths", [])
+                or (parts[:-1] == ("docs", "images", "badges") and parsed.suffix == ".svg")
+                or _EXPORT_NAME.fullmatch(parsed.name) or _ISSUE_EXPORT_PATH.fullmatch(parsed.as_posix()))
+
+
 def substantive_path(parsed: PurePosixPath) -> bool:
     """False for administrative inputs excluded from rule 24's byte share."""
-    t = standard("types")
-    parts = parsed.parts
-    excluded = set(t.get("dataset_exclude_dirs", []))
-    output = (parsed.as_posix() in t.get("showcase_artifact_paths", []) or
-              (parts[:-1] == ("docs", "images", "badges") and parsed.suffix == ".svg"))
-    return (not output and not any(p in excluded for p in parts[:-1])
-            and parts[-1] not in set(t.get("dataset_exclude_files", []))
-            and not _EXPORT_NAME.fullmatch(parts[-1]) and not _ISSUE_EXPORT_PATH.fullmatch(parsed.as_posix()))
+    spec = standard("types")
+    excluded = set(spec.get("dataset_exclude_dirs", []))
+    return (not _generated_or_exported_path(parsed, spec) and not any(part in excluded for part in parsed.parts[:-1])
+            and parsed.name not in spec.get("dataset_exclude_files", []))
 
 
 def substantive_sizes(facts: RepoFacts) -> dict[str, int]:
@@ -185,11 +188,13 @@ def documentation_type(facts: RepoFacts) -> str | None:
     """Distinguish dedicated documentation from a workspace with a README and housekeeping files."""
     if not facts.known or facts.meta.get("files_complete", True) is not True:
         return None
-    admin = set(standard("types").get("documentation_exclude_files", []))
+    spec = standard("types")
+    admin = set(spec.get("documentation_exclude_files", []))
+    administrative_dirs = set(spec.get("documentation_exclude_dirs", []))
     if facts.dir is None:
         paths = [captured_path(path) for path in facts.meta.get("files", []) or []]
     else:
-        files = facts.files
+        files = facts.documentation_files()
         if facts.metadata_path is not None:
             root = facts.dir.resolve()
             path = facts.metadata_path.parent.resolve() / facts.metadata_path.name
@@ -201,7 +206,9 @@ def documentation_type(facts: RepoFacts) -> str | None:
         paths = [captured_path(path) for path in files]
     if any(path is None for path in paths):
         return None
-    rest = [path for path in paths if path is not None and substantive_path(path) and path.name not in admin]
+    rest = [path for path in paths if path is not None and path.name not in admin
+            and not any(part in administrative_dirs for part in path.parts[:-1])
+            and not _generated_or_exported_path(path, spec)]
     if not rest or any(path.suffix.lower() not in DOC_SUFFIXES and path.name not in ("LICENSE", "COPYING")
                        for path in rest):
         return None

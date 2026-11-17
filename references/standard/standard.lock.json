@@ -850,6 +850,13 @@
     "streamlit"
    ]
   },
+  "documentation_exclude_dirs": [
+   "planning",
+   ".planning",
+   ".github",
+   "node_modules",
+   "vendor"
+  ],
   "documentation_exclude_files": [
    ".gitignore",
    ".gitattributes",

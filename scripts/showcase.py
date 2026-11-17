@@ -24,7 +24,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from ctshowcase import STANDARD, __version__  # noqa: E402
-from ctshowcase.errors import CHECK_FAILED, NEEDS_INPUT, OK, USAGE, ShowcaseError  # noqa: E402
+from ctshowcase.errors import CHECK_FAILED, NEEDS_INPUT, OK, USAGE, ConfigError, ShowcaseError  # noqa: E402
 
 GENERATORS = {"banner", "card", "org-tile", "intro", "contact-sheet", "social-preview", "org-banner"}
 # `enterprise` contract names (org/project/enterprise/content groups) that map onto the original action names
@@ -666,7 +666,9 @@ def cmd_labels(args):
 
 
 def cmd_meta(args):
+    from ctshowcase import config as C
     from ctshowcase import meta as M
+    from ctshowcase.context import same_repository
     from ctshowcase.detect import detect
     from ctshowcase.facts import RepoFacts
     try:
@@ -675,6 +677,7 @@ def cmd_meta(args):
         if args.from_gh:
             raise
         b = None
+    rd = None
     if args.from_gh:
         owner = args.from_gh.split("/")[0]
         status = b.owner_status(owner)
@@ -685,8 +688,24 @@ def cmd_meta(args):
     else:
         rd = repo_dir(args)
         m = M.merged(args.meta, str(rd) if rd else None)
-    m["detected"] = detect(m, RepoFacts(m, None if args.from_gh else rd, metadata_path=args.meta), type_override=args.type_override,
-                           same_owner=b.resolver().same if b else None)
+    resolver = b.resolver() if b else None
+    unread_override = False
+    override = {}
+    override_errors = (ConfigError, OSError, ValueError, RecursionError)
+    if C.yaml is not None:
+        override_errors += (C.yaml.YAMLError,)
+    try:
+        override = C.load_repo_override(rd)[0] if rd else C.override_from_manifests(m.get("manifests"))
+    except override_errors:
+        # Preserve the capture on the stdlib-only Action step and for invalid
+        # config. A later config-aware command reports the exact failure.
+        unread_override = True
+    if override.get("for") and not same_repository(override["for"], m["owner"], m["repo"], resolver):
+        override = {}
+    m["detected"] = detect(m, RepoFacts(m, rd, metadata_path=args.meta), override, type_override=args.type_override,
+                           same_owner=resolver.same if resolver else None)
+    if unread_override:
+        m["detected"].pop("suggestion", None)
     if b:
         try:
             m["detected"]["family"] = b.org(m["owner"]).get("family")

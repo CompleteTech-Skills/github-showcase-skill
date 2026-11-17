@@ -20,6 +20,7 @@ showcase_artifact_paths: [docs/images/.showcase.json, docs/images/banner.png, do
                           docs/images/card.png, docs/images/intro.svg, assets/intro.svg, assets/icon.png,
                           assets/social-preview.png, assets/social-preview.jpg]
 # Repository administration files that do not stop a tree counting as documentation-only (`docs-only`).
+documentation_exclude_dirs: [planning, .planning, .github, node_modules, vendor]
 documentation_exclude_files: [.gitignore, .gitattributes, .editorconfig, CODEOWNERS]
 # Rule 24 is low confidence (logged `type-suggestion:dataset:dataset-near-threshold`) below this data share.
 dataset_confident_share: 0.6

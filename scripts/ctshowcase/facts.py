@@ -35,6 +35,7 @@ class RepoFacts:
         self.dir = Path(repo_dir) if repo_dir else None
         self.metadata_path = Path(metadata_path) if metadata_path else None
         self._files: list[str] | None = None
+        self._documentation_files: list[str] | None = None
 
     # -- raw access ---------------------------------------------------------------------------------
     @property
@@ -46,20 +47,31 @@ class RepoFacts:
     def files(self) -> list[str]:
         if self._files is None:
             if self.dir is not None:
-                out = []
-                for base, dirs, names in os.walk(self.dir):
-                    dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS)
-                    rel = Path(base).relative_to(self.dir)
-                    for n in sorted(names):
-                        if not rel.parts and n == ".git":  # linked checkout pointer
-                            continue
-                        out.append((rel / n).as_posix() if str(rel) != "." else n)
-                self._files = out
+                self._files = self._checkout_files(SKIP_DIRS)
             else:
                 captured = self.meta.get("files")
                 self._files = ([path for path in captured if isinstance(path, str)]
                                if isinstance(captured, list) else [])
         return self._files
+
+    def _checkout_files(self, skip_dirs) -> list[str]:
+        out = []
+        for base, dirs, names in os.walk(self.dir):
+            dirs[:] = sorted(name for name in dirs if name not in skip_dirs)
+            relative = Path(base).relative_to(self.dir)
+            for name in sorted(names):
+                if not relative.parts and name == ".git":  # linked checkout pointer
+                    continue
+                out.append((relative / name).as_posix())
+        return out
+
+    def documentation_files(self) -> list[str]:
+        """A checkout can contain authored files under build/ and dist/."""
+        if self.dir is None:
+            return self.files
+        if self._documentation_files is None:
+            self._documentation_files = self._checkout_files(SKIP_DIRS - {"build", "dist"})
+        return self._documentation_files
 
     def read(self, rel: str) -> str | None:
         if self.dir is not None:
