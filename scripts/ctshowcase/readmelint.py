@@ -247,6 +247,7 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
     header_part = text.split("\n---\n", 1)[0]
     # masked over the whole document, then cut to the header: a reference label is resolved by a definition below it
     image_view = _outside_code(text)
+    images = _image_entries(image_view, text)
     badge_header = image_view[:len(header_part)]
     image_sources = [source for _, source in _images(badge_header, text)]
     nbadges = sum(bool(SHIELDS_SRC.match(src)
@@ -260,7 +261,7 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
         elif nbadges < 2:
             warns.append(f"badges-short: {nbadges} badge (no licence or language to show yet)")
     # colours come only from complete parsed image destinations, so an apostrophe or other HTML delimiter inside a Markdown URL hides nothing
-    shields += [m.group(1) for _, src in _images(image_view, text)
+    shields += [m.group(1) for _, src, _ in images
                 if (m := SHIELDS_BADGE.match(src))]
     shields = list(dict.fromkeys(shields))
     for s in shields:
@@ -314,7 +315,7 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
         elif _extra_footer(text):
             fails.append("D18 footer fail:duplicate")
     # alt text, local images
-    for alt, source, is_html in _image_entries(image_view, text):
+    for alt, source, is_html in images:
         if not alt.strip():
             fails.append(f"R7 image without alt text: {source[:40]}")
         if source:

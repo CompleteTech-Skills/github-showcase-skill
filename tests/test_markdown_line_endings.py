@@ -264,7 +264,9 @@ def test_dry_run_patch_applies_to_original_readme_bytes(tmp_path, ending):
     assert json.loads(written.stdout)['written']
     expected = path.read_bytes()
     path.write_bytes(original)
-    applied = subprocess.run([git, 'apply', '--whitespace=nowarn', str(patch)], cwd=tmp_path, capture_output=True)
+    # Test patch bytes independently of the Git installation's working-tree EOL policy.
+    git_apply = [git, '-c', 'core.autocrlf=false', '-c', 'core.eol=lf', 'apply', '--whitespace=nowarn']
+    applied = subprocess.run([*git_apply, str(patch)], cwd=tmp_path, capture_output=True)
     assert applied.returncode == 0, applied.stderr
     assert path.read_bytes() == expected
 
