@@ -52,7 +52,9 @@ class RepoFacts:
                         out.append((rel / n).as_posix() if str(rel) != "." else n)
                 self._files = out
             else:
-                self._files = list(self.meta.get("files") or [])
+                captured = self.meta.get("files")
+                self._files = ([path for path in captured if isinstance(path, str)]
+                               if isinstance(captured, list) else [])
         return self._files
 
     def read(self, rel: str) -> str | None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+from fractions import Fraction
 from functools import lru_cache
 from pathlib import PurePosixPath
 
@@ -124,34 +125,43 @@ _ISSUE_EXPORT_PATH = re.compile(r"issues/issue-[0-9]+\.json", re.IGNORECASE)
 _EXPORT_NAME = re.compile(r"(?:generated|exported)-(?:issues|planning)\.json", re.IGNORECASE)
 
 
-def substantive_path(path: str) -> bool:
-    """False for administrative inputs (planning and issue exports, package config) excluded from rule 24's share."""
-    t = standard("types")
+def captured_path(path: object) -> PurePosixPath | None:
+    """A canonical checkout-relative path supplied by a capture."""
+    if not isinstance(path, str):
+        return None
     parsed = PurePosixPath(path)
+    if (not parsed.parts or parsed.as_posix() != path or ".." in parsed.parts or parsed.is_absolute()
+            or "\\" in path or "\0" in path or re.match(r"^[A-Za-z]:", path)):
+        return None
+    return parsed
+
+
+def substantive_path(parsed: PurePosixPath) -> bool:
+    """False for administrative inputs excluded from rule 24's byte share."""
+    t = standard("types")
     parts = parsed.parts
-    if not parts or parsed.as_posix() != path or ".." in parts or path.startswith("/") or "\\" in path or "\0" in path:
-        return False
-    if re.match(r"^[A-Za-z]:", path):
-        return False
     excluded = set(t.get("dataset_exclude_dirs", []))
     return (not any(p in excluded for p in parts[:-1])
             and parts[-1] not in set(t.get("dataset_exclude_files", []))
-            and not _EXPORT_NAME.fullmatch(parts[-1]) and not _ISSUE_EXPORT_PATH.fullmatch(path))
+            and not _EXPORT_NAME.fullmatch(parts[-1]) and not _ISSUE_EXPORT_PATH.fullmatch(parsed.as_posix()))
 
 
 def substantive_sizes(facts: RepoFacts) -> dict[str, int]:
     """Use captured sizes without consulting the checkout, including legacy captures with only a size map."""
     captured = facts.meta.get("file_sizes")
-    if facts.meta.get("files_complete") is False or not isinstance(captured, dict):
+    if facts.meta.get("files_complete", True) is not True or not isinstance(captured, dict):
         return {}
     files = facts.meta.get("files")
-    if files is None:
+    if "files" not in facts.meta:
         files = captured.keys()
     elif not isinstance(files, list):
         return {}
     sizes = {}
     for path in files:
-        if not isinstance(path, str) or not substantive_path(path):
+        parsed = captured_path(path)
+        if parsed is None:
+            return {}
+        if not substantive_path(parsed):
             continue
         size = captured.get(path)
         if type(size) is not int or size < 0:
@@ -160,34 +170,39 @@ def substantive_sizes(facts: RepoFacts) -> dict[str, int]:
     return sizes
 
 
-def dataset_share(facts: RepoFacts) -> float | None:
+def dataset_share(facts: RepoFacts) -> Fraction | None:
     """Share of substantive bytes in CSV, JSON and Parquet files, or None when no substantive byte is known."""
     sizes = substantive_sizes(facts)
     total = sum(sizes.values())
     if not total:
         return None
-    return sum(v for k, v in sizes.items() if k.endswith(DATA_SUFFIXES)) / total
+    return Fraction(sum(v for k, v in sizes.items() if k.endswith(DATA_SUFFIXES)), total)
 
 
 def docs_only(facts: RepoFacts) -> bool:
     """True when the known tree holds only documentation once repository administration files are set aside."""
-    if not facts.known or facts.meta.get("files_complete") is False:
+    if not facts.known or facts.meta.get("files_complete", True) is not True:
         return False
     admin = set(standard("types").get("documentation_exclude_files", []))
-    rest = [f for f in facts.files if substantive_path(f) and PurePosixPath(f).name not in admin]
-    return bool(rest) and all(PurePosixPath(f).suffix.lower() in DOC_SUFFIXES
-                              or PurePosixPath(f).name in ("LICENSE", "COPYING") for f in rest)
+    paths = [captured_path(path) for path in facts.meta.get("files", []) or []] if facts.dir is None else [
+        captured_path(path) for path in facts.files
+    ]
+    if any(path is None for path in paths):
+        return False
+    rest = [path for path in paths if path is not None and substantive_path(path) and path.name not in admin]
+    return bool(rest) and all(path.suffix.lower() in DOC_SUFFIXES or path.name in ("LICENSE", "COPYING") for path in rest)
 
 
 def type_suggestion(rule: int, facts: RepoFacts) -> str | None:
     """Return the reason for a low-confidence type, if any."""
     if not facts.known:
         return "file-tree-unknown"
-    if facts.meta.get("files_complete") is False and rule == 25:
+    if facts.meta.get("files_complete", True) is not True and rule == 25:
         return "file-tree-incomplete"
     if rule == 24:
         share = dataset_share(facts)
-        if share is not None and share < standard("types").get("dataset_confident_share", 0.6):
+        threshold = Fraction(str(standard("types").get("dataset_confident_share", 0.6)))
+        if share is not None and share < threshold:
             return "dataset-near-threshold"
     if rule == 25 and docs_only(facts):
         return "docs-only"

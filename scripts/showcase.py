@@ -682,7 +682,8 @@ def cmd_meta(args):
     else:
         rd = repo_dir(args)
         m = M.merged(args.meta, str(rd) if rd else None)
-    m["detected"] = detect(m, RepoFacts(m, None if args.from_gh else rd), same_owner=b.resolver().same if b else None)
+    m["detected"] = detect(m, RepoFacts(m, None if args.from_gh else rd), type_override=args.type_override,
+                           same_owner=b.resolver().same if b else None)
     if b:
         try:
             m["detected"]["family"] = b.org(m["owner"]).get("family")
@@ -1033,7 +1034,7 @@ def parser() -> argparse.ArgumentParser:
                         "--meta file describes)")
     p.add_argument("--no-repo-dir", action="store_true", help="ignore --repo-dir; use --meta facts only")
     p.add_argument("--meta", help="metadata JSON (scratch format, gh api output or `meta` output)")
-    p.add_argument("--type", dest="type_override", metavar="TYPE", help="§5.4 type to use instead of detection (when the file tree is not available); logged")
+    p.add_argument("--type", dest="type_override", metavar="TYPE", help="§5.4 type to use instead of automatic detection, including for low-confidence results")
     p.add_argument("--format", choices=("json", "text"), default=None, help="output style")
     p.add_argument("--quiet", action="store_true")
     p.add_argument("--allow-t3", action="store_true",

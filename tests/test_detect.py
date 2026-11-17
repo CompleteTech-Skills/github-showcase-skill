@@ -112,6 +112,24 @@ def test_empty_or_malformed_sizes_do_not_claim_dataset():
     assert detect_type({"files": ["data.json"], "file_sizes": ["data.json"]}) == ("workspace", 25)
 
 
+
+@pytest.mark.parametrize("fields", [
+    {"files": None}, {"files": ["rows.csv", None]}, {"files": ["rows.csv", "./main.py"]},
+    {"files_complete": None}, {"files_complete": 0}, {"files_complete": "true"},
+])
+def test_explicitly_invalid_capture_is_not_a_legacy_size_map(fields):
+    meta = {"file_sizes": {"rows.csv": 90, "main.py": 10}, **fields}
+    assert detect_type(meta) == ("workspace", 25)
+
+
+def test_dataset_share_keeps_the_inclusive_cutoff_exact():
+    large = 2 ** 54
+    meta = {"file_sizes": {"rows.csv": large - 1, "main.py": large}}
+    assert detect_type(meta) == ("workspace", 25)
+    meta["file_sizes"]["rows.csv"] = large
+    assert detect_type(meta) == ("dataset", 24)
+
+
 def test_checkout_sizes_only_measure_captured_paths(tmp_path):
     # Regression: the composite Action writes meta.json into the checkout. Without captured sizes rule 24 is skipped
     # (main's behaviour), and an uncaptured local file never counts towards the data share.
@@ -221,6 +239,21 @@ def test_meta_and_fingerprint_use_selected_brand_aliases(tmp_path, brand):
     expected = fp.inputs(meta, None)
     expected["type"] = "security-check"
     assert json.loads(result.stdout)["fingerprint"] == fp.fingerprint(expected, load_brand(config).sha256)
+
+
+
+def test_meta_explicit_type_resolves_low_confidence_suggestion(tmp_path):
+    path = tmp_path / "meta.json"
+    path.write_text(json.dumps(meta_dict(files=["README.md"])), encoding="utf-8")
+    args = ("--meta", path, "--no-repo-dir")
+    automatic = run_cli(*args, "meta")
+    assert automatic.returncode == 0, automatic.stderr
+    assert "type-suggestion:workspace:docs-only" in automatic.stdout
+    explicit = run_cli(*args, "--type", "cli", "meta")
+    assert explicit.returncode == 0, explicit.stderr
+    detected = json.loads(explicit.stdout)["detected"]
+    assert (detected["type"], detected["rule"]) == ("cli", 0)
+    assert "suggestion" not in detected
 
 
 @pytest.mark.parametrize("checkout", [False, True])
