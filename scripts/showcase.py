@@ -226,7 +226,7 @@ def write_art(ctx, out: Path, data: bytes, *, format_generated: bool, preview=No
             if sidecar is not None:
                 target_relative(ctx.repo_dir, sidecar)
             ensure_distinct_outputs(*destinations, *([capture] if capture else []))
-            write_formatted_outputs(outputs)
+            write_formatted_outputs(outputs, repo_root=ctx.repo_dir.resolve())
         else:
             for destination, content in outputs:
                 write_bytes(destination, content)
@@ -628,7 +628,7 @@ def cmd_readme(args):
                                         code=CHECK_FAILED)
             for target, _ in outputs:
                 target_relative(rd, target)
-            write_formatted_outputs(outputs, snapshots=dict(snapshots))
+            write_formatted_outputs(outputs, repo_root=rd, snapshots=dict(snapshots))
         else:
             for target, data in outputs:
                 if target == contrib_path:

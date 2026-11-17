@@ -20,7 +20,7 @@ def code_spans(text: str) -> list[tuple[int, int]]:
             else:
                 spans += [(pos + c.start(), pos + c.end()) for c in INLINE_CODE.finditer(line)]
         else:
-            close = re.match(r"^ {0,3}(`{3,}|~{3,})[ \t]*$", line.rstrip("\n"))
+            close = re.match(r"^ {0,3}(`{3,}|~{3,})[ \t]*$", line.rstrip("\r\n"))
             if close and close.group(1)[0] == fence[0] and len(close.group(1)) >= len(fence):
                 spans.append((fstart, pos + len(line)))
                 fence = None

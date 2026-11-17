@@ -1137,13 +1137,13 @@ def license_block(ctx: RepoContext, text: str) -> str:
 
 
 TEMPLATE_H1 = "CompleteTech Repo Template"
-PRISTINE = re.compile(r"<!-- showcase:template-body:pristine(?: sha256=([0-9a-f]{64}))? -->\r?\n?")
+PRISTINE = re.compile(r"<!-- showcase:template-body:pristine(?: sha256=([0-9a-f]{64}))? -->(?:\r\n|\r|\n)?")
 TEMPLATE_BODY = re.compile(re.escape(start("template-body")) + r"\n?(.*?)\n?" + re.escape(end("template-body")), re.S)
 
 
 def body_sha(body: str) -> str:
     import hashlib
-    return hashlib.sha256(body.replace("\r\n", "\n").strip().encode("utf-8")).hexdigest()
+    return hashlib.sha256(body.replace("\r\n", "\n").replace("\r", "\n").strip().encode("utf-8")).hexdigest()
 
 
 def pristine_block(body: str) -> str:

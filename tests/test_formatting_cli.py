@@ -577,3 +577,25 @@ def test_formatter_records_cannot_alias_readme(tmp_path, monkeypatch, write):
         argv.append("--write")
     assert showcase.main(argv) == 2
     assert readme.read_bytes() == original
+
+
+@pytest.mark.parametrize("ending", ["\r\n", "\r"])
+def test_formatter_keeps_markers_after_fences_and_reseals_pristine_body(tmp_path, monkeypatch, ending):
+    import showcase
+    from ctshowcase import readme
+
+    repo, meta = target(tmp_path)
+    path = repo / "README.md"
+    original = ("# Northwind\n\n"
+                "```sh\nprintf sample\n```\n\n"
+                "<!-- showcase:tagline:start -->\n\nOld tagline.\n\n<!-- showcase:tagline:end -->\n\n"
+                + readme.pristine_block("## Install\n\nSynthetic install instructions.") + "\n")
+    path.write_bytes(original.encode("utf-8"))
+    monkeypatch.setattr("ctshowcase.formatting.format_text", lambda root, path, text: text.replace("\n", ending))
+    argv = ["--meta", str(meta), "--repo-dir", str(repo), "readme", "--mode", "header", "--write", "--format-generated"]
+    assert showcase.main(argv) == 0
+    rendered = path.read_bytes()
+    assert ending.encode() in rendered
+    assert readme.bootstrap_state(rendered.decode().replace("\r\n", "\n").replace("\r", "\n")) == "pristine"
+    assert showcase.main(argv) == 0
+    assert path.read_bytes() == rendered

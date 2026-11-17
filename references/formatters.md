@@ -26,7 +26,10 @@ missing or mismatched local dependencies, and unsupported pinning mechanisms
 return `needs-input:formatter`. No packages are installed or downloaded and no
 package scripts or shell commands are run. Prettier may load the target's own
 JavaScript configuration and plugins, so request formatting only for a trusted
-checkout. `.editorconfig` detection alone does not select a formatter.
+checkout. Formatter discovery stops at the target checkout. EditorConfig is
+applied when its search is bounded by a target `root = true` or a target
+version-control directory. Formatted outputs, including an optional PNG preview,
+stay within the target checkout.
 
 Text is passed on stdin with its final target path, so Prettier uses the target's
 configuration. The caller still applies the usual content-preservation and

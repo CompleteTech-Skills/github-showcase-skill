@@ -248,3 +248,65 @@ def test_preflight_reports_the_skills_own_check_commands(tmp_path):
         "python scripts/showcase.py fonts --check",
         "python scripts/showcase.py footer --check",
     ]
+
+
+@pytest.mark.parametrize("suffix", [".md", ".json", ".svg"])
+def test_formatter_uses_explicit_config_inside_the_checkout(tmp_path, monkeypatch, suffix):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    local_prettier(repo)
+    outside = tmp_path / "prettier.config.cjs"
+    outside.write_text("throw new Error('external config');", encoding="utf-8")
+    calls = []
+    nested = repo / "docs"
+    nested.mkdir()
+    destination = nested / f"test{suffix}"
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        data = json.dumps("ok") if suffix == ".md" else "ok"
+        return SimpleNamespace(returncode=0, stdout=data.encode(), stderr=b"")
+
+    monkeypatch.setattr("ctshowcase.formatting.shutil.which", lambda _: "/node")
+    monkeypatch.setattr("ctshowcase.formatting.subprocess.run", run)
+    assert format_text(repo, destination, "ok") == "ok"
+    assert str(repo / "package.json") in calls[-1] and str(outside) not in calls[-1]
+
+    settings = nested / ".prettierrc.json"
+    settings.write_text("{}", encoding="utf-8")
+    assert format_text(repo, destination, "ok") == "ok"
+    assert str(settings) in calls[-1]
+
+
+def test_formatter_refuses_externally_linked_config(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    local_prettier(repo)
+    outside = tmp_path / "outside.cjs"
+    outside.write_text("module.exports = {};", encoding="utf-8")
+    config = repo / "prettier.config.cjs"
+    try:
+        config.symlink_to(outside)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symbolic links are unavailable: {exc}")
+    monkeypatch.setattr("ctshowcase.formatting.shutil.which", lambda _: "/node")
+    monkeypatch.setattr("ctshowcase.formatting.subprocess.run", lambda *a, **k: pytest.fail("loaded escaping config"))
+    with pytest.raises(NeedsInput, match="configuration must be inside"):
+        format_text(repo, repo / "README.md", "# Example")
+
+
+def test_formatted_writer_rejects_parent_retarget_before_creating_descendants(tmp_path):
+    from ctshowcase.formatting import write_formatted_outputs
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    images = repo / "images"
+    try:
+        images.symlink_to(outside, target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symbolic links are unavailable: {exc}")
+    with pytest.raises(ShowcaseError, match="inside the target checkout"):
+        write_formatted_outputs([(images / "new" / "preview.png", b"preview")], repo_root=repo)
+    assert not (outside / "new").exists()
