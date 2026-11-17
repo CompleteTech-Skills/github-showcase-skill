@@ -787,7 +787,6 @@
   "dataset_exclude_dirs": [
    "planning",
    ".planning",
-   "issues",
    ".github",
    "node_modules",
    "vendor",

@@ -41,9 +41,6 @@ def is_fork(meta: dict) -> bool:
 def detect_type(meta: dict, facts: RepoFacts | None = None, same_owner=None) -> tuple[str, int]:
     """Return (type, rule number). Rules that need files are skipped when the tree is unknown."""
     t = standard("types")
-    if same_owner is None:
-        from .config import load_brand
-        same_owner = load_brand().resolver().same
     facts = facts or RepoFacts(meta)
     owner, slug = meta.get("owner", ""), meta.get("repo", "")
     tlds = "|".join(t["domain_tlds"])
@@ -56,11 +53,20 @@ def detect_type(meta: dict, facts: RepoFacts | None = None, same_owner=None) -> 
     def dep(kind):
         return any(d.lower() in deps for d in t["deps"][kind])
 
+    def owner_matches(login):
+        nonlocal same_owner
+        if not owner:
+            return False
+        if same_owner is None:
+            from .config import load_brand
+            same_owner = load_brand(prefer_lock=True).resolver().same
+        return same_owner(owner, login)
+
     if is_fork(meta):
         return "fork", 1
     if re.search(r"-backup-\d{8}$", slug):
         return "backup", 2
-    if slug == ".github" or (same_owner(owner, "CompleteDotTech") and _same_login(slug, "CompleteDotTech")):
+    if slug == ".github" or (_same_login(slug, "CompleteDotTech") and owner_matches("CompleteDotTech")):
         return "github-profile", 3
     if meta.get("is_template"):
         return "template", 4
@@ -69,7 +75,7 @@ def detect_type(meta: dict, facts: RepoFacts | None = None, same_owner=None) -> 
     if not facts.known and re.search(r"\]\((?:\./)?SKILL\.md\)", meta.get("readme_head") or ""):
         # tree unknown (partial metadata): the README links a root SKILL.md, the rule 5 evidence available
         return "agent-skills", 5
-    if same_owner(owner, t["security_owner"]):
+    if owner_matches(t["security_owner"]):
         return "security-check", 6
     if dep("mcp-server") or "mcp server" in h1.lower() or "mcp server" in desc.lower():
         return "mcp-server", 7
@@ -81,7 +87,7 @@ def detect_type(meta: dict, facts: RepoFacts | None = None, same_owner=None) -> 
         return "discord-bot", 10
     if dep("bot"):
         return "bot", 11
-    if any(same_owner(owner, other) for other in t["game_owners"]):
+    if any(owner_matches(other) for other in t["game_owners"]):
         return "game", 12
     if any(f.endswith("AndroidManifest.xml") or ".xcodeproj/" in f or f.endswith(".xcodeproj") for f in files):
         return "mobile-app", 13
@@ -102,7 +108,7 @@ def detect_type(meta: dict, facts: RepoFacts | None = None, same_owner=None) -> 
     if facts.known and facts.is_library():
         return "library", 21
     nb = [f for f in files if f.endswith(".ipynb")]
-    if same_owner(owner, t["research_owner"]) or (files and len(nb) * 2 >= len(files)):
+    if owner_matches(t["research_owner"]) or (files and len(nb) * 2 >= len(files)):
         return "research", 22
     if re.search(r"-in-\d+-steps$", slug):
         return "tutorial", 23
@@ -114,29 +120,44 @@ def detect_type(meta: dict, facts: RepoFacts | None = None, same_owner=None) -> 
 
 DATA_SUFFIXES = (".csv", ".json", ".parquet")
 DOC_SUFFIXES = (".md", ".rst", ".txt", ".adoc")
+_ISSUE_EXPORT_PATH = re.compile(r"issues/issue-[0-9]+\.json", re.IGNORECASE)
 _EXPORT_NAME = re.compile(r"(?:generated|exported)-(?:issues|planning)\.json", re.IGNORECASE)
 
 
 def substantive_path(path: str) -> bool:
     """False for administrative inputs (planning and issue exports, package config) excluded from rule 24's share."""
     t = standard("types")
-    parts = PurePosixPath(path).parts
-    if not parts or ".." in parts or path.startswith("/") or "\\" in path or "\0" in path:
+    parsed = PurePosixPath(path)
+    parts = parsed.parts
+    if not parts or parsed.as_posix() != path or ".." in parts or path.startswith("/") or "\\" in path or "\0" in path:
         return False
     if re.match(r"^[A-Za-z]:", path):
         return False
     excluded = set(t.get("dataset_exclude_dirs", []))
     return (not any(p in excluded for p in parts[:-1])
-            and parts[-1] not in set(t.get("dataset_exclude_files", [])) and not _EXPORT_NAME.fullmatch(parts[-1]))
+            and parts[-1] not in set(t.get("dataset_exclude_files", []))
+            and not _EXPORT_NAME.fullmatch(parts[-1]) and not _ISSUE_EXPORT_PATH.fullmatch(path))
 
 
 def substantive_sizes(facts: RepoFacts) -> dict[str, int]:
-    """Use captured sizes so the same tree yields the same share with or without a checkout."""
+    """Use captured sizes without consulting the checkout, including legacy captures with only a size map."""
     captured = facts.meta.get("file_sizes")
     if facts.meta.get("files_complete") is False or not isinstance(captured, dict):
         return {}
-    return {k: v for k, v in captured.items() if isinstance(k, str) and substantive_path(k)
-            and isinstance(v, int) and not isinstance(v, bool) and v >= 0}
+    files = facts.meta.get("files")
+    if files is None:
+        files = captured.keys()
+    elif not isinstance(files, list):
+        return {}
+    sizes = {}
+    for path in files:
+        if not isinstance(path, str) or not substantive_path(path):
+            continue
+        size = captured.get(path)
+        if type(size) is not int or size < 0:
+            return {}
+        sizes[path] = size
+    return sizes
 
 
 def dataset_share(facts: RepoFacts) -> float | None:

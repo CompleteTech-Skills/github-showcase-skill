@@ -164,7 +164,7 @@ def gate_watching(ctx, allow_hold=False, remedy=HOLD_REMEDY) -> None:
 def maybe_sidecar(ctx, out: Path, record: dict) -> None:
     from ctshowcase import fingerprint as fp
     if out.parent.name == "images" and out.parent.parent.name == "docs":
-        inp = fp.inputs(ctx.meta, ctx.repo_dir)
+        inp = fp.inputs(ctx.meta, ctx.repo_dir, same_owner=ctx.same_owner)
         # the repository's immutable id (`meta --from-gh`): `action_prepare.py foreign` tells a rename or transfer
         # (same id) from art copied out of another repository (a template copy gets a new id). Kept out of the
         # fingerprint inputs, so the fingerprint is unchanged.
@@ -666,23 +666,29 @@ def cmd_meta(args):
     from ctshowcase import meta as M
     from ctshowcase.detect import detect
     from ctshowcase.facts import RepoFacts
+    try:
+        b = brand(args, prefer_lock=True)
+    except ShowcaseError:
+        if args.from_gh:
+            raise
+        b = None
     if args.from_gh:
         owner = args.from_gh.split("/")[0]
-        status = brand(args, prefer_lock=True).owner_status(owner)
+        status = b.owner_status(owner)
         if status in ("excluded", "hold", "t3"):
             # raises Refused (exit 2); --allow-t3 only after an approved t3-metadata or t3-signoff row
-            brand(args, prefer_lock=True).check_owner(owner, allow_t3=args.allow_t3, repo=args.from_gh.split("/")[1] if "/" in args.from_gh else None)
+            b.check_owner(owner, allow_t3=args.allow_t3, repo=args.from_gh.split("/")[1] if "/" in args.from_gh else None)
         m = M.from_gh(args.from_gh)
     else:
         rd = repo_dir(args)
         m = M.merged(args.meta, str(rd) if rd else None)
-    m["detected"] = detect(m, RepoFacts(m, None if args.from_gh else repo_dir(args)))
-    try:
-        b = brand(args, prefer_lock=True)
-        m["detected"]["family"] = b.org(m["owner"]).get("family")
-        m["detected"]["owner_status"] = b.owner_status(m["owner"])
-    except ShowcaseError:
-        pass
+    m["detected"] = detect(m, RepoFacts(m, None if args.from_gh else rd), same_owner=b.resolver().same if b else None)
+    if b:
+        try:
+            m["detected"]["family"] = b.org(m["owner"]).get("family")
+            m["detected"]["owner_status"] = b.owner_status(m["owner"])
+        except ShowcaseError:
+            pass
     text = json.dumps(m, sort_keys=True, indent=1, ensure_ascii=False) + "\n"
     if args.out:
         Path(args.out).write_text(text, encoding="utf-8")
@@ -698,8 +704,9 @@ def cmd_fingerprint(args):
     rd = repo_dir(args)
     m = merged(args.meta, str(rd) if rd else None)
     out_dir = (rd or Path(".")) / args.out_dir if not Path(args.out_dir).is_absolute() else Path(args.out_dir)
-    inp = fp.inputs(m, rd)
-    f = fp.fingerprint(inp, fp.config_sha256())
+    b = brand(args, prefer_lock=True) if args.config else None
+    inp = fp.inputs(m, rd, same_owner=b.resolver().same if b else None)
+    f = fp.fingerprint(inp, fp.config_sha256(b))
     old = fp.read_sidecar(out_dir).get("fingerprint")
     changed = f != old
     if args.github_output and os.environ.get("GITHUB_OUTPUT"):

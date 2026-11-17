@@ -79,7 +79,7 @@ def test_planning_heavy_repo_is_not_a_dataset(tmp_path, checkout):
     assert "suggestion" not in det  # an ordinary workspace fallback is not low confidence
 
 
-@pytest.mark.parametrize("name", ["issues.json", "generated-issues-data.json", "data/issues.json"])
+@pytest.mark.parametrize("name", ["issues.json", "generated-issues-data.json", "data/issues.json", "data/issues/records.parquet"])
 @pytest.mark.parametrize("data_size,want", [(49, "workspace"), (50, "dataset"), (51, "dataset")])
 def test_other_issue_data_stays_eligible_at_inclusive_threshold(name, data_size, want):
     meta = {"files": [name, "main.py"], "file_sizes": {name: data_size, "main.py": 100 - data_size}}
@@ -92,6 +92,19 @@ def test_dataset_near_threshold_suggests_override(data_size, suggested):
     det = detect(meta)
     assert det["type"] == "dataset"
     assert det.get("suggestion") == ("type-suggestion:dataset:dataset-near-threshold:override-key=type" if suggested else None)
+
+
+def test_legacy_size_only_capture_can_still_identify_dataset():
+    assert detect_type({"file_sizes": {"rows.csv": 90, "main.py": 10}}) == ("dataset", 24)
+
+
+@pytest.mark.parametrize("missing", [{}, {"main.py": "10"}, {"main.py": False}, {"main.py": -10}])
+def test_dataset_requires_valid_sizes_for_all_substantive_tree_paths(missing):
+    meta = {"files": ["rows.csv", "main.py", "planning/backlog.json"],
+            "file_sizes": {"rows.csv": 90, **missing}}
+    assert detect_type(meta) == ("workspace", 25)
+    meta["file_sizes"]["main.py"] = 10
+    assert detect_type(meta) == ("dataset", 24)
 
 
 def test_empty_or_malformed_sizes_do_not_claim_dataset():
@@ -116,7 +129,7 @@ def test_checkout_uses_captured_sizes_without_stat_calls(tmp_path, monkeypatch):
     _tree(repo, {"rows.csv": "a,b\n" * 100, "main.py": "print(1)"})
     outside = tmp_path / "outside.csv"
     meta = meta_dict(files=["rows.csv", "main.py"], file_sizes={
-        "rows.csv": 1, "main.py": 1000, "linked.csv": 1,
+        "rows.csv": 1, "main.py": 1000, "linked.csv": 10000, "./rows.csv": 10000,
         str(outside): 10000, "../outside.csv": 10000, "C:/outside.csv": 10000,
     })
     stat = Path.stat
@@ -171,6 +184,43 @@ def test_owner_rules_use_the_resolver():
     resolver = Resolver(registry={"orgs": {"CompleteTech-Security": {"former_slugs": ["Northwind-Old-Security"]}}})
     assert detect({"owner": "Northwind-Old-Security", "files": ["main.py"]}, same_owner=resolver.same)["type"] == \
         "security-check"
+
+
+def test_early_rules_do_not_load_brand_config(monkeypatch):
+    from ctshowcase import config
+
+    def unexpected_load(**kwargs):
+        pytest.fail("rules 1 and 2 do not need owner resolution")
+
+    monkeypatch.setattr(config, "load_brand", unexpected_load)
+    assert detect_type({"fork": True}) == ("fork", 1)
+    assert detect_type({"repo": "sample-backup-20261015"}) == ("backup", 2)
+
+
+def test_meta_and_fingerprint_use_selected_brand_aliases(tmp_path, brand):
+    from copy import deepcopy
+
+    from ctshowcase import fingerprint as fp
+    from ctshowcase.config import load_brand
+
+    raw = deepcopy(brand.raw)
+    raw["orgs"]["CompleteTech-Security"]["former_slugs"].append("Northwind-Old-Security")
+    config = tmp_path / "brand.yaml"
+    config.write_text(json.dumps(raw), encoding="utf-8")
+    meta = meta_dict(owner="Northwind-Old-Security", files=["main.py"])
+    path = tmp_path / "meta.json"
+    path.write_text(json.dumps(meta), encoding="utf-8")
+
+    args = ("--meta", path, "--no-repo-dir", "--config", config)
+    result = run_cli(*args, "meta")
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["detected"]["type"] == "security-check"
+
+    result = run_cli(*args, "fingerprint", "--out-dir", tmp_path)
+    assert result.returncode == 0, result.stderr
+    expected = fp.inputs(meta, None)
+    expected["type"] = "security-check"
+    assert json.loads(result.stdout)["fingerprint"] == fp.fingerprint(expected, load_brand(config).sha256)
 
 
 @pytest.mark.parametrize("checkout", [False, True])

@@ -13,7 +13,7 @@ deps:
   web-app: [react, next, vue, svelte, astro, streamlit]
   api: [fastapi, flask, express]
 # Planning and issue exports are administration, not repository datasets.
-dataset_exclude_dirs: [planning, .planning, issues, .github, node_modules, vendor, dist, build]
+dataset_exclude_dirs: [planning, .planning, .github, node_modules, vendor, dist, build]
 dataset_exclude_files: [package.json, package-lock.json, tsconfig.json, composer.json, composer.lock]
 # Repository administration files that do not stop a tree counting as documentation-only (`docs-only`).
 documentation_exclude_files: [.gitignore, .gitattributes, .editorconfig, CODEOWNERS]
