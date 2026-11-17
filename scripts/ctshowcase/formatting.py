@@ -49,6 +49,38 @@ FORMAT_GENERATED = r"""
 const fs = require("node:fs");
 const path = require("node:path");
 const { isDeepStrictEqual } = require("node:util");
+const alertMarker = />[ \t]*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][ \t]*(?:\n|$)/iy;
+const ignoreComment = "<!-- prettier-ignore -->";
+function alertTypes(node, source, types = []) {
+    if (node.type === "blockquote" && node.position) {
+        alertMarker.lastIndex = node.position.start.offset;
+        const marker = alertMarker.exec(source);
+        if (marker) types.push(marker[1].toUpperCase());
+    }
+    for (const child of node.children || []) alertTypes(child, source, types);
+    return types;
+}
+async function protectAlerts(prettier, input, options) {
+    if (!input.includes("[!")) return { text: input, alerts: [] };
+    const source = input.replace(/\r\n?/g, "\n");
+    const tree = (await prettier.__debug.parse(source, options)).ast;
+    const lines = [0, ...Array.from(input.matchAll(/\r\n|\r|\n/g), match => match.index + match[0].length)];
+    const ending = (input.match(/\r\n|\r|\n/) || ["\n"])[0];
+    const offsets = [];
+    const alerts = [];
+    for (const [index, block] of tree.children.entries()) {
+        const types = alertTypes(block, source);
+        if (!block.position || !types.length) continue;
+        alerts.push(...types);
+        const prior = tree.children[index - 1];
+        if (prior?.type === "html" && prior.value.trim().endsWith(ignoreComment)) continue;
+        offsets.push(lines[block.position.start.line - 1]);
+    }
+    for (const offset of offsets.reverse()) {
+        input = input.slice(0, offset) + ignoreComment + ending + ending + input.slice(offset);
+    }
+    return { text: input, alerts };
+}
 async function main() {
     const [packagePath, config, editorFile, editorConfig, filepath] = process.argv.slice(1);
     const prettier = require(packagePath);
@@ -70,11 +102,15 @@ async function main() {
     const markdown = extension === ".md";
     const options = { ...(markdown ? { parser: "markdown" } : {}), ...editor, ...settings, filepath };
     if (extension === ".svg") options.parser = "html";
-    const formatted = await prettier.format(input, options);
+    const { text, alerts } = markdown ? await protectAlerts(prettier, input, options) : { text: input, alerts: [] };
+    const formatted = await prettier.format(text, options);
     if (markdown) {
-        const original = await prettier.__debug.parse(input, options, { massage: true });
+        const original = await prettier.__debug.parse(text, options, { massage: true });
         const candidate = await prettier.__debug.parse(formatted, options, { massage: true });
-        if (!isDeepStrictEqual(original.ast, candidate.ast)) {
+        const source = formatted.replace(/\r\n?/g, "\n");
+        const preserved = !alerts.length ||
+            isDeepStrictEqual(alerts, alertTypes((await prettier.__debug.parse(source, options)).ast, source));
+        if (!preserved || !isDeepStrictEqual(original.ast, candidate.ast)) {
             process.exitCode = 1;
             return;
         }
@@ -358,8 +394,8 @@ def discover(repo_dir: Path | None) -> dict:
         import yaml
 
         try:
-            data = _mapping(yaml.safe_load(_read(root, path)))
-        except yaml.YAMLError:
+            data = _mapping(yaml.load(_read(root, path), Loader=yaml.BaseLoader))
+        except (yaml.YAMLError, ValueError, RecursionError):
             continue
         for details in _mapping(data.get("jobs")).values():
             steps = _mapping(details).get("steps")
@@ -408,7 +444,7 @@ def _configured_prettier(root: Path, destination: Path) -> tuple[Path, list[Path
 
                         try:
                             package = _mapping(yaml.safe_load(_read(root, candidate)))
-                        except yaml.YAMLError:
+                        except (yaml.YAMLError, ValueError, RecursionError):
                             continue
                     else:
                         package = _json(root, candidate)

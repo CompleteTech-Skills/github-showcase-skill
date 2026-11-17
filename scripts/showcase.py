@@ -574,12 +574,6 @@ def cmd_readme(args):
                             logs=ctx.logs + ["readme-shrink"]), CHECK_FAILED
     if args.format_generated:
         from ctshowcase.formatting import format_text
-        # Prettier's Markdown parser can join the managed GitHub alert marker to its body.
-        for block in readme.find_blocks(readme.MARK, after):
-            if block.group(1) == "checklist" and block.group(2).lstrip().startswith("> [!IMPORTANT]"):
-                position = block.start(2)
-                after = after[:position] + "<!-- prettier-ignore -->\n\n" + after[position:]
-                break
         formatted = format_text(rd, path, after)
         markers = [m.group(1) for m in readme.find_blocks(readme.MARK, after)]
         if markers != [m.group(1) for m in readme.find_blocks(readme.MARK, formatted)]:

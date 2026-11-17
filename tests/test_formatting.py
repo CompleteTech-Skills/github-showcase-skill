@@ -364,3 +364,38 @@ def test_formatter_refuses_external_ignore_files(tmp_path, monkeypatch, name):
     monkeypatch.setattr("ctshowcase.formatting.subprocess.run", lambda *a, **k: pytest.fail("loaded escaping ignore file"))
     with pytest.raises(NeedsInput, match="ignore files must be inside"):
         format_text(repo, repo / "README.md", "# Example")
+
+
+def test_validation_discovery_keeps_workflow_names_as_strings(tmp_path):
+    workflows = tmp_path / ".github/workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "malformed.yml").write_text("jobs: [", encoding="utf-8")
+    (workflows / "checks.yml").write_text(
+        "name: 2026-02-30\njobs: {test: {steps: [{run: make verify}]}}", encoding="utf-8")
+    assert discover(tmp_path)["validators"] == [
+        {"source": ".github/workflows", "command": "make verify", "status": "not run"}
+    ]
+
+
+def test_markdown_wrapper_protects_live_alerts_and_leaves_fenced_examples(tmp_path):
+    import shutil
+
+    if shutil.which("node") is None:
+        pytest.skip("Node.js is needed for the Markdown formatter")
+    local_prettier(tmp_path)
+    entry = tmp_path / "node_modules/prettier/index.cjs"
+    entry.write_text(r'''
+exports.resolveConfig = async () => ({});
+exports.format = async (input) => input;
+exports.__debug = {parse: async (input, options, details) => {
+    if (details) return {ast: {}};
+    const lines = input.split("\n");
+    const index = lines.indexOf("> [!NOTE]");
+    const offset = lines.slice(0, index).join("\n").length + (index ? 1 : 0);
+    return {ast: {children: [{type: "blockquote", position: {start: {line: index + 1, offset}}},
+                             {type: "code"}]}};
+}};
+''', encoding="utf-8")
+    raw = "# Example\n\n> [!NOTE]\n> Authored text.\n\n```text\n> [!TIP]\n> Example.\n```\n"
+    formatted = format_text(tmp_path, tmp_path / "README.md", raw)
+    assert formatted == raw.replace("> [!NOTE]", "<!-- prettier-ignore -->\n\n> [!NOTE]", 1)

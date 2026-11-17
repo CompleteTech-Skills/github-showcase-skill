@@ -35,8 +35,8 @@ configuration. The caller still applies the usual content-preservation and
 output-path checks before writing. A formatter failure leaves the requested
 output unwritten. The related files are prepared before any are replaced. If a
 replacement fails, Showcase restores earlier files in the group. README and CONTRIBUTING formatting requires the pinned
-Prettier's Markdown AST check (`--debug-check`) to pass. The generated GitHub
-alert is protected with a Prettier ignore comment, and Showcase refreshes the
+Prettier's Markdown AST check (`--debug-check`) to pass. GitHub alerts are protected with a Prettier ignore comment on their enclosing
+Markdown block, and Showcase refreshes the
 ownership digest of a pristine template body after formatting. Bootstrap
 applies the normal CONTRIBUTING owner-token replacement before formatting.
 The art sidecar must retain the same typed JSON values and unique keys.
