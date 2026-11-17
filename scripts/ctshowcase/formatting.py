@@ -1,11 +1,16 @@
 """Read-only target tooling discovery and explicitly requested, local Prettier formatting."""
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
+import tempfile
+import time
 import xml.etree.ElementTree as ET
+from contextlib import contextmanager
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -17,6 +22,7 @@ VALIDATOR_COMMAND = re.compile(
     r"^(?:(?:uv run |poetry run )?(?:python[\d.]* -m )?(?:pytest|unittest|ruff|prettier|pyright|mypy|eslint)"
     r"|(?:npx |(?:npm|pnpm) exec )(?:prettier|eslint)"
     r"|(?:python[\d.]* )?(?:\./)?(?:scripts/)?validate[\w.-]*\.py"
+    r"|python[\d.]* (?:\./)?scripts/showcase\.py (?:fonts|footer) --check"
     r"|(?:cargo|go|dotnet|npm|pnpm|yarn|bun|make|just)\s+(?:run\s+)?"
     r"(?:test|check|contracts|lint|typecheck|validate|verify|format)(?:[:_-][A-Za-z0-9:_-]+)?)(?=\s|$|[;&|])",
     re.I,
@@ -72,15 +78,73 @@ def _config_name(name: str) -> str | None:
 
 
 def same_svg(original: str, formatted: str) -> bool:
-    """Compare ordered SVG nodes while ignoring layout whitespace and comments."""
+    """Compare SVG drawing nodes and reject unexpected XML directives."""
+
+    class Drawing(ET.TreeBuilder):
+        def __init__(self):
+            super().__init__()
+            self.comments = []
+
+        def pi(self, target, text):
+            raise ValueError("SVG processing instructions are not allowed")
+
+        def doctype(self, name, pubid, system):
+            raise ValueError("SVG document types are not allowed")
+
+        def comment(self, text):
+            if text.strip() != "prettier-ignore":
+                self.comments.append(text)
+
     def structure(markup):
-        return [(node.tag, node.attrib, " ".join((node.text or "").split()),
-                 " ".join((node.tail or "").split()), len(node)) for node in ET.fromstring(markup).iter()]
+        target = Drawing()
+        root = ET.fromstring(markup, parser=ET.XMLParser(target=target))
+        nodes = [(node.tag, node.attrib, " ".join((node.text or "").split()),
+                  " ".join((node.tail or "").split()), len(node)) for node in root.iter()]
+        return nodes, target.comments
 
     try:
         return structure(original) == structure(formatted)
     except (ET.ParseError, ValueError):
         return False
+
+
+def target_relative(repo_dir: Path | None, destination: Path) -> Path:
+    if repo_dir is None:
+        raise NeedsInput("formatter", "formatting requires a target checkout")
+    try:
+        return destination.resolve().relative_to(Path(repo_dir).resolve())
+    except ValueError as error:
+        raise ShowcaseError("formatter destination must be inside the target checkout", log="usage") from error
+
+
+@contextmanager
+def sidecar_lock(path: Path | None):
+    """Serialize a sidecar read/format/write across local generator processes."""
+    if path is None:
+        yield
+        return
+    key = hashlib.sha256(os.fsencode(os.path.normcase(str(path.resolve())))).hexdigest()
+    directory = Path(tempfile.gettempdir()) / "showcase-sidecar-locks"
+    directory.mkdir(exist_ok=True)
+    with (directory / key).open("a+b") as lock:
+        if os.name == "nt":
+            import msvcrt
+
+            deadline = time.monotonic() + 90
+            while True:
+                try:
+                    lock.seek(0)
+                    msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError:
+                    if time.monotonic() >= deadline:
+                        raise NeedsInput("formatter", "another generator still holds the sidecar lock")
+                    time.sleep(0.1)
+        else:
+            import fcntl
+
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        yield  # closing the file releases the lock on both platforms
 
 
 def _display_validator(command: str) -> str | None:
@@ -238,15 +302,10 @@ def format_text(repo_dir: Path | None, destination: Path, text: str) -> str:
     No install, package script, shell, or file write occurs here. The caller writes only
     after its usual safety checks. Calling this function is the explicit opt-in.
     """
-    if repo_dir is None:
-        raise NeedsInput("formatter", "formatting requires a target checkout")
-    root = Path(repo_dir).resolve()
     destination = Path(destination)
+    relative = target_relative(repo_dir, destination)
+    root = Path(repo_dir).resolve()
     suffix = destination.suffix.lower()
-    try:
-        relative = destination.resolve().relative_to(root)
-    except ValueError as error:
-        raise ShowcaseError("formatter destination must be inside the target checkout", log="usage") from error
     version = _prettier_version(_json(root, root / "package.json"))
     if not isinstance(version, str):
         raise NeedsInput("formatter", "declare prettier in the target package.json")

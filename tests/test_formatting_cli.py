@@ -341,3 +341,70 @@ def test_formatter_cannot_remove_card_drawing(tmp_path, monkeypatch):
     assert cli.main(["--meta", str(meta), "--repo-dir", str(repo), "card", "--key-chip", "Test",
                      "--chip", "Python", "--format-generated"]) == 1
     assert not (repo / "docs").exists()
+
+
+def test_external_sidecar_is_refused_before_reading(tmp_path, monkeypatch, make_ctx):
+    import showcase
+    from ctshowcase.errors import ShowcaseError
+
+    repo = tmp_path / "repo"
+    images = repo / "docs/images"
+    images.mkdir(parents=True)
+    outside = tmp_path / "unrelated.json"
+    outside.write_text("[]", encoding="utf-8")
+    try:
+        (images / ".showcase.json").symlink_to(outside)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symbolic links are unavailable: {exc}")
+    monkeypatch.setattr(showcase, "_sidecar_text", lambda *_: pytest.fail("read before containment check"))
+    ctx = make_ctx(repo_dir=repo)
+    with pytest.raises(ShowcaseError, match="inside the target checkout"):
+        showcase.write_art(ctx, images / "banner.png", b"banner", format_generated=True)
+    assert outside.read_text(encoding="utf-8") == "[]"
+    assert not (images / "banner.png").exists()
+
+
+def test_concurrent_formatted_art_preserves_both_sidecar_records(tmp_path, monkeypatch, make_ctx):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    from time import sleep
+    import showcase
+
+    ctx = make_ctx(repo_dir=tmp_path)
+    start = Barrier(2)
+
+    def formatting(repo, path, original):
+        sleep(0.05)
+        return original
+
+    def write(name):
+        start.wait(timeout=5)
+        showcase.write_art(ctx, tmp_path / "docs/images" / name, name.encode(), format_generated=True)
+
+    monkeypatch.setattr("ctshowcase.formatting.format_text", formatting)
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        list(workers.map(write, ("banner.png", "card.svg")))
+    sidecar = tmp_path / "docs/images/.showcase.json"
+    assert set(json.loads(sidecar.read_text(encoding="utf-8"))["outputs"]) == {"banner.png", "card.svg"}
+
+
+def test_readme_formats_each_local_badge_before_writing(tmp_path, monkeypatch):
+    import showcase
+
+    repo, meta = target(tmp_path)
+    capture = meta_dict(repo=".github", files=["README.md"], license="MIT")
+    meta.write_text(json.dumps(capture), encoding="utf-8")
+    formatted_paths = []
+
+    def formatting(root, path, value):
+        formatted_paths.append(path)
+        assert not path.exists()
+        return value
+
+    monkeypatch.setattr("ctshowcase.formatting.format_text", formatting)
+    args = ["--meta", str(meta), "--repo-dir", str(repo), "readme", "--mode", "scaffold",
+            "--write", "--badges", "local", "--format-generated"]
+    assert showcase.main(args) == 0
+    assert repo / "README.md" in formatted_paths
+    badges = list((repo / "docs/images/badges").glob("*.svg"))
+    assert len(badges) >= 2 and set(badges) <= set(formatted_paths)

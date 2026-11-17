@@ -179,8 +179,11 @@ def _sidecar_text(ctx, out: Path, record: dict) -> str:
 
 
 def maybe_sidecar(ctx, out: Path, record: dict) -> None:
+    from ctshowcase.formatting import sidecar_lock
+
     if (sidecar := _sidecar_path(out)) is not None:
-        sidecar.write_text(_sidecar_text(ctx, out, record), encoding="utf-8")
+        with sidecar_lock(sidecar):
+            sidecar.write_text(_sidecar_text(ctx, out, record), encoding="utf-8")
 
 
 def ensure_distinct_outputs(*destinations: Path) -> None:
@@ -192,25 +195,26 @@ def ensure_distinct_outputs(*destinations: Path) -> None:
 
 def write_art(ctx, out: Path, data: bytes, *, format_generated: bool, preview=None, **extra) -> None:
     """Prepare the optional preview and formatted sidecar before writing any art outputs."""
+    from ctshowcase.formatting import format_text, same_json, sidecar_lock, target_relative
+
     sidecar = _sidecar_path(out)
     destinations = [out] + ([sidecar] if sidecar else []) + ([preview[0]] if preview else [])
     ensure_distinct_outputs(*destinations)
-    record = {"sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data), **extra}
-    formatted = None
     if sidecar is not None and format_generated:
-        from ctshowcase.formatting import format_text, same_json
-
-        original = _sidecar_text(ctx, out, record)
-        formatted = format_text(ctx.repo_dir, sidecar, original)
-        if not same_json(original, formatted):
-            raise ShowcaseError("formatter changed the art sidecar data", log="formatter-content")
-    write_bytes(out, data)
-    if preview:
-        write_bytes(*preview)
-    if sidecar is not None and formatted is not None:
-        write_bytes(sidecar, formatted.encode("utf-8"))
-    else:
-        maybe_sidecar(ctx, out, record)
+        target_relative(ctx.repo_dir, sidecar)
+    record = {"sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data), **extra}
+    with sidecar_lock(sidecar):
+        summary = _sidecar_text(ctx, out, record) if sidecar is not None else None
+        if sidecar is not None and summary is not None and format_generated:
+            formatted = format_text(ctx.repo_dir, sidecar, summary)
+            if not same_json(summary, formatted):
+                raise ShowcaseError("formatter changed the art sidecar data", log="formatter-content")
+            summary = formatted
+        write_bytes(out, data)
+        if preview:
+            write_bytes(*preview)
+        if sidecar is not None and summary is not None:
+            write_bytes(sidecar, summary.encode("utf-8"))
 
 
 def write_bytes(path: Path, data: bytes) -> None:
@@ -478,11 +482,14 @@ def cmd_readme(args):
     if args.format_generated and getattr(args, "no_regroup", False):
         raise ShowcaseError("--no-regroup preserves outside bytes and cannot be combined with --format-generated",
                             log="usage")
-    before = readme.read_text(path)
     if ctx.watching_status() == "exempt:watching-fork":
         return base("readme", ctx, result="exempt", logs=["exempt"]), OK
     # a watching-org non-fork other than `.github`: held until decided (no README change, no --allow-hold)
     gate_watching(ctx, remedy=README_HOLD_REMEDY)
+    if args.format_generated:
+        from ctshowcase.formatting import target_relative
+        target_relative(rd, path)
+    before = readme.read_text(path)
     if args.variant and args.variant != "auto":
         ctx.det["variant"] = args.variant
     ctx.local_badges = args.badges == "local"
@@ -499,6 +506,8 @@ def cmd_readme(args):
         if state == "pristine":
             after = readme.bootstrap(ctx, before)
             if contrib_path.is_file() and after != before:
+                if args.format_generated:
+                    target_relative(rd, contrib_path)
                 c0 = contrib_path.read_text(encoding="utf-8")
                 c1 = readme.bootstrap_contributing(ctx, c0)
                 contrib_new = c1 if c1 != c0 else None
@@ -567,7 +576,15 @@ def cmd_readme(args):
         from ctshowcase.typeset import Fonts
         fonts = Fonts(ctx.brand)
         for rel, (label, message, colour) in sorted(ctx.badge_files.items()):
-            badge_outputs[rel] = badge.svg(ctx.brand, fonts, label, message, colour, style=ctx.style).encode()
+            drawing = badge.svg(ctx.brand, fonts, label, message, colour, style=ctx.style)
+            if args.format_generated:
+                from ctshowcase.formatting import same_svg
+                formatted = format_text(rd, rd / rel, drawing)
+                if not same_svg(drawing, formatted):
+                    raise ShowcaseError("formatter changed the local badge drawing", log="formatter-content",
+                                        code=CHECK_FAILED)
+                drawing = formatted
+            badge_outputs[rel] = drawing.encode("utf-8")
     if args.write:
         for rel, data in badge_outputs.items():
             write_bytes(rd / rel, data)

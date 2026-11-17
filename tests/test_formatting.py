@@ -220,3 +220,31 @@ def test_markdown_rejects_empty_or_unframed_success(tmp_path, monkeypatch, stdou
                         lambda *a, **k: SimpleNamespace(returncode=0, stdout=stdout, stderr=b""))
     with pytest.raises(ShowcaseError, match="invalid Markdown output"):
         format_text(tmp_path, tmp_path / "README.md", "# Title")
+
+
+@pytest.mark.parametrize("prefix", [
+    '<?xml-stylesheet type="text/css" href="https://example.invalid/style.css"?>',
+    '<!DOCTYPE svg SYSTEM "https://example.invalid/svg.dtd">',
+    '<!-- unexpected artifact content -->',
+])
+def test_same_svg_rejects_nonformatting_xml_prefix(prefix):
+    from ctshowcase.formatting import same_svg
+
+    svg = '<svg xmlns="http://www.w3.org/2000/svg"><path d="M 0 0"/></svg>'
+    assert same_svg(svg, "<!-- prettier-ignore -->\n" + svg)
+    assert not same_svg(svg, prefix + svg)
+
+
+def test_preflight_reports_the_skills_own_check_commands(tmp_path):
+    workflows = tmp_path / ".github/workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "validate.yml").write_text(
+        "jobs:\n  validate:\n    steps:\n"
+        "      - run: python scripts/showcase.py fonts --check\n"
+        "      - run: python scripts/showcase.py footer --check README.md --online\n",
+        encoding="utf-8",
+    )
+    assert [row["command"] for row in discover(tmp_path)["validators"]] == [
+        "python scripts/showcase.py fonts --check",
+        "python scripts/showcase.py footer --check",
+    ]
