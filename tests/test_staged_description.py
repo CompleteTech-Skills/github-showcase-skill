@@ -459,3 +459,70 @@ def test_action_classifies_foreign_art_individually(tmp_path, monkeypatch):
     assert action_prepare.foreign("Northwind/current", "banner.png")
     assert not action_prepare.foreign("Northwind/current", "card.svg")
     assert not action_prepare.foreign("Northwind/current")
+
+
+@pytest.mark.parametrize("surface, preview", [("banner", False), ("card", True), ("content", False)])
+def test_staged_art_rejects_provenance_path_collision(tmp_path, surface, preview):
+    capture = tmp_path / "meta.json"
+    capture.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    checkout = tmp_path / "repo"
+    checkout.mkdir()
+    external = tmp_path / ".showcase-staging"
+    external.mkdir()
+    sidecar = external / ".showcase.json"
+    sidecar.write_text('{"existing": true}', encoding="utf-8")
+    args = ["--meta", capture, "--repo-dir", checkout, "--format", "json", surface]
+    if surface == "content":
+        args.append("social")
+    args += ["--description", "Route support requests."]
+    if preview:
+        args += ["--out", external / "card.svg", "--png", sidecar]
+    else:
+        args += ["--out", sidecar]
+    result = run_cli(*args)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "staged-description:path" in json.loads(result.stdout)["logs"]
+    assert sidecar.read_text(encoding="utf-8") == '{"existing": true}'
+    assert not (external / "card.svg").exists()
+
+
+def test_staged_banner_rejects_link_to_capture(tmp_path):
+    capture = tmp_path / "meta.json"
+    captured = json.dumps(meta_dict())
+    capture.write_text(captured, encoding="utf-8")
+    images = tmp_path / "repo/docs/images"
+    images.mkdir(parents=True)
+    try:
+        (images / "banner.png").symlink_to(capture)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symbolic links are unavailable: {exc}")
+    result = run_cli("--meta", capture, "--repo-dir", tmp_path / "repo", "--format", "json", "banner",
+                     "--description", "Route support requests.")
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert capture.read_text(encoding="utf-8") == captured
+    assert not (images / ".showcase.json").exists()
+
+
+@pytest.mark.requires_bash
+def test_action_commit_step_skips_partial_live_refresh_with_staged_records(tmp_path):
+    import os
+    import yaml
+    from conftest import ROOT, run_bash
+    from ctshowcase.fingerprint import write_sidecar
+
+    images = tmp_path / "docs/images"
+    images.mkdir(parents=True)
+    proposal = "Unpublished support process."
+    write_sidecar(images, {"description": proposal}, "config", "banner.png",
+                  {"sha256": "a" * 64, "staged_description": {"text": proposal}})
+    write_sidecar(images, {"description": "Live description."}, "config", "card.svg", {"sha256": "b" * 64})
+    definition = yaml.safe_load((ROOT / "action.yml").read_text(encoding="utf-8"))
+    script = next(step["run"] for step in definition["runs"]["steps"]
+                  if "action_commit.sh" in step.get("run", ""))
+    env = {**os.environ, "GITHUB_ACTION_PATH": str(ROOT), "SHOWCASE_DRY_RUN": "1",
+           "SHOWCASE_COMMIT_MESSAGE": "Synthetic no-op", "SHOWCASE_ON_PROTECTED": "fail"}
+    result = run_bash(script, cwd=tmp_path, env=env)
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert "commit skipped" in result.stdout
+    assert proposal not in result.stdout + result.stderr
+    assert read_sidecar(images)["outputs"]["banner.png"]["staged_description"]["text"] == proposal

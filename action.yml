@@ -211,7 +211,14 @@ runs:
         GH_TOKEN: ${{ inputs.token }}
         SHOWCASE_COMMIT_MESSAGE: ${{ inputs.commit-message }}
         SHOWCASE_ON_PROTECTED: ${{ inputs.on-protected }}
-      run: bash "$GITHUB_ACTION_PATH/scripts/action_commit.sh" "$SHOWCASE_COMMIT_MESSAGE" "$SHOWCASE_ON_PROTECTED"
+      run: |
+        set -euo pipefail
+        staged="$(python "$GITHUB_ACTION_PATH/scripts/action_prepare.py" staged)"
+        if [ "$staged" = "true" ]; then
+          echo "::warning title=CompleteTech Showcase::commit skipped while unpublished staged output is present"
+          exit 0
+        fi
+        bash "$GITHUB_ACTION_PATH/scripts/action_commit.sh" "$SHOWCASE_COMMIT_MESSAGE" "$SHOWCASE_ON_PROTECTED"
 
     # Lint after the commit, so a first run always lands the bootstrap and the new art. On the bootstrap run, and
     # while an output is skipped, findings are warnings; afterwards a failing check fails the run.

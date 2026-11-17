@@ -47,3 +47,5 @@ logs `needs-input:description`. `doctor` still reports drift if the current
 managed tagline matches the recorded staged tagline digest, even after edits
 elsewhere in the README. Upgrades for variants G (fork) and H (archive) write a callout.
 `doctor` also checks any managed tagline those upgrades preserve.
+
+The composite Action skips automatic commit while any staged record remains in its output sidecar. A partial live refresh preserves unrelated staged records and cannot authorize their publication.

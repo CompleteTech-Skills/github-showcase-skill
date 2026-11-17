@@ -7,6 +7,7 @@
                                          whose sha256 is the one that sidecar recorded). A sidecar that only names
                                          another slug (a rename or transfer) prints "false" and keeps every file.
   action_prepare.py foreign OWNER/REPO NAME  check a canonical banner or card without removing the icon
+  action_prepare.py staged             report whether local output still carries a staged proposal
   action_prepare.py drop NAME            remove docs/images/NAME and its sidecar record (the sidecar too when empty)
   action_prepare.py summary META_JSON    append the describe and topics proposals to $GITHUB_STEP_SUMMARY
 """
@@ -85,6 +86,15 @@ def foreign(full_name: str, artifact: str | None = None) -> bool:
     return True
 
 
+
+def has_staged_outputs() -> bool:
+    data = _sidecar()
+    if not data and (SIDECAR.exists() or SIDECAR.is_symlink()):
+        return True  # an unreadable sidecar cannot authorize a grouped artifact commit
+    return any(isinstance(record, dict) and "staged_description" in record
+               for record in output_records(data).values())
+
+
 def drop(name: str) -> None:
     p = IMAGES / name
     if p.is_file():
@@ -142,6 +152,9 @@ def summary(meta: str) -> None:
 
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ["staged"]:
+        print("true" if has_staged_outputs() else "false")
+        sys.exit(0)
     if not (len(sys.argv) == 3 and sys.argv[1] in ("foreign", "drop", "summary")
             or len(sys.argv) == 4 and sys.argv[1] == "foreign" and sys.argv[3] in ART_NAMES):
         sys.exit(__doc__)

@@ -38,13 +38,7 @@ def check_social_path(path: Path, *, staged: bool, job: bool) -> None:
                             log="staged-description:upload")
 
 
-def record_output(ctx, path: Path, record: dict, *, always: bool = False) -> Path | None:
-    """Record staged output beside external art, or in a checkout's docs/images sidecar.
-
-    A per-output record remains truthful when only one of several surfaces is refreshed.
-    An ordinary refresh replaces an existing record, removing staged provenance.
-    """
-    info = getattr(ctx, "staged_description", None)
+def _output_slot(ctx, path: Path) -> tuple[Path, str, bool]:
     path = Path(path).resolve()
     root = Path(ctx.repo_dir).resolve() if ctx.repo_dir else None
     if root is not None and path.is_relative_to(root):
@@ -58,10 +52,37 @@ def record_output(ctx, path: Path, record: dict, *, always: bool = False) -> Pat
             name = "./" + relative
         else:
             name = relative
-        summarize = path.parent == directory and name in fp.ART_NAMES and "exempt" not in record
+        summarize = path.parent == directory and name in fp.ART_NAMES
     else:
         directory, name = path.parent, path.name
         summarize = True
+    return directory, name, summarize
+
+
+def check_outputs(ctx, *paths: Path) -> None:
+    """Keep renderer outputs and their provenance paths distinct before any write."""
+    sidecars = {(_output_slot(ctx, path)[0] / fp.SIDECAR).resolve() for path in paths}
+    root = Path(ctx.repo_dir).resolve() if ctx.repo_dir else None
+    real_paths = []
+    for path in paths:
+        resolved = path.resolve()
+        if (resolved.name == fp.SIDECAR or resolved in sidecars
+                or path.name.casefold() == fp.SIDECAR.casefold()
+                or (resolved.exists() and any(sidecar.exists() and resolved.samefile(sidecar) for sidecar in sidecars))):
+            raise ShowcaseError("render output overlaps its showcase sidecar", log="staged-description:path")
+        if getattr(ctx, "staged_description", None) is not None:
+            if path.is_symlink() or (root and path.absolute().is_relative_to(root) and not resolved.is_relative_to(root)):
+                raise ShowcaseError("staged output must not write through a link", log="staged-description:path")
+        for other in real_paths:
+            if resolved == other or (resolved.exists() and other.exists() and resolved.samefile(other)):
+                raise ShowcaseError("render output paths must be distinct", log="staged-description:path")
+        real_paths.append(resolved)
+
+
+def record_output(ctx, path: Path, record: dict, *, always: bool = False) -> Path | None:
+    """Record a generated output and preserve provenance for untouched surfaces."""
+    info = getattr(ctx, "staged_description", None)
+    directory, name, summarize = _output_slot(ctx, path)
     if not always and info is None and name not in fp.output_records(fp.read_sidecar(directory)):
         return None
     directory.mkdir(parents=True, exist_ok=True)
@@ -70,7 +91,7 @@ def record_output(ctx, path: Path, record: dict, *, always: bool = False) -> Pat
     if info is not None:
         record = dict(record, staged_description=info)
     return fp.write_sidecar(directory, fp.inputs(ctx.meta, ctx.repo_dir), ctx.brand.sha256, name,
-                            record, summarize=summarize)
+                            record, summarize=summarize and "exempt" not in record)
 
 
 def tagline_forms(ctx) -> set[str]:
