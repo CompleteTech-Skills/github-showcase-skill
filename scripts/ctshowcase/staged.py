@@ -75,12 +75,15 @@ def check_auxiliary(capture: Path | None, checkout: Path | None, *paths: Path) -
         resolved = path.resolve()
         if path.is_symlink() or (path.exists() and (not path.is_file() or path.stat().st_nlink > 1)):
             raise ShowcaseError("staged reports must use an unlinked regular file", log="staged-description:path")
-        if checkout is None:
-            continue
-        root = checkout.resolve()
-        if (resolved.is_relative_to((root / "docs/images").resolve())
-                or any(_aliases(resolved, (root / name).resolve()) for name in ("README.md", "CONTRIBUTING.md"))):
-            raise ShowcaseError("staged reports must stay outside Action-managed paths", log="staged-description:path")
+        roots = {(checkout or Path.cwd()).resolve()}
+        # Explicit metadata-only destinations can still land in this or another checked-out repository.
+        enclosing = next((parent for parent in resolved.parents if (parent / ".git").exists()), None)
+        if enclosing is not None:
+            roots.add(enclosing)
+        for root in roots:
+            if (resolved.is_relative_to((root / "docs/images").resolve())
+                    or any(_aliases(resolved, (root / name).resolve()) for name in ("README.md", "CONTRIBUTING.md"))):
+                raise ShowcaseError("staged reports must stay outside Action-managed paths", log="staged-description:path")
 
 
 def check_outputs(ctx, *paths: Path, auxiliary: tuple[Path, ...] = ()) -> None:

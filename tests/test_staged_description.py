@@ -691,3 +691,90 @@ def test_concurrent_staged_updates_keep_each_record(tmp_path, monkeypatch):
         banner.result(5)
         card.result(5)
     assert set(original_read(tmp_path)["outputs"]) == {"banner.png", "card.svg"}
+
+
+def test_exemption_rechecks_output_after_acquiring_sidecar_lock(tmp_path, make_ctx, monkeypatch):
+    from contextlib import contextmanager
+
+    import showcase
+    from ctshowcase import staged
+
+    ctx = make_ctx(repo_dir=tmp_path)
+    proposal = make_ctx(repo_dir=tmp_path)
+    proposal.meta, proposal.staged_description = prepare(proposal.meta, "Unpublished draft.")
+    card = tmp_path / "docs/images/card.svg"
+    guarded = staged.lock_outputs
+
+    @contextmanager
+    def staged_before_live_lock(context, *paths):
+        with guarded(proposal, card):
+            staged.record_output(proposal, card, {"sha256": "a" * 64})
+            card.write_bytes(b"staged card drawing")
+        with guarded(context, *paths):
+            yield
+
+    monkeypatch.setattr(staged, "lock_outputs", staged_before_live_lock)
+    showcase.record_art_exemption(ctx, "card", None, "exempt:no-card")
+    assert read_sidecar(card.parent)["outputs"][card.name]["staged_description"]["text"] == "Unpublished draft."
+
+
+@pytest.mark.requires_bash
+def test_action_refuses_a_staged_proposal_captured_in_the_git_index(tmp_path):
+    import os
+    import subprocess
+
+    import yaml
+    from conftest import ROOT, run_bash
+
+    def git(*args):
+        return subprocess.run(["git", *args], cwd=tmp_path, capture_output=True, text=True, check=True).stdout
+
+    git("init", "-q")
+    git("-c", "user.name=Synthetic", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-qm", "base")
+    initial = git("rev-parse", "HEAD")
+    (tmp_path / "docs/images").mkdir(parents=True)
+    definition = yaml.safe_load((ROOT / "action.yml").read_text(encoding="utf-8"))
+    script = next(step["run"] for step in definition["runs"]["steps"]
+                  if "action_commit.sh" in step.get("run", ""))
+    injected = r'''
+git() {
+  if [ "$1" = "add" ]; then
+    printf '%s\n' '{"outputs":{"card.svg":{"staged_description":{"text":"Unpublished draft"}}}}' > docs/images/.showcase.json
+    printf '%s\n' 'staged drawing' > docs/images/card.svg
+    command git "$@" || return "$?"
+    printf '%s\n' '{"outputs":{}}' > docs/images/.showcase.json
+  else
+    command git "$@"
+  fi
+}
+export -f git
+'''
+    env = {**os.environ, "GITHUB_ACTION_PATH": str(ROOT), "SHOWCASE_DRY_RUN": "1",
+           "SHOWCASE_COMMIT_MESSAGE": "Synthetic no-op", "SHOWCASE_ON_PROTECTED": "fail"}
+    result = run_bash(injected + script, cwd=tmp_path, env=env)
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert "commit skipped" in result.stdout
+    assert "Unpublished draft" not in result.stdout + result.stderr
+    assert git("rev-parse", "HEAD") == initial
+    assert "staged_description" in git("show", ":docs/images/.showcase.json")
+    assert "staged_description" not in (tmp_path / "docs/images/.showcase.json").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("another_checkout", [False, True])
+def test_metadata_only_staged_report_refuses_action_managed_destinations(tmp_path, another_checkout):
+    target = tmp_path / "repo"
+    target.mkdir()
+    if another_checkout:
+        (target / ".git").mkdir()
+    capture = tmp_path / "capture.json"
+    capture.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    report = target / "docs/images/proposed.json"
+    output = tmp_path / ".showcase-staging" / "preview.png"
+    result = run_cli("--meta", capture, "--no-repo-dir", "--format", "json", "content", "social",
+                     "--description", "Unpublished draft.", "--out", output,
+                     "--report", report if another_checkout else "docs/images/proposed.json",
+                     cwd=tmp_path if another_checkout else target)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "staged-description:path" in json.loads(result.stdout)["logs"]
+    assert not report.exists()
+    assert not output.exists()

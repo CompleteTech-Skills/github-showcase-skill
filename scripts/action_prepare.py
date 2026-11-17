@@ -8,6 +8,7 @@
                                          another slug (a rename or transfer) prints "false" and keeps every file.
   action_prepare.py foreign OWNER/REPO NAME  check a canonical banner or card without removing the icon
   action_prepare.py staged             report whether local output still carries a staged proposal
+  action_prepare.py staged-index       check staged sidecar blobs before a grouped Git commit
   action_prepare.py drop NAME            remove docs/images/NAME and its sidecar record (the sidecar too when empty)
   action_prepare.py summary META_JSON    append the describe and topics proposals to $GITHUB_STEP_SUMMARY
 """
@@ -87,16 +88,40 @@ def foreign(full_name: str, artifact: str | None = None) -> bool:
 
 
 
+def _has_staged_provenance(data) -> bool:
+    outputs = data.get("outputs") if isinstance(data, dict) else None
+    if not isinstance(outputs, dict):
+        return True  # unreadable provenance cannot authorize publication
+    return any(not isinstance(record, dict) or "staged_description" in record for record in outputs.values())
+
+
 def has_staged_outputs() -> bool:
     # The grouped commit includes nested art and the two root Markdown files.
     candidates = {SIDECAR, Path(SIDECAR.name), *IMAGES.rglob(SIDECAR.name)}
-    for path in candidates:
-        if not path.exists() and not path.is_symlink():
+    return any(_has_staged_provenance(read_sidecar(path.parent)) for path in candidates
+               if path.exists() or path.is_symlink())
+
+
+def has_staged_index() -> bool:
+    """Check the sidecar blobs Git will publish, even if the files change after git add."""
+    result = subprocess.run(["git", "ls-files", "--stage", "-z", "--", IMAGES.as_posix(), SIDECAR.name],
+                            check=True, capture_output=True, timeout=30)
+    for item in result.stdout.split(b"\0"):
+        if not item:
             continue
-        outputs = read_sidecar(path.parent).get("outputs")
-        if not isinstance(outputs, dict):
-            return True  # unreadable provenance cannot authorize publication
-        if any(not isinstance(record, dict) or "staged_description" in record for record in outputs.values()):
+        stat_info, path = item.split(b"\t", 1)
+        if path.rsplit(b"/", 1)[-1] != os.fsencode(SIDECAR.name):
+            continue
+        _, blob, stage = stat_info.split()
+        if stage != b"0":
+            return True
+        stored = subprocess.run(["git", "cat-file", "blob", blob.decode("ascii")],
+                                check=True, capture_output=True, timeout=30)
+        try:
+            data = json.loads(stored.stdout)
+        except ValueError:
+            return True
+        if _has_staged_provenance(data):
             return True
     return False
 
@@ -159,8 +184,9 @@ def summary(meta: str) -> None:
 
 
 if __name__ == "__main__":
-    if sys.argv[1:] == ["staged"]:
-        print("true" if has_staged_outputs() else "false")
+    if sys.argv[1:] in (["staged"], ["staged-index"]):
+        check = has_staged_outputs if sys.argv[1] == "staged" else has_staged_index
+        print("true" if check() else "false")
         sys.exit(0)
     if not (len(sys.argv) == 3 and sys.argv[1] in ("foreign", "drop", "summary")
             or len(sys.argv) == 4 and sys.argv[1] == "foreign" and sys.argv[3] in ART_NAMES):

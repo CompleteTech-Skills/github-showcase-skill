@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Commit and push regenerated showcase files. Used only by action.yml (spec A7).
-# Usage: action_commit.sh "<commit message>" <pr|fail>
+# Usage: action_commit.sh "<commit message>" <pr|fail> [action_prepare.py path]
 # Stages only docs/images/, README.md and CONTRIBUTING.md, plus the removal of assets/icon.png when the prepare step
 # deleted a copied template icon (decision 12); does nothing when the index is clean.
 # SHOWCASE_DRY_RUN=1 commits locally and prints what would be pushed, without any network call.
 set -euo pipefail
 msg="${1:?commit message required}"
 on_protected="${2:-pr}"
+prepare="${3:-}"
 git config user.name "github-actions[bot]"
 git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 paths=()
@@ -22,6 +23,14 @@ if [ "${#paths[@]}" -gt 0 ]; then
 fi
 if [ -n "$icon_removed" ]; then
   git rm -q --cached -- assets/icon.png
+fi
+if [ -n "$prepare" ]; then
+  staged_index="$(python "$prepare" staged-index)"
+  staged_worktree="$(python "$prepare" staged)"
+  if [ "$staged_index" = "true" ] || [ "$staged_worktree" = "true" ]; then
+    echo "::warning title=CompleteTech Showcase::commit skipped while unpublished staged output is present"
+    exit 0
+  fi
 fi
 if git diff --cached --quiet; then
   echo "showcase: no changes"

@@ -178,15 +178,22 @@ def maybe_sidecar(ctx, out: Path, record: dict) -> None:
 
 
 def record_art_exemption(ctx, kind: str, out: str | None, reason: str) -> None:
-    from ctshowcase.fingerprint import ART_EXEMPTIONS, ART_RECORDS
-    from ctshowcase.staged import record_output
+    from ctshowcase.fingerprint import ART_EXEMPTIONS, ART_RECORDS, output_records, read_sidecar
+    from ctshowcase.staged import lock_outputs, record_output
 
     if (ctx.repo_dir is None or getattr(ctx, "staged_description", None) is not None
             or ctx.style.get("hold") or ctx.watching_status() == "hold:watching-non-fork"
             or reason not in ART_EXEMPTIONS):
         return
     canonical = ctx.repo_dir.resolve() / "docs" / "images" / ART_RECORDS[kind]
-    if (out is None or Path(out).resolve() == canonical) and not canonical.exists():
+    if out is not None and Path(out).resolve() != canonical:
+        return
+    with lock_outputs(ctx, canonical):
+        if canonical.exists() or canonical.is_symlink():
+            return
+        previous = output_records(read_sidecar(canonical.parent)).get(canonical.name)
+        if isinstance(previous, dict) and "staged_description" in previous:
+            return
         record_output(ctx, canonical, {"exempt": reason}, always=True)
 
 

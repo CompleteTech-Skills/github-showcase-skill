@@ -54,4 +54,5 @@ elsewhere in the README. Upgrades for variants G (fork) and H (archive) write a 
 `doctor` also checks any managed tagline those upgrades preserve.
 
 The composite Action checks the canonical, nested art and root sidecars for staged
-records before committing. Local writes to each output group share a sidecar lock. A partial live refresh preserves unrelated staged records and cannot authorize their publication.
+records before committing and checks the staged Git blobs for proposals. Local
+writes to each output group share a sidecar lock. A partial live refresh preserves unrelated staged records and cannot authorize their publication.
