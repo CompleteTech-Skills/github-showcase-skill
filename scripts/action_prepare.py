@@ -18,7 +18,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-from ctshowcase.fingerprint import ART_NAMES, output_records, read_sidecar
+# Keep direct and runpy entry points equivalent when the caller's CWD is a target checkout.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from ctshowcase.fingerprint import ART_NAMES, output_records, read_sidecar  # noqa: E402
 
 IMAGES = Path("docs/images")
 SIDECAR = IMAGES / ".showcase.json"
