@@ -269,7 +269,9 @@ def from_gh(full_name: str) -> dict:
         raw["files"] = sorted(t["path"] for t in blobs)
         # GitHub cuts a large recursive tree short: only an untruncated listing proves that an unlisted path is absent
         raw["files_complete"] = tree.get("truncated") is False
-        raw["file_sizes"] = {t["path"]: t.get("size", 0) for t in blobs}
+        # An absent or malformed blob size is unknown. A real zero-byte blob is still measured.
+        raw["file_sizes"] = {t["path"]: size for t in blobs
+                             if type(size := t.get("size")) is int and size >= 0}
         manifests = {}
         for p in MANIFEST_PATHS:
             if p in raw["files"]:

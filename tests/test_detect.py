@@ -94,6 +94,34 @@ def test_dataset_near_threshold_suggests_override(data_size, suggested):
     assert det.get("suggestion") == ("type-suggestion:dataset:dataset-near-threshold:override-key=type" if suggested else None)
 
 
+
+@pytest.mark.parametrize("size, expected", [({}, "workspace"), ({"size": None}, "workspace"),
+                                          ({"size": True}, "workspace"), ({"size": 0}, "dataset")])
+def test_remote_capture_does_not_infer_sizes_for_unmeasured_blobs(monkeypatch, size, expected):
+    from ctshowcase import meta as capture
+
+    name = "Northwind-Trading-Co/sample-data"
+    responses = {
+        f"repos/{name}": {"full_name": name, "default_branch": "main"},
+        f"repos/{name}/git/trees/main?recursive=1": {
+            "truncated": False,
+            "tree": [
+                {"type": "blob", "path": "rows.csv", "size": 90},
+                {"type": "blob", "path": "main.py", **size},
+            ],
+        },
+    }
+    monkeypatch.setattr(capture, "_gh", lambda path, **_: responses.get(path))
+    result = capture.from_gh(name)
+    assert result["files_complete"] is True
+    assert result["files"] == ["main.py", "rows.csv"]
+    assert detect_type(result)[0] == expected
+    if expected == "dataset":
+        assert result["file_sizes"]["main.py"] == 0
+    else:
+        assert "main.py" not in result["file_sizes"]
+
+
 def test_legacy_size_only_capture_can_still_identify_dataset():
     assert detect_type({"file_sizes": {"rows.csv": 90, "main.py": 10}}) == ("dataset", 24)
 
