@@ -1418,7 +1418,7 @@ def restore_line_endings(raw: str, before: str, after: str) -> str:
     """`after` with the authored line endings of `raw` restored (#160).
 
     `read_text` decodes with universal newlines, so `before` holds one LF for
-    every CRLF, lone CR or LF in `raw` (the file's own text, BOM removed).
+    every CRLF, lone CR or LF in `raw` (the file's own text).
     Each line `after` keeps unchanged from `before` takes its original
     ending back; a new or edited line takes the README's most common ending.
     An LF-only README is returned unchanged.

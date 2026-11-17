@@ -502,8 +502,8 @@ def cmd_readme(args):
             write_bytes(rd / rel, data)
     if args.write and changed:
         raw = path.read_bytes().decode("utf-8") if path.is_file() else ""
-        raw = raw[1:] if raw.startswith(readme.BOM) else raw
-        path.write_bytes(readme.restore_line_endings(raw, before, after).encode("utf-8"))
+        bom = readme.BOM if raw.startswith(readme.BOM) else ""
+        path.write_bytes((bom + readme.restore_line_endings(raw, before, after)).encode("utf-8"))
         if contrib_new is not None:
             (rd / "CONTRIBUTING.md").write_text(contrib_new, encoding="utf-8")
     if args.records and changed:

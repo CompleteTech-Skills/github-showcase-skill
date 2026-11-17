@@ -139,7 +139,8 @@ def test_readme_plan_does_not_rewrite_authored_line_endings(tmp_path, ending):
 
 
 @pytest.mark.parametrize('ending', ENDINGS)
-def test_readme_write_preserves_authored_line_endings(tmp_path, ending):
+@pytest.mark.parametrize('bom', [b'', b'\xef\xbb\xbf'], ids=['without-bom', 'with-bom'])
+def test_readme_write_preserves_authored_line_endings(tmp_path, ending, bom):
     # #160: `readme --write` refreshes a managed block without rewriting the
     # README's authored CRLF or lone-CR endings as LF.
     meta = tmp_path / 'meta.json'
@@ -148,18 +149,20 @@ def test_readme_write_preserves_authored_line_endings(tmp_path, ending):
     path = tmp_path / 'README.md'
     authored = ('# Probe\n\n<!-- showcase:badges:start -->\n<!-- showcase:badges:end -->\n\n'
                 'Authored text  \nMore\n').replace('\n', ending)
-    path.write_bytes(authored.encode())
+    path.write_bytes(bom + authored.encode())
     result = run_cli('--meta', meta, '--repo-dir', tmp_path, 'readme', '--write', '--mode', 'header')
     assert result.returncode in (0, 1), result.stderr
     assert json.loads(result.stdout)['written'] is True
-    written = path.read_bytes().decode()
+    written_bytes = path.read_bytes()
+    assert written_bytes.startswith(b'\xef\xbb\xbf') is bool(bom)
+    written = written_bytes[len(bom):].decode()
     assert '![Type GitHub profile]' in written
     assert written.endswith(('\n\nAuthored text  \nMore\n').replace('\n', ending))
     # every line ending in the written file is the authored one
     assert written.count(ending) == written.replace('\r\n', '\n').replace('\r', '\n').count('\n')
     again = run_cli('--meta', meta, '--repo-dir', tmp_path, 'readme', '--write', '--mode', 'header')
     assert json.loads(again.stdout)['result'] == 'unchanged'
-    assert path.read_bytes().decode() == written
+    assert path.read_bytes() == written_bytes
 
 
 def test_restore_line_endings_keeps_each_unchanged_line_ending():
