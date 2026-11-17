@@ -523,6 +523,9 @@ def cmd_readme(args):
             return base("readme", ctx, result="fail", mode=mode, problems=problems[:20],
                         logs=ctx.logs + ["readme-shrink"]), CHECK_FAILED
         after = formatted
+        if path.is_file():
+            # Generation operates on normalized lines, but Prettier may emit CRLF.
+            before = path.read_bytes().decode("utf-8")
         if contrib_new is not None:
             formatted_contrib = format_text(rd, rd / "CONTRIBUTING.md", contrib_new)
             if re.sub(r"\s", "", contrib_new) != re.sub(r"\s", "", formatted_contrib):
@@ -544,7 +547,11 @@ def cmd_readme(args):
     if args.write and changed:
         path.write_bytes(after.encode("utf-8"))
         if contrib_new is not None:
-            (rd / "CONTRIBUTING.md").write_text(contrib_new, encoding="utf-8")
+            contrib_path = rd / "CONTRIBUTING.md"
+            if args.format_generated:
+                contrib_path.write_bytes(contrib_new.encode("utf-8"))
+            else:
+                contrib_path.write_text(contrib_new, encoding="utf-8")
     if args.records and changed:
         records.append(args.records, [records.record(ctx.owner, ctx.repo, "readme", "README.md", before, after,
                                                      f"§7 variant {ctx.det['variant']} ({mode})")])

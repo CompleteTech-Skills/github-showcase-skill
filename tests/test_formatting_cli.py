@@ -117,3 +117,23 @@ def test_formatter_cannot_remove_authored_readme_text(tmp_path, monkeypatch):
     assert cli.main(["--meta", str(meta), "--repo-dir", str(repo), "readme", "--write", "--format-generated"]) == 1
     assert (repo / "README.md").read_text(encoding="utf-8") == original
     assert not (repo / "docs").exists()
+
+
+def test_formatted_crlf_readme_is_stable_on_retry(tmp_path, monkeypatch, capsys):
+    repo, meta = target(tmp_path)
+    readme = repo / "README.md"
+    readme.write_bytes(b"# Original title\n\nAn authored paragraph.\n")
+    spec = importlib.util.spec_from_file_location("formatting_crlf_showcase", ROOT / "scripts/showcase.py")
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+    monkeypatch.setattr("ctshowcase.formatting.format_text",
+                        lambda root, path, text: text.replace("\n", "\r\n"))
+    argv = ["--meta", str(meta), "--repo-dir", str(repo), "readme", "--mode", "header",
+            "--write", "--format-generated"]
+    assert cli.main(argv) == 0
+    assert json.loads(capsys.readouterr().out)["written"]
+    raw = readme.read_bytes()
+    assert b"\r\n" in raw
+    assert cli.main(argv) == 0
+    assert not json.loads(capsys.readouterr().out)["written"]
+    assert readme.read_bytes() == raw
