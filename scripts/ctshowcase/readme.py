@@ -440,7 +440,7 @@ def callout(ctx) -> str | None:
 # ------------------------------------------------------------------------------------------------
 def scaffold(ctx: RepoContext, existing: str = "") -> str:
     variant = ctx.det["variant"]
-    order = required_sections(ctx.det)
+    order = required_sections(ctx.det, meta=ctx.meta)
     parts = [header(ctx)]
     co = callout(ctx)
     if co:
@@ -954,7 +954,7 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
     intro = "\n".join(keep_pre).strip()
     # sections: renames, mapping, Notes demotion, License last
     renames = rv["renames"]
-    section_rows = required_sections(ctx.det)
+    section_rows = required_sections(ctx.det, meta=ctx.meta)
     low_order = {h.lower(): h for h, _ in section_rows}
     placed: dict[str, str] = {}
     notes: list[str] = []
@@ -1192,7 +1192,7 @@ def bootstrap(ctx: RepoContext, text: str) -> str:
     if ctx.meta.get("is_template") or bootstrap_state(text) != "pristine":
         return text
     variant = ctx.det["variant"]
-    order = required_sections(ctx.det)
+    order = required_sections(ctx.det, meta=ctx.meta)
     secs = []
     for h2, req in order:
         if h2 in ("License", "Licensing"):

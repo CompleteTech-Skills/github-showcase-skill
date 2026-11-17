@@ -190,15 +190,19 @@ def test_incomplete_tree_does_not_claim_docs_only_or_dataset(tmp_path, name, che
     assert det["suggestion"] == "type-suggestion:workspace:file-tree-incomplete:override-key=type"
 
 
-def test_dedicated_docs_repo_gets_documentation_type_and_sections(make_ctx):
+@pytest.mark.parametrize("visibility,variant", [("public", "C"), ("private", "I")])
+def test_dedicated_docs_repo_gets_documentation_type_and_sections(make_ctx, visibility, variant):
     files = ["README.md", "docs/guide.md", "docs/faq.rst", "LICENSE", ".gitignore", ".gitattributes", ".editorconfig",
              "CODEOWNERS"]
-    ctx = make_ctx(files=files)
+    ctx = make_ctx(files=files, visibility=visibility)
+    assert ctx.det["variant"] == variant
     assert (ctx.det["type"], ctx.det["rule"]) == ("documentation", 25)
     assert "type-suggestion:documentation:docs-only:override-key=type" in ctx.logs
     from ctshowcase.detect import required_sections, standard
     assert "documentation" in standard("topics")["type_topics"]
-    assert [name for name, _ in required_sections(ctx.det)] == ["About", "Documentation", "License"]
+    assert [name for name, _ in required_sections(ctx.det, meta=ctx.meta)] == ["About", "Documentation", "License"]
+    alternative = "I" if variant == "C" else "C"
+    assert required_sections(ctx.det, alternative, meta=ctx.meta) == standard("readme-variants")["variants"][alternative]
     assert detect({"files": files + ["src/main.py"]})["type"] == "workspace"
     assert "suggestion" not in detect({"files": files + ["src/main.py"]})
 

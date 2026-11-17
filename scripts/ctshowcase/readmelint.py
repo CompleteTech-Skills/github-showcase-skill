@@ -117,7 +117,7 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
         warns.append("tagline not checked (no description in meta)")
     # H2 order, License last
     pre, sections = split_sections(plain)
-    section_rows = required_sections(ctx.det, variant)
+    section_rows = required_sections(ctx.det, variant, meta=ctx.meta)
     order = [h for h, _ in section_rows]
     # "License" and "Licensing" are one slot: a private repository reads "## License" (proprietary) even in variant F
     lic_slot = next((h for h in order if h in ("License", "Licensing")), "License")

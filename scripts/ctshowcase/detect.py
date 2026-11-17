@@ -215,14 +215,13 @@ def type_suggestion(rule: int, facts: RepoFacts) -> str | None:
     return None
 
 
-def required_sections(det: dict, variant: str | None = None) -> list:
+def required_sections(det: dict, variant: str | None = None, *, meta: dict | None = None) -> list:
     """H2 rows for a README: a type's `type_sections` when its default variant is in use, else the variant's rows."""
     rv = standard("readme-variants")
     variant = variant or det["variant"]
-    if variant == standard("types")["types"][det["type"]]["variant"]:
-        specific = rv.get("type_sections", {}).get(det["type"])
-        if specific is not None:
-            return specific
+    specific = rv.get("type_sections", {}).get(det["type"])
+    if specific is not None and variant == variant_for(det["type"], meta or {}):
+        return specific
     return rv["variants"].get(variant, [])
 
 
