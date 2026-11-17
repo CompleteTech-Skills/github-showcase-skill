@@ -305,10 +305,16 @@ def parse_repo_override(name: str, text: str) -> dict:
     return obj
 
 
-def override_from_manifests(manifests: dict | None) -> dict:
+def override_from_manifests(manifests: object) -> dict:
     """The repository override captured in metadata (`meta --from-gh` manifests), first of REPO_CONFIG_NAMES found."""
+    if manifests is None:
+        return {}
+    if not isinstance(manifests, dict):
+        raise ConfigError("metadata manifests must be a mapping")
     for name in REPO_CONFIG_NAMES:
-        text = (manifests or {}).get(name)
-        if isinstance(text, str) and text.strip():
+        if name in manifests:
+            text = manifests[name]
+            if not isinstance(text, str):
+                raise ConfigError(f"{name}: captured override must be text")
             return parse_repo_override(name, text)
     return {}

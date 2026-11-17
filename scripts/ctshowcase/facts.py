@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 from pathlib import Path
 
 try:
@@ -30,10 +31,11 @@ def _req_name(line: str) -> str | None:
 
 class RepoFacts:
     def __init__(self, meta: dict | None = None, repo_dir: str | Path | None = None, *,
-                 metadata_path: str | Path | None = None):
+                 metadata_path: str | Path | None = None, metadata_output: str | Path | None = None):
         self.meta = meta or {}
         self.dir = Path(repo_dir) if repo_dir else None
         self.metadata_path = Path(metadata_path) if metadata_path else None
+        self.metadata_output = Path(metadata_output) if metadata_output else None
         self._files: list[str] | None = None
         self._documentation_files: list[str] | None = None
 
@@ -70,8 +72,41 @@ class RepoFacts:
         if self.dir is None:
             return self.files
         if self._documentation_files is None:
-            self._documentation_files = self._checkout_files(SKIP_DIRS - {"build", "dist"})
+            files = self._checkout_files(SKIP_DIRS - {"build", "dist"})
+            scratch = self._scratch_metadata_paths(files)
+            self._documentation_files = [name for name in files if name not in scratch]
         return self._documentation_files
+
+    def _scratch_metadata_paths(self, files: list[str]) -> set[str]:
+        root = self.dir.resolve()
+        captured = self.meta.get("files")
+        scratch = set()
+        for explicit_path in (self.metadata_path, self.metadata_output):
+            if explicit_path is None:
+                continue
+            path = explicit_path.parent.resolve() / explicit_path.name
+            if not path.is_relative_to(root):
+                continue
+            name = path.relative_to(root).as_posix()
+            if name in files and not (isinstance(captured, list) and name in captured):
+                if not self._git_tracks(name):
+                    scratch.add(name)
+        return scratch
+
+    def _git_tracks(self, name: str) -> bool:
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(self.dir), "ls-files", "--error-unmatch", "--", f":(literal){name}"],
+                capture_output=True, timeout=10,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return False
+        return result.returncode == 0
+
+    @property
+    def manifests(self) -> dict:
+        captured = self.meta.get("manifests")
+        return captured if isinstance(captured, dict) else {}
 
     def read(self, rel: str) -> str | None:
         if self.dir is not None:
@@ -82,8 +117,8 @@ class RepoFacts:
                 except OSError:
                     return None
             return None
-        manifests = self.meta.get("manifests") or {}
-        return manifests.get(rel)
+        text = self.manifests.get(rel)
+        return text if isinstance(text, str) else None
 
     def exists(self, rel: str) -> bool:
         if self.dir is not None:
@@ -124,7 +159,7 @@ class RepoFacts:
 
     def requirements(self) -> list[str]:
         names = []
-        for f in self.root_files() or [m for m in (self.meta.get("manifests") or {})]:
+        for f in self.root_files() or self.manifests:
             if re.fullmatch(r"requirements[^/]*\.txt", f):
                 for line in (self.read(f) or "").splitlines():
                     n = _req_name(line)

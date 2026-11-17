@@ -48,8 +48,10 @@ def test_variant_table():
 
 # -- issues #79-#82: planning-heavy, docs-only and mobile shapes, low-confidence suggestions -------------------------
 import json  # noqa: E402
+import subprocess  # noqa: E402
+import sys  # noqa: E402
 
-from conftest import meta_dict, run_cli  # noqa: E402
+from conftest import ROOT, meta_dict, run_cli  # noqa: E402
 from ctshowcase.detect import detect, required_sections  # noqa: E402
 
 
@@ -424,8 +426,6 @@ def test_docs_only_adopt_matches_topics_with_local_metadata_input(tmp_path):
 
 
 def test_documentation_type_ignores_linked_worktree_checkout_pointer(tmp_path):
-    import subprocess
-
     primary = tmp_path / "primary"
     worktree = tmp_path / "worktree"
     _tree(primary, {"README.md": "# Northwind\n", "docs/guide.md": "# Maintainer guide\n"})
@@ -488,3 +488,89 @@ def test_authored_build_code_prevents_docs_only_classification(tmp_path, checkou
     assert "suggestion" not in detected
     doctor = run_cli(*args, "doctor", "--format", "json")
     assert json.loads(doctor.stdout)["type"] == "workspace"
+
+
+def test_meta_out_repeated_inside_docs_checkout_keeps_type_and_logs(tmp_path):
+    _tree(tmp_path, {"README.md": "# Handbook\n", "docs/guide.md": "# Guide\n"})
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, capture_output=True)
+    output = tmp_path / "capture.snapshot.json"
+    args = ["--repo-dir", tmp_path, "meta", "--out", output]
+    first = run_cli(*args)
+    assert first.returncode == 0, first.stderr
+    payload = output.read_bytes()
+    second = run_cli(*args)
+    assert second.returncode == 0, second.stderr
+    assert output.read_bytes() == payload
+    result = json.loads(second.stdout)
+    assert result == json.loads(first.stdout)
+    assert result["detected"]["type"] == "documentation"
+    assert result["logs"] == ["type-suggestion:documentation:docs-only:override-key=type"]
+
+    subprocess.run(["git", "-C", str(tmp_path), "add", "--", output.name], check=True, capture_output=True)
+    tracked = run_cli(*args)
+    assert tracked.returncode == 0, tracked.stderr
+    assert json.loads(tracked.stdout)["detected"]["type"] == "workspace"
+
+
+def test_meta_counts_tracked_input_without_captured_file_list(tmp_path):
+    capture = "tracked[1].json"
+    _tree(tmp_path, {"README.md": "# Handbook\n", "docs/guide.md": "# Guide\n", capture: json.dumps(meta_dict())})
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(tmp_path), "add", "--", f":(literal){capture}"], check=True, capture_output=True)
+    args = ["--meta", tmp_path / capture, "--repo-dir", tmp_path]
+    snapshot = run_cli(*args, "meta")
+    assert snapshot.returncode == 0, snapshot.stderr
+    assert json.loads(snapshot.stdout)["detected"]["type"] == "workspace"
+    doctor = run_cli(*args, "doctor", "--format", "json")
+    assert json.loads(doctor.stdout)["type"] == "workspace"
+
+
+@pytest.mark.parametrize("primary", ["", "  # No override\n"])
+def test_meta_empty_yml_override_takes_precedence_over_yaml(tmp_path, primary):
+    manifests = {".github/showcase.yml": primary, ".github/showcase.yaml": "type: workspace\n"}
+    files = {"README.md": "# Handbook\n", "docs/guide.md": "# Guide\n", **manifests}
+    checkout = tmp_path / "repo"
+    _tree(checkout, files)
+    capture = tmp_path / "capture.json"
+    capture.write_text(json.dumps(meta_dict(files=list(files), manifests=manifests)), encoding="utf-8")
+    local = run_cli("--meta", capture, "--repo-dir", checkout, "meta")
+    offline = run_cli("--meta", capture, "--no-repo-dir", "meta")
+    assert local.returncode == offline.returncode == 0, local.stderr + offline.stderr
+    detected = json.loads(offline.stdout)["detected"]
+    assert detected == json.loads(local.stdout)["detected"]
+    assert detected["type"] == "documentation"
+
+
+@pytest.mark.parametrize("manifests", [
+    [], ["invalid"], 42, "invalid", {".github/showcase.yml": ["type: workspace"]},
+])
+def test_meta_preserves_malformed_manifests_for_config_aware_validation(tmp_path, manifests):
+    capture = tmp_path / "capture.json"
+    capture.write_text(json.dumps(meta_dict(files=["README.md", "docs/guide.md"], manifests=manifests)), encoding="utf-8")
+    args = ["--meta", capture, "--no-repo-dir"]
+    snapshot = run_cli(*args, "meta")
+    assert snapshot.returncode == 0, snapshot.stderr
+    result = json.loads(snapshot.stdout)
+    assert result["manifests"] == manifests
+    assert "suggestion" not in result["detected"]
+    doctor = run_cli(*args, "doctor", "--format", "json")
+    assert doctor.returncode != 0, doctor.stdout
+    assert json.loads(doctor.stdout)["logs"] == ["config"]
+
+
+def test_stdlib_meta_preserves_override_for_later_validation(tmp_path):
+    manifests = {".github/showcase.yml": "type: workspace\n"}
+    capture = tmp_path / "input.json"
+    output = tmp_path / "output.json"
+    capture.write_text(json.dumps(meta_dict(files=["README.md", "docs/guide.md", *manifests], manifests=manifests)),
+                       encoding="utf-8")
+    snapshot = subprocess.run(
+        [sys.executable, "-S", str(ROOT / "scripts/showcase.py"), "--meta", str(capture), "--no-repo-dir",
+         "meta", "--out", str(output)],
+        cwd=ROOT, capture_output=True, text=True, encoding="utf-8",
+    )
+    assert snapshot.returncode == 0, snapshot.stderr
+    result = json.loads(output.read_text(encoding="utf-8"))
+    assert result["manifests"] == manifests
+    assert "suggestion" not in result["detected"]
+    assert json.loads(snapshot.stdout)["logs"] == []

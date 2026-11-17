@@ -702,7 +702,8 @@ def cmd_meta(args):
         unread_override = True
     if override.get("for") and not same_repository(override["for"], m["owner"], m["repo"], resolver):
         override = {}
-    m["detected"] = detect(m, RepoFacts(m, rd, metadata_path=args.meta), override, type_override=args.type_override,
+    facts = RepoFacts(m, rd, metadata_path=args.meta, metadata_output=args.out)
+    m["detected"] = detect(m, facts, override, type_override=args.type_override,
                            same_owner=resolver.same if resolver else None)
     if unread_override:
         m["detected"].pop("suggestion", None)
@@ -715,8 +716,9 @@ def cmd_meta(args):
     text = json.dumps(m, sort_keys=True, indent=1, ensure_ascii=False) + "\n"
     if args.out:
         Path(args.out).write_text(text, encoding="utf-8")
+        suggestion = m["detected"].get("suggestion")
         return {"command": "meta", "owner": m["owner"], "repo": m["repo"], "result": "ok", "out": args.out,
-                "detected": m["detected"], "logs": []}, OK
+                "detected": m["detected"], "logs": [suggestion] if suggestion else []}, OK
     sys.stdout.write(text)
     return None, OK
 
