@@ -1,7 +1,10 @@
 """Opt-in target formatting preserves default behavior and fails before writes."""
 import importlib.util
 import json
+import os
 from pathlib import Path
+
+import pytest
 
 from ctshowcase.errors import NeedsInput
 from conftest import ROOT, meta_dict, run_cli
@@ -137,3 +140,99 @@ def test_formatted_crlf_readme_is_stable_on_retry(tmp_path, monkeypatch, capsys)
     assert cli.main(argv) == 0
     assert not json.loads(capsys.readouterr().out)["written"]
     assert readme.read_bytes() == raw
+
+
+def test_bootstrap_formats_generated_content_and_reseals_on_retry(tmp_path, monkeypatch, capsys):
+    from ctshowcase.readme import bootstrap_state
+
+    repo, meta = target(tmp_path)
+    readme = repo / "README.md"
+    original = (ROOT / "tests/fixtures/template-README.md").read_bytes()
+    readme.write_bytes(original)
+    guide = repo / "CONTRIBUTING.md"
+    guide.write_text("See https://github.com/CompleteTech-LLC/.github/blob/main/CONTRIBUTING.md for details.\n",
+                     encoding="utf-8")
+    spec = importlib.util.spec_from_file_location("formatting_bootstrap_showcase", ROOT / "scripts/showcase.py")
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+
+    def format_candidate(root, path, generated):
+        if path.name == "README.md":
+            assert "This repository is the starting point" not in generated
+            assert "write from repository facts only" in generated
+            return generated.replace("write from repository facts only", "write from repository\nfacts only")
+        assert "/Northwind-Trading-Co/" in generated
+        return generated.replace(" for details.", "\nfor details.")
+
+    monkeypatch.setattr("ctshowcase.formatting.format_text", format_candidate)
+    argv = ["--meta", str(meta), "--repo-dir", str(repo), "readme", "--bootstrap", "--write", "--format-generated"]
+    assert cli.main(argv) == 0
+    assert json.loads(capsys.readouterr().out)["written"]
+    written = readme.read_bytes()
+    assert b"write from repository\nfacts only" in written
+    assert bootstrap_state(written.decode()) == "pristine"
+    assert "/Northwind-Trading-Co/" in guide.read_text(encoding="utf-8")
+    assert cli.main(argv) == 0
+    assert not json.loads(capsys.readouterr().out)["written"]
+    assert readme.read_bytes() == written
+
+
+@pytest.mark.parametrize("first", ["banner", "card"])
+def test_banner_and_card_share_a_formatted_sidecar_on_retry(tmp_path, monkeypatch, first):
+    from ctshowcase import banner
+
+    repo, meta = target(tmp_path)
+    spec = importlib.util.spec_from_file_location("formatting_art_showcase", ROOT / "scripts/showcase.py")
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+    monkeypatch.setattr(banner, "render", lambda *args, **kwargs: (b"synthetic raster", {
+        "px": "1280x360", "scale": 1, "chips": [], "icon": {"source": "synthetic"}, "bytes": 16, "save": "original",
+        "incomplete": False, "eyebrow": "Northwind", "title_lines": [], "subtitle": None, "subtitle_source": None,
+    }))
+    def format_value(root, path, value):
+        return json.dumps(json.loads(value), indent=2) + "\n" if path.suffix == ".json" else value
+
+    monkeypatch.setattr("ctshowcase.formatting.format_text", format_value)
+    argv = ["--meta", str(meta), "--repo-dir", str(repo)]
+    second = "card" if first == "banner" else "banner"
+    for command in (first, second):
+        flags = ["--key-chip", "Test", "--chip", "Python"] if command == "card" else []
+        assert cli.main([*argv, command, *flags, "--format-generated"]) == 0
+    sidecar = repo / "docs/images/.showcase.json"
+    previous = sidecar.read_bytes()
+    assert previous.startswith(b'{\n  "')
+    assert set(json.loads(previous)["outputs"]) == {"banner.png", "card.svg"}
+    flags = ["--key-chip", "Test", "--chip", "Python"] if first == "card" else []
+    assert cli.main([*argv, first, *flags, "--format-generated"]) == 0
+    assert sidecar.read_bytes() == previous
+
+
+@pytest.mark.parametrize("alias", ["same", "symlink", "hardlink"])
+def test_card_png_cannot_overwrite_other_outputs(tmp_path, monkeypatch, alias):
+    repo, meta = target(tmp_path)
+    output = repo / "docs/images"
+    output.mkdir(parents=True)
+    svg = output / "card.svg"
+    sidecar = output / ".showcase.json"
+    svg.write_bytes(b"existing SVG")
+    sidecar.write_bytes(b'{"outputs":{}}')
+    png = svg
+    if alias != "same":
+        png = output / "other.png"
+        try:
+            if alias == "symlink":
+                png.symlink_to(sidecar)
+            else:
+                os.link(sidecar, png)
+        except OSError as error:
+            pytest.skip(f"links unavailable: {error}")
+    spec = importlib.util.spec_from_file_location("formatting_alias_showcase", ROOT / "scripts/showcase.py")
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+    monkeypatch.setattr("ctshowcase.formatting.format_text", lambda root, path, value: value)
+    monkeypatch.setattr("ctshowcase.card.preview_png", lambda scene, fonts: "synthetic PNG")
+    monkeypatch.setattr("ctshowcase.scene.png_bytes", lambda image: b"PNG")
+    assert cli.main(["--meta", str(meta), "--repo-dir", str(repo), "card", "--key-chip", "Test",
+                     "--chip", "Python", "--png", str(png), "--format-generated"]) == 2
+    assert svg.read_bytes() == b"existing SVG"
+    assert sidecar.read_bytes() == b'{"outputs":{}}'

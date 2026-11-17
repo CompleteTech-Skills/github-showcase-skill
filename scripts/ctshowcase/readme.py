@@ -1137,7 +1137,7 @@ def license_block(ctx: RepoContext, text: str) -> str:
 
 
 TEMPLATE_H1 = "CompleteTech Repo Template"
-PRISTINE = re.compile(r"<!-- showcase:template-body:pristine(?: sha256=([0-9a-f]{64}))? -->\n?")
+PRISTINE = re.compile(r"<!-- showcase:template-body:pristine(?: sha256=([0-9a-f]{64}))? -->\r?\n?")
 TEMPLATE_BODY = re.compile(re.escape(start("template-body")) + r"\n?(.*?)\n?" + re.escape(end("template-body")), re.S)
 
 
@@ -1163,6 +1163,21 @@ def bootstrap_state(text: str) -> str:
         return "none"
     rest = PRISTINE.sub("", m.group(1), count=1)
     return "pristine" if pm.group(1) and pm.group(1) == body_sha(rest) else "edited"
+
+
+def reseal_pristine(text: str) -> str | None:
+    """Refresh the existing digest after an approved transformation of a pristine body."""
+    blocks = find_blocks(TEMPLATE_BODY, text)
+    if not blocks:
+        return None
+    tb = blocks[0]
+    body = tb.group(1)
+    marker = PRISTINE.search(body)
+    if not marker or not marker.group(1):
+        return None
+    digest = body_sha(PRISTINE.sub("", body, count=1))
+    start, end = marker.span(1)
+    return text[:tb.start(1) + start] + digest + text[tb.start(1) + end:]
 
 
 def drop_pristine(text: str) -> str:

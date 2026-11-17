@@ -186,7 +186,7 @@ labels --emit-yml
 labels --plan [--references] [--records FILE] [--gh] [--jobs FILE] [--allow-hold]
 banner [--out docs/images/banner.png] [--scale 2] [--icon PATH] [--subtitle TEXT]
        [--key-chip TEXT]... [--chip TEXT]... [--category TEXT] [--allow-unmeasured] [--allow-hold]
-       [--allow-few-chips] [--png-budget 300000]
+       [--allow-few-chips] [--png-budget 300000] [--format-generated]
 card [--out docs/images/card.svg] [--png PATH] [--icon PATH] [--allow-unmeasured] [--allow-hold]
      [--key-chip TEXT]... [--chip TEXT]... [--format-generated]
 org-banner --org OWNER --out PATH [--illustration PATH]
@@ -354,4 +354,4 @@ Generation, checking and planning are local. The only network calls are the read
 
 ### Target formatter and validator preflight
 
-`doctor --format json` reports the target repository's formatter configuration and declared validators in `tooling`, with each command marked `not run`. `readme --format-generated` and `card --format-generated` opt into the installed, pinned target Prettier before writing generated text. Missing, unpinned or incompatible tooling returns `needs-input:formatter`; discovered commands are never run. README preservation still applies after formatting. See [Target formatting and validation](references/formatters.md).
+`doctor --format json` reports the target repository's formatter configuration and declared validators in `tooling`, with each command marked `not run`. `readme --format-generated`, `banner --format-generated`, and `card --format-generated` opt into the installed, pinned target Prettier before writing generated text. Missing, unpinned or incompatible tooling returns `needs-input:formatter`; discovered commands are never run. README preservation still applies after formatting. See [Target formatting and validation](references/formatters.md).

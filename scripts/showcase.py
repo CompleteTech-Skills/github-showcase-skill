@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import hashlib
 import json
 import os
 import re
@@ -161,16 +162,40 @@ def gate_watching(ctx, allow_hold=False, remedy=HOLD_REMEDY) -> None:
         raise ShowcaseError(f"{ctx.owner}/{ctx.repo} is in the watching org but is not a fork: {remedy}", log=why)
 
 
-def maybe_sidecar(ctx, out: Path, record: dict) -> None:
+def write_art(ctx, out: Path, data: bytes, *, format_generated: bool, preview=None, **extra) -> None:
+    """Prepare the optional preview and sidecar before writing any art outputs."""
     from ctshowcase import fingerprint as fp
-    if out.parent.name == "images" and out.parent.parent.name == "docs":
-        inp = fp.inputs(ctx.meta, ctx.repo_dir)
-        # the repository's immutable id (`meta --from-gh`): `action_prepare.py foreign` tells a rename or transfer
-        # (same id) from art copied out of another repository (a template copy gets a new id). Kept out of the
-        # fingerprint inputs, so the fingerprint is unchanged.
-        if isinstance(ctx.meta.get("id"), int) and not isinstance(ctx.meta.get("id"), bool):
-            record = dict(record, repository_id=ctx.meta["id"])
-        fp.write_sidecar(out.parent, inp, ctx.brand.sha256, out.name, record)
+    sidecar = out.parent / fp.SIDECAR if out.parent.name == "images" and out.parent.parent.name == "docs" else None
+    destinations = [out] + ([sidecar] if sidecar else []) + ([preview[0]] if preview else [])
+    for i, path in enumerate(destinations):
+        for other in destinations[:i]:
+            if path.resolve() == other.resolve() or (path.exists() and other.exists() and path.samefile(other)):
+                raise ShowcaseError("art output paths must be distinct", log="usage")
+    sidecar_text = None
+    if sidecar is not None:
+        record = {"sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data), **extra}
+        repo_id = ctx.meta.get("id")
+        if isinstance(repo_id, int) and not isinstance(repo_id, bool):
+            record["repository_id"] = repo_id
+        original = fp.sidecar_text(out.parent, fp.inputs(ctx.meta, ctx.repo_dir), ctx.brand.sha256, out.name, record)
+        sidecar_text = original
+        if format_generated:
+            from ctshowcase.formatting import format_text
+            sidecar_text = format_text(ctx.repo_dir, sidecar, original)
+            try:
+                unchanged = json.loads(sidecar_text) == json.loads(original)
+            except ValueError:
+                unchanged = False
+            if not unchanged:
+                raise ShowcaseError("formatter changed the art sidecar data", log="formatter-content")
+    write_bytes(out, data)
+    if preview:
+        write_bytes(*preview)
+    if sidecar is not None:
+        if format_generated:
+            write_bytes(sidecar, sidecar_text.encode("utf-8"))
+        else:
+            sidecar.write_text(sidecar_text, encoding="utf-8")
 
 
 def write_bytes(path: Path, data: bytes) -> None:
@@ -183,7 +208,6 @@ def write_bytes(path: Path, data: bytes) -> None:
 # ---------------------------------------------------------------------------------------------------
 def cmd_banner(args):
     from ctshowcase import banner
-    from ctshowcase.fingerprint import file_record
     from ctshowcase.typeset import Fonts
     ctx = context(args)
     gate_owner(ctx, args.allow_hold)
@@ -202,9 +226,8 @@ def cmd_banner(args):
     data, info = banner.render(ctx, fonts, scale=args.scale, budget=args.png_budget, subtitle=args.subtitle,
                                keys=args.key_chip or None, attrs=args.chip or None, category=args.category, icon=args.icon,
                                allow_few_chips=args.allow_few_chips)
-    write_bytes(out, data)
-    maybe_sidecar(ctx, out, file_record(out, px=info["px"], scale=info["scale"], chips=info["chips"],
-                                        icon_source=info["icon"]["source"]))
+    write_art(ctx, out, data, format_generated=args.format_generated, px=info["px"], scale=info["scale"],
+              chips=info["chips"], icon_source=info["icon"]["source"])
     alt = f"{ctx.repo} by {ctx.company}"
     return base("banner", ctx, result="incomplete" if info["incomplete"] else "ok", out=str(out), bytes=info["bytes"], px=info["px"], save=info["save"],
                 alt=alt, eyebrow=info["eyebrow"], title_lines=info["title_lines"], subtitle=info["subtitle"],
@@ -213,7 +236,6 @@ def cmd_banner(args):
 
 def cmd_card(args):
     from ctshowcase import card, svglint
-    from ctshowcase.fingerprint import file_record
     from ctshowcase.scene import png_bytes
     from ctshowcase.typeset import Fonts
     ctx = context(args)
@@ -233,32 +255,9 @@ def cmd_card(args):
     lint = svglint.lint_bytes("card", svg.encode(), str(out))
     if lint["result"] != "PASS":
         return base("card", ctx, result="fail", lint=lint), CHECK_FAILED
-    sidecar = None
-    if args.format_generated and out.parent.name == "images" and out.parent.parent.name == "docs":
-        import hashlib
-        from ctshowcase import fingerprint as fp
-        record = {"sha256": hashlib.sha256(svg.encode()).hexdigest(), "bytes": len(svg.encode())}
-        if isinstance(ctx.meta.get("id"), int) and not isinstance(ctx.meta["id"], bool):
-            record["repository_id"] = ctx.meta["id"]
-        sidecar_path = out.parent / fp.SIDECAR
-        original = fp.sidecar_text(out.parent, fp.inputs(ctx.meta, ctx.repo_dir), ctx.brand.sha256, out.name, record)
-        formatted = format_text(ctx.repo_dir, sidecar_path, original)
-        try:
-            unchanged = json.loads(formatted) == json.loads(original)
-        except ValueError:
-            unchanged = False
-        if not unchanged:
-            raise ShowcaseError("formatter changed the card sidecar data", log="formatter-content")
-        sidecar = (sidecar_path, formatted)
-    write_bytes(out, svg.encode())
-    outputs = [str(out)]
-    if args.png:
-        write_bytes(Path(args.png), png_bytes(card.preview_png(scene, fonts)))
-        outputs.append(args.png)
-    if sidecar is None:
-        maybe_sidecar(ctx, out, file_record(out))
-    else:
-        write_bytes(sidecar[0], sidecar[1].encode())
+    preview = (Path(args.png), png_bytes(card.preview_png(scene, fonts))) if args.png else None
+    write_art(ctx, out, svg.encode(), format_generated=args.format_generated, preview=preview)
+    outputs = [str(out)] + ([args.png] if preview else [])
     return base("card", ctx, result="ok", out=str(out), outputs=outputs, bytes=len(svg.encode()),
                 alt=f"{ctx.repo}: {ctx.meta.get('description')}", items=info["items"], icon=info["icon"],
                 lint=lint), OK
@@ -517,18 +516,28 @@ def cmd_readme(args):
                             logs=ctx.logs + ["readme-shrink"]), CHECK_FAILED
     if args.format_generated:
         from ctshowcase.formatting import format_text
+        # Prettier's Markdown parser can join the managed GitHub alert marker to its body.
+        for block in readme.find_blocks(readme.MARK, after):
+            if block.group(1) == "checklist" and block.group(2).lstrip().startswith("> [!IMPORTANT]"):
+                position = block.start(2)
+                after = after[:position] + "<!-- prettier-ignore -->\n\n" + after[position:]
+                break
         formatted = format_text(rd, path, after)
-        problems = readme.preservation(before, formatted, removed)
-        if problems:
-            return base("readme", ctx, result="fail", mode=mode, problems=problems[:20],
-                        logs=ctx.logs + ["readme-shrink"]), CHECK_FAILED
+        if after.split() != formatted.split():
+            raise ShowcaseError("formatter changed generated README.md content", log="formatter-content",
+                                code=CHECK_FAILED)
+        if readme.bootstrap_state(after) == "pristine":
+            formatted = readme.reseal_pristine(formatted)
+            if formatted is None:
+                raise ShowcaseError("formatter changed the README template-body markers", log="formatter-content",
+                                    code=CHECK_FAILED)
         after = formatted
         if path.is_file():
             # Generation operates on normalized lines, but Prettier may emit CRLF.
             before = path.read_bytes().decode("utf-8")
         if contrib_new is not None:
             formatted_contrib = format_text(rd, rd / "CONTRIBUTING.md", contrib_new)
-            if re.sub(r"\s", "", contrib_new) != re.sub(r"\s", "", formatted_contrib):
+            if contrib_new.split() != formatted_contrib.split():
                 raise ShowcaseError("formatter changed CONTRIBUTING.md content; all outputs left unchanged",
                                     log="formatter-content")
             contrib_new = formatted_contrib
@@ -1101,6 +1110,8 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--png-budget", type=int, default=300_000)
     s.add_argument("--allow-few-chips", action="store_true",
                    help="render with fewer than 2 chips (result incomplete, needs-input:banner-chips) instead of exit 4")
+    s.add_argument("--format-generated", action="store_true",
+                   help="format the shared JSON sidecar with the target's pinned local Prettier")
     s.set_defaults(func=cmd_banner)
 
     s = sub.add_parser("card", help="repo card SVG (dark only)")

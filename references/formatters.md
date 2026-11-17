@@ -4,15 +4,20 @@ The skill can report the target checkout's formatter configuration and validatio
 commands. It recognizes `.prettierrc*`, `prettier.config.*`, `.editorconfig`, the
 `prettier` key and validation scripts in `package.json`, shell snippets in
 `AGENTS.md` and `CONTRIBUTING.md`, including inline code in run instructions,
-and workflow `run` steps. Discovery identifies commands by their names and surrounding instructions.
+and recognizable validation commands from workflow `run` steps. Discovery reads
+regular files inside the target checkout and identifies commands by their names
+and surrounding instructions.
 Default TSV and Markdown doctor output reports tooling on stderr to preserve the
 coverage row; JSON includes it in `tooling`. Reports retain their
 source and mark commands **not run**. Discovery never executes these commands;
 workflow steps can require secrets or services unavailable in a local checkout.
 
-Pass `readme --format-generated` or `card --format-generated` to apply the target's
-Prettier settings. The card command formats its SVG and generated JSON sidecar
-before writing either one. Both commands use the target's installed Prettier CLI with an exact version in `package.json` or an
+Pass `readme --format-generated`, `banner --format-generated`, or
+`card --format-generated` to apply the target's Prettier settings. Use the flag
+on both art commands when they update the same JSON sidecar. The banner applies
+formatting to the sidecar, and the card applies it to the SVG and the sidecar
+before writing either one. These commands use the target's installed Prettier
+CLI with an exact version in `package.json` or an
 exact `node_modules/prettier` version in its npm lockfile. Missing Node.js,
 missing or mismatched local dependencies, and unsupported pinning mechanisms
 return `needs-input:formatter`. No packages are installed or downloaded and no
@@ -23,11 +28,11 @@ checkout. `.editorconfig` detection alone does not select a formatter.
 Text is passed on stdin with its final target path, so Prettier uses the target's
 configuration. The caller still applies the usual content-preservation and
 output-path checks before writing. A formatter failure leaves the requested
-output unwritten. Existing authored README content is not silently reformatted
-when preservation would reject the changes.
-Bootstrap formatting of
-`CONTRIBUTING.md` accepts whitespace changes only after the normal owner-token
-replacement; any other content change refuses the whole write.
+output unwritten. README and CONTRIBUTING formatting accepts whitespace changes
+to the generated Markdown. Prettier keeps the generated GitHub alert intact,
+and Showcase refreshes the ownership digest of a pristine template body after
+formatting. Bootstrap applies the normal CONTRIBUTING owner-token replacement
+before formatting.
 `.github/showcase.yml` supplies input configuration. Format it and author-maintained
 files such as `PROMPTS.md` through the target repository's own workflow.
 

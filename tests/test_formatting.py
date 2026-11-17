@@ -1,4 +1,5 @@
 import json
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -99,3 +100,67 @@ def test_npm_lock_pin_is_supported(tmp_path, monkeypatch):
     monkeypatch.setattr("ctshowcase.formatting.shutil.which", lambda _: "/node")
     monkeypatch.setattr("ctshowcase.formatting.subprocess.run", lambda *a, **k: SimpleNamespace(returncode=0, stdout=b"ok", stderr=b""))
     assert format_text(tmp_path, tmp_path / "README.md", "ok") == "ok"
+
+
+def test_validation_discovery_filters_workflow_setup_and_deploy(tmp_path):
+    (tmp_path / "CONTRIBUTING.md").write_text("Run `cargo test` and `npm test`.\n", encoding="utf-8")
+    workflow = tmp_path / ".github/workflows/release.yml"
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text("""jobs:
+  test:
+    steps:
+      - run: |
+          npm ci
+          npm test
+          npm run deploy
+      - run: echo cargo test
+""", encoding="utf-8")
+    assert [v["command"] for v in discover(tmp_path)["validators"]] == ["cargo test", "npm test", "npm test"]
+
+
+def test_discovery_ignores_links_outside_target(tmp_path):
+    root = tmp_path / "checkout"
+    root.mkdir()
+    (root / ".github").mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "notes.md").write_text("Run `cargo test`.\n", encoding="utf-8")
+    (outside / "package.json").write_text('{"scripts":{"test":"synthetic out-of-scope command"}}', encoding="utf-8")
+    (outside / "test.yml").write_text("jobs: {tests: {steps: [{run: npm test}]}}", encoding="utf-8")
+    try:
+        (root / "AGENTS.md").symlink_to(outside / "notes.md")
+        (root / "CONTRIBUTING.md").symlink_to(outside / "notes.md")
+        (root / "package.json").symlink_to(outside / "package.json")
+        workflows = root / ".github" / "workflows"
+        workflows.symlink_to(outside, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"symlinks unavailable: {error}")
+    assert discover(root)["validators"] == []
+    workflows.unlink()
+    workflows.mkdir()
+    (workflows / "test.yml").symlink_to(outside / "test.yml")
+    assert discover(root)["validators"] == []
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="named pipes require POSIX")
+def test_discovery_ignores_special_files(tmp_path):
+    workflow = tmp_path / ".github/workflows/check.yml"
+    workflow.parent.mkdir(parents=True)
+    for path in (tmp_path / "package.json", tmp_path / "AGENTS.md", tmp_path / ".prettierrc", workflow):
+        os.mkfifo(path)
+    assert discover(tmp_path)["validators"] == []
+    assert discover(tmp_path)["formatters"] == []
+
+
+def test_formatter_refuses_prettier_package_outside_checkout(tmp_path):
+    repo = tmp_path / "checkout"
+    repo.mkdir()
+    local_prettier(repo)
+    package = repo / "node_modules/prettier"
+    outside = package.rename(tmp_path / "prettier")
+    try:
+        package.symlink_to(outside, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"symlinks unavailable: {error}")
+    with pytest.raises(NeedsInput, match="install the target's pinned Prettier"):
+        format_text(repo, repo / "README.md", "# Hello")
