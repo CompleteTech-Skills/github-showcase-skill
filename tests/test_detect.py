@@ -421,3 +421,23 @@ def test_docs_only_adopt_matches_topics_with_local_metadata_input(tmp_path):
     result = json.loads(adopted.stdout)
     assert result["type"] == "documentation"
     assert any(log.startswith("type-suggestion:documentation:docs-only") for log in result["logs"])
+
+
+def test_documentation_type_ignores_linked_worktree_checkout_pointer(tmp_path):
+    import subprocess
+
+    primary = tmp_path / "primary"
+    worktree = tmp_path / "worktree"
+    _tree(primary, {"README.md": "# Northwind\n", "docs/guide.md": "# Maintainer guide\n"})
+
+    def git(*args):
+        return subprocess.run(["git", "-C", str(primary), *args], capture_output=True, text=True, check=True)
+
+    git("init", "-q")
+    git("add", "README.md", "docs/guide.md")
+    git("-c", "user.name=Synthetic", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "Docs fixture")
+    git("worktree", "add", "--detach", str(worktree), "HEAD")
+    assert (worktree / ".git").is_file()
+    facts = RepoFacts({}, worktree)
+    assert facts.files == ["README.md", "docs/guide.md"]
+    assert detect_type({}, facts) == ("documentation", 25)

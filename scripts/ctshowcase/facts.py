@@ -51,6 +51,8 @@ class RepoFacts:
                     dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS)
                     rel = Path(base).relative_to(self.dir)
                     for n in sorted(names):
+                        if not rel.parts and n == ".git":  # linked checkout pointer
+                            continue
                         out.append((rel / n).as_posix() if str(rel) != "." else n)
                 self._files = out
             else:
