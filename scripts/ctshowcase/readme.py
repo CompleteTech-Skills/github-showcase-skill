@@ -954,6 +954,11 @@ def _unreemitted(lines: list[str], kept: Counter) -> list[str]:
     return out
 
 
+def _badge_blocks_need_in_place_refresh(markers: list[re.Match]) -> bool:
+    badges = [m for m in markers if m.group(1) == "badges"]
+    return len(badges) > 1 or any(m.group(0) != wrap("badges", m.group(2)) for m in badges)
+
+
 def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
     """Return (new text, header lines removed). Raises nothing; callers run the shrink checks."""
     variant = ctx.det["variant"]
@@ -961,10 +966,8 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
     if variant in ("G", "H"):
         return callout_only(ctx, normalize_text(text))
     text = normalize_text(text)
-    if variant == "J":
-        badge_blocks = [m for m in find_blocks(MARK, text) if m.group(1) == "badges"]
-        if len(badge_blocks) > 1 or any(m.group(0) != wrap("badges", m.group(2)) for m in badge_blocks):
-            return header_only(ctx, text), []
+    if variant == "J" and _badge_blocks_need_in_place_refresh(find_blocks(MARK, text)):
+        return header_only(ctx, text), []
     body, blocks = _strip_markers(text)
     want_footer = footer_wanted(ctx)
     removed: list[str] = []
@@ -1347,9 +1350,8 @@ def bootstrap(ctx: RepoContext, text: str) -> str:
             # the tagline block carries over (tagline_body), so a line the owner wrote survives the rebuild and only an
             # inherited one is emptied, exactly as header_only decides it
             markers = find_blocks(MARK, hm.group(0))
-            if variant == "J" and sum(m.group(1) == "badges" for m in markers) > 1:
-                # Refresh each independently so rebuilding the header cannot
-                # collapse separate authored badge blocks into a single block.
+            if variant == "J" and _badge_blocks_need_in_place_refresh(markers):
+                # Refresh in place to preserve distinct or noncanonical blocks.
                 return header_only(ctx, text)
             blocks = {m.group(1): m.group(2) for m in markers}
             old = blocks.get("tagline")

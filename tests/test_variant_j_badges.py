@@ -721,3 +721,8 @@ def test_header_keeps_same_line_authored_badge_markers(make_ctx, tmp_path):
     row = readme.start('badges') + '![Custom](img.svg)' + readme.end('badges')
     assert readme.header_only(ctx, row) == row
     assert readme.upgrade(ctx, row) == (row, [])
+
+    template = readme.header(ctx, title=readme.TEMPLATE_H1)
+    template += "\n\n" + readme.pristine_block("## About\n\nTemplate.")
+    template = readme._sub_blocks(template, lambda m: row if m.group(1) == "badges" else m.group(0))
+    assert row in readme.bootstrap(ctx, template)
