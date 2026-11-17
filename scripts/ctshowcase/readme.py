@@ -987,15 +987,16 @@ def _badge_blocks_need_in_place_refresh(markers: list[re.Match]) -> bool:
     return len(badges) > 1 or any(m.group(0) != wrap("badges", m.group(2)) for m in badges)
 
 
-def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
+def upgrade(ctx: RepoContext, text: str, *, already_normalized: bool = False) -> tuple[str, list[str]]:
     """Return (new text, header lines removed). Raises nothing; callers run the shrink checks."""
+    if not already_normalized:
+        text = normalize_text(text)
     variant = ctx.det["variant"]
     rv = standard("readme-variants")
     if variant in ("G", "H"):
-        return callout_only(ctx, normalize_line_endings(text))
-    text = normalize_line_endings(text)
+        return callout_only(ctx, text)
     if variant == "J" and _badge_blocks_need_in_place_refresh(find_blocks(MARK, text)):
-        return header_only(ctx, text), []
+        return header_only(ctx, text, already_normalized=True), []
     body, blocks = _strip_markers(text)
     want_footer = footer_wanted(ctx)
     removed: list[str] = []
@@ -1195,9 +1196,10 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
     return "\n\n".join(x for x in out if x) + "\n", removed
 
 
-def header_only(ctx: RepoContext, text: str) -> str:
+def header_only(ctx: RepoContext, text: str, *, already_normalized: bool = False) -> str:
     """Replace only existing marker blocks (what the Action runs)."""
-    text = normalize_line_endings(text)
+    if not already_normalized:
+        text = normalize_text(text)
     desc = (ctx.meta.get("description") or "").strip()
     gen = {"nav": nav_line(ctx), "banner": banner_html(ctx), "footer": footermod.markup(ctx.brand)}
     if ctx.repo_dir is not None and not (ctx.repo_dir / "docs" / "images" / "banner.png").is_file():
@@ -1325,7 +1327,7 @@ def pristine_block(body: str) -> str:
 def bootstrap_state(text: str) -> str:
     """'pristine' (the block is byte-for-byte what was generated), 'edited' (a marker without a matching hash: a person
     wrote in the block) or 'none' (no marker: the README is the repository's own)."""
-    found = find_blocks(TEMPLATE_BODY, normalize_line_endings(text))
+    found = find_blocks(TEMPLATE_BODY, normalize_text(text))
     if not found:
         return "none"
     m = found[0]
@@ -1351,13 +1353,14 @@ def _header_region(text: str) -> re.Match | None:
     return re.match(r"\A.*?" + re.escape(end("tagline")) + r"\n(?:.*?\n)??---\n", text, re.S)
 
 
-def bootstrap(ctx: RepoContext, text: str) -> str:
+def bootstrap(ctx: RepoContext, text: str, *, already_normalized: bool = False) -> str:
     """Fill a README that still carries a generated (pristine) template body: the README variant's sections from
     repository facts, the variant's header (Variant F has no H1) and the license section. A pristine body is
     regenerated on later runs too, so a repository typed `workspace` on its creation commit is re-bootstrapped once
     its code (or `type:` in .github/showcase.yml) gives the real type. Any human edit inside the block changes its
     hash, and from then on the block is the repository's own: never overwritten (callers drop the marker)."""
-    text = normalize_line_endings(text)
+    if not already_normalized:
+        text = normalize_text(text)
     if ctx.meta.get("is_template") or bootstrap_state(text) != "pristine":
         return text
     variant = ctx.det["variant"]
@@ -1377,7 +1380,7 @@ def bootstrap(ctx: RepoContext, text: str) -> str:
     text = text[:tb.start()] + new + text[tb.end():]
     # the header: rebuilt for this variant unless a person retitled the README
     hm = _header_region(text)
-    if hm:
+    if hm and not text.startswith(BOM):
         h1 = re.search(r"(?m)^# (.+)$", hm.group(0))
         auto = cased_title(ctx.repo, ctx.meta.get("description") or "")
         if not h1 or h1.group(1).strip() in (TEMPLATE_H1, auto, slug_title(ctx.repo)):
@@ -1386,13 +1389,13 @@ def bootstrap(ctx: RepoContext, text: str) -> str:
             markers = find_blocks(MARK, hm.group(0))
             if variant == "J" and _badge_blocks_need_in_place_refresh(markers):
                 # Refresh in place to preserve distinct or noncanonical blocks.
-                return header_only(ctx, text)
+                return header_only(ctx, text, already_normalized=True)
             blocks = {m.group(1): m.group(2) for m in markers}
             old = blocks.get("tagline")
             new_header = header(ctx, title=auto, tagline=tagline_body(ctx, old, text),
                                 existing_badges=blocks.get("badges"))
             text = new_header + "\n\n" + text[hm.end():].lstrip("\n")
-    return header_only(ctx, text)
+    return header_only(ctx, text, already_normalized=True)
 
 
 def bootstrap_contributing(ctx: RepoContext, text: str) -> str:

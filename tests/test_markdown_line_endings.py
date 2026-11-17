@@ -468,3 +468,17 @@ assert [m.group(1) for m in mdcode.find_blocks(readme.MARK, text + readme.wrap("
     result = subprocess.run([sys.executable, "-c", probe, str(ROOT / "scripts")],
                             capture_output=True, text=True, timeout=20, check=False)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_bootstrap_preserves_the_authored_bom_prefix(tmp_path):
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps({"owner": "Northwind-Trading-Co", "repo": ".github",
+                                "license": "MIT", "files": ["README.md"]}), encoding="utf-8")
+    path = tmp_path / "README.md"
+    authored_title = "\ufeff\ufeff# Authored"
+    original = (authored_title + "\n\n" + readme.wrap("tagline", "Old generated tagline.") + "\n\n---\n\n"
+                + readme.pristine_block("## Install\n\nPlaceholder.") + "\n")
+    path.write_bytes(original.encode("utf-8"))
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--bootstrap", "--write")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert path.read_bytes().startswith((authored_title + "\n").encode("utf-8"))

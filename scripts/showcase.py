@@ -462,7 +462,7 @@ def cmd_readme(args):
             return base("readme", ctx, result="fail", mode="bootstrap", problems=problems,
                         logs=ctx.logs + ["readme-shrink"]), CHECK_FAILED
         if state == "pristine":
-            after = readme.bootstrap(ctx, before)
+            after = readme.bootstrap(ctx, before, already_normalized=True)
             cp = rd / "CONTRIBUTING.md"
             if cp.is_file() and after != before:
                 c0 = cp.read_text(encoding="utf-8")
@@ -473,7 +473,7 @@ def cmd_readme(args):
             # never-drop-a-line check; if that check objects, only the marker goes and the header blocks refresh.
             ctx.log("bootstrap:edited")
             base_text = readme.drop_pristine(before)
-            after, removed = readme.upgrade(ctx, base_text)
+            after, removed = readme.upgrade(ctx, base_text, already_normalized=True)
             if readme.preservation(base_text, after, removed, ctx=ctx):
                 # a marked footer that holds authored content (partner or foreign image) must never be regenerated
                 refusal = _authored_footer_refusal(ctx, base_text)
@@ -482,9 +482,9 @@ def cmd_readme(args):
                                 problems=refusal + readme.preservation(base_text, after, removed, ctx=ctx)[:19],
                                 logs=ctx.logs + ["readme-shrink"]), CHECK_FAILED
                 ctx.log("readme-shrink")
-                after, removed = readme.header_only(ctx, base_text), []
+                after, removed = readme.header_only(ctx, base_text, already_normalized=True), []
         else:
-            after = readme.header_only(ctx, before)
+            after = readme.header_only(ctx, before, already_normalized=True)
     else:
         if mode == "auto":
             mode = "scaffold" if len([ln for ln in readme.source_lines(before) if ln.strip(" \t")]) < 3 else "upgrade"
@@ -492,9 +492,9 @@ def cmd_readme(args):
         if mode == "scaffold":
             after = readme.scaffold(ctx, before)
         elif mode == "header":
-            after = readme.header_only(ctx, before)
+            after = readme.header_only(ctx, before, already_normalized=True)
         else:
-            after, removed = readme.upgrade(ctx, before)
+            after, removed = readme.upgrade(ctx, before, already_normalized=True)
             problems = readme.preservation(before, after, removed, ctx=ctx)
             if problems:
                 return base("readme", ctx, result="fail", mode=mode, problems=problems[:20],
