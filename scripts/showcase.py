@@ -128,6 +128,7 @@ def context(args, b=None, *, for_coverage=False):
     ctx = RepoContext(b, meta, rd, type_override=getattr(args, "type_override", None), for_coverage=for_coverage)
     if getattr(args, "format_generated", False):
         ctx.meta_path = Path(args.meta).resolve() if args.meta else None
+        ctx.format_root = rd.resolve() if rd else None
     return ctx
 
 
@@ -205,9 +206,10 @@ def write_art(ctx, out: Path, data: bytes, *, format_generated: bool, preview=No
     capture = getattr(ctx, "meta_path", None)
     ensure_distinct_outputs(*destinations, *([capture] if capture else []))
     if format_generated:
-        target_relative(ctx.repo_dir, out)
+        root = getattr(ctx, "format_root", None) or (ctx.repo_dir.resolve() if ctx.repo_dir else None)
+        target_relative(root, out)
         if sidecar is not None:
-            target_relative(ctx.repo_dir, sidecar)
+            target_relative(root, sidecar)
     record = {"sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data), **extra}
     with sidecar_lock(sidecar):
         summary = _sidecar_text(ctx, out, record) if sidecar is not None else None
@@ -222,11 +224,11 @@ def write_art(ctx, out: Path, data: bytes, *, format_generated: bool, preview=No
         if sidecar is not None and summary is not None:
             outputs.append((sidecar, summary.encode("utf-8")))
         if format_generated:
-            target_relative(ctx.repo_dir, out)
+            target_relative(root, out)
             if sidecar is not None:
-                target_relative(ctx.repo_dir, sidecar)
+                target_relative(root, sidecar)
             ensure_distinct_outputs(*destinations, *([capture] if capture else []))
-            write_formatted_outputs(outputs, repo_root=ctx.repo_dir.resolve())
+            write_formatted_outputs(outputs, repo_root=root)
         else:
             for destination, content in outputs:
                 write_bytes(destination, content)
@@ -283,10 +285,10 @@ def cmd_card(args):
     fonts = Fonts(ctx.brand)
     svg, scene, info = card.render(ctx, fonts, args.icon, keys=args.key_chip or None, attrs=args.chip or None)
     if args.format_generated:
-        from ctshowcase.formatting import format_text, same_svg
+        from ctshowcase.formatting import format_text, protect_svg_title, same_svg
 
         # Prettier's HTML parser wraps SVG title text, which must equal aria-label.
-        formatted = format_text(ctx.repo_dir, out, svg.replace("\n<title>", "\n<!-- prettier-ignore -->\n<title>", 1))
+        formatted = format_text(ctx.repo_dir, out, protect_svg_title(svg))
         if not same_svg(svg, formatted):
             raise ShowcaseError("formatter changed the SVG drawing", log="formatter-content", code=CHECK_FAILED)
         svg = formatted
@@ -594,8 +596,8 @@ def cmd_readme(args):
         for rel, (label, message, colour) in sorted(ctx.badge_files.items()):
             drawing = badge.svg(ctx.brand, fonts, label, message, colour, style=ctx.style)
             if args.format_generated:
-                from ctshowcase.formatting import same_svg
-                formatted = format_text(rd, rd / rel, drawing)
+                from ctshowcase.formatting import protect_svg_title, same_svg
+                formatted = format_text(rd, rd / rel, protect_svg_title(drawing))
                 if not same_svg(drawing, formatted):
                     raise ShowcaseError("formatter changed the local badge drawing", log="formatter-content",
                                         code=CHECK_FAILED)
@@ -628,7 +630,7 @@ def cmd_readme(args):
                                         code=CHECK_FAILED)
             for target, _ in outputs:
                 target_relative(rd, target)
-            write_formatted_outputs(outputs, repo_root=rd, snapshots=dict(snapshots))
+            write_formatted_outputs(outputs, repo_root=ctx.format_root, snapshots=dict(snapshots))
         else:
             for target, data in outputs:
                 if target == contrib_path:

@@ -86,6 +86,11 @@ def _config_name(name: str) -> str | None:
     return None
 
 
+def protect_svg_title(drawing: str) -> str:
+    """Preserve the exact accessible title of a generated drawing."""
+    return drawing.replace("\n<title>", "\n<!-- prettier-ignore -->\n<title>", 1)
+
+
 def same_svg(original: str, formatted: str) -> bool:
     """Compare SVG drawing nodes and reject unexpected XML directives."""
 
@@ -107,7 +112,8 @@ def same_svg(original: str, formatted: str) -> bool:
     def structure(markup):
         target = Drawing()
         root = ET.fromstring(markup, parser=ET.XMLParser(target=target))
-        nodes = [(node.tag, node.attrib, " ".join((node.text or "").split()),
+        nodes = [(node.tag, node.attrib,
+                  (node.text or "") if node.tag.rsplit("}", 1)[-1] == "title" else " ".join((node.text or "").split()),
                   " ".join((node.tail or "").split()), len(node)) for node in root.iter()]
         return nodes, target.comments
 

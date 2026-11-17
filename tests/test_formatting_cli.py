@@ -599,3 +599,20 @@ def test_formatter_keeps_markers_after_fences_and_reseals_pristine_body(tmp_path
     assert readme.bootstrap_state(rendered.decode().replace("\r\n", "\n").replace("\r", "\n")) == "pristine"
     assert showcase.main(argv) == 0
     assert path.read_bytes() == rendered
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_formatted_readme_from_relative_or_implicit_checkout(tmp_path, monkeypatch, explicit):
+    import showcase
+
+    repo, meta = target(tmp_path)
+    target_path = repo / "README.md"
+    target_path.write_text("# Northwind\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
+    subprocess.run(["git", "-C", str(repo), "remote", "add", "origin",
+                    "https://github.com/Northwind-Trading-Co/support-triage-agent.git"], check=True)
+    monkeypatch.chdir(tmp_path if explicit else repo)
+    monkeypatch.setattr("ctshowcase.formatting.format_text", lambda root, destination, text: text)
+    args = ["--meta", str(meta)] + (["--repo-dir", "repo"] if explicit else [])
+    assert showcase.main([*args, "readme", "--mode", "scaffold", "--write", "--format-generated"]) == 0
+    assert "showcase:tagline:start" in target_path.read_text(encoding="utf-8")

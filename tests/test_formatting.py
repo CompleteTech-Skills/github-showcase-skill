@@ -310,3 +310,15 @@ def test_formatted_writer_rejects_parent_retarget_before_creating_descendants(tm
     with pytest.raises(ShowcaseError, match="inside the target checkout"):
         write_formatted_outputs([(images / "new" / "preview.png", b"preview")], repo_root=repo)
     assert not (outside / "new").exists()
+
+
+def test_formatted_svg_accessible_title_preserves_internal_whitespace():
+    from ctshowcase.formatting import protect_svg_title, same_svg
+
+    original = ('<svg xmlns="http://www.w3.org/2000/svg" aria-label="license: AGPL-3.0 | commercial">\n'
+                '<title>license: AGPL-3.0 | commercial</title>\n</svg>')
+    protected = protect_svg_title(original)
+    assert "<!-- prettier-ignore -->\n<title>" in protected
+    assert same_svg(original, protected)
+    assert not same_svg(original, protected.replace("AGPL-3.0 | commercial", "AGPL-3.0 |\ncommercial", 2))
+    assert not same_svg(original, protected.replace("<title>license: ", "<title>license:\n"))
