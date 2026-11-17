@@ -173,6 +173,11 @@ def personal_profile(ctx: RepoContext) -> bool:
     return ctx.det["type"] == "github-profile" and ctx.same_owner(ctx.repo)
 
 
+def personal_intro_applies(ctx: RepoContext) -> bool:
+    """The banner surface is exempt only because this is the personal profile, which opens with its intro instead."""
+    return ctx.art_status()["banner"] == "exempt:profile-readme" and personal_profile(ctx)
+
+
 def hero_path(ctx: RepoContext) -> str:
     return "assets/intro.svg" if personal_profile(ctx) else "docs/images/banner.png"
 
@@ -637,12 +642,22 @@ def callout_only(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
             ctx.log("needs-input:archive-callout")
         if co:
             out = co + "\n\n" + body.lstrip("\n")
+    replaced_hero: list[str] = []
+    hero_body = next((b.group(2) for b in find_blocks(MARK, m.group(0)) if b.group(1) == "banner"), None) if m else None
     if ctx.art_status()["banner"] is None:
         lead_banner = wrap("banner", banner_html(ctx)) + "\n\n"  # decision 13: the hero banner opens G and H too
+    elif m and personal_intro_applies(ctx) and personal_generated_hero(ctx, hero_body or ""):
+        # The personal profile is banner-exempt (decision 15): a managed hero block that still points at the exempt
+        # banner is refreshed to the intro, or refuses (needs-input:intro / intro-identity) before any write.
+        new_hero = banner_html(ctx)
+        lead_banner = wrap("banner", new_hero) + "\n\n"
+        # Report only the old generated lines the intro does not carry again, so the shrink guard stays tight.
+        replaced_hero = list((Counter(ln for ln in (hero_body or "").splitlines() if ln.strip())
+                              - Counter(new_hero.splitlines())).elements())
     elif m:
         lead_banner = text.lstrip("\n")[:m.end()].rstrip("\n") + "\n\n"
     out = lead_banner + out.lstrip("\n")
-    removed: list[str] = []
+    removed: list[str] = list(replaced_hero)
     if footer_wanted(ctx):
         had_footer = False
         if footermod.check(ctx.brand, out)[0] != "pass":
@@ -1079,7 +1094,9 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
         # §7.0 preserve list: additive only. The hero banner block goes on top (q57 `pres` default, "Banner above the
         # existing content"; none when the user answers "Leave them unchanged"), with the nav line in the §7.1 order;
         # the README's own banner and every section stay verbatim and in place; add License if missing, then footer.
-        if ctx.preserve_unchanged() or ctx.art_status()["banner"] is not None:
+        # The personal profile's banner exemption is not "no hero": it opens with its intro (decision 15), which
+        # banner_html returns or refuses with needs-input before any write.
+        if ctx.preserve_unchanged() or (ctx.art_status()["banner"] is not None and not personal_intro_applies(ctx)):
             out.append(wrap("nav", nav_line(ctx)))
         else:
             out += lead(ctx, wrap("banner", banner_html(ctx)), wrap("nav", nav_line(ctx)))

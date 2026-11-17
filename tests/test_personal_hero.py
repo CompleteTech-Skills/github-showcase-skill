@@ -61,7 +61,7 @@ def test_personal_refresh_migrates_only_the_exact_old_generated_hero(tmp_path, i
               '  <img src="docs/images/banner.png" alt="CompleteDotTech by CompleteTech LLC" width="100%">\n'
               '</p>\n<!-- showcase:banner:end -->\n\n# Synthetic profile\n\nAuthored project notes stay.\n')
     path = tmp_path / "README.md"
-    path.write_text(source, encoding="utf-8")
+    path.write_bytes(source.encode("utf-8"))
     result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--mode", mode, "--write")
     assert result.returncode == 0, result.stdout + result.stderr
     text = path.read_text(encoding="utf-8")
@@ -76,7 +76,7 @@ def test_personal_refresh_keeps_authored_marked_hero_without_intro(tmp_path, mod
     body = '<p align="center">\n  <img src="custom.svg" alt="Authored hero" width="840">\n</p>'
     source = f"<!-- showcase:banner:start -->\n{body}\n<!-- showcase:banner:end -->\n\n# Profile\n\nAuthored notes.\n"
     path = tmp_path / "README.md"
-    path.write_text(source, encoding="utf-8")
+    path.write_bytes(source.encode("utf-8"))
     result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--mode", mode, "--write")
     assert result.returncode == 0, result.stdout + result.stderr
     text = path.read_text(encoding="utf-8")
@@ -120,7 +120,7 @@ def test_missing_intro_refresh_does_not_write_readme_badges_or_records(tmp_path,
               '  <img src="docs/images/banner.png" alt="CompleteDotTech by CompleteTech LLC" width="100%">\n'
               '</p>\n<!-- showcase:banner:end -->\n\n# Profile\n\nAuthored notes.\n')
     path = tmp_path / "README.md"
-    path.write_text(source, encoding="utf-8")
+    path.write_bytes(source.encode("utf-8"))
     records = tmp_path / "records.jsonl"
     result = run_cli("--format", "json", "--meta", meta, "--repo-dir", tmp_path, "readme",
                      "--mode", mode, "--badges", "local", "--records", records, "--write")
@@ -182,7 +182,7 @@ def test_personal_upgrade_does_not_claim_authored_banner_path(tmp_path, marked):
         hero = f"<!-- showcase:banner:start -->\n{hero}\n<!-- showcase:banner:end -->"
     source = hero + "\n\n# Profile\n\nAuthored notes.  \n"
     path = tmp_path / "README.md"
-    path.write_text(source, encoding="utf-8")
+    path.write_bytes(source.encode("utf-8"))
     result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--mode", "upgrade", "--write")
     assert result.returncode == 0, result.stdout + result.stderr
     assert path.read_bytes() == source.encode()
@@ -222,7 +222,7 @@ def test_personal_bootstrap_preserves_authored_hero_in_pristine_template(tmp_pat
               '**Show synthetic public projects.**\n<!-- showcase:tagline:end -->\n\n---\n\n'
               + pristine_block('## About\n\nSynthetic template content.') + '\n')
     path = tmp_path / "README.md"
-    path.write_text(source, encoding="utf-8")
+    path.write_bytes(source.encode("utf-8"))
     result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--bootstrap", "--write")
     assert result.returncode == 0, result.stdout + result.stderr
     after = path.read_text(encoding="utf-8")
@@ -246,7 +246,7 @@ def test_unresolved_existing_intro_refuses_all_writes(tmp_path, intro_bytes, mod
               '</p>\n<!-- showcase:banner:end -->\n\n'
               '<!-- showcase:nav:start -->\nOld nav\n<!-- showcase:nav:end -->\n\n# Profile\n')
     path = tmp_path / "README.md"
-    path.write_text(source, encoding="utf-8")
+    path.write_bytes(source.encode("utf-8"))
     records = tmp_path / "records.jsonl"
     result = run_cli("--format", "json", "--config", config_path, "--meta", meta, "--repo-dir", tmp_path,
                      "readme", "--mode", mode, "--badges", "local", "--records", records, "--write")
@@ -303,8 +303,105 @@ def test_changed_intro_identity_refuses_ambiguous_managed_hero(tmp_path, intro_b
               '  <img src="assets/intro.svg" alt="Previous identity" width="100%">\n'
               '</p>\n<!-- showcase:banner:end -->\n\n# Profile\n')
     path = tmp_path / "README.md"
-    path.write_text(source, encoding="utf-8")
+    path.write_bytes(source.encode("utf-8"))
     result = run_cli("--format", "json", "--meta", meta, "--repo-dir", tmp_path,
                      "readme", "--mode", "header", "--write")
     assert result.returncode == 4 and "needs-input:intro-identity" in result.stdout
     assert path.read_bytes() == source.encode()
+
+
+LEGACY_HERO = ('<!-- showcase:banner:start -->\n<p align="center">\n'
+               '  <img src="docs/images/banner.png" alt="CompleteDotTech by CompleteTech LLC" width="100%">\n'
+               '</p>\n<!-- showcase:banner:end -->\n\n')
+
+
+@pytest.mark.parametrize("variant", ["G", "H"])
+def test_personal_callout_variant_refreshes_managed_hero_to_intro(tmp_path, intro_bytes, variant):
+    meta = metadata(tmp_path)
+    put_intro(tmp_path, intro_bytes)
+    source = LEGACY_HERO + "> [!NOTE]\n> Synthetic callout.\n\n# Profile\n\nAuthored notes.\n"
+    path = tmp_path / "README.md"
+    path.write_bytes(source.encode("utf-8"))
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--mode", "upgrade", "--variant", variant,
+                     "--write")
+    assert result.returncode == 0, result.stdout + result.stderr
+    text = path.read_text(encoding="utf-8")
+    assert text.count('src="assets/intro.svg"') == 1 and "docs/images/banner.png" not in text
+    assert "> Synthetic callout." in text and "Authored notes." in text
+
+
+@pytest.mark.parametrize("variant", ["G", "H"])
+def test_personal_callout_variant_missing_intro_refuses_before_writes(tmp_path, variant):
+    meta = metadata(tmp_path)
+    source = LEGACY_HERO + "> [!NOTE]\n> Synthetic callout.\n\n# Profile\n\nAuthored notes.\n"
+    path = tmp_path / "README.md"
+    path.write_bytes(source.encode("utf-8"))
+    records = tmp_path / "records.jsonl"
+    result = run_cli("--format", "json", "--meta", meta, "--repo-dir", tmp_path, "readme", "--mode", "upgrade",
+                     "--variant", variant, "--badges", "local", "--records", records, "--write")
+    assert result.returncode == 4 and "needs-input:intro" in result.stdout, result.stdout + result.stderr
+    assert path.read_bytes() == source.encode("utf-8")
+    assert not records.exists() and not (tmp_path / "docs").exists()
+
+
+@pytest.mark.parametrize("variant", ["G", "H"])
+def test_personal_callout_variant_keeps_authored_hero_block(tmp_path, variant):
+    meta = metadata(tmp_path)
+    hero = '<p align="center">\n  <img src="custom.svg" alt="Authored hero" width="840">\n</p>'
+    source = (f"<!-- showcase:banner:start -->\n{hero}\n<!-- showcase:banner:end -->\n\n"
+              "> [!NOTE]\n> Synthetic callout.\n\n# Profile\n\nAuthored notes.\n")
+    path = tmp_path / "README.md"
+    path.write_bytes(source.encode("utf-8"))
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--mode", "upgrade", "--variant", variant,
+                     "--write")
+    assert result.returncode == 0, result.stdout + result.stderr
+    text = path.read_text(encoding="utf-8")
+    assert hero in text and "assets/intro.svg" not in text and "docs/images/banner.png" not in text
+
+
+def _preserve_list_readme() -> str:
+    # Over 15,000 bytes puts any README on the §7.0 preserve list.
+    filler = "\n\n".join(f"Synthetic Northwind paragraph {i} with authored notes that stay." for i in range(320))
+    return LEGACY_HERO + "# Profile\n\n## Notes\n\n" + filler + "\n"
+
+
+def test_personal_preserve_list_upgrade_opens_with_intro(tmp_path, intro_bytes):
+    meta = metadata(tmp_path)
+    put_intro(tmp_path, intro_bytes)
+    source = _preserve_list_readme()
+    assert len(source.encode("utf-8")) > 15000
+    path = tmp_path / "README.md"
+    path.write_bytes(source.encode("utf-8"))
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--mode", "upgrade", "--write")
+    assert result.returncode == 0, result.stdout + result.stderr
+    text = path.read_text(encoding="utf-8")
+    assert text.count('src="assets/intro.svg"') == 1 and "docs/images/banner.png" not in text
+    assert "Synthetic Northwind paragraph 319 with authored notes that stay." in text
+
+
+def test_personal_preserve_list_upgrade_missing_intro_refuses_before_writes(tmp_path):
+    meta = metadata(tmp_path)
+    source = _preserve_list_readme()
+    path = tmp_path / "README.md"
+    path.write_bytes(source.encode("utf-8"))
+    records = tmp_path / "records.jsonl"
+    result = run_cli("--format", "json", "--meta", meta, "--repo-dir", tmp_path, "readme", "--mode", "upgrade",
+                     "--badges", "local", "--records", records, "--write")
+    assert result.returncode == 4 and "needs-input:intro" in result.stdout, result.stdout + result.stderr
+    assert path.read_bytes() == source.encode("utf-8")
+    assert not records.exists() and not (tmp_path / "docs").exists()
+
+
+def test_personal_bootstrap_missing_intro_refuses_before_writes(tmp_path):
+    from ctshowcase.readme import pristine_block
+
+    meta = metadata(tmp_path)
+    source = (LEGACY_HERO + '# CompleteTech Repo Template\n\n<!-- showcase:tagline:start -->\n'
+              '**Show synthetic public projects.**\n<!-- showcase:tagline:end -->\n\n---\n\n'
+              + pristine_block('## About\n\nSynthetic template content.') + '\n')
+    path = tmp_path / "README.md"
+    path.write_bytes(source.encode("utf-8"))
+    result = run_cli("--format", "json", "--meta", meta, "--repo-dir", tmp_path, "readme", "--bootstrap", "--write")
+    assert result.returncode == 4 and "needs-input:intro" in result.stdout, result.stdout + result.stderr
+    assert path.read_bytes() == source.encode("utf-8")
+    assert not (tmp_path / "CONTRIBUTING.md").exists()

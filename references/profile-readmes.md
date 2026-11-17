@@ -126,6 +126,12 @@ matching establishes applicability, not artwork rights. An unresolved identity o
 refresh because ownership cannot be established. This command does not generate artwork implicitly. Organization
 and ordinary repository scaffolds keep `docs/images/banner.png`.
 
+The same rule covers every place the README hero is emitted for the personal profile: scaffold, header and
+upgrade, `--bootstrap`, the G and H callout variants (`--variant G|H`) and the §7.0 preserve-list upgrade (for
+example a README over 15,000 bytes). Each either writes the intro or returns the needs-input result above, and
+none of them writes a README, badge, CONTRIBUTING or change record on that refusal. `lint readme` checks
+`assets/intro.svg` as the first image of the personal README (D13, R7).
+
 Personal header refresh migrates only the exact legacy generated banner body
 (or an empty managed banner block); authored hero bodies and unmarked artwork
 stay owned by their author. Personal upgrade with authored artwork refreshes
