@@ -347,3 +347,20 @@ def test_editorconfig_mirror_retains_local_worktree_settings_without_parents(tmp
 
     monkeypatch.setattr("ctshowcase.formatting.subprocess.run", run)
     assert format_text(repo, repo / "docs/images/sidecar.json", '{"ok":true}') == '{"ok":true}'
+
+
+@pytest.mark.parametrize("name", [".prettierignore", ".gitignore"])
+def test_formatter_refuses_external_ignore_files(tmp_path, monkeypatch, name):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    local_prettier(repo)
+    outside = tmp_path / "outside.ignore"
+    outside.write_text("README.md\n", encoding="utf-8")
+    try:
+        (repo / name).symlink_to(outside)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symbolic links are unavailable: {exc}")
+    monkeypatch.setattr("ctshowcase.formatting.shutil.which", lambda _: "/node")
+    monkeypatch.setattr("ctshowcase.formatting.subprocess.run", lambda *a, **k: pytest.fail("loaded escaping ignore file"))
+    with pytest.raises(NeedsInput, match="ignore files must be inside"):
+        format_text(repo, repo / "README.md", "# Example")

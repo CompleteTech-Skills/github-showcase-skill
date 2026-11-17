@@ -54,7 +54,12 @@ async function main() {
     const prettier = require(packagePath);
     const input = fs.readFileSync(0, "utf8");
     for (const ignorePath of [".gitignore", ".prettierignore"]) {
-        if (fs.existsSync(ignorePath) && (await prettier.getFileInfo(filepath, { ignorePath, resolveConfig: false })).ignored) {
+        if (!fs.existsSync(ignorePath)) continue;
+        const location = path.relative(fs.realpathSync(process.cwd()), fs.realpathSync(ignorePath));
+        if (location === ".." || location.startsWith(".." + path.sep) || path.isAbsolute(location)) {
+            throw new Error("ignore file escapes the checkout");
+        }
+        if ((await prettier.getFileInfo(filepath, { ignorePath, resolveConfig: false })).ignored) {
             process.stdout.write(JSON.stringify(input));
             return;
         }
@@ -461,6 +466,10 @@ def format_text(repo_dir: Path | None, destination: Path, text: str) -> str:
     if entry is None:
         raise NeedsInput("formatter", "the installed Prettier API is unavailable")
     config, editorconfigs = _configured_prettier(root, root / relative)
+    for name in (".gitignore", ".prettierignore"):
+        ignored = root / name
+        if (ignored.exists() or ignored.is_symlink()) and not _file_inside(root, ignored):
+            raise NeedsInput("formatter", "formatter ignore files must be inside the target checkout")
     try:
         with ExitStack() as stack:
             editor_file = editor_config = ""
@@ -499,3 +508,37 @@ def format_text(repo_dir: Path | None, destination: Path, text: str) -> str:
                                 code=CHECK_FAILED)
         raise ShowcaseError("target Prettier returned invalid output", log="formatter-failed")
     return formatted
+
+
+def match_formatted_managed_blocks(repo_dir: Path, path: Path, before: str, after: str) -> str:
+    """Compare an old managed block with the same content under the pinned formatter."""
+    from .readme import MARK, find_blocks, normalize_text
+
+    def unique_blocks(text, *, keep_offsets=False):
+        seen = {}
+        scan = text if keep_offsets else normalize_text(text).replace("\r", "\n")
+        for block in find_blocks(MARK, scan):
+            name = block.group(1)
+            seen[name] = block if name not in seen else None
+        return seen
+
+    original = unique_blocks(before)
+    candidate = unique_blocks(after, keep_offsets=True)
+    names = {"banner", "nav", "badges", "tagline", "footer"}.intersection(original, candidate)
+    names = {name for name in names if original[name] and candidate[name]
+             and original[name].group(2) != candidate[name].group(2)}
+    if not names:
+        return after
+    previous = unique_blocks(format_text(repo_dir, path, before))
+    current = unique_blocks(format_text(repo_dir, path, after))
+    replacements = []
+    for name in names:
+        a, b = previous.get(name), current.get(name)
+        if a and b and a.group(2) == b.group(2):
+            start, end = candidate[name].span(2)
+            replacements.append((start, end, original[name].group(2)))
+    # This comparison view changes only managed bodies proven formatter-equivalent.
+    # The normal line-preservation check still compares all original authored content.
+    for start, end, body in sorted(replacements, reverse=True):
+        after = after[:start] + body + after[end:]
+    return after

@@ -512,6 +512,14 @@ def cmd_readme(args):
     if args.variant and args.variant != "auto":
         ctx.det["variant"] = args.variant
     ctx.local_badges = args.badges == "local"
+    def preservation(old, new, removed):
+        problems = readme.preservation(old, new, removed)
+        if problems and args.format_generated:
+            from ctshowcase.formatting import match_formatted_managed_blocks
+            comparable = match_formatted_managed_blocks(rd, path, old, new)
+            problems = readme.preservation(old, comparable, removed)
+        return problems
+
     mode = args.mode
     contrib_new = None
     original_contrib = None
@@ -538,12 +546,13 @@ def cmd_readme(args):
             ctx.log("bootstrap:edited")
             base_text = readme.drop_pristine(before)
             after, removed = readme.upgrade(ctx, base_text)
-            if readme.preservation(base_text, after, removed):
+            problems = preservation(base_text, after, removed)
+            if problems:
                 # a marked footer that holds authored content (partner or foreign image) must never be regenerated
                 refusal = _authored_footer_refusal(ctx, base_text)
                 if refusal:
                     return base("readme", ctx, result="fail", mode="bootstrap",
-                                problems=refusal + readme.preservation(base_text, after, removed)[:19],
+                                problems=refusal + problems[:19],
                                 logs=ctx.logs + ["readme-shrink"]), CHECK_FAILED
                 ctx.log("readme-shrink")
                 after, removed = readme.header_only(ctx, base_text), []
@@ -559,7 +568,7 @@ def cmd_readme(args):
             after = readme.header_only(ctx, before)
         else:
             after, removed = readme.upgrade(ctx, before)
-            problems = readme.preservation(before, after, removed)
+            problems = preservation(before, after, removed)
             if problems:
                 return base("readme", ctx, result="fail", mode=mode, problems=problems[:20],
                             logs=ctx.logs + ["readme-shrink"]), CHECK_FAILED

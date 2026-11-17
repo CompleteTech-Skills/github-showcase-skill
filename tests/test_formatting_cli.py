@@ -616,3 +616,27 @@ def test_formatted_readme_from_relative_or_implicit_checkout(tmp_path, monkeypat
     args = ["--meta", str(meta)] + (["--repo-dir", "repo"] if explicit else [])
     assert showcase.main([*args, "readme", "--mode", "scaffold", "--write", "--format-generated"]) == 0
     assert "showcase:tagline:start" in target_path.read_text(encoding="utf-8")
+
+
+def test_reformatted_managed_nav_is_idempotent_and_authored_nav_is_preserved(tmp_path, monkeypatch):
+    import showcase
+
+    repo, meta = target(tmp_path)
+    readme = repo / "README.md"
+    readme.write_text("# Human Title\n\nAuthored overview.\n\n## About\n\nExisting information.\n", encoding="utf-8")
+
+    def wrap_nav(root, target, text):
+        return text.replace(" · [All repositories]", " ·\n[All repositories]").replace(" · [Contributing]", " ·\n[Contributing]")
+
+    monkeypatch.setattr("ctshowcase.formatting.format_text", wrap_nav)
+    args = ["--meta", str(meta), "--repo-dir", str(repo), "readme", "--write", "--format-generated"]
+    assert showcase.main(args) == 0
+    first = readme.read_bytes()
+    assert b"\n[All repositories]" in first
+    assert showcase.main(args) == 0
+    assert readme.read_bytes() == first
+    authored = first.replace(b"<!-- showcase:nav:end -->",
+                             b"Authored navigation note.\n\n<!-- showcase:nav:end -->")
+    readme.write_bytes(authored)
+    assert showcase.main(args) == 1
+    assert readme.read_bytes() == authored
