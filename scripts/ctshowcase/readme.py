@@ -292,7 +292,8 @@ def tagline_body(ctx: RepoContext, existing: str | None = None, text: str = "") 
     R2: the tagline is the description. Without one (logged needs-input:description) the block keeps `existing`, the
     body it holds now in README `text`, unless that is inherited (guardrail 6: improve, never erase); nothing to keep
     gives an empty block, never "****"."""
-    desc = (ctx.meta.get("description") or "").strip()
+    staged = getattr(ctx, "staged_description", None)
+    desc = (staged["text"] if staged else ctx.meta.get("description") or "").strip()
     if desc:
         return f'<p align="center"><b>{desc}</b></p>' if ctx.det["variant"] == "F" else f"**{desc}**"
     ctx.log("needs-input:description")

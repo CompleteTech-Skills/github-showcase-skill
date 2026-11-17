@@ -2623,6 +2623,9 @@ def cmd_content(args, cli=None):
     resolver = _resolver(args, cli)
     head = {"command": "content", "action": act}
     if act == "social":
+        if args.description is not None and args.report:
+            from .staged import check_auxiliary
+            check_auxiliary(Path(args.meta) if args.meta else None, cli.repo_dir(args), Path(args.report))
         if args.job and args.description is not None:
             from .staged import prepare
             prepare({}, args.description)

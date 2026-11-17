@@ -363,8 +363,8 @@ def test_canonical_and_custom_outputs_have_independent_provenance(make_ctx, tmp_
     record_output(ctx, tmp_path / "README.md", {"sha256": "readme-hash"})
     record_output(ctx, tmp_path / "assets" / SOCIAL_STAGING / "social-preview.png", {"sha256": "social-hash"})
     updated = read_sidecar(canonical.parent)
-    assert updated["fingerprint"] == original["fingerprint"]
-    assert updated["inputs"] == original["inputs"]
+    assert "fingerprint" not in original and "fingerprint" not in updated
+    assert "inputs" not in original and "inputs" not in updated
     assert updated["outputs"]["banner.png"] == original["outputs"]["banner.png"]
     assert updated["outputs"]["./banner.png"]["staged_description"]["text"] == "Custom proposal."
     ctx.meta, ctx.staged_description = original_meta, None
@@ -526,3 +526,72 @@ def test_action_commit_step_skips_partial_live_refresh_with_staged_records(tmp_p
     assert "commit skipped" in result.stdout
     assert proposal not in result.stdout + result.stderr
     assert read_sidecar(images)["outputs"]["banner.png"]["staged_description"]["text"] == proposal
+
+
+@pytest.mark.parametrize("collision", ["metadata", "sidecar", "records", "report", "preview-directory"])
+def test_staged_destinations_fail_before_artifact_writes(tmp_path, collision):
+    target = tmp_path / "repo"
+    images = target / "docs/images"
+    images.mkdir(parents=True)
+    capture = images / ".showcase.json" if collision == "sidecar" else tmp_path / "capture.json"
+    original = json.dumps(meta_dict())
+    capture.write_text(original, encoding="utf-8")
+    stage = ["--description", "Route support requests."]
+    common = ["--meta", capture, "--repo-dir", target, "--format", "json"]
+    if collision == "records":
+        command = ["readme", "--mode", "scaffold", "--write", "--records", capture]
+    elif collision == "report":
+        command = ["content", "social", "--report", capture]
+    elif collision == "preview-directory":
+        preview = images / "card.png"
+        preview.mkdir()
+        command = ["card", "--png", preview]
+    else:
+        command = ["banner", "--allow-few-chips", "--out", capture if collision == "metadata" else images / "banner.png"]
+    result = run_cli(*common, *command, *stage)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "staged-description:path" in json.loads(result.stdout)["logs"]
+    assert capture.read_text(encoding="utf-8") == original
+    assert not (images / "banner.png").exists()
+    assert not (images / "card.svg").exists()
+    assert not (target / "README.md").exists()
+
+
+def test_staged_readme_only_uses_proposal_for_tagline(tmp_path):
+    capture = tmp_path / "capture.json"
+    capture.write_text(json.dumps(meta_dict(repo="acme-tool", description="Route support requests.")), encoding="utf-8")
+    target = tmp_path / "repo"
+    target.mkdir()
+    common = ["--meta", capture, "--repo-dir", target, "--format", "json", "readme"]
+    staged = run_cli(*common, "--mode", "scaffold", "--description", "Run the AcME tool.", "--write")
+    assert staged.returncode == 0, staged.stdout + staged.stderr
+    text = (target / "README.md").read_text(encoding="utf-8")
+    assert "# Acme Tool" in text
+    assert "**Run the AcME tool.**" in text
+    live = run_cli(*common, "--mode", "header", "--write")
+    assert live.returncode == 0, live.stdout + live.stderr
+    assert "AcME" not in (target / "README.md").read_text(encoding="utf-8")
+    assert "staged_description" not in read_sidecar(target / "docs/images")["outputs"]["README.md"]
+
+
+def test_staged_render_marks_output_before_writing_bytes(make_ctx, monkeypatch, tmp_path):
+    from showcase import write_rendered_art
+
+    ctx = make_ctx(repo_dir=tmp_path)
+    ctx.meta, ctx.staged_description = prepare(ctx.meta, "Unpublished support process.")
+    art = tmp_path / "docs/images/card.svg"
+    png = tmp_path / "docs/images/card.png"
+
+    def fail_preview(_ctx, path, data):
+        if path == png:
+            raise PermissionError("synthetic write failure")
+        path.write_bytes(data)
+
+    monkeypatch.setattr("showcase.write_artifact", fail_preview)
+    with pytest.raises(PermissionError, match="synthetic write failure"):
+        write_rendered_art(ctx, (art, b"preview SVG", {}), (png, b"preview PNG", {}))
+
+    assert art.read_bytes() == b"preview SVG"
+    sidecar = read_sidecar(art.parent)
+    assert "inputs" not in sidecar
+    assert sidecar["outputs"]["card.svg"]["staged_description"]["text"] == "Unpublished support process."

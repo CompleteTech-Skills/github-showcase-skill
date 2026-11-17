@@ -164,5 +164,8 @@ def write_sidecar(out_dir: Path, inp: dict, cfg_sha: str, name: str, record: dic
 
 
 def file_record(path: Path, **extra) -> dict:
-    data = path.read_bytes()
+    return bytes_record(path.read_bytes(), **extra)
+
+
+def bytes_record(data: bytes, **extra) -> dict:
     return {"sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data), **extra}

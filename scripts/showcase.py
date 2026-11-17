@@ -125,9 +125,11 @@ def context(args, b=None, *, for_coverage=False):
     rd = repo_dir(args)
     meta = merged(args.meta, str(rd) if rd else None)
     from ctshowcase.staged import prepare
-    meta, staged = prepare(meta, getattr(args, "description", None))
-    ctx = RepoContext(b, meta, rd, type_override=getattr(args, "type_override", None), for_coverage=for_coverage)
+    proposal_meta, staged = prepare(meta, getattr(args, "description", None))
+    ctx = RepoContext(b, meta if args.command == "readme" else proposal_meta, rd,
+                      type_override=getattr(args, "type_override", None), for_coverage=for_coverage)
     if staged is not None:
+        ctx.meta_path = Path(args.meta).resolve() if args.meta else None
         ctx.staged_description = staged
         ctx.log("staged-description")
     return ctx
@@ -205,9 +207,25 @@ def write_artifact(ctx, path: Path, data: bytes) -> None:
 # ---------------------------------------------------------------------------------------------------
 # generators
 # ---------------------------------------------------------------------------------------------------
+def write_rendered_art(ctx, *artifacts: tuple[Path, bytes, dict], summarize_art: bool = True) -> None:
+    from ctshowcase.fingerprint import bytes_record
+    from ctshowcase.staged import record_output
+
+    staged = getattr(ctx, "staged_description", None) is not None
+    if staged:
+        # Record every proposal before changing any artifact. A partial write remains guarded by the Action.
+        for path, data, details in artifacts:
+            record_output(ctx, path, bytes_record(data, **details))
+    for path, data, _ in artifacts:
+        write_artifact(ctx, path, data)
+    if not staged:
+        record = maybe_sidecar if summarize_art else record_output
+        for path, data, details in artifacts:
+            record(ctx, path, bytes_record(data, **details))
+
+
 def cmd_banner(args):
     from ctshowcase import banner
-    from ctshowcase.fingerprint import file_record
     from ctshowcase.staged import check_outputs
     from ctshowcase.typeset import Fonts
     ctx = context(args)
@@ -229,9 +247,8 @@ def cmd_banner(args):
                                keys=args.key_chip or None, attrs=args.chip or None, category=args.category, icon=args.icon,
                                allow_few_chips=args.allow_few_chips)
     check_outputs(ctx, out)
-    write_artifact(ctx, out, data)
-    maybe_sidecar(ctx, out, file_record(out, px=info["px"], scale=info["scale"], chips=info["chips"],
-                                        icon_source=info["icon"]["source"]))
+    write_rendered_art(ctx, (out, data, dict(px=info["px"], scale=info["scale"], chips=info["chips"],
+                                           icon_source=info["icon"]["source"])))
     alt = f"{ctx.repo} by {ctx.company}"
     return base("banner", ctx, result="incomplete" if info["incomplete"] else "ok", out=str(out), bytes=info["bytes"], px=info["px"], save=info["save"],
                 alt=alt, eyebrow=info["eyebrow"], title_lines=info["title_lines"], subtitle=info["subtitle"],
@@ -240,7 +257,6 @@ def cmd_banner(args):
 
 def cmd_card(args):
     from ctshowcase import card, svglint
-    from ctshowcase.fingerprint import file_record
     from ctshowcase.staged import check_outputs
     from ctshowcase.scene import png_bytes
     from ctshowcase.typeset import Fonts
@@ -260,15 +276,11 @@ def cmd_card(args):
         return base("card", ctx, result="fail", lint=lint), CHECK_FAILED
     preview = Path(args.png) if args.png else None
     check_outputs(ctx, out, *([preview] if preview is not None else []))
-    preview_bytes = png_bytes(card.preview_png(scene, fonts)) if preview is not None else None
-    write_artifact(ctx, out, svg.encode("utf-8"))
-    outputs = [str(out)]
-    if preview is not None and preview_bytes is not None:
-        write_artifact(ctx, preview, preview_bytes)
-        outputs.append(args.png)
-    maybe_sidecar(ctx, out, file_record(out))
+    artifacts = [(out, svg.encode("utf-8"), {})]
     if preview is not None:
-        maybe_sidecar(ctx, preview, file_record(preview))
+        artifacts.append((preview, png_bytes(card.preview_png(scene, fonts)), {}))
+    write_rendered_art(ctx, *artifacts)
+    outputs = [str(out)] + ([args.png] if preview is not None else [])
     return base("card", ctx, result="ok", out=str(out), outputs=outputs, bytes=len(svg.encode()),
                 alt=f"{ctx.repo}: {ctx.meta.get('description')}", items=info["items"], icon=info["icon"],
                 lint=lint), OK
@@ -276,7 +288,7 @@ def cmd_card(args):
 
 def cmd_social(args):
     from ctshowcase import social
-    from ctshowcase.staged import SOCIAL_STAGING, check_outputs, check_social_path, record_output
+    from ctshowcase.staged import SOCIAL_STAGING, check_outputs, check_social_path
     from ctshowcase.typeset import Fonts
     ctx = context(args)
     # R10 (ctx.social_applicable) includes backups and the personal-profile capstone: render whatever adopt uploads,
@@ -297,10 +309,9 @@ def cmd_social(args):
     if fmt == "jpg":
         out = out.with_suffix(".jpg")
         check_social_path(out, staged=staged, job=job)
-    from ctshowcase.fingerprint import file_record
-    check_outputs(ctx, out)
-    write_artifact(ctx, out, data)
-    record_output(ctx, out, file_record(out))
+    report = getattr(args, "report", None)
+    check_outputs(ctx, out, auxiliary=(Path(report),) if staged and report else ())
+    write_rendered_art(ctx, (out, data, {}), summarize_art=False)
     res = base("social-preview", ctx, result="ok", out=str(out), bytes=len(data), format=fmt, **info)
     if args.command == "social-preview":  # the hidden, deprecated top-level alias of `content social`
         res["logs"] = list(res["logs"]) + ["deprecated:social-preview (use content social)"]
@@ -540,15 +551,22 @@ def cmd_readme(args):
         fonts = Fonts(ctx.brand)
         for rel, (label, message, colour) in sorted(ctx.badge_files.items()):
             badge_outputs[rel] = badge.svg(ctx.brand, fonts, label, message, colour, style=ctx.style).encode()
-    if args.write:
-        from ctshowcase.staged import check_outputs
+    from ctshowcase.staged import check_outputs, record_output, tagline_blocks, tagline_digest
+    from ctshowcase.fingerprint import bytes_record, file_record
 
+    staged = getattr(ctx, "staged_description", None) is not None
+    report = (Path(args.records),) if staged and args.records and changed else ()
+    if args.write:
         destinations = [rd / rel for rel in badge_outputs]
-        if changed or str(ctx.meta.get("description") or "").strip():
+        if changed or staged or str(ctx.meta.get("description") or "").strip():
             destinations.append(path)
         if changed and contrib_new is not None:
             destinations.append(rd / "CONTRIBUTING.md")
-        check_outputs(ctx, *destinations)
+        check_outputs(ctx, *destinations, auxiliary=report)
+        if staged:
+            tagline = readme.tagline_body(ctx).strip()
+            if tagline in tagline_blocks(after):
+                record_output(ctx, path, bytes_record(after.encode("utf-8"), tagline_sha256=tagline_digest(tagline)))
         for rel, data in badge_outputs.items():
             write_artifact(ctx, rd / rel, data)
     if args.write and changed:
@@ -558,14 +576,13 @@ def cmd_readme(args):
                 write_artifact(ctx, rd / "CONTRIBUTING.md", contrib_new.encode("utf-8"))
             else:
                 (rd / "CONTRIBUTING.md").write_text(contrib_new, encoding="utf-8")
-    if args.write and str(ctx.meta.get("description") or "").strip():
-        from ctshowcase.staged import record_output, tagline_blocks, tagline_digest
-        from ctshowcase.fingerprint import file_record
+    if args.write and not staged and str(ctx.meta.get("description") or "").strip():
         tagline = readme.tagline_body(ctx).strip()
         if tagline in tagline_blocks(after):
-            extra = {"tagline_sha256": tagline_digest(tagline)} if getattr(ctx, "staged_description", None) else {}
-            record_output(ctx, path, file_record(path, **extra))
+            record_output(ctx, path, file_record(path))
     if args.records and changed:
+        if staged and not args.write:
+            check_outputs(ctx, path, auxiliary=report)
         records.append(args.records, [records.record(ctx.owner, ctx.repo, "readme", "README.md", before, after,
                                                      f"§7 variant {ctx.det['variant']} ({mode})")])
     res = base("readme", ctx, result="changed" if changed else "unchanged", mode="bootstrap" if args.bootstrap else mode,

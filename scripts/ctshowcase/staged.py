@@ -59,23 +59,52 @@ def _output_slot(ctx, path: Path) -> tuple[Path, str, bool]:
     return directory, name, summarize
 
 
-def check_outputs(ctx, *paths: Path) -> None:
-    """Keep renderer outputs and their provenance paths distinct before any write."""
-    sidecars = {(_output_slot(ctx, path)[0] / fp.SIDECAR).resolve() for path in paths}
-    root = Path(ctx.repo_dir).resolve() if ctx.repo_dir else None
-    real_paths = []
+def _aliases(left: Path, right: Path) -> bool:
+    return left == right or (left.exists() and right.exists() and left.samefile(right))
+
+
+def check_capture(capture: Path | None, *destinations: Path) -> None:
+    if capture is not None and any(_aliases(capture.resolve(), path.resolve()) for path in destinations):
+        raise ShowcaseError("write destination overlaps the metadata capture", log="staged-description:path")
+
+
+def check_auxiliary(capture: Path | None, checkout: Path | None, *paths: Path) -> None:
+    check_capture(capture, *paths)
     for path in paths:
         resolved = path.resolve()
-        if (resolved.name == fp.SIDECAR or resolved in sidecars
-                or path.name.casefold() == fp.SIDECAR.casefold()
-                or (resolved.exists() and any(sidecar.exists() and resolved.samefile(sidecar) for sidecar in sidecars))):
+        if path.is_symlink() or (path.exists() and not path.is_file()):
+            raise ShowcaseError("staged report must be a regular file", log="staged-description:path")
+        if checkout is None:
+            continue
+        root = checkout.resolve()
+        if (resolved.is_relative_to((root / "docs/images").resolve())
+                or any(_aliases(resolved, (root / name).resolve()) for name in ("README.md", "CONTRIBUTING.md"))):
+            raise ShowcaseError("staged reports must stay outside Action-managed paths", log="staged-description:path")
+
+
+def check_outputs(ctx, *paths: Path, auxiliary: tuple[Path, ...] = ()) -> None:
+    """Keep renderer outputs and their provenance paths distinct before any write."""
+    sidecars = {_output_slot(ctx, path)[0] / fp.SIDECAR for path in paths}
+    real_sidecars = {path.resolve() for path in sidecars}
+    staged = getattr(ctx, "staged_description", None) is not None
+    if staged:
+        capture = getattr(ctx, "meta_path", None)
+        check_capture(capture, *paths, *real_sidecars)
+        check_auxiliary(capture, ctx.repo_dir, *auxiliary)
+        for path in (*paths, *sidecars):
+            if path.is_symlink() or (path.exists() and not path.is_file()):
+                raise ShowcaseError("staged output must be a regular file", log="staged-description:path")
+    root = Path(ctx.repo_dir).resolve() if ctx.repo_dir else None
+    real_paths = []
+    for path in (*paths, *auxiliary):
+        resolved = path.resolve()
+        if (path.name.casefold() == fp.SIDECAR.casefold()
+                or any(_aliases(resolved, sidecar) for sidecar in real_sidecars)):
             raise ShowcaseError("render output overlaps its showcase sidecar", log="staged-description:path")
-        if getattr(ctx, "staged_description", None) is not None:
-            if path.is_symlink() or (root and path.absolute().is_relative_to(root) and not resolved.is_relative_to(root)):
-                raise ShowcaseError("staged output must not write through a link", log="staged-description:path")
-        for other in real_paths:
-            if resolved == other or (resolved.exists() and other.exists() and resolved.samefile(other)):
-                raise ShowcaseError("render output paths must be distinct", log="staged-description:path")
+        if staged and root and path.absolute().is_relative_to(root) and not resolved.is_relative_to(root):
+            raise ShowcaseError("staged output must not write through a link", log="staged-description:path")
+        if any(_aliases(resolved, other) for other in real_paths):
+            raise ShowcaseError("render output paths must be distinct", log="staged-description:path")
         real_paths.append(resolved)
 
 
@@ -91,7 +120,7 @@ def record_output(ctx, path: Path, record: dict, *, always: bool = False) -> Pat
     if info is not None:
         record = dict(record, staged_description=info)
     return fp.write_sidecar(directory, fp.inputs(ctx.meta, ctx.repo_dir), ctx.brand.sha256, name,
-                            record, summarize=summarize and "exempt" not in record)
+                            record, summarize=summarize and info is None and "exempt" not in record)
 
 
 def tagline_forms(ctx) -> set[str]:

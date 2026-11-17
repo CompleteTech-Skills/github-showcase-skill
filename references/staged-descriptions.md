@@ -7,8 +7,9 @@ option. An empty or multiline value, or a value containing a managed README
 marker, returns `needs-input:description`.
 
 The command reports `staged-description` and the proposed text, its SHA-256 and
-the captured live description's SHA-256. It uses the proposal for type detection
-and as the description input to the renderer. For banners, an explicit or
+the captured live description's SHA-256. Art renderers use the proposal for
+type detection and as the description input. README rendering uses the proposal
+only in the managed tagline. For banners, an explicit or
 configured subtitle takes precedence. Follow the normal description check and
 the orchestrator's writer queue to approve the sentence for publication.
 
@@ -19,6 +20,8 @@ outside the target checkout, the sidecar is placed beside that output; metadata-
 rendering uses that location too. README dry runs report the proposal without
 writing a sidecar. `readme --write` records the proposal when the resulting
 README has a managed tagline with that text, including an already-current tagline.
+Explicit report and change-record destinations must stay outside the files the
+Action commits. The capture, output and provenance destinations must be distinct.
 Staged social previews default to `assets/.showcase-staging/social-preview.png`.
 An explicit staged path must also be inside a `.showcase-staging` directory.
 `content social --job` requires captured metadata and a live output path outside
@@ -27,7 +30,9 @@ An ordinary render replaces the record for each refreshed output with its curren
 hash and no staged description, while leaving untouched output records intact.
 Card PNG previews have their own records. Banner and card records retain the
 captured repository ID when available. The sidecar's top-level inputs and
-fingerprint describe the latest canonical banner or card artifact. Before skipping generation,
+fingerprint describe the latest live canonical banner or card artifact. Each
+staged record is written before the associated artifact, so a partial render
+remains guarded against automatic publication. Before skipping generation,
 the Action checks the selected banner and card for current records in a sidecar
 with per-output fingerprints. It also checks any existing README record when
 README refresh is enabled. Older sidecars use the top-level fingerprint.
