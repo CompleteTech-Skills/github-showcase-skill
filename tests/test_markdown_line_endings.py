@@ -283,3 +283,44 @@ def test_bare_reference_controls_check_visible_images_and_palette(tmp_path):
     failures = json.loads(result.stdout)['fails']
     assert 'R7 local image does not resolve: docs/miss%01ing.png' in failures
     assert 'R7 off-palette badge colour FF0000' in failures
+
+
+def test_readme_upgrade_keeps_mixed_endings_with_reordered_identical_sections(tmp_path):
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps({"owner": "Northwind-Trading-Co", "repo": ".github",
+                                "license": "MIT", "files": ["README.md"]}), encoding="utf-8")
+    path = tmp_path / "README.md"
+    raw = (b"# Probe\n\n## Files\n\nShared above\nRepeated line\rShared below\n\n"
+           b"## About\n\nShared above\nRepeated line\r\nShared below\n")
+    path.write_bytes(raw)
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--write")
+    assert result.returncode == 0, result.stdout + result.stderr
+    written = path.read_bytes()
+    assert b"## About\n\nShared above\nRepeated line\r\nShared below" in written
+    assert b"## Files\n\nShared above\nRepeated line\rShared below" in written
+    assert written.index(b"## About") < written.index(b"## Files")
+
+
+@pytest.mark.parametrize("tag", ["script", "style", "textarea", "title"])
+@pytest.mark.parametrize("ending", ENDINGS)
+def test_markers_in_raw_html_text_are_authored(tag, ending):
+    marker = readme.wrap("badges", "authored example")
+    inside = f"<{tag}>\n{marker}\n</{tag}>"
+    ordinary = f"<div>\n{readme.wrap('tagline', 'real marker')}\n</div>"
+    text = f"{inside}\n\n{ordinary}".replace("\n", ending)
+    assert [block.group(1) for block in mdcode.find_blocks(readme.MARK, text)] == ["tagline"]
+
+
+@pytest.mark.parametrize("ending", ENDINGS)
+def test_readme_write_does_not_rewrite_markers_inside_textarea(tmp_path, ending):
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps({"owner": "Northwind-Trading-Co", "repo": ".github",
+                                "license": "MIT", "files": ["README.md"]}), encoding="utf-8")
+    path = tmp_path / "README.md"
+    example = "<textarea>\n" + readme.wrap("badges", "") + "\n</textarea>"
+    raw = ("# Probe\n\n" + example + "\n").replace("\n", ending).encode("utf-8")
+    path.write_bytes(raw)
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--mode", "header", "--write")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert raw in path.read_bytes()
+    assert b"showcase:badges:generated" not in path.read_bytes()

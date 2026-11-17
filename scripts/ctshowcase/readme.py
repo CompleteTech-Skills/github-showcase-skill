@@ -14,7 +14,7 @@ from . import footer as footermod
 from .context import RepoContext
 from .detect import standard
 from .errors import ConfigError, NeedsInput
-from .mdcode import code_spans, find_blocks, masked  # noqa: F401  (code_spans: re-exported for callers)
+from .mdcode import code_block_spans, code_spans, find_blocks, masked  # noqa: F401  (code_spans: re-exported for callers)
 
 MARK = re.compile(r"<!-- showcase:([a-z-]+):start -->\n?(.*?)\n?<!-- showcase:\1:end -->", re.S)
 EMOJI = re.compile("[\U0001F000-\U0001FAFF☀-➿⬀-⯿️‍]")
@@ -1465,6 +1465,23 @@ def read_text(path: Path) -> str:
 _LINE_END = re.compile(r"\r\n|\r|\n")
 
 
+def _line_sections(text: str, lines: list[str]) -> list[str | None]:
+    """Identify the H2 section owning each line, excluding literal code headings."""
+    blocks = iter(code_block_spans(text)) if re.search(r"(?m)^## (?!#)", text) else iter(())
+    block = next(blocks, None)
+    section = None
+    offset = 0
+    names = []
+    for line in lines:
+        while block is not None and block[1] <= offset:
+            block = next(blocks, None)
+        if line.startswith("## ") and line[3:4] != "#" and (block is None or offset < block[0]):
+            section = line[3:].strip()
+        names.append(section)
+        offset += len(line) + 1
+    return names
+
+
 def restore_line_endings(raw: str, before: str, after: str) -> str:
     """`after` with the authored line endings of `raw` restored (#160).
 
@@ -1488,33 +1505,56 @@ def restore_line_endings(raw: str, before: str, after: str) -> str:
     # Keep the unchanged edges anchored. Match the remaining equal lines
     # by occurrence, including lines moved during section reordering.
     old_count, new_count = len(old) - 1, len(new) - 1
+    old_sections, new_sections = _line_sections(before, old), _line_sections(after, new)
     head = 0
-    while head < min(old_count, new_count) and old[head] == new[head]:
+    while head < min(old_count, new_count) and (old[head], old_sections[head]) == (new[head], new_sections[head]):
         head += 1
     tail = 0
-    while tail < min(old_count, new_count) - head and old[old_count - 1 - tail] == new[new_count - 1 - tail]:
+    while tail < min(old_count, new_count) - head:
+        a, b = old_count - 1 - tail, new_count - 1 - tail
+        if (old[a], old_sections[a]) != (new[b], new_sections[b]):
+            break
         tail += 1
     old_middle = range(head, old_count - tail)
     new_middle = range(head, new_count - tail)
     anchored = {}
     used = set()
 
-    def unique_context(lines, indexes, offsets):
+    def unique_context(lines, indexes, offsets, sections):
         keys = {}
         for i in indexes:
-            key = tuple(lines[i + offset] if i + offset >= 0 else None for offset in offsets)
+            if sections is not None and sections[i] is None:
+                continue
+            key = (sections[i] if sections is not None else None,
+                   *(lines[i + offset] if i + offset >= 0 else None for offset in offsets))
             keys[key] = i if key not in keys else None
         return keys
 
-    # Prefer unchanged neighbours when a line appears more than once.
-    # Every pass visits each line at most once.
-    for offsets in ((-1, 0, 1), (-1, 0), (0, 1)):
-        old_keys = unique_context(old, old_middle, offsets)
-        for key, new_index in unique_context(new, new_middle, offsets).items():
-            old_index = old_keys.get(key)
-            if new_index is not None and old_index is not None and new_index not in anchored and old_index not in used:
-                anchored[new_index] = old_index
-                used.add(old_index)
+    def match_context(old_scope, new_scope):
+        for offsets in ((-1, 0, 1), (-1, 0), (0, 1)):
+            old_keys = unique_context(old, old_middle, offsets, old_scope)
+            for key, new_index in unique_context(new, new_middle, offsets, new_scope).items():
+                old_index = old_keys.get(key)
+                if new_index is not None and old_index is not None and new_index not in anchored and old_index not in used:
+                    anchored[new_index] = old_index
+                    used.add(old_index)
+
+    # Pair repeated authored lines with their named section before allowing
+    # matches across sections. Adjacent context still distinguishes repeats
+    # within a section. Each pass visits each line at most once.
+    if any(old_sections) and any(new_sections):
+        match_context(old_sections, new_sections)
+        section_rows = defaultdict(deque)
+        for i in old_middle:
+            if i not in used and old_sections[i] is not None:
+                section_rows[(old_sections[i], old[i])].append(i)
+        for i in new_middle:
+            if i in anchored or new_sections[i] is None:
+                continue
+            if associated := section_rows.get((new_sections[i], new[i])):
+                anchored[i] = associated.popleft()
+                used.add(anchored[i])
+    match_context(None, None)
 
     remaining = defaultdict(deque)
     for i in old_middle:

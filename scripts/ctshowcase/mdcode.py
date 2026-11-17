@@ -2333,6 +2333,34 @@ inline_code_spans.cache_info = _accepted_inline.cache_info
 inline_code_spans.cache_parameters = _accepted_inline.cache_parameters
 
 
+_MARKER_RAW_ELEMENT = re.compile(r"</(script|style|textarea|title)[ \t\n\r]*>", re.I | re.A)
+_MARKER_RAW_NAMES = frozenset(("script", "style", "textarea", "title"))
+
+
+def _raw_marker_text_spans(source, blocks, tags, inline_literals):
+    """Locate raw HTML text whose comment-like content is authored text."""
+    closers = {name: [] for name in _MARKER_RAW_NAMES}
+    for match in _MARKER_RAW_ELEMENT.finditer(source):
+        closers[match.group(1).lower()].append(match.span())
+    _, comments = _comment_matches(source, blocks)
+    inline_tags = set(inline_literals)
+    covered = 0
+    for start, end in tags:
+        if start < covered:
+            continue
+        match = HTML_OPEN_TAG.match(source, start, end)
+        if match is None or match.end() != end or match.group(1).lower() not in _MARKER_RAW_NAMES:
+            continue
+        if (start, end) not in inline_tags:
+            block = _span_at(blocks, start)
+            if block is None or end > block[1] or _span_at(comments, start) is not None:
+                continue
+        closing = closers[match.group(1).lower()]
+        index = bisect.bisect_left(closing, (end, -1))
+        covered = closing[index][0] if index < len(closing) else len(source)
+        yield end, covered
+
+
 @functools.lru_cache(maxsize=16)
 def _marker_projection(text: str) -> str:
     """Hide code and accepted literal data, retaining real HTML marker comments.
@@ -2346,7 +2374,9 @@ def _marker_projection(text: str) -> str:
     # The main inline pass skips raw HTML blocks. Their tag attributes still
     # contain literal data, whereas real marker comments must remain visible.
     blocks = html_block_spans(source)
-    for span in _HTMLTokens(source).tags:
+    tags = _HTMLTokens(source).tags
+    spans.extend(_raw_marker_text_spans(source, blocks, tags, parsed[3]))
+    for span in tags:
         block = _span_at(blocks, span[0])
         if block is not None and span[1] <= block[1]:
             spans.append(span)
