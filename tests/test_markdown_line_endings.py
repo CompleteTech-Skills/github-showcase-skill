@@ -1,4 +1,5 @@
 """Shared scanners recognize Markdown endings while retaining authored offsets."""
+import hashlib
 import json
 
 import pytest
@@ -149,12 +150,23 @@ def test_readme_write_preserves_authored_line_endings(tmp_path, ending, bom):
     path = tmp_path / 'README.md'
     authored = ('# Probe\n\n<!-- showcase:badges:start -->\n<!-- showcase:badges:end -->\n\n'
                 'Authored text  \nMore\n').replace('\n', ending)
-    path.write_bytes(bom + authored.encode())
-    result = run_cli('--meta', meta, '--repo-dir', tmp_path, 'readme', '--write', '--mode', 'header')
+    authored_bytes = bom + authored.encode()
+    path.write_bytes(authored_bytes)
+    plan = tmp_path / 'plan.jsonl'
+    changes = tmp_path / 'changes.jsonl'
+    command = ('--meta', meta, '--repo-dir', tmp_path, 'readme', '--mode', 'header')
+    planned = run_cli(*command, '--records', plan)
+    assert json.loads(planned.stdout)['diff'].startswith('--- a/README.md')
+    assert path.read_bytes() == authored_bytes
+    result = run_cli(*command, '--write', '--records', changes)
     assert result.returncode in (0, 1), result.stderr
     assert json.loads(result.stdout)['written'] is True
     written_bytes = path.read_bytes()
     assert written_bytes.startswith(b'\xef\xbb\xbf') is bool(bom)
+    record = json.loads(plan.read_text(encoding='utf-8'))
+    assert record == json.loads(changes.read_text(encoding='utf-8'))
+    assert record['before_sha256'] == hashlib.sha256(authored_bytes).hexdigest()
+    assert record['after'].encode('utf-8') == written_bytes
     written = written_bytes[len(bom):].decode()
     assert '![Type GitHub profile]' in written
     assert written.endswith(('\n\nAuthored text  \nMore\n').replace('\n', ending))
@@ -171,3 +183,12 @@ def test_restore_line_endings_keeps_each_unchanged_line_ending():
     after = '# Probe\n\nnew\nadded\nkept\nlast'
     assert readme.restore_line_endings(raw, before, after) == '# Probe\r\n\rnew\r\nadded\r\nkept\r\nlast'
     assert readme.restore_line_endings('a\nb\n', 'a\nb\n', 'a\nc\n') == 'a\nc\n'
+
+
+
+def test_restore_line_endings_preserves_paragraph_after_lone_cr():
+    raw = 'A\rB\nC\n'
+    after = 'A\n\nB\nC\n'
+    restored = readme.restore_line_endings(raw, readme.normalize_text(raw), after)
+    assert restored == 'A\r\r\nB\nC\n'
+    assert readme.normalize_text(restored) == after

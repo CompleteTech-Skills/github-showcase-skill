@@ -28,7 +28,7 @@ BOM = "\ufeff"
 def normalize_text(text: str) -> str:
     """README text as the tools read it: LF line endings, no leading UTF-8 byte order mark (a BOM would hide the H1
     from every `^#` match)."""
-    text = text.replace("\r\n", "\n")
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
     return text[1:] if text.startswith(BOM) else text
 
 
@@ -1450,4 +1450,8 @@ def restore_line_endings(raw: str, before: str, after: str) -> str:
     for i, j, size in matcher.get_matching_blocks():
         for k in range(size):
             out_ends[head + j + k] = endings[head + i + k]
+    # A lone CR followed by an empty LF line would read back as one CRLF.
+    for i in range(1, len(out_ends)):
+        if not new[i] and out_ends[i - 1] == "\r" and out_ends[i] == "\n":
+            out_ends[i] = "\r\n"
     return "".join(line + end for line, end in zip(new, out_ends)) + new[-1]

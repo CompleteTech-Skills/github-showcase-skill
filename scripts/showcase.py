@@ -432,7 +432,8 @@ def cmd_readme(args):
     if rd is None:
         raise ShowcaseError("readme needs the repository checkout (--repo-dir DIR, or run inside it)", log="usage")
     path = rd / "README.md"
-    before = readme.read_text(path)
+    raw = path.read_bytes().decode("utf-8") if path.is_file() else ""
+    before = readme.normalize_text(raw)
     if ctx.watching_status() == "exempt:watching-fork":
         return base("readme", ctx, result="exempt", logs=["exempt"]), OK
     # a watching-org non-fork other than `.github`: held until decided (no README change, no --allow-hold)
@@ -500,15 +501,16 @@ def cmd_readme(args):
     if args.write:
         for rel, data in badge_outputs.items():
             write_bytes(rd / rel, data)
-    if args.write and changed:
-        raw = path.read_bytes().decode("utf-8") if path.is_file() else ""
+    if changed and (args.write or args.records):
         bom = readme.BOM if raw.startswith(readme.BOM) else ""
-        path.write_bytes((bom + readme.restore_line_endings(raw, before, after)).encode("utf-8"))
-        if contrib_new is not None:
-            (rd / "CONTRIBUTING.md").write_text(contrib_new, encoding="utf-8")
-    if args.records and changed:
-        records.append(args.records, [records.record(ctx.owner, ctx.repo, "readme", "README.md", before, after,
-                                                     f"§7 variant {ctx.det['variant']} ({mode})")])
+        restored = bom + readme.restore_line_endings(raw, before, after)
+        if args.write:
+            path.write_bytes(restored.encode("utf-8"))
+            if contrib_new is not None:
+                (rd / "CONTRIBUTING.md").write_text(contrib_new, encoding="utf-8")
+        if args.records:
+            records.append(args.records, [records.record(ctx.owner, ctx.repo, "readme", "README.md", raw, restored,
+                                                         f"§7 variant {ctx.det['variant']} ({mode})")])
     res = base("readme", ctx, result="changed" if changed else "unchanged", mode="bootstrap" if args.bootstrap else mode,
                variant=ctx.det["variant"], written=bool(args.write and changed))
     if args.diff or not args.write:
