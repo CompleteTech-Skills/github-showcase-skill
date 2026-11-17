@@ -408,3 +408,63 @@ def test_readme_formats_each_local_badge_before_writing(tmp_path, monkeypatch):
     assert repo / "README.md" in formatted_paths
     badges = list((repo / "docs/images/badges").glob("*.svg"))
     assert len(badges) >= 2 and set(badges) <= set(formatted_paths)
+
+
+def test_formatted_readme_keeps_concurrent_edit(tmp_path, monkeypatch):
+    import showcase
+
+    repo, meta = target(tmp_path)
+    readme = repo / "README.md"
+    readme.write_text("# Original\n", encoding="utf-8")
+    edit = b"# Edit made during formatting\n"
+
+    def formatting(root, path, value):
+        if path == readme:
+            readme.write_bytes(edit)
+        return value
+
+    monkeypatch.setattr("ctshowcase.formatting.format_text", formatting)
+    assert showcase.main(["--meta", str(meta), "--repo-dir", str(repo), "readme", "--mode", "scaffold",
+                          "--write", "--format-generated"]) == 1
+    assert readme.read_bytes() == edit
+
+
+def test_local_badge_cannot_alias_unchanged_readme(tmp_path, monkeypatch):
+    import showcase
+
+    repo, meta = target(tmp_path)
+    meta.write_text(json.dumps(meta_dict(repo=".github", files=["README.md"])), encoding="utf-8")
+    monkeypatch.setattr("ctshowcase.formatting.format_text", lambda _r, _p, value: value)
+    args = ["--meta", str(meta), "--repo-dir", str(repo), "readme", "--mode", "scaffold",
+            "--write", "--badges", "local", "--format-generated"]
+    assert showcase.main(args) == 0
+    readme = repo / "README.md"
+    original = readme.read_bytes()
+    badge = next((repo / "docs/images/badges").glob("*.svg"))
+    badge.unlink()
+    try:
+        badge.hardlink_to(readme)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"hard links are unavailable: {exc}")
+    assert showcase.main(args) == 2
+    assert readme.read_bytes() == original
+
+
+def test_formatted_banner_refuses_external_art_before_sidecar_read(tmp_path, monkeypatch, make_ctx):
+    import showcase
+    from ctshowcase.errors import ShowcaseError
+
+    repo = tmp_path / "repo"
+    images = repo / "docs/images"
+    images.mkdir(parents=True)
+    outside = tmp_path / "unrelated.png"
+    outside.write_bytes(b"unrelated")
+    out = images / "banner.png"
+    try:
+        out.symlink_to(outside)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symbolic links are unavailable: {exc}")
+    monkeypatch.setattr(showcase, "_sidecar_text", lambda *_: pytest.fail("read before containment check"))
+    with pytest.raises(ShowcaseError, match="inside the target checkout"):
+        showcase.write_art(make_ctx(repo_dir=repo), out, b"banner", format_generated=True)
+    assert outside.read_bytes() == b"unrelated"

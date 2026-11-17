@@ -200,8 +200,10 @@ def write_art(ctx, out: Path, data: bytes, *, format_generated: bool, preview=No
     sidecar = _sidecar_path(out)
     destinations = [out] + ([sidecar] if sidecar else []) + ([preview[0]] if preview else [])
     ensure_distinct_outputs(*destinations)
-    if sidecar is not None and format_generated:
-        target_relative(ctx.repo_dir, sidecar)
+    if format_generated:
+        target_relative(ctx.repo_dir, out)
+        if sidecar is not None:
+            target_relative(ctx.repo_dir, sidecar)
     record = {"sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data), **extra}
     with sidecar_lock(sidecar):
         summary = _sidecar_text(ctx, out, record) if sidecar is not None else None
@@ -489,12 +491,15 @@ def cmd_readme(args):
     if args.format_generated:
         from ctshowcase.formatting import target_relative
         target_relative(rd, path)
-    before = readme.read_text(path)
+    original_readme = path.read_bytes() if path.is_file() else None
+    raw_readme = (original_readme or b"").decode("utf-8")
+    before = readme.normalize_text(raw_readme.replace("\r\n", "\n").replace("\r", "\n"))
     if args.variant and args.variant != "auto":
         ctx.det["variant"] = args.variant
     ctx.local_badges = args.badges == "local"
     mode = args.mode
     contrib_new = None
+    original_contrib = None
     if args.bootstrap:
         state = readme.bootstrap_state(before)
         removed = []
@@ -508,7 +513,8 @@ def cmd_readme(args):
             if contrib_path.is_file() and after != before:
                 if args.format_generated:
                     target_relative(rd, contrib_path)
-                c0 = contrib_path.read_text(encoding="utf-8")
+                original_contrib = contrib_path.read_bytes()
+                c0 = original_contrib.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
                 c1 = readme.bootstrap_contributing(ctx, c0)
                 contrib_new = c1 if c1 != c0 else None
         elif state == "edited":
@@ -561,14 +567,11 @@ def cmd_readme(args):
                 raise ShowcaseError("formatter changed the README template-body markers", log="formatter-content",
                                     code=CHECK_FAILED)
         after = formatted
-        if path.is_file():
-            # Generation operates on normalized lines, but Prettier may emit CRLF.
-            before = path.read_bytes().decode("utf-8")
+        # Prettier can emit CRLF. Compare against the exact bytes used for the plan.
+        before = raw_readme
         if contrib_new is not None:
             contrib_new = format_text(rd, contrib_path, contrib_new)
     changed = after != before
-    if args.write and changed and contrib_new is not None:
-        ensure_distinct_outputs(path, contrib_path)
     diff = "".join(difflib.unified_diff(before.splitlines(True), after.splitlines(True), "a/README.md", "b/README.md"))
     badge_outputs = {}
     if getattr(ctx, "badge_files", None):
@@ -586,6 +589,17 @@ def cmd_readme(args):
                 drawing = formatted
             badge_outputs[rel] = drawing.encode("utf-8")
     if args.write:
+        if badge_outputs or (changed and contrib_new is not None):
+            ensure_distinct_outputs(path, contrib_path, *(rd / rel for rel in badge_outputs))
+        if args.format_generated:
+            snapshots = [(path, original_readme)]
+            if contrib_new is not None:
+                snapshots.append((contrib_path, original_contrib))
+            for target, original in snapshots:
+                current = target.read_bytes() if target.is_file() else None
+                if current != original:
+                    raise ShowcaseError("README inputs changed during formatting", log="formatter-source-changed",
+                                        code=CHECK_FAILED)
         for rel, data in badge_outputs.items():
             write_bytes(rd / rel, data)
     if args.write and changed:
