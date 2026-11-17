@@ -57,10 +57,12 @@ def test_renames_and_notes(brand, tmp_path, make_ctx):
 
 
 def test_mobile_sections_apply_to_readme_modes(tmp_path, make_ctx):
-    ctx = make_ctx(files=["app/src/main/AndroidManifest.xml"])
+    ctx = make_ctx(files=["app/src/main/AndroidManifest.xml", "package.json", "requirements.txt", "pyproject.toml"],
+                   manifests={"package.json": '{"bin":{"lint-assets":"lint.js"}}'})
     assert ctx.det["type"] == "mobile-app"
     scaffold = readme.scaffold(ctx)
-    assert {"needs-input:B:Install", "needs-input:B:Platforms"} <= set(ctx.logs)
+    assert {"needs-input:B:Install", "needs-input:B:Platforms", "needs-input:B:Quick Start"} <= set(ctx.logs)
+    assert "npm install" not in scaffold and "pip install" not in scaffold and "lint-assets --help" not in scaffold
     assert "needs-input:B:Live Site" not in ctx.logs and "needs-input:B:Tech Stack" not in ctx.logs
 
     bootstrap = readme.bootstrap(ctx, readme.pristine_block("Template body."))

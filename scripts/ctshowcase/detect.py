@@ -121,28 +121,21 @@ def substantive_path(path: str) -> bool:
     """False for administrative inputs (planning and issue exports, package config) excluded from rule 24's share."""
     t = standard("types")
     parts = PurePosixPath(path).parts
+    if not parts or ".." in parts or path.startswith("/") or "\\" in path or "\0" in path:
+        return False
+    if re.match(r"^[A-Za-z]:", path):
+        return False
     excluded = set(t.get("dataset_exclude_dirs", []))
-    return (bool(parts) and not any(p in excluded for p in parts[:-1])
+    return (not any(p in excluded for p in parts[:-1])
             and parts[-1] not in set(t.get("dataset_exclude_files", [])) and not _EXPORT_NAME.fullmatch(parts[-1]))
 
 
 def substantive_sizes(facts: RepoFacts) -> dict[str, int]:
-    """Rule 24 byte sizes: the captured `file_sizes`, restricted to substantive paths.
-
-    With a checkout, each captured path is measured locally instead. Only captured paths are measured, so a file that
-    is not in the captured tree (the `--meta` file the composite Action writes into the checkout) is never counted,
-    and without captured sizes the rule is skipped, as before."""
+    """Use captured sizes so the same tree yields the same share with or without a checkout."""
     captured = facts.meta.get("file_sizes")
-    if not isinstance(captured, dict):
+    if facts.meta.get("files_complete") is False or not isinstance(captured, dict):
         return {}
-    sizes = dict(captured)
-    if facts.dir is not None:
-        for path in captured:
-            try:
-                sizes[path] = (facts.dir / path).stat().st_size
-            except (OSError, TypeError, ValueError):
-                sizes.pop(path, None)
-    return {k: v for k, v in sizes.items() if isinstance(k, str) and substantive_path(k)
+    return {k: v for k, v in captured.items() if isinstance(k, str) and substantive_path(k)
             and isinstance(v, int) and not isinstance(v, bool) and v >= 0}
 
 
@@ -157,7 +150,7 @@ def dataset_share(facts: RepoFacts) -> float | None:
 
 def docs_only(facts: RepoFacts) -> bool:
     """True when the known tree holds only documentation once repository administration files are set aside."""
-    if not facts.known:
+    if not facts.known or facts.meta.get("files_complete") is False:
         return False
     admin = set(standard("types").get("documentation_exclude_files", []))
     rest = [f for f in facts.files if substantive_path(f) and PurePosixPath(f).name not in admin]
@@ -165,10 +158,12 @@ def docs_only(facts: RepoFacts) -> bool:
                               or PurePosixPath(f).name in ("LICENSE", "COPYING") for f in rest)
 
 
-def type_suggestion(type_: str, rule: int, facts: RepoFacts) -> str | None:
-    """Reason a detected type is low confidence: `file-tree-unknown`, `dataset-near-threshold` or `docs-only`."""
+def type_suggestion(rule: int, facts: RepoFacts) -> str | None:
+    """Return the reason for a low-confidence type, if any."""
     if not facts.known:
         return "file-tree-unknown"
+    if facts.meta.get("files_complete") is False and rule == 25:
+        return "file-tree-incomplete"
     if rule == 24:
         share = dataset_share(facts)
         if share is not None and share < standard("types").get("dataset_confident_share", 0.6):
@@ -222,11 +217,11 @@ def detect(meta: dict, facts: RepoFacts | None = None, override: dict | None = N
         type_, rule = detect_type(meta, facts, same_owner)
     variant = (override or {}).get("variant") or variant_for(type_, meta, same_owner)
     out = {"type": type_, "rule": rule, "variant": variant, "category": card_category(type_)}
-    reason = None if type_override else type_suggestion(type_, rule, facts)
+    reason = None if type_override else type_suggestion(rule, facts)
     if reason:
         # the override key is `type:` in .github/showcase.yml (or --type); setting it suppresses the suggestion
         out["confidence"] = "low"
-        out["suggestion"] = f"type-suggestion:{type_}:{reason}"
+        out["suggestion"] = f"type-suggestion:{type_}:{reason}:override-key=type"
     if not facts.known and not type_override:
         # rules 5, 8-11 and 13-24 need the file tree; without it the type is provisional
         out["provisional"] = True

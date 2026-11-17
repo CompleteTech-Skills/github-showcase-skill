@@ -91,7 +91,7 @@ def test_dataset_near_threshold_suggests_override(data_size, suggested):
     meta = {"files": ["rows.csv", "main.py"], "file_sizes": {"rows.csv": data_size, "main.py": 100 - data_size}}
     det = detect(meta)
     assert det["type"] == "dataset"
-    assert det.get("suggestion") == ("type-suggestion:dataset:dataset-near-threshold" if suggested else None)
+    assert det.get("suggestion") == ("type-suggestion:dataset:dataset-near-threshold:override-key=type" if suggested else None)
 
 
 def test_empty_or_malformed_sizes_do_not_claim_dataset():
@@ -109,11 +109,37 @@ def test_checkout_sizes_only_measure_captured_paths(tmp_path):
     assert detect_type(meta, RepoFacts(meta, tmp_path)) == ("workspace", 25)
 
 
-def test_checkout_measures_local_bytes_of_captured_paths(tmp_path):
-    _tree(tmp_path, {"rows.csv": "a,b\n" * 100, "README.md": "Northwind rows."})
-    meta = meta_dict(files=["rows.csv", "README.md"], file_sizes={"rows.csv": 1, "README.md": 1000})
-    assert detect_type(meta) == ("workspace", 25)
-    assert detect_type(meta, RepoFacts(meta, tmp_path)) == ("dataset", 24)
+def test_checkout_uses_captured_sizes_without_stat_calls(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    repo = tmp_path / "repo"
+    _tree(repo, {"rows.csv": "a,b\n" * 100, "main.py": "print(1)"})
+    outside = tmp_path / "outside.csv"
+    meta = meta_dict(files=["rows.csv", "main.py"], file_sizes={
+        "rows.csv": 1, "main.py": 1000, "linked.csv": 1,
+        str(outside): 10000, "../outside.csv": 10000, "C:/outside.csv": 10000,
+    })
+    stat = Path.stat
+
+    def guard_stat(path, *args, **kwargs):
+        assert path.name not in ("rows.csv", "main.py", "linked.csv", "outside.csv")
+        return stat(path, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "stat", guard_stat)
+        assert detect_type(meta) == ("workspace", 25)
+        assert detect_type(meta, RepoFacts(meta, repo)) == ("workspace", 25)
+
+
+@pytest.mark.parametrize("name", ["README.md", "rows.csv"])
+@pytest.mark.parametrize("checkout", [False, True])
+def test_incomplete_tree_does_not_claim_docs_only_or_dataset(tmp_path, name, checkout):
+    files = {name: "Northwind rows."}
+    _tree(tmp_path, files)
+    meta = _sized(files, files_complete=False)
+    det = detect(meta, RepoFacts(meta, tmp_path if checkout else None))
+    assert (det["type"], det["rule"]) == ("workspace", 25)
+    assert det["suggestion"] == "type-suggestion:workspace:file-tree-incomplete:override-key=type"
 
 
 def test_docs_only_repo_stays_workspace_with_suggestion(make_ctx):
@@ -121,12 +147,12 @@ def test_docs_only_repo_stays_workspace_with_suggestion(make_ctx):
              "CODEOWNERS"]
     ctx = make_ctx(files=files)
     assert (ctx.det["type"], ctx.det["rule"]) == ("workspace", 25)
-    assert "type-suggestion:workspace:docs-only" in ctx.logs
+    assert "type-suggestion:workspace:docs-only:override-key=type" in ctx.logs
     assert "suggestion" not in detect({"files": files + ["src/main.py"]})
 
 
 def test_unknown_tree_suggests_override_and_explicit_type_suppresses_it():
-    assert detect({"owner": "Northwind-Trading-Co"})["suggestion"] == "type-suggestion:workspace:file-tree-unknown"
+    assert detect({"owner": "Northwind-Trading-Co"})["suggestion"] == "type-suggestion:workspace:file-tree-unknown:override-key=type"
     assert "suggestion" not in detect({"files": ["README.md"]}, type_override="cli")
     assert "suggestion" not in detect({"files": ["README.md"]}, override={"type": "workspace"})
 
@@ -151,8 +177,8 @@ def test_owner_rules_use_the_resolver():
 @pytest.mark.parametrize("files,want,log", [
     (PLANNING, "workspace", None),
     ({"README.md": "# Northwind handbook\n", "docs/guide.md": "Guide.\n", ".gitignore": "*.pyc\n"}, "workspace",
-     "type-suggestion:workspace:docs-only"),
-    ({"rows.csv": "a,b\n" * 30, "main.py": "x" * 100}, "dataset", "type-suggestion:dataset:dataset-near-threshold")])
+     "type-suggestion:workspace:docs-only:override-key=type"),
+    ({"rows.csv": "a,b\n" * 30, "main.py": "x" * 100}, "dataset", "type-suggestion:dataset:dataset-near-threshold:override-key=type")])
 def test_cli_doctor_type_and_suggestion(tmp_path, checkout, files, want, log):
     repo = tmp_path / "repo"
     _tree(repo, files)

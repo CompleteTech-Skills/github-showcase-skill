@@ -376,6 +376,8 @@ def section_facts(ctx: RepoContext, h2: str) -> str | None:
     if h2 == "Workflow Diagram" and f.read("assets/diagrams/workflow.mmd"):
         return ("Source: [assets/diagrams/workflow.mmd](assets/diagrams/workflow.mmd).\n\n```mermaid\n"
                 + f.read("assets/diagrams/workflow.mmd").strip() + "\n```")
+    if ctx.det["type"] == "mobile-app" and h2 in ("Install", "Quick Start"):
+        return None
     if h2 == "Install":
         cmds = []
         if f.exists("requirements.txt"):
