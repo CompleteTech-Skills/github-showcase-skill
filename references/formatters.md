@@ -9,8 +9,9 @@ regular files inside the target checkout and identifies commands by their names
 and surrounding instructions.
 Default TSV and Markdown doctor output reports tooling on stderr to preserve the
 coverage row; JSON includes it in `tooling`. Reports retain their
-source and mark commands **not run**. Discovery never executes these commands;
-workflow steps can require secrets or services unavailable in a local checkout.
+source and mark commands **not run**. Package scripts appear by name. Instructions
+and workflow steps show recognized command prefixes and flags, with arbitrary
+arguments and shell tails omitted. Discovery never executes these commands.
 
 Pass `readme --format-generated`, `banner --format-generated`, or
 `card --format-generated` to apply the target's Prettier settings. Use the flag
@@ -28,11 +29,12 @@ checkout. `.editorconfig` detection alone does not select a formatter.
 Text is passed on stdin with its final target path, so Prettier uses the target's
 configuration. The caller still applies the usual content-preservation and
 output-path checks before writing. A formatter failure leaves the requested
-output unwritten. README and CONTRIBUTING formatting accepts whitespace changes
-to the generated Markdown. Prettier keeps the generated GitHub alert intact,
-and Showcase refreshes the ownership digest of a pristine template body after
-formatting. Bootstrap applies the normal CONTRIBUTING owner-token replacement
-before formatting.
+output unwritten. README and CONTRIBUTING formatting requires the pinned
+Prettier's Markdown AST check (`--debug-check`) to pass. The generated GitHub
+alert is protected with a Prettier ignore comment, and Showcase refreshes the
+ownership digest of a pristine template body after formatting. Bootstrap
+applies the normal CONTRIBUTING owner-token replacement before formatting.
+The art sidecar must retain the same typed JSON values and unique keys.
 `.github/showcase.yml` supplies input configuration. Format it and author-maintained
 files such as `PROMPTS.md` through the target repository's own workflow.
 

@@ -183,26 +183,26 @@ def maybe_sidecar(ctx, out: Path, record: dict) -> None:
         sidecar.write_text(_sidecar_text(ctx, out, record), encoding="utf-8")
 
 
+def ensure_distinct_outputs(*destinations: Path) -> None:
+    for i, path in enumerate(destinations):
+        for other in destinations[:i]:
+            if path.resolve() == other.resolve() or (path.exists() and other.exists() and path.samefile(other)):
+                raise ShowcaseError("output paths must be distinct", log="usage")
+
+
 def write_art(ctx, out: Path, data: bytes, *, format_generated: bool, preview=None, **extra) -> None:
     """Prepare the optional preview and formatted sidecar before writing any art outputs."""
     sidecar = _sidecar_path(out)
     destinations = [out] + ([sidecar] if sidecar else []) + ([preview[0]] if preview else [])
-    for i, path in enumerate(destinations):
-        for other in destinations[:i]:
-            if path.resolve() == other.resolve() or (path.exists() and other.exists() and path.samefile(other)):
-                raise ShowcaseError("art output paths must be distinct", log="usage")
+    ensure_distinct_outputs(*destinations)
     record = {"sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data), **extra}
     formatted = None
     if sidecar is not None and format_generated:
-        from ctshowcase.formatting import format_text
+        from ctshowcase.formatting import format_text, same_json
 
         original = _sidecar_text(ctx, out, record)
         formatted = format_text(ctx.repo_dir, sidecar, original)
-        try:
-            unchanged = json.loads(formatted) == json.loads(original)
-        except ValueError:
-            unchanged = False
-        if not unchanged:
+        if not same_json(original, formatted):
             raise ShowcaseError("formatter changed the art sidecar data", log="formatter-content")
     write_bytes(out, data)
     if preview:
@@ -470,6 +470,9 @@ def cmd_readme(args):
     if rd is None:
         raise ShowcaseError("readme needs the repository checkout (--repo-dir DIR, or run inside it)", log="usage")
     path = rd / "README.md"
+    contrib_path = rd / "CONTRIBUTING.md"
+    if args.write:
+        ensure_distinct_outputs(path, contrib_path)
     if args.format_generated and getattr(args, "no_regroup", False):
         raise ShowcaseError("--no-regroup preserves outside bytes and cannot be combined with --format-generated",
                             log="usage")
@@ -493,9 +496,8 @@ def cmd_readme(args):
                         logs=ctx.logs + ["readme-shrink"]), CHECK_FAILED
         if state == "pristine":
             after = readme.bootstrap(ctx, before)
-            cp = rd / "CONTRIBUTING.md"
-            if cp.is_file() and after != before:
-                c0 = cp.read_text(encoding="utf-8")
+            if contrib_path.is_file() and after != before:
+                c0 = contrib_path.read_text(encoding="utf-8")
                 c1 = readme.bootstrap_contributing(ctx, c0)
                 contrib_new = c1 if c1 != c0 else None
         elif state == "edited":
@@ -538,9 +540,6 @@ def cmd_readme(args):
                 after = after[:position] + "<!-- prettier-ignore -->\n\n" + after[position:]
                 break
         formatted = format_text(rd, path, after)
-        if after.split() != formatted.split():
-            raise ShowcaseError("formatter changed generated README.md content", log="formatter-content",
-                                code=CHECK_FAILED)
         if readme.bootstrap_state(after) == "pristine":
             formatted = readme.reseal_pristine(formatted)
             if formatted is None:
@@ -551,11 +550,7 @@ def cmd_readme(args):
             # Generation operates on normalized lines, but Prettier may emit CRLF.
             before = path.read_bytes().decode("utf-8")
         if contrib_new is not None:
-            formatted_contrib = format_text(rd, rd / "CONTRIBUTING.md", contrib_new)
-            if contrib_new.split() != formatted_contrib.split():
-                raise ShowcaseError("formatter changed CONTRIBUTING.md content; all outputs left unchanged",
-                                    log="formatter-content")
-            contrib_new = formatted_contrib
+            contrib_new = format_text(rd, contrib_path, contrib_new)
     changed = after != before
     diff = "".join(difflib.unified_diff(before.splitlines(True), after.splitlines(True), "a/README.md", "b/README.md"))
     badge_outputs = {}
@@ -571,7 +566,6 @@ def cmd_readme(args):
     if args.write and changed:
         path.write_bytes(after.encode("utf-8"))
         if contrib_new is not None:
-            contrib_path = rd / "CONTRIBUTING.md"
             if args.format_generated:
                 contrib_path.write_bytes(contrib_new.encode("utf-8"))
             else:

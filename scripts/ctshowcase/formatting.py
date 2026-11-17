@@ -5,19 +5,60 @@ import json
 import re
 import shutil
 import subprocess
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
-from .errors import NeedsInput, ShowcaseError
+from .errors import CHECK_FAILED, NeedsInput, ShowcaseError
 
-VALIDATOR_NAME = re.compile(r"(?:^|[:_-])(check|lint|test|typecheck|validate|format)(?:$|[:_-])", re.I)
-
-
+VALIDATOR_NAME = re.compile(r"(?:^|[:_-])(check|contracts|lint|test|typecheck|validate|format|verify)(?:$|[:_-])", re.I)
+SCRIPT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9:_-]*")
 VALIDATOR_COMMAND = re.compile(
-    r"^(?:(?:uv run |poetry run )?(?:python[\w.]* -m )?(?:pytest|unittest|ruff|prettier|pyright|mypy|eslint)"
-    r"|(?:python[\w.]* )?(?:\S+/)?validate[\w.-]*\.py"
+    r"^(?:(?:uv run |poetry run )?(?:python[\d.]* -m )?(?:pytest|unittest|ruff|prettier|pyright|mypy|eslint)"
+    r"|(?:npx |npm exec )prettier"
+    r"|(?:python[\d.]* )?(?:\./)?(?:scripts/)?validate[\w.-]*\.py"
     r"|(?:cargo|go|dotnet|npm|pnpm|yarn|bun|make|just)\s+(?:run\s+)?"
-    r"(?:test|check|lint|typecheck|validate|verify|format)(?=$|[:_\s-]))(?:\s|$|[:_-])", re.I
+    r"(?:test|check|contracts|lint|typecheck|validate|verify|format)(?:[:_-][A-Za-z0-9:_-]+)?)(?=\s|$|[;&|])",
+    re.I,
 )
+DISPLAY_ARGUMENTS = {".", "-q", "-v", "--", "--check", "--write", "--fix", "--quiet", "--verbose", "check", "discover"}
+
+
+def _display_validator(command: str) -> str | None:
+    """Report a command prefix and recognized flags without echoing arbitrary arguments or shell tails."""
+    match = VALIDATOR_COMMAND.match(command.strip())
+    if not match:
+        return None
+    command = command.strip()
+    display = [match.group()]
+    for arg in command[match.end():].split():
+        if arg not in DISPLAY_ARGUMENTS:
+            break
+        display.append(arg)
+    return " ".join(display)
+
+
+def same_json(original: str, formatted: str) -> bool:
+    """Compare JSON values without merging boolean, integer and decimal types."""
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate JSON key")
+            result[key] = value
+        return result
+
+    def reject_constant(_value):
+        raise ValueError("nonfinite JSON number")
+
+    def decode(value):
+        return json.loads(value, object_pairs_hook=unique_object, parse_constant=reject_constant,
+                          parse_int=lambda number: ("integer", int(number)),
+                          parse_float=lambda number: ("decimal", Decimal(number)))
+
+    try:
+        return decode(original) == decode(formatted)
+    except (ValueError, InvalidOperation, RecursionError):
+        return False
 
 
 def _inside(root: Path, path: Path) -> Path | None:
@@ -85,23 +126,23 @@ def discover(repo_dir: Path | None) -> dict:
         configs.append("package.json#prettier")
     validators = []
     for name, command in _mapping(package.get("scripts")).items():
-        if VALIDATOR_NAME.search(name) and isinstance(command, str):
-            validators.append({"source": f"package.json#scripts.{name}", "command": command, "status": "not run"})
+        if SCRIPT_NAME.fullmatch(name) and VALIDATOR_NAME.search(name) and isinstance(command, str):
+            validators.append({"source": f"package.json#scripts.{name}", "command": f"npm run {name}", "status": "not run"})
     for name in ("AGENTS.md", "CONTRIBUTING.md"):
         text = _read(root, root / name)
         # These are reported evidence, never executable instructions.
         for match in re.finditer(r"^```(?:bash|sh|shell|console)\s*\n(.*?)^```", text, re.M | re.S):
             for line in match.group(1).splitlines():
                 command = line.strip().removeprefix("$ ")
-                if VALIDATOR_COMMAND.match(command):
-                    validators.append({"source": name, "command": command, "status": "not run"})
+                if display := _display_validator(command):
+                    validators.append({"source": name, "command": display, "status": "not run"})
         prose = re.sub(r"^```[^\n]*\n.*?^```[^\n]*", "", text, flags=re.M | re.S)
         for line in prose.splitlines():
             if not re.search(r"\b(?:run|execute)\b", line, re.I):
                 continue
             for command in re.findall(r"`([^`\n]+)`", line):
-                if VALIDATOR_COMMAND.match(command):
-                    validators.append({"source": name, "command": command, "status": "not run"})
+                if display := _display_validator(command):
+                    validators.append({"source": name, "command": display, "status": "not run"})
     workflows = root / ".github" / "workflows"
     for path in _children(root, workflows):
         if path.suffix not in (".yml", ".yaml"):
@@ -122,8 +163,8 @@ def discover(repo_dir: Path | None) -> dict:
                 if isinstance(run, str):
                     for line in run.splitlines():
                         command = line.strip()
-                        if VALIDATOR_COMMAND.match(command):
-                            validators.append({"source": source, "command": command, "status": "not run"})
+                        if display := _display_validator(command):
+                            validators.append({"source": source, "command": display, "status": "not run"})
     return {"formatters": configs, "prettier_version": _prettier_version(package),
             "validators": validators, "status": "not run"}
 
@@ -137,9 +178,10 @@ def format_text(repo_dir: Path | None, destination: Path, text: str) -> str:
     if repo_dir is None:
         raise NeedsInput("formatter", "formatting requires a target checkout")
     root = Path(repo_dir).resolve()
-    destination = Path(destination).resolve()
+    destination = Path(destination)
+    suffix = destination.suffix.lower()
     try:
-        relative = destination.relative_to(root)
+        relative = destination.resolve().relative_to(root)
     except ValueError as error:
         raise ShowcaseError("formatter destination must be inside the target checkout", log="usage") from error
     version = _prettier_version(_json(root, root / "package.json"))
@@ -170,11 +212,19 @@ def format_text(repo_dir: Path | None, destination: Path, text: str) -> str:
     if cli is None or not _file_inside(package_root, cli):
         raise NeedsInput("formatter", "the installed Prettier CLI is unavailable")
     argv = [node, str(cli), "--stdin-filepath", str(relative)]
-    if destination.suffix.lower() == ".svg":
+    if suffix == ".svg":
         argv += ["--parser", "html"]
+    def run(*flags: str) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.run([*argv, *flags], cwd=root, input=text.encode("utf-8"),
+                              capture_output=True, timeout=60, check=False)
+
     try:
-        result = subprocess.run(argv, cwd=root, input=text.encode("utf-8"),
-                                capture_output=True, timeout=60, check=False)
+        if suffix == ".md":
+            semantic_check = run("--debug-check")
+            if semantic_check.returncode:
+                raise ShowcaseError("target Prettier could not verify Markdown content", log="formatter-content",
+                                    code=CHECK_FAILED)
+        result = run()
     except (OSError, subprocess.SubprocessError) as error:
         raise NeedsInput("formatter", "the target's pinned Prettier could not run") from error
     if result.returncode:

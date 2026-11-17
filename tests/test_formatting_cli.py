@@ -2,7 +2,9 @@
 import importlib.util
 import json
 import os
+import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -35,7 +37,7 @@ def test_doctor_exposes_declared_validation_without_execution(tmp_path):
     result = run_cli("--meta", meta, "--repo-dir", repo, "doctor", "--format", "json")
     payload = json.loads(result.stdout)
     assert payload["tooling"]["validators"] == [
-        {"source": "package.json#scripts.lint", "command": "do-not-execute-this", "status": "not run"}]
+        {"source": "package.json#scripts.lint", "command": "npm run lint", "status": "not run"}]
 
 
 def test_doctor_default_reports_tooling_without_running_it(tmp_path):
@@ -115,8 +117,21 @@ def test_formatter_cannot_remove_authored_readme_text(tmp_path, monkeypatch):
     spec = importlib.util.spec_from_file_location("formatting_preservation_showcase", ROOT / "scripts/showcase.py")
     cli = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(cli)
-    monkeypatch.setattr("ctshowcase.formatting.format_text",
-                        lambda root, path, text: text.replace("Keep this authored explanation.", ""))
+    from test_formatting import local_prettier
+
+    local_prettier(repo)
+    monkeypatch.setattr("ctshowcase.formatting.shutil.which", lambda _: "/node")
+
+    real_run = subprocess.run
+
+    def reject_changed_ast(argv, **kwargs):
+        if argv[0] != "/node":
+            return real_run(argv, **kwargs)
+        assert "--debug-check" in argv
+        assert b"Keep this authored explanation." in kwargs["input"]
+        return SimpleNamespace(returncode=1, stdout=b"", stderr=b"AST changed")
+
+    monkeypatch.setattr("ctshowcase.formatting.subprocess.run", reject_changed_ast)
     assert cli.main(["--meta", str(meta), "--repo-dir", str(repo), "readme", "--write", "--format-generated"]) == 1
     assert (repo / "README.md").read_text(encoding="utf-8") == original
     assert not (repo / "docs").exists()
@@ -236,3 +251,55 @@ def test_card_png_cannot_overwrite_other_outputs(tmp_path, monkeypatch, alias):
                      "--chip", "Python", "--png", str(png), "--format-generated"]) == 2
     assert svg.read_bytes() == b"existing SVG"
     assert sidecar.read_bytes() == b'{"outputs":{}}'
+
+
+
+@pytest.mark.parametrize("link", ["symlink", "hardlink"])
+def test_readme_writes_refuse_aliases_to_contributing(tmp_path, link):
+    repo, meta = target(tmp_path)
+    readme = repo / "README.md"
+    readme.write_bytes(b"# Shared file\n")
+    contrib = repo / "CONTRIBUTING.md"
+    try:
+        if link == "symlink":
+            contrib.symlink_to(readme)
+        else:
+            os.link(readme, contrib)
+    except OSError as error:
+        pytest.skip(f"links unavailable: {error}")
+    result = run_cli("--meta", meta, "--repo-dir", repo, "readme", "--write", "--bootstrap", "--format-generated")
+    assert result.returncode == 2
+    assert "output paths must be distinct" in result.stdout
+    assert readme.read_bytes() == contrib.read_bytes() == b"# Shared file\n"
+
+
+
+def test_readme_accepts_prettier_table_alignment_after_ast_check(tmp_path, monkeypatch):
+    from test_formatting import local_prettier
+
+    repo, meta = target(tmp_path)
+    readme = repo / "README.md"
+    readme.write_text("# Local table\n\n| Key | Value |\n|---|---|\n| x | y |\n", encoding="utf-8")
+    local_prettier(repo)
+    spec = importlib.util.spec_from_file_location("formatting_table_showcase", ROOT / "scripts/showcase.py")
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+    monkeypatch.setattr("ctshowcase.formatting.shutil.which", lambda _: "/node")
+    real_run = subprocess.run
+    checks = []
+
+    def format_table(argv, **kwargs):
+        if argv[0] != "/node":
+            return real_run(argv, **kwargs)
+        value = kwargs["input"]
+        if "--debug-check" in argv:
+            checks.append(value)
+            return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
+        assert checks == [value]
+        formatted = value.replace(b"|---|---|", b"| --- | ----- |").replace(b"| x | y |", b"| x   | y     |")
+        return SimpleNamespace(returncode=0, stdout=formatted, stderr=b"")
+
+    monkeypatch.setattr("ctshowcase.formatting.subprocess.run", format_table)
+    assert cli.main(["--meta", str(meta), "--repo-dir", str(repo), "readme", "--mode", "header",
+                     "--write", "--format-generated"]) == 0
+    assert "| --- | ----- |\n| x   | y     |" in readme.read_text(encoding="utf-8")

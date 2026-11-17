@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from ctshowcase.errors import NeedsInput, ShowcaseError
-from ctshowcase.formatting import discover, format_text
+from ctshowcase.formatting import discover, format_text, same_json
 
 
 def test_discovery_is_read_only_and_reports_sources(tmp_path):
@@ -18,7 +18,7 @@ def test_discovery_is_read_only_and_reports_sources(tmp_path):
     workflow.write_text('jobs:\n  checks:\n    steps:\n      - run: make verify\n')
     result = discover(tmp_path)
     assert result["formatters"] == [".editorconfig", ".prettierrc.json"]
-    assert [v["command"] for v in result["validators"]] == ["never-execute-this", "python -m pytest", "make verify"]
+    assert [v["command"] for v in result["validators"]] == ["npm run lint", "python -m pytest", "make verify"]
     assert all(v["status"] == "not run" for v in result["validators"])
 
 
@@ -62,7 +62,9 @@ def test_formatter_uses_stdin_local_exact_version_without_shell(tmp_path, monkey
 
     monkeypatch.setattr("ctshowcase.formatting.subprocess.run", run)
     assert format_text(tmp_path, tmp_path / "README.md", "# Formatted") == "# Formatted\n"
-    argv, kwargs = called[0]
+    assert len(called) == 2
+    assert called[0][0][-1] == "--debug-check"
+    argv, kwargs = called[1]
     assert argv[0] == "/node" and argv[-2:] == ["--stdin-filepath", "README.md"]
     assert kwargs["input"] == b"# Formatted" and not kwargs.get("shell")
     assert not (tmp_path / "README.md").exists()
@@ -164,3 +166,26 @@ def test_formatter_refuses_prettier_package_outside_checkout(tmp_path):
         pytest.skip(f"symlinks unavailable: {error}")
     with pytest.raises(NeedsInput, match="install the target's pinned Prettier"):
         format_text(repo, repo / "README.md", "# Hello")
+
+
+
+def test_discovery_reports_prettier_wrappers_and_contracts_without_literal_args(tmp_path):
+    (tmp_path / "package.json").write_text(
+        '{"scripts":{"contracts":"verify --token SYNTHETIC_SECRET"}}', encoding="utf-8")
+    (tmp_path / "AGENTS.md").write_text(
+        "Run `npx prettier --check . && echo SYNTHETIC_SECRET`.\n"
+        "Run `npm exec prettier -- --check . --token SYNTHETIC_SECRET`.\n"
+        "Run `npm run contracts SYNTHETIC_SECRET`.\n", encoding="utf-8")
+    commands = discover(tmp_path)["validators"]
+    assert [entry["command"] for entry in commands] == [
+        "npm run contracts", "npx prettier --check .", "npm exec prettier -- --check .", "npm run contracts"]
+    assert "SYNTHETIC_SECRET" not in str(commands)
+
+
+@pytest.mark.parametrize("formatted", [
+    '{"number":true,"flag":true}', '{"number":1.0,"flag":true}', '{"number":1,"flag":1}',
+    '{"number":1,"flag":false,"flag":true}', '{"number":NaN,"flag":true}',
+])
+def test_sidecar_comparison_preserves_json_types_and_rejects_invalid_values(formatted):
+    assert not same_json('{"number":1,"flag":true}', formatted)
+    assert same_json('{"number":1,"flag":true}', '{ "flag": true, "number": 1 }')
