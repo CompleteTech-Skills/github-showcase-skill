@@ -127,7 +127,7 @@ def test_formatter_cannot_remove_authored_readme_text(tmp_path, monkeypatch):
     def reject_changed_ast(argv, **kwargs):
         if argv[0] != "/node":
             return real_run(argv, **kwargs)
-        assert "--debug-check" in argv
+        assert "isDeepStrictEqual(original.ast, candidate.ast)" in argv[3]
         assert b"Keep this authored explanation." in kwargs["input"]
         return SimpleNamespace(returncode=1, stdout=b"", stderr=b"AST changed")
 
@@ -258,7 +258,9 @@ def test_card_png_cannot_overwrite_other_outputs(tmp_path, monkeypatch, alias):
 def test_readme_writes_refuse_aliases_to_contributing(tmp_path, link):
     repo, meta = target(tmp_path)
     readme = repo / "README.md"
-    readme.write_bytes(b"# Shared file\n")
+    original = (ROOT / "tests/fixtures/template-README.md").read_bytes()
+    original += b"\nSee https://github.com/CompleteTech-LLC/.github/blob/main/CONTRIBUTING.md for details.\n"
+    readme.write_bytes(original)
     contrib = repo / "CONTRIBUTING.md"
     try:
         if link == "symlink":
@@ -267,10 +269,12 @@ def test_readme_writes_refuse_aliases_to_contributing(tmp_path, link):
             os.link(readme, contrib)
     except OSError as error:
         pytest.skip(f"links unavailable: {error}")
-    result = run_cli("--meta", meta, "--repo-dir", repo, "readme", "--write", "--bootstrap", "--format-generated")
+    result = run_cli("--meta", meta, "--repo-dir", repo, "readme", "--write", "--bootstrap")
     assert result.returncode == 2
     assert "output paths must be distinct" in result.stdout
-    assert readme.read_bytes() == contrib.read_bytes() == b"# Shared file\n"
+    assert readme.read_bytes() == contrib.read_bytes() == original
+    result = run_cli("--meta", meta, "--repo-dir", repo, "readme", "--write", "--mode", "header")
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 
@@ -286,20 +290,54 @@ def test_readme_accepts_prettier_table_alignment_after_ast_check(tmp_path, monke
     spec.loader.exec_module(cli)
     monkeypatch.setattr("ctshowcase.formatting.shutil.which", lambda _: "/node")
     real_run = subprocess.run
-    checks = []
+    calls = []
 
     def format_table(argv, **kwargs):
         if argv[0] != "/node":
             return real_run(argv, **kwargs)
+        assert "isDeepStrictEqual(original.ast, candidate.ast)" in argv[3]
         value = kwargs["input"]
-        if "--debug-check" in argv:
-            checks.append(value)
-            return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
-        assert checks == [value]
+        calls.append(value)
         formatted = value.replace(b"|---|---|", b"| --- | ----- |").replace(b"| x | y |", b"| x   | y     |")
-        return SimpleNamespace(returncode=0, stdout=formatted, stderr=b"")
+        return SimpleNamespace(returncode=0, stdout=json.dumps(formatted.decode()).encode(), stderr=b"")
 
     monkeypatch.setattr("ctshowcase.formatting.subprocess.run", format_table)
     assert cli.main(["--meta", str(meta), "--repo-dir", str(repo), "readme", "--mode", "header",
                      "--write", "--format-generated"]) == 0
+    assert len(calls) == 1
     assert "| --- | ----- |\n| x   | y     |" in readme.read_text(encoding="utf-8")
+
+
+def test_returned_readme_must_preserve_managed_markers(tmp_path, monkeypatch):
+    repo, meta = target(tmp_path)
+    path = repo / "README.md"
+    original = (b"# Northwind\n\n<!-- showcase:notes:start -->\nA synthetic README.\n"
+                b"<!-- showcase:notes:end -->\n")
+    path.write_bytes(original)
+    spec = importlib.util.spec_from_file_location("formatting_markers_showcase", ROOT / "scripts/showcase.py")
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+
+    def drop_notes_end(root, destination, text):
+        assert "<!-- showcase:notes:end -->" in text
+        return text.replace("<!-- showcase:notes:end -->", "")
+
+    monkeypatch.setattr("ctshowcase.formatting.format_text", drop_notes_end)
+    assert cli.main(["--meta", str(meta), "--repo-dir", str(repo), "readme", "--mode", "header",
+                     "--write", "--format-generated"]) == 1
+    assert path.read_bytes() == original
+
+
+def test_formatter_cannot_remove_card_drawing(tmp_path, monkeypatch):
+    repo, meta = target(tmp_path)
+    spec = importlib.util.spec_from_file_location("formatting_svg_contents_showcase", ROOT / "scripts/showcase.py")
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+
+    def remove_drawing(root, path, value):
+        return value.split("</title>", 1)[0] + "</title>\n</svg>\n"
+
+    monkeypatch.setattr("ctshowcase.formatting.format_text", remove_drawing)
+    assert cli.main(["--meta", str(meta), "--repo-dir", str(repo), "card", "--key-chip", "Test",
+                     "--chip", "Python", "--format-generated"]) == 1
+    assert not (repo / "docs").exists()

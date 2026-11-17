@@ -40,6 +40,7 @@ def local_prettier(tmp_path, version="3.6.2", pin="3.6.2"):
     p = tmp_path / "node_modules/prettier"
     p.mkdir(parents=True)
     (p / "package.json").write_text(json.dumps({"version": version, "bin": "bin/prettier.cjs"}))
+    (p / "index.cjs").write_text("")
     (p / "bin").mkdir()
     (p / "bin/prettier.cjs").write_text('')
 
@@ -58,14 +59,14 @@ def test_formatter_uses_stdin_local_exact_version_without_shell(tmp_path, monkey
 
     def run(argv, **kwargs):
         called.append((argv, kwargs))
-        return SimpleNamespace(returncode=0, stdout=b"# Formatted\n", stderr=b"")
+        return SimpleNamespace(returncode=0, stdout=json.dumps("# Formatted\n").encode(), stderr=b"")
 
     monkeypatch.setattr("ctshowcase.formatting.subprocess.run", run)
     assert format_text(tmp_path, tmp_path / "README.md", "# Formatted") == "# Formatted\n"
-    assert len(called) == 2
-    assert called[0][0][-1] == "--debug-check"
-    argv, kwargs = called[1]
-    assert argv[0] == "/node" and argv[-2:] == ["--stdin-filepath", "README.md"]
+    assert len(called) == 1
+    argv, kwargs = called[0]
+    assert argv[0] == "/node" and argv[-1] == "README.md"
+    assert "isDeepStrictEqual(original.ast, candidate.ast)" in argv[3]
     assert kwargs["input"] == b"# Formatted" and not kwargs.get("shell")
     assert not (tmp_path / "README.md").exists()
 
@@ -93,14 +94,14 @@ def test_malformed_workflow_steps_do_not_break_passive_preflight(tmp_path):
     workflow.parent.mkdir(parents=True)
     workflow.write_text('jobs:\n  malformed:\n    steps: 42\n  valid:\n    steps:\n      - run: make verify\n')
     assert discover(tmp_path)["validators"] == [{
-        "source": ".github/workflows/check.yml#jobs.valid", "command": "make verify", "status": "not run"}]
+        "source": ".github/workflows", "command": "make verify", "status": "not run"}]
 
 
 def test_npm_lock_pin_is_supported(tmp_path, monkeypatch):
     local_prettier(tmp_path, pin="^3.6.2")
     (tmp_path / "package-lock.json").write_text(json.dumps({"packages": {"node_modules/prettier": {"version": "3.6.2"}}}))
     monkeypatch.setattr("ctshowcase.formatting.shutil.which", lambda _: "/node")
-    monkeypatch.setattr("ctshowcase.formatting.subprocess.run", lambda *a, **k: SimpleNamespace(returncode=0, stdout=b"ok", stderr=b""))
+    monkeypatch.setattr("ctshowcase.formatting.subprocess.run", lambda *a, **k: SimpleNamespace(returncode=0, stdout=json.dumps("ok").encode(), stderr=b""))
     assert format_text(tmp_path, tmp_path / "README.md", "ok") == "ok"
 
 
@@ -189,3 +190,33 @@ def test_discovery_reports_prettier_wrappers_and_contracts_without_literal_args(
 def test_sidecar_comparison_preserves_json_types_and_rejects_invalid_values(formatted):
     assert not same_json('{"number":1,"flag":true}', formatted)
     assert same_json('{"number":1,"flag":true}', '{ "flag": true, "number": 1 }')
+
+
+@pytest.mark.parametrize("value", ["file:/synthetic/sensitive", "https://example.invalid/synthetic-private",
+                                   "\ud800", {"unknown": "literal"}])
+def test_discovery_reports_unsupported_pins_and_generic_metadata(tmp_path, value):
+    (tmp_path / "package.json").write_text(json.dumps({"devDependencies": {"prettier": value}}), encoding="utf-8")
+    (tmp_path / ".prettierrc.synthetic-private").write_text("{}", encoding="utf-8")
+    workflow = tmp_path / ".github/workflows/synthetic-private.yml"
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text("jobs: {synthetic-private: {steps: [{run: pnpm exec prettier --check .}, {run: npx eslint .}]}}",
+                        encoding="utf-8")
+    result = discover(tmp_path)
+    assert result["prettier_version"] is None
+    assert result["prettier_version_status"] == "unsupported"
+    assert result["formatters"] == [".prettierrc.*"]
+    assert result["validators"] == [
+        {"source": ".github/workflows", "command": "pnpm exec prettier --check .", "status": "not run"},
+        {"source": ".github/workflows", "command": "npx eslint .", "status": "not run"},
+    ]
+    assert "synthetic-private" not in str(result)
+
+
+@pytest.mark.parametrize("stdout", [b"", b'""', b'"  "', b'logged output\n"# Title"'])
+def test_markdown_rejects_empty_or_unframed_success(tmp_path, monkeypatch, stdout):
+    local_prettier(tmp_path)
+    monkeypatch.setattr("ctshowcase.formatting.shutil.which", lambda _: "/node")
+    monkeypatch.setattr("ctshowcase.formatting.subprocess.run",
+                        lambda *a, **k: SimpleNamespace(returncode=0, stdout=stdout, stderr=b""))
+    with pytest.raises(ShowcaseError, match="invalid Markdown output"):
+        format_text(tmp_path, tmp_path / "README.md", "# Title")

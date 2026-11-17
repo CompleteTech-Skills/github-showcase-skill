@@ -9,9 +9,11 @@ regular files inside the target checkout and identifies commands by their names
 and surrounding instructions.
 Default TSV and Markdown doctor output reports tooling on stderr to preserve the
 coverage row; JSON includes it in `tooling`. Reports retain their
-source and mark commands **not run**. Package scripts appear by name. Instructions
-and workflow steps show recognized command prefixes and flags, with arbitrary
-arguments and shell tails omitted. Discovery never executes these commands.
+source category and mark commands **not run**. Package scripts appear by name,
+and workflows appear under `.github/workflows`. Instructions and workflow steps
+show recognized command prefixes and flags. Discovery shows exact Prettier
+versions and reports other declarations as unsupported without displaying them.
+Discovery never executes these commands.
 
 Pass `readme --format-generated`, `banner --format-generated`, or
 `card --format-generated` to apply the target's Prettier settings. Use the flag
@@ -44,4 +46,6 @@ bytes is not evidence that rendering failed. A synthetic long-slug, long-chip
 case passes the SVG validator; chip layout
 also retains its overflow/refusal rules. No budget is raised to hide warnings.
 
-SVG formatting uses Prettier's HTML parser. A Prettier ignore comment preserves the accessible title. To include SVGs in a later bare `prettier --check`, declare an override such as `{"overrides":[{"files":"*.svg","options":{"parser":"html"}}]}` in the target Prettier configuration. Other target formatting options continue to apply. The skill does not modify formatter configuration.
+SVG formatting uses Prettier's HTML parser. Showcase compares the output's XML
+structure to the original drawing. A Prettier ignore comment preserves the
+accessible title. To include SVGs in a later bare `prettier --check`, declare an override such as `{"overrides":[{"files":"*.svg","options":{"parser":"html"}}]}` in the target Prettier configuration. Other target formatting options continue to apply. The skill does not modify formatter configuration.

@@ -5,6 +5,7 @@ import json
 import re
 import shutil
 import subprocess
+import xml.etree.ElementTree as ET
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -14,13 +15,72 @@ VALIDATOR_NAME = re.compile(r"(?:^|[:_-])(check|contracts|lint|test|typecheck|va
 SCRIPT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9:_-]*")
 VALIDATOR_COMMAND = re.compile(
     r"^(?:(?:uv run |poetry run )?(?:python[\d.]* -m )?(?:pytest|unittest|ruff|prettier|pyright|mypy|eslint)"
-    r"|(?:npx |npm exec )prettier"
+    r"|(?:npx |(?:npm|pnpm) exec )(?:prettier|eslint)"
     r"|(?:python[\d.]* )?(?:\./)?(?:scripts/)?validate[\w.-]*\.py"
     r"|(?:cargo|go|dotnet|npm|pnpm|yarn|bun|make|just)\s+(?:run\s+)?"
     r"(?:test|check|contracts|lint|typecheck|validate|verify|format)(?:[:_-][A-Za-z0-9:_-]+)?)(?=\s|$|[;&|])",
     re.I,
 )
 DISPLAY_ARGUMENTS = {".", "-q", "-v", "--", "--check", "--write", "--fix", "--quiet", "--verbose", "check", "discover"}
+
+
+EXACT_VERSION = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+                           r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+                           r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?")
+PRETTIER_EXTENSIONS = {"json", "json5", "yaml", "yml", "toml", "js", "cjs", "mjs", "ts", "cts", "mts"}
+
+# Match Prettier's debug check, but compare and return the same formatting result.
+CHECK_MARKDOWN = r"""
+const fs = require("node:fs");
+const { isDeepStrictEqual } = require("node:util");
+async function main() {
+    const [packagePath, filepath] = process.argv.slice(1);
+    const prettier = require(packagePath);
+    const input = fs.readFileSync(0, "utf8");
+    for (const ignorePath of [".gitignore", ".prettierignore"]) {
+        if (fs.existsSync(ignorePath) && (await prettier.getFileInfo(filepath, { ignorePath })).ignored) {
+            process.stdout.write(JSON.stringify(input));
+            return;
+        }
+    }
+    const settings = await prettier.resolveConfig(filepath, { editorconfig: true });
+    const options = { parser: "markdown", ...settings, filepath };
+    const formatted = await prettier.format(input, options);
+    const original = await prettier.__debug.parse(input, options, { massage: true });
+    const candidate = await prettier.__debug.parse(formatted, options, { massage: true });
+    if (!isDeepStrictEqual(original.ast, candidate.ast)) {
+        process.exitCode = 1;
+        return;
+    }
+    process.stdout.write(JSON.stringify(formatted));
+}
+main().catch(() => { process.exitCode = 2; });
+"""
+
+
+def _exact_version(value) -> bool:
+    return isinstance(value, str) and len(value) <= 128 and EXACT_VERSION.fullmatch(value) is not None
+
+
+def _config_name(name: str) -> str | None:
+    if name in (".editorconfig", ".prettierrc"):
+        return name
+    for prefix in (".prettierrc.", "prettier.config."):
+        if name.startswith(prefix):
+            return name if name[len(prefix):] in PRETTIER_EXTENSIONS else prefix + "*"
+    return None
+
+
+def same_svg(original: str, formatted: str) -> bool:
+    """Compare ordered SVG nodes while ignoring layout whitespace and comments."""
+    def structure(markup):
+        return [(node.tag, node.attrib, " ".join((node.text or "").split()),
+                 " ".join((node.tail or "").split()), len(node)) for node in ET.fromstring(markup).iter()]
+
+    try:
+        return structure(original) == structure(formatted)
+    except (ET.ParseError, ValueError):
+        return False
 
 
 def _display_validator(command: str) -> str | None:
@@ -120,8 +180,8 @@ def discover(repo_dir: Path | None) -> dict:
         return {"formatters": [], "validators": [], "status": "needs-input:repo-dir"}
     root = Path(repo_dir).resolve()
     package = _json(root, root / "package.json")
-    configs = [p.name for p in _children(root, root)
-               if (p.name.startswith((".prettierrc", "prettier.config.")) or p.name == ".editorconfig") and _file_inside(root, p)]
+    configs = sorted({name for p in _children(root, root)
+                      if (name := _config_name(p.name)) and _file_inside(root, p)})
     if "prettier" in package:
         configs.append("package.json#prettier")
     validators = []
@@ -153,11 +213,11 @@ def discover(repo_dir: Path | None) -> dict:
             data = _mapping(yaml.safe_load(_read(root, path)))
         except yaml.YAMLError:
             continue
-        for job, details in _mapping(data.get("jobs")).items():
+        for details in _mapping(data.get("jobs")).values():
             steps = _mapping(details).get("steps")
             if not isinstance(steps, list):
                 continue
-            source = f"{path.relative_to(root).as_posix()}#jobs.{job}"
+            source = ".github/workflows"
             for step in steps:
                 run = _mapping(step).get("run")
                 if isinstance(run, str):
@@ -165,7 +225,10 @@ def discover(repo_dir: Path | None) -> dict:
                         command = line.strip()
                         if display := _display_validator(command):
                             validators.append({"source": source, "command": display, "status": "not run"})
-    return {"formatters": configs, "prettier_version": _prettier_version(package),
+    declared = _prettier_version(package)
+    version = declared if _exact_version(declared) else None
+    status = "exact" if version else ("unsupported" if declared is not None else "undeclared")
+    return {"formatters": configs, "prettier_version": version, "prettier_version_status": status,
             "validators": validators, "status": "not run"}
 
 
@@ -185,14 +248,13 @@ def format_text(repo_dir: Path | None, destination: Path, text: str) -> str:
     except ValueError as error:
         raise ShowcaseError("formatter destination must be inside the target checkout", log="usage") from error
     version = _prettier_version(_json(root, root / "package.json"))
-    exact = r"\d+\.\d+\.\d+(?:-[\w.-]+)?"
     if not isinstance(version, str):
         raise NeedsInput("formatter", "declare prettier in the target package.json")
-    if not re.fullmatch(exact, version):
+    if not _exact_version(version):
         for lockname in ("npm-shrinkwrap.json", "package-lock.json"):
             locked = _json(root, root / lockname)
             pin = _mapping(_mapping(locked.get("packages")).get("node_modules/prettier")).get("version")
-            if isinstance(pin, str) and re.fullmatch(exact, pin):
+            if _exact_version(pin):
                 version = pin
                 break
         else:
@@ -212,24 +274,35 @@ def format_text(repo_dir: Path | None, destination: Path, text: str) -> str:
     if cli is None or not _file_inside(package_root, cli):
         raise NeedsInput("formatter", "the installed Prettier CLI is unavailable")
     argv = [node, str(cli), "--stdin-filepath", str(relative)]
-    if suffix == ".svg":
+    if suffix == ".md":
+        entry = next((resolved for name in ("index.cjs", "index.js")
+                      if (resolved := _inside(package_root, package_root / name)) and resolved.is_file()), None)
+        if entry is None:
+            raise NeedsInput("formatter", "the installed Prettier API is unavailable")
+        argv = [node, "--input-type=commonjs", "-e", CHECK_MARKDOWN, str(entry), str(relative)]
+    elif suffix == ".svg":
         argv += ["--parser", "html"]
-    def run(*flags: str) -> subprocess.CompletedProcess[bytes]:
-        return subprocess.run([*argv, *flags], cwd=root, input=text.encode("utf-8"),
-                              capture_output=True, timeout=60, check=False)
-
     try:
-        if suffix == ".md":
-            semantic_check = run("--debug-check")
-            if semantic_check.returncode:
-                raise ShowcaseError("target Prettier could not verify Markdown content", log="formatter-content",
-                                    code=CHECK_FAILED)
-        result = run()
+        result = subprocess.run(argv, cwd=root, input=text.encode("utf-8"),
+                                capture_output=True, timeout=60, check=False)
     except (OSError, subprocess.SubprocessError) as error:
         raise NeedsInput("formatter", "the target's pinned Prettier could not run") from error
+    if result.returncode == 1 and suffix == ".md":
+        raise ShowcaseError("target Prettier could not verify Markdown content", log="formatter-content",
+                            code=CHECK_FAILED)
     if result.returncode:
         raise ShowcaseError("target Prettier failed; verify its configuration and plugins", log="formatter-failed")
     try:
-        return result.stdout.decode("utf-8")
+        formatted = result.stdout.decode("utf-8")
     except UnicodeError as error:
         raise ShowcaseError("target Prettier returned invalid UTF-8", log="formatter-failed") from error
+    if suffix == ".md":
+        try:
+            value = json.loads(formatted)
+        except ValueError:
+            value = None
+        if not isinstance(value, str) or (text.strip() and not value.strip()):
+            raise ShowcaseError("target Prettier returned invalid Markdown output", log="formatter-content",
+                                code=CHECK_FAILED)
+        return value
+    return formatted

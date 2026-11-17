@@ -264,9 +264,13 @@ def cmd_card(args):
     fonts = Fonts(ctx.brand)
     svg, scene, info = card.render(ctx, fonts, args.icon, keys=args.key_chip or None, attrs=args.chip or None)
     if args.format_generated:
-        from ctshowcase.formatting import format_text
+        from ctshowcase.formatting import format_text, same_svg
+
         # Prettier's HTML parser wraps SVG title text, which must equal aria-label.
-        svg = format_text(ctx.repo_dir, out, svg.replace("\n<title>", "\n<!-- prettier-ignore -->\n<title>", 1))
+        formatted = format_text(ctx.repo_dir, out, svg.replace("\n<title>", "\n<!-- prettier-ignore -->\n<title>", 1))
+        if not same_svg(svg, formatted):
+            raise ShowcaseError("formatter changed the SVG drawing", log="formatter-content", code=CHECK_FAILED)
+        svg = formatted
     lint = svglint.lint_bytes("card", svg.encode(), str(out))
     if lint["result"] != "PASS":
         return base("card", ctx, result="fail", lint=lint), CHECK_FAILED
@@ -471,8 +475,6 @@ def cmd_readme(args):
         raise ShowcaseError("readme needs the repository checkout (--repo-dir DIR, or run inside it)", log="usage")
     path = rd / "README.md"
     contrib_path = rd / "CONTRIBUTING.md"
-    if args.write:
-        ensure_distinct_outputs(path, contrib_path)
     if args.format_generated and getattr(args, "no_regroup", False):
         raise ShowcaseError("--no-regroup preserves outside bytes and cannot be combined with --format-generated",
                             log="usage")
@@ -540,6 +542,10 @@ def cmd_readme(args):
                 after = after[:position] + "<!-- prettier-ignore -->\n\n" + after[position:]
                 break
         formatted = format_text(rd, path, after)
+        markers = [m.group(1) for m in readme.find_blocks(readme.MARK, after)]
+        if markers != [m.group(1) for m in readme.find_blocks(readme.MARK, formatted)]:
+            raise ShowcaseError("formatter changed the README managed blocks", log="formatter-content",
+                                code=CHECK_FAILED)
         if readme.bootstrap_state(after) == "pristine":
             formatted = readme.reseal_pristine(formatted)
             if formatted is None:
@@ -552,6 +558,8 @@ def cmd_readme(args):
         if contrib_new is not None:
             contrib_new = format_text(rd, contrib_path, contrib_new)
     changed = after != before
+    if args.write and changed and contrib_new is not None:
+        ensure_distinct_outputs(path, contrib_path)
     diff = "".join(difflib.unified_diff(before.splitlines(True), after.splitlines(True), "a/README.md", "b/README.md"))
     badge_outputs = {}
     if getattr(ctx, "badge_files", None):
