@@ -78,7 +78,7 @@ Rule 24 uses captured `file_sizes` from a repository tree. It skips classificati
 
 Low-confidence results log `type-suggestion:<type>:<reason>:override-key=type` with reasons `dataset-near-threshold` (rule 24 with a data share below `dataset_confident_share`, 60%), `docs-only` (rule 25 for a tree of only `.md`, `.rst`, `.txt`, `.adoc`, `LICENSE` or `COPYING` files once `documentation_exclude_files` such as `.gitignore` and `CODEOWNERS` are set aside), `file-tree-unknown` (no checkout and no captured tree), and `file-tree-incomplete` (workspace fallback with an explicitly incomplete capture). Use `type:` in `.github/showcase.yml` for target commands or pass `--type` for an explicit selection. The metadata inspection command uses its explicit `--type` argument. A documentation-only tree with a dedicated guide gets `documentation`. A tree containing only top-level housekeeping documents keeps the `workspace` fallback. The documentation check ignores the explicit `--meta` input in a checkout when that path is absent from the captured repository files.
 
-**The 24 type topics are reserved.** A repo carries exactly one of them, and only as its type topic.
+**The configured type topics are reserved.** A repo carries exactly one of them, and only as its type topic.
 
 | Type topic | README variant ([readme-variants.md](readme-variants.md)) | Card category ([banner-layout.md](banner-layout.md)) |
 |---|---|---|
