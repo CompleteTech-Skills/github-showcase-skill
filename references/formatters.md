@@ -31,7 +31,8 @@ checkout. `.editorconfig` detection alone does not select a formatter.
 Text is passed on stdin with its final target path, so Prettier uses the target's
 configuration. The caller still applies the usual content-preservation and
 output-path checks before writing. A formatter failure leaves the requested
-output unwritten. README and CONTRIBUTING formatting requires the pinned
+output unwritten. The related files are prepared before any are replaced. If a
+replacement fails, Showcase restores earlier files in the group. README and CONTRIBUTING formatting requires the pinned
 Prettier's Markdown AST check (`--debug-check`) to pass. The generated GitHub
 alert is protected with a Prettier ignore comment, and Showcase refreshes the
 ownership digest of a pristine template body after formatting. Bootstrap

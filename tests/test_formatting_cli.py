@@ -468,3 +468,112 @@ def test_formatted_banner_refuses_external_art_before_sidecar_read(tmp_path, mon
     with pytest.raises(ShowcaseError, match="inside the target checkout"):
         showcase.write_art(make_ctx(repo_dir=repo), out, b"banner", format_generated=True)
     assert outside.read_bytes() == b"unrelated"
+
+
+@pytest.mark.parametrize("directory", ["card.png", ".showcase.json"])
+def test_formatted_card_preflights_every_artifact(tmp_path, monkeypatch, make_ctx, directory):
+    import showcase
+    from ctshowcase.errors import ShowcaseError
+
+    images = tmp_path / "docs/images"
+    images.mkdir(parents=True)
+    out = images / "card.svg"
+    out.write_bytes(b"original card")
+    sidecar = images / ".showcase.json"
+    (images / directory).mkdir()
+    if sidecar.is_dir():
+        original_sidecar = None
+    else:
+        original_sidecar = b'{"outputs":{}}'
+        sidecar.write_bytes(original_sidecar)
+    monkeypatch.setattr("ctshowcase.formatting.format_text", lambda root, path, text: text)
+    with pytest.raises(ShowcaseError, match="must be a regular file"):
+        showcase.write_art(make_ctx(repo_dir=tmp_path), out, b"new card", format_generated=True,
+                           preview=(images / "card.png", b"new preview"))
+    assert out.read_bytes() == b"original card"
+    if original_sidecar is not None:
+        assert sidecar.read_bytes() == original_sidecar
+    else:
+        assert not (images / "card.png").exists()
+
+
+def test_formatted_outputs_roll_back_a_failed_replacement(tmp_path, monkeypatch):
+    from ctshowcase.formatting import write_formatted_outputs
+
+    card = tmp_path / "card.svg"
+    preview = tmp_path / "card.png"
+    card.write_bytes(b"original card")
+    replace = Path.replace
+
+    def fail_preview(source, destination):
+        if destination == preview:
+            raise PermissionError("synthetic replacement failure")
+        return replace(source, destination)
+
+    monkeypatch.setattr(Path, "replace", fail_preview)
+    with pytest.raises(PermissionError, match="synthetic replacement failure"):
+        write_formatted_outputs([(card, b"new card"), (preview, b"new preview")])
+    assert card.read_bytes() == b"original card"
+    assert not preview.exists()
+
+
+def test_formatted_card_replaces_a_hard_link_without_writing_through_it(tmp_path, monkeypatch, make_ctx):
+    import showcase
+
+    images = tmp_path / "repo/docs/images"
+    images.mkdir(parents=True)
+    outside = tmp_path / "unrelated.svg"
+    outside.write_bytes(b"original external file")
+    card = images / "card.svg"
+    try:
+        card.hardlink_to(outside)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"hard links are unavailable: {exc}")
+    monkeypatch.setattr("ctshowcase.formatting.format_text", lambda root, path, text: text)
+    showcase.write_art(make_ctx(repo_dir=tmp_path / "repo"), card, b"new card", format_generated=True)
+    assert card.read_bytes() == b"new card"
+    assert outside.read_bytes() == b"original external file"
+
+
+def test_formatter_cannot_retarget_readme_to_same_bytes_outside_checkout(tmp_path, monkeypatch):
+    import showcase
+
+    repo, meta = target(tmp_path)
+    readme = repo / "README.md"
+    original = b"# Northwind\n\nSynthetic body.\n"
+    readme.write_bytes(original)
+    outside = tmp_path / "unrelated.md"
+    outside.write_bytes(original)
+    link = repo / "replacement"
+    try:
+        link.symlink_to(outside)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symbolic links are unavailable: {exc}")
+
+    def retarget(root, destination, text):
+        readme.unlink()
+        link.replace(readme)
+        return text
+
+    monkeypatch.setattr("ctshowcase.formatting.format_text", retarget)
+    assert showcase.main(["--meta", str(meta), "--repo-dir", str(repo), "readme", "--mode", "scaffold",
+                          "--write", "--format-generated"]) == 2
+    assert readme.is_symlink()
+    assert outside.read_bytes() == original
+
+
+@pytest.mark.parametrize("write", [False, True])
+def test_formatter_records_cannot_alias_readme(tmp_path, monkeypatch, write):
+    import showcase
+
+    repo, meta = target(tmp_path)
+    readme = repo / "README.md"
+    original = b"# Northwind\n"
+    readme.write_bytes(original)
+    monkeypatch.setattr("ctshowcase.formatting.format_text", lambda root, path, text: text)
+    argv = ["--meta", str(meta), "--repo-dir", str(repo), "readme", "--mode", "scaffold",
+            "--records", str(readme), "--format-generated"]
+    if write:
+        argv.append("--write")
+    assert showcase.main(argv) == 2
+    assert readme.read_bytes() == original

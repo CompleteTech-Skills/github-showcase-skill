@@ -6,11 +6,12 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import tempfile
 import time
 import xml.etree.ElementTree as ET
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -115,6 +116,60 @@ def target_relative(repo_dir: Path | None, destination: Path) -> Path:
         return destination.resolve().relative_to(Path(repo_dir).resolve())
     except ValueError as error:
         raise ShowcaseError("formatter destination must be inside the target checkout", log="usage") from error
+
+
+def _file_state(path: Path) -> tuple[int, ...] | None:
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return None
+    if not stat.S_ISREG(info.st_mode):
+        raise ShowcaseError("formatted output must be a regular file", log="formatter-output")
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
+def write_formatted_outputs(outputs: list[tuple[Path, bytes]], *,
+                            snapshots: dict[Path, bytes | None] | None = None) -> None:
+    """Prepare every replacement on its destination filesystem, then publish or roll back the group."""
+    snapshots = snapshots or {}
+    with ExitStack() as scratch:
+        prepared = []
+        for destination, data in outputs:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            path = destination.parent.resolve() / destination.name
+            initial = _file_state(path)
+            working = Path(scratch.enter_context(tempfile.TemporaryDirectory(dir=path.parent)))
+            replacement = working / "output"
+            backup = working / "original"
+            replacement.write_bytes(data)
+            previous = None
+            if initial is not None:
+                # Keep the old entry's access check even where directory permissions allow replacing it.
+                with path.open("r+b") as stream:
+                    previous = stream.read()
+                backup.write_bytes(previous)
+                mode = stat.S_IMODE(initial[2])
+                replacement.chmod(mode)
+                backup.chmod(mode)
+            if destination in snapshots and previous != snapshots[destination]:
+                raise ShowcaseError("README inputs changed during formatting", log="formatter-source-changed",
+                                    code=CHECK_FAILED)
+            prepared.append((destination, path, initial, replacement, backup))
+        written = []
+        try:
+            for destination, path, initial, replacement, backup in prepared:
+                if destination.resolve() != path or _file_state(path) != initial:
+                    raise ShowcaseError("output changed during formatting", log="formatter-source-changed",
+                                        code=CHECK_FAILED)
+                replacement.replace(path)
+                written.append((path, backup))
+        except (OSError, ShowcaseError):
+            for path, backup in reversed(written):
+                if backup.exists():
+                    backup.replace(path)
+                else:
+                    path.unlink()
+            raise
 
 
 @contextmanager

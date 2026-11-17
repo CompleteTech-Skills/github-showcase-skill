@@ -125,7 +125,10 @@ def context(args, b=None, *, for_coverage=False):
     b = b or brand(args)
     rd = repo_dir(args)
     meta = merged(args.meta, str(rd) if rd else None)
-    return RepoContext(b, meta, rd, type_override=getattr(args, "type_override", None), for_coverage=for_coverage)
+    ctx = RepoContext(b, meta, rd, type_override=getattr(args, "type_override", None), for_coverage=for_coverage)
+    if getattr(args, "format_generated", False):
+        ctx.meta_path = Path(args.meta).resolve() if args.meta else None
+    return ctx
 
 
 def base(cmd, ctx=None, **kw) -> dict:
@@ -195,11 +198,12 @@ def ensure_distinct_outputs(*destinations: Path) -> None:
 
 def write_art(ctx, out: Path, data: bytes, *, format_generated: bool, preview=None, **extra) -> None:
     """Prepare the optional preview and formatted sidecar before writing any art outputs."""
-    from ctshowcase.formatting import format_text, same_json, sidecar_lock, target_relative
+    from ctshowcase.formatting import format_text, same_json, sidecar_lock, target_relative, write_formatted_outputs
 
     sidecar = _sidecar_path(out)
     destinations = [out] + ([sidecar] if sidecar else []) + ([preview[0]] if preview else [])
-    ensure_distinct_outputs(*destinations)
+    capture = getattr(ctx, "meta_path", None)
+    ensure_distinct_outputs(*destinations, *([capture] if capture else []))
     if format_generated:
         target_relative(ctx.repo_dir, out)
         if sidecar is not None:
@@ -212,11 +216,20 @@ def write_art(ctx, out: Path, data: bytes, *, format_generated: bool, preview=No
             if not same_json(summary, formatted):
                 raise ShowcaseError("formatter changed the art sidecar data", log="formatter-content")
             summary = formatted
-        write_bytes(out, data)
+        outputs = [(out, data)]
         if preview:
-            write_bytes(*preview)
+            outputs.append(preview)
         if sidecar is not None and summary is not None:
-            write_bytes(sidecar, summary.encode("utf-8"))
+            outputs.append((sidecar, summary.encode("utf-8")))
+        if format_generated:
+            target_relative(ctx.repo_dir, out)
+            if sidecar is not None:
+                target_relative(ctx.repo_dir, sidecar)
+            ensure_distinct_outputs(*destinations, *([capture] if capture else []))
+            write_formatted_outputs(outputs)
+        else:
+            for destination, content in outputs:
+                write_bytes(destination, content)
 
 
 def write_bytes(path: Path, data: bytes) -> None:
@@ -588,27 +601,40 @@ def cmd_readme(args):
                                         code=CHECK_FAILED)
                 drawing = formatted
             badge_outputs[rel] = drawing.encode("utf-8")
+    if args.format_generated and args.records and changed:
+        capture = getattr(ctx, "meta_path", None)
+        ensure_distinct_outputs(Path(args.records), path, contrib_path, *(rd / rel for rel in badge_outputs),
+                                *([capture] if capture else []))
     if args.write:
         if badge_outputs or (changed and contrib_new is not None):
             ensure_distinct_outputs(path, contrib_path, *(rd / rel for rel in badge_outputs))
+        outputs = [(rd / rel, data) for rel, data in badge_outputs.items()]
+        if changed:
+            outputs.append((path, after.encode("utf-8")))
+            if contrib_new is not None:
+                outputs.append((contrib_path, contrib_new.encode("utf-8")))
         if args.format_generated:
+            from ctshowcase.formatting import write_formatted_outputs
+            capture = getattr(ctx, "meta_path", None)
+            ensure_distinct_outputs(*(target for target, _ in outputs), *([capture] if capture else []))
             snapshots = [(path, original_readme)]
             if contrib_new is not None:
                 snapshots.append((contrib_path, original_contrib))
             for target, original in snapshots:
+                target_relative(rd, target)
                 current = target.read_bytes() if target.is_file() else None
                 if current != original:
                     raise ShowcaseError("README inputs changed during formatting", log="formatter-source-changed",
                                         code=CHECK_FAILED)
-        for rel, data in badge_outputs.items():
-            write_bytes(rd / rel, data)
-    if args.write and changed:
-        path.write_bytes(after.encode("utf-8"))
-        if contrib_new is not None:
-            if args.format_generated:
-                contrib_path.write_bytes(contrib_new.encode("utf-8"))
-            else:
-                contrib_path.write_text(contrib_new, encoding="utf-8")
+            for target, _ in outputs:
+                target_relative(rd, target)
+            write_formatted_outputs(outputs, snapshots=dict(snapshots))
+        else:
+            for target, data in outputs:
+                if target == contrib_path:
+                    contrib_path.write_text(contrib_new, encoding="utf-8")
+                else:
+                    write_bytes(target, data)
     if args.records and changed:
         records.append(args.records, [records.record(ctx.owner, ctx.repo, "readme", "README.md", before, after,
                                                      f"§7 variant {ctx.det['variant']} ({mode})")])
