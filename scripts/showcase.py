@@ -535,6 +535,18 @@ def cmd_readme(args):
             problems = readme.preservation(old, comparable, removed, ctx=ctx)
         return problems
 
+    reason = readme.managed_reason(ctx, before)
+    if reason:
+        proposed = readme.header(ctx)
+        ctx.log("needs-input:readme-managed")
+        if args.format == "text":
+            if not args.quiet:
+                print(f"readme: needs-input:readme-managed ({reason})", file=sys.stderr)
+                if not args.write:
+                    print(proposed)
+            return None, NEEDS_INPUT if args.write else OK
+        return base("readme", ctx, result="needs-input", written=False, reason=reason,
+                    proposed_header=proposed), NEEDS_INPUT if args.write else OK
     mode = args.mode
     contrib_new = None
     original_contrib = None

@@ -123,6 +123,9 @@
       ],
       "additionalProperties": false,
       "properties": {
+        "managed": {
+          "type": "boolean"
+        },
         "header": {
           "type": "boolean"
         },
