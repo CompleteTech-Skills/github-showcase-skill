@@ -494,7 +494,8 @@ def cmd_readme(args):
     if rd is None:
         raise ShowcaseError("readme needs the repository checkout (--repo-dir DIR, or run inside it)", log="usage")
     path = rd / "README.md"
-    before = readme.read_text(path)
+    original = path.read_bytes() if path.is_file() else None
+    before = readme.normalize_text((original or b"").decode("utf-8").replace("\r\n", "\n").replace("\r", "\n"))
     if ctx.watching_status() == "exempt:watching-fork":
         return base("readme", ctx, result="exempt", logs=["exempt"]), OK
     # a watching-org non-fork other than `.github`: held until decided (no README change, no --allow-hold)
@@ -570,8 +571,12 @@ def cmd_readme(args):
             destinations.append(path)
         if changed and contrib_new is not None:
             destinations.append(rd / "CONTRIBUTING.md")
-        with lock_outputs(ctx, *destinations):
+        with lock_outputs(ctx, path, *destinations):
             check_outputs(ctx, *destinations, auxiliary=report)
+            current = path.read_bytes() if path.is_file() else None
+            if current != original:
+                raise ShowcaseError("README changed while the refresh was being prepared", log="readme-source-changed",
+                                    code=CHECK_FAILED)
             if staged:
                 tagline = readme.tagline_body(ctx).strip()
                 if tagline in tagline_blocks(after):

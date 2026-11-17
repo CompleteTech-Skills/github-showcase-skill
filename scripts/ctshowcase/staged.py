@@ -41,6 +41,8 @@ def check_social_path(path: Path, *, staged: bool, job: bool) -> None:
 
 def _output_slot(ctx, path: Path) -> tuple[Path, str, bool]:
     path = Path(path).resolve()
+    if SOCIAL_STAGING in map(str.casefold, path.parent.parts):
+        return path.parent, path.name, False
     root = Path(ctx.repo_dir).resolve() if ctx.repo_dir else None
     if root is not None and path.is_relative_to(root):
         directory = root / "docs" / "images"
@@ -75,6 +77,11 @@ def check_auxiliary(capture: Path | None, checkout: Path | None, *paths: Path) -
         resolved = path.resolve()
         if path.is_symlink() or (path.exists() and (not path.is_file() or path.stat().st_nlink > 1)):
             raise ShowcaseError("staged reports must use an unlinked regular file", log="staged-description:path")
+        if path.is_file():
+            with path.open("rb") as stream:
+                signature = stream.read(8)
+            if signature.startswith((b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff")):
+                raise ShowcaseError("staged reports must not replace an existing image", log="staged-description:path")
         roots = {(checkout or Path.cwd()).resolve()}
         # Explicit metadata-only destinations can still land in this or another checked-out repository.
         enclosing = next((parent for parent in resolved.parents if (parent / ".git").exists()), None)

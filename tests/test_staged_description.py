@@ -151,7 +151,8 @@ def test_cli_staged_art_keeps_capture_and_records_proposal(surface, tmp_path):
     report = json.loads(result.stdout)
     assert "staged-description" in report["logs"]
     assert json.loads(capture.read_text())["description"] == "Run the Northwind triage agent."
-    records = read_sidecar(target / "docs/images")["outputs"]
+    provenance = Path(report["out"]).parent if surface == "social" else target / "docs/images"
+    records = read_sidecar(provenance)["outputs"]
     assert any(r.get("staged_description", {}).get("text") == "Route support requests." for r in records.values())
 
 
@@ -214,11 +215,11 @@ def test_cli_ordinary_refresh_replaces_only_its_staged_records(tmp_path, surface
     staged = run_cli(*common, *command, "--description", "Route support requests.")
     assert staged.returncode == 0, staged.stdout + staged.stderr
     sidecar = target / "docs/images"
+    private = target / "assets" / SOCIAL_STAGING
     before = read_sidecar(sidecar)["outputs"]
-    stage_social = f"assets/{SOCIAL_STAGING}/social-preview.png"
+    private_before = read_sidecar(private)
     keys = {"banner": ["banner.png"], "card": ["card.svg", "card.png"],
-            "social": [stage_social], "readme": ["README.md"]}[surface]
-    untouched = "README.md" if surface == "social" else stage_social
+            "social": [], "readme": ["README.md"]}[surface]
     for key in keys:
         assert before[key]["staged_description"]["text"] == "Route support requests."
         if surface in ("banner", "card"):
@@ -226,9 +227,9 @@ def test_cli_ordinary_refresh_replaces_only_its_staged_records(tmp_path, surface
     ordinary = run_cli(*common, *command)
     assert ordinary.returncode == 0, ordinary.stdout + ordinary.stderr
     after = read_sidecar(sidecar)["outputs"]
-    assert after[untouched] == before[untouched]
+    assert read_sidecar(private) == private_before
     if surface == "social":
-        assert after[stage_social] == before[stage_social]
+        assert after == before
         assert (target / "assets/social-preview.png").is_file()
         return
     for key in keys:
@@ -778,3 +779,67 @@ def test_metadata_only_staged_report_refuses_action_managed_destinations(tmp_pat
     assert "staged-description:path" in json.loads(result.stdout)["logs"]
     assert not report.exists()
     assert not output.exists()
+
+
+def test_staged_social_provenance_stays_outside_unrelated_action_commits(tmp_path, monkeypatch, make_ctx):
+    import action_prepare
+
+    ctx = make_ctx(repo_dir=tmp_path)
+    ctx.meta, ctx.staged_description = prepare(ctx.meta, "Unpublished draft.")
+    path = tmp_path / "assets" / SOCIAL_STAGING / "social-preview.png"
+    record_output(ctx, path, {"sha256": "a" * 64})
+    monkeypatch.chdir(tmp_path)
+    assert read_sidecar(path.parent)["outputs"][path.name]["staged_description"]["text"] == "Unpublished draft."
+    assert not action_prepare.has_staged_outputs()
+
+
+@pytest.mark.parametrize("signature", [b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff"])
+def test_staged_report_does_not_replace_previously_rendered_social_image(tmp_path, signature):
+    target = tmp_path / "repo"
+    target.mkdir()
+    capture = tmp_path / "meta.json"
+    capture.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    live = target / "queued-preview"
+    original = signature + b"existing render"
+    live.write_bytes(original)
+    result = run_cli("--meta", capture, "--repo-dir", target, "--format", "json",
+                     "content", "social", "--description", "Unpublished draft.", "--report", live)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "staged-description:path" in json.loads(result.stdout)["logs"]
+    assert live.read_bytes() == original
+
+
+def test_stale_live_readme_plan_cannot_clear_concurrent_staged_provenance(tmp_path, monkeypatch, make_ctx):
+    from contextlib import contextmanager
+
+    import showcase
+    from ctshowcase import readme, staged
+
+    capture = tmp_path / "capture.json"
+    capture.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    target = tmp_path / "repo"
+    target.mkdir()
+    path = target / "README.md"
+    common = ["--meta", str(capture), "--repo-dir", str(target), "readme"]
+    assert showcase.main([*common, "--mode", "scaffold", "--write"]) == 0
+    assert showcase.main([*common, "--mode", "header", "--write"]) == 0
+    live = path.read_bytes()
+    proposal = make_ctx(repo_dir=target)
+    proposal.meta, proposal.staged_description = prepare(proposal.meta, "Unpublished draft.")
+    staged_text = live.decode().replace("Run the Northwind triage agent.", "Unpublished draft.").encode()
+    original_lock = staged.lock_outputs
+
+    @contextmanager
+    def stage_first(ctx, *paths):
+        with original_lock(proposal, path):
+            path.write_bytes(staged_text)
+            fp_hash = hashlib.sha256(staged_text).hexdigest()
+            record_output(proposal, path, {"sha256": fp_hash,
+                                           "tagline_sha256": staged.tagline_digest(readme.tagline_body(proposal).strip())})
+        with original_lock(ctx, *paths):
+            yield
+
+    monkeypatch.setattr(staged, "lock_outputs", stage_first)
+    assert showcase.main([*common, "--mode", "header", "--write"]) == 1
+    assert path.read_bytes() == staged_text
+    assert "staged_description" in read_sidecar(target / "docs/images")["outputs"]["README.md"]

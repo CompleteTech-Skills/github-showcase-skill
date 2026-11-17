@@ -24,6 +24,8 @@ Explicit report and change-record destinations must stay outside the files the
 Action commits. The capture, output and provenance destinations must be distinct.
 Staged social previews default to `assets/.showcase-staging/social-preview.png`.
 An explicit staged path must also be inside a `.showcase-staging` directory.
+A preview's sidecar stays beside the private image outside the canonical Action
+artifact group. Reports also preserve existing PNG or JPEG output files.
 `content social --job` requires captured metadata and a live output path outside
 that directory. Staging a preview leaves previously queued live files intact.
 An ordinary render replaces the record for each refreshed output with its current
