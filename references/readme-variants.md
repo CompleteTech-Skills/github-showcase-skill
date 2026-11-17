@@ -285,8 +285,8 @@ centered bold paragraph) inside a recognized `showcase:tagline` block. A block
 with additional prose stays intact. The upgrade's line-count guard still
 protects authored text outside that block, including examples in code fences.
 
-For a README owned by the repository's own generator, set `readme.managed: true`
-in `.github/showcase.yml`:
+For a README owned by the repository's own generator, set `readme: managed` in
+`.github/showcase.yml`. Use the mapping form when setting other README options:
 
 ```yaml
 readme:

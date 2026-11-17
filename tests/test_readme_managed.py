@@ -94,13 +94,14 @@ def test_prose_code_and_late_comments_are_not_ownership_notices(make_ctx, text):
     assert readme.managed_reason(make_ctx(), text) is None
 
 
-@pytest.mark.parametrize("managed_by", ["notice", "config"])
+@pytest.mark.parametrize("managed_by", ["notice", "config", "shorthand"])
 def test_managed_cli_write_refuses_and_dry_run_offers_header(tmp_path, managed_by):
     checkout = tmp_path / "checkout"
     checkout.mkdir()
-    if managed_by == "config":
+    if managed_by != "notice":
         (checkout / ".github").mkdir()
-        (checkout / ".github/showcase.yml").write_text("readme:\n  managed: true\n", encoding="utf-8")
+        config = "readme: managed\n" if managed_by == "shorthand" else "readme:\n  managed: true\n"
+        (checkout / ".github/showcase.yml").write_text(config, encoding="utf-8")
         original = GENERATED_README.split("-->\n")[1]
     else:
         original = GENERATED_README
