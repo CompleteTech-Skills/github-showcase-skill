@@ -32,14 +32,16 @@ def normalize_text(text: str) -> str:
 
 
 def personal_readme_bytes(original: bytes, text: str) -> bytes:
-    """Keep BOM and each unchanged line's terminator, including authored mixed LF/CRLF files."""
+    """Keep BOM and each unchanged line's terminator, including authored mixed LF, CRLF and CR files."""
     source = original.decode("utf-8")
     bom = BOM if source.startswith(BOM) else ""
     source = source.removeprefix(BOM)
     old = source.splitlines(keepends=True)
-    normalized = [line.replace("\r\n", "\n") for line in old]
+    normalized = [line.replace("\r\n", "\n").replace("\r", "\n") for line in old]
     new = text.splitlines(keepends=True)
-    newline = "\r\n" if source.count("\r\n") > source.count("\n") / 2 else "\n"
+    crlf = source.count("\r\n")
+    counts = {"\n": source.count("\n") - crlf, "\r\n": crlf, "\r": source.count("\r") - crlf}
+    newline = max(counts, key=counts.__getitem__)
     out = []
     for tag, i, j, a, b in SequenceMatcher(None, normalized, new, autojunk=False).get_opcodes():
         out.extend(old[i:j] if tag == "equal" else [line.replace("\n", newline) for line in new[a:b]])

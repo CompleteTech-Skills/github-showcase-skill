@@ -199,7 +199,7 @@ def test_personal_banner_remains_exempt(tmp_path):
 def test_personal_changed_header_preserves_authored_mixed_line_endings(tmp_path, intro_bytes):
     meta = metadata(tmp_path)
     put_intro(tmp_path, intro_bytes)
-    suffix = b'\r\n\r\n# Profile\n\nAuthored  spaces.  \r\nAnother authored line.\n'
+    suffix = b'\r\n\r\n# Profile\n\nAuthored  spaces.  \r\nAnother authored line.\rLast line.\n'
     source = (b'\xef\xbb\xbf<!-- showcase:banner:start -->\r\n<p align="center">\r\n'
               b'  <img src="docs/images/banner.png" alt="CompleteDotTech by CompleteTech LLC" width="100%">\r\n'
               b'</p>\r\n<!-- showcase:banner:end -->' + suffix)
