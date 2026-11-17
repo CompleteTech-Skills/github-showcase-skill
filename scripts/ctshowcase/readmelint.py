@@ -11,7 +11,7 @@ from . import mdcode
 from .mdcode import find_inline_code  # noqa: F401 (compatibility re-export)
 from .context import RepoContext
 from .detect import standard
-from .readme import BANNER_BLOCK, EMOJI, MARK, is_footer_like, masked, normalize_text, nav_first, preserved, split_sections
+from .readme import BANNER_BLOCK, EMOJI, MARK, is_footer_like, masked, normalize_text, nav_first, preserved, source_lines, split_sections
 
 from .mdcode import (  # noqa: F401 (compatibility re-exports)
     _NL,
@@ -200,8 +200,14 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
             if st != "pass":
                 fails.append(f"D18 footer {st}")
         return _result(path, fails, warns, incomplete)
-    plain = MARK.sub(lambda m: m.group(2), text)
-    lines = [ln for ln in plain.splitlines() if ln.strip()]
+    parts = []
+    offset = 0
+    for block in mdcode.find_blocks(MARK, text):
+        parts.extend((text[offset:block.start()], block.group(2)))
+        offset = block.end()
+    parts.append(text[offset:])
+    plain = "".join(parts)
+    lines = [line for line in source_lines(plain) if line.strip(" \t")]
     preserve = preserved(ctx, text)
     unchanged = preserve and ctx.preserve_unchanged()
     # §7.1 order (q57 `nav`): hero banner, then the nav line; "Nav line first" (readme.nav_first) puts the nav on top

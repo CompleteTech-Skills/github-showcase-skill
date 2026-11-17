@@ -14,9 +14,9 @@ from . import footer as footermod
 from .context import RepoContext
 from .detect import standard
 from .errors import ConfigError, NeedsInput
-from .mdcode import code_block_spans, code_spans, find_blocks, masked  # noqa: F401  (code_spans: re-exported for callers)
+from .mdcode import MANAGED_BLOCK_PATTERN, code_block_spans, code_spans, find_blocks, masked  # noqa: F401  (code_spans: re-exported for callers)
 
-MARK = re.compile(r"<!-- showcase:([a-z-]+):start -->\n?(.*?)\n?<!-- showcase:\1:end -->", re.S)
+MARK = MANAGED_BLOCK_PATTERN
 EMOJI = re.compile("[\U0001F000-\U0001FAFF☀-➿⬀-⯿️‍]")
 SHIELDS = "https://img.shields.io/badge/"
 GENERATED_BADGES = re.compile(r"<!-- showcase:badges:generated sha256=([0-9a-f]{64})"
@@ -24,16 +24,20 @@ GENERATED_BADGES = re.compile(r"<!-- showcase:badges:generated sha256=([0-9a-f]{
 BOM = "\ufeff"
 
 
+def normalize_line_endings(text: str) -> str:
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
 def normalize_text(text: str) -> str:
     """README text as the tools read it: LF line endings, no leading UTF-8 byte order mark (a BOM would hide the H1
     from every `^#` match)."""
-    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = normalize_line_endings(text)
     return text[1:] if text.startswith(BOM) else text
 
 
 def source_lines(text: str) -> list[str]:
     """Split only at Markdown line endings, keeping other source characters."""
-    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    lines = normalize_line_endings(text).split("\n")
     if not lines[-1]:
         lines.pop()
     return lines
@@ -988,8 +992,8 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
     variant = ctx.det["variant"]
     rv = standard("readme-variants")
     if variant in ("G", "H"):
-        return callout_only(ctx, normalize_text(text))
-    text = normalize_text(text)
+        return callout_only(ctx, normalize_line_endings(text))
+    text = normalize_line_endings(text)
     if variant == "J" and _badge_blocks_need_in_place_refresh(find_blocks(MARK, text)):
         return header_only(ctx, text), []
     body, blocks = _strip_markers(text)
@@ -1193,7 +1197,7 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
 
 def header_only(ctx: RepoContext, text: str) -> str:
     """Replace only existing marker blocks (what the Action runs)."""
-    text = normalize_text(text)
+    text = normalize_line_endings(text)
     desc = (ctx.meta.get("description") or "").strip()
     gen = {"nav": nav_line(ctx), "banner": banner_html(ctx), "footer": footermod.markup(ctx.brand)}
     if ctx.repo_dir is not None and not (ctx.repo_dir / "docs" / "images" / "banner.png").is_file():
@@ -1321,7 +1325,7 @@ def pristine_block(body: str) -> str:
 def bootstrap_state(text: str) -> str:
     """'pristine' (the block is byte-for-byte what was generated), 'edited' (a marker without a matching hash: a person
     wrote in the block) or 'none' (no marker: the README is the repository's own)."""
-    found = find_blocks(TEMPLATE_BODY, normalize_text(text))
+    found = find_blocks(TEMPLATE_BODY, normalize_line_endings(text))
     if not found:
         return "none"
     m = found[0]
@@ -1353,7 +1357,7 @@ def bootstrap(ctx: RepoContext, text: str) -> str:
     regenerated on later runs too, so a repository typed `workspace` on its creation commit is re-bootstrapped once
     its code (or `type:` in .github/showcase.yml) gives the real type. Any human edit inside the block changes its
     hash, and from then on the block is the repository's own: never overwritten (callers drop the marker)."""
-    text = normalize_text(text)
+    text = normalize_line_endings(text)
     if ctx.meta.get("is_template") or bootstrap_state(text) != "pristine":
         return text
     variant = ctx.det["variant"]

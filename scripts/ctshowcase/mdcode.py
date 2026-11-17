@@ -999,10 +999,38 @@ def masked(text: str) -> str:
     return "".join(out)
 
 
+MANAGED_BLOCK_PATTERN = re.compile(r"<!-- showcase:([a-z-]+):start -->\n?(.*?)\n?<!-- showcase:\1:end -->", re.S)
+_MANAGED_DELIMITER = re.compile(r"<!-- showcase:([a-z-]+):(start|end) -->")
+
+
+def _managed_block_ranges(projection: str):
+    """Pair actual delimiters without rescanning the remainder at each unmatched opener."""
+    tokens = list(_MANAGED_DELIMITER.finditer(projection))
+    following_end = {}
+    pairs = {}
+    for token in reversed(tokens):
+        name, kind = token.groups()
+        if kind == "end":
+            following_end[name] = token.end()
+        elif name in following_end:
+            pairs[token.start()] = following_end[name]
+    previous_end = 0
+    for token in tokens:
+        start = token.start()
+        if start >= previous_end and start in pairs:
+            previous_end = pairs[start]
+            yield start, previous_end
+
+
 def find_blocks(pattern: re.Pattern, text: str) -> list[re.Match]:
     """Matches outside accepted code/literal data, with original source groups byte-identical."""
-    found = (pattern.fullmatch(text, m.start(), m.end()) for m in pattern.finditer(_marker_projection(text)))
-    return [m for m in found if m]
+    projection = _marker_projection(text)
+    if pattern is MANAGED_BLOCK_PATTERN:
+        ranges = _managed_block_ranges(projection)
+    else:
+        ranges = (match.span() for match in pattern.finditer(projection))
+    found = (pattern.fullmatch(text, start, end) for start, end in ranges)
+    return [match for match in found if match]
 
 
 # Shared stdlib-only inline/reference grammar. Readme, meta and image lint
@@ -1155,9 +1183,9 @@ class _CommentMatch:
         return self._start, self._end
 
 
-def _search_comment(text: str, pos: int, html_spans):
+def _search_comment(indexed_comments, pos: int):
     """First indexed, unescaped valid HTML comment at or after `pos`."""
-    starts, matches = _comment_matches(text, tuple(html_spans))
+    starts, matches = indexed_comments
     index = bisect.bisect_left(starts, pos)
     return _CommentMatch(*matches[index]) if index < len(matches) else None
 
@@ -1264,6 +1292,7 @@ def _definition_candidates(document: str) -> str:
                 out[i] = " "
     fences = code_block_spans(document)
     html_spans = html_block_spans(document)
+    indexed_comments = _comment_matches(document, html_spans)
     links = _inline_link_spans(document, fences)  # resolved link destinations and titles: literal text, computed once
     # Reference labels are parsed before inline HTML. A comment-looking string
     # inside a syntactically valid definition label is literal label text, even
@@ -1289,7 +1318,7 @@ def _definition_candidates(document: str) -> str:
         if tag is not False and (tag is None or tag.start() < pos):
             tag = _search_unescaped(HTML_OPEN_TAG, document, pos, html_spans) or False
         if comment is not False and (comment is None or comment.start() < pos):
-            comment = _search_comment(document, pos, html_spans) or False
+            comment = _search_comment(indexed_comments, pos) or False
         if raw_html is not False and (raw_html is None or raw_html.start() < pos):
             raw_html = _search_raw_html(document, pos) or False
         found = [m for m in (tag, comment, raw_html) if m]
@@ -1525,6 +1554,7 @@ def _outside_code(text: str, mask_inline: bool = True) -> str:
     definitions = _definition_spans(text)  # decided before inline code: a definition destination's backtick is literal
     labels = _reference_label_spans(text)  # resolved full-reference labels: their backticks are literal too
     html_spans = html_block_spans(text)  # raw HTML blocks: tags there are never escaped by a backslash
+    indexed_comments = _comment_matches(text, html_spans)
     out, pos = list(text), 0
     tag = comment = raw_html = inline = dest = autolink = None
 
@@ -1564,7 +1594,7 @@ def _outside_code(text: str, mask_inline: bool = True) -> str:
         if tag is not False and (tag is None or tag.start() < pos):
             tag = _search_unescaped(HTML_OPEN_TAG, text, pos, html_spans) or False
         if comment is not False and (comment is None or comment.start() < pos):
-            comment = _search_comment(text, pos, html_spans) or False
+            comment = _search_comment(indexed_comments, pos) or False
         if raw_html is not False and (raw_html is None or raw_html.start() < pos):
             raw_html = _search_raw_html(text, pos) or False
         if autolink is not False and (autolink is None or autolink[0] < pos):
@@ -1787,6 +1817,7 @@ def _accepted_inline(text: str):
     WORK['inline_precedence_builds'] += 1
     fences = _fence_spans(text)
     html_spans = html_block_spans(text)
+    indexed_comments = _comment_matches(text, html_spans)
     defs = _definition_spans(text)  # live reference definitions: inert block regions, cached per document
     keys = {_definition_key(m, text) for m in _definitions(text)}  # live definition labels, computed once per call
     opened: set[int] = set()
@@ -1848,7 +1879,7 @@ def _accepted_inline(text: str):
         if tag is not False and (tag is None or tag.start() < pos):
             tag = _search_unescaped(HTML_OPEN_TAG, text, pos, html_spans) or False
         if comment is not False and (comment is None or comment.start() < pos):
-            comment = _search_comment(text, pos, html_spans) or False
+            comment = _search_comment(indexed_comments, pos) or False
         if raw_html is not False and (raw_html is None or raw_html.start() < pos):
             raw_html = _search_raw_html(text, pos) or False
         if autolink is not False and (autolink is None or autolink[0] < pos):
@@ -2362,6 +2393,23 @@ def _raw_marker_text_spans(source, blocks, tags, inline_literals):
         yield end, covered
 
 
+def _marker_comment_starts(source, blocks, literal_spans) -> set[int]:
+    """Only the first live opener owns an HTML comment; nested-looking openers are literal."""
+    _, comments = _comment_matches(source, blocks)
+    live = set()
+    previous_end = 0
+    span = iter(literal_spans)
+    literal = next(span, None)
+    for start, end in comments:
+        while literal is not None and literal[1] <= start:
+            literal = next(span, None)
+        if start < previous_end or (literal is not None and literal[0] <= start):
+            continue
+        live.add(start)
+        previous_end = end
+    return live
+
+
 @functools.lru_cache(maxsize=16)
 def _marker_projection(text: str) -> str:
     """Hide code and accepted literal data, retaining real HTML marker comments.
@@ -2390,6 +2438,10 @@ def _marker_projection(text: str) -> str:
             merged[-1] = (merged[-1][0], max(end, merged[-1][1]))
         else:
             merged.append((start, end))
+    comments = _marker_comment_starts(source, blocks, merged)
+    for opener in re.finditer(r"<!--", source):
+        if opener.start() not in comments:
+            out[opener.start()] = "\x00"
     for start, end in merged:
         WORK['marker_projection_chars'] += end - start
         for at in range(start, end):

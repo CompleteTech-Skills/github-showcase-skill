@@ -392,3 +392,79 @@ def test_lead_reorder_cannot_modify_indented_marker_examples(make_ctx):
     example = readme.wrap("nav", "sample") + "\n\n" + readme.wrap("banner", "sample")
     authored = "\n".join("    " + line for line in example.split("\n"))
     assert readme.reorder_lead(ctx, authored) == authored
+
+
+@pytest.mark.parametrize("ending", ENDINGS)
+def test_markers_inside_other_html_comments_cannot_authorize_a_write(tmp_path, ending):
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps({"owner": "Northwind-Trading-Co", "repo": ".github",
+                                "license": "MIT", "files": ["README.md"]}), encoding="utf-8")
+    path = tmp_path / "README.md"
+    authored = ("<!-- Outer documentation comment with a specimen opener:\n"
+                "<!-- showcase:nav:start -->\n"
+                "Authored navigation prose.\n<!-- showcase:nav:end -->")
+    genuine = readme.wrap("badges", "")
+    raw = ("# Probe\n\n" + authored + "\n\n" + genuine + "\n").replace("\n", ending)
+    path.write_bytes(raw.encode("utf-8"))
+    assert [block.group(1) for block in mdcode.find_blocks(readme.MARK, raw)] == ["badges"]
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--mode", "header", "--write")
+    assert result.returncode == 0, result.stdout + result.stderr
+    written = path.read_bytes()
+    assert authored.replace("\n", ending).encode("utf-8") in written
+    assert b"![Type GitHub profile]" in written
+
+
+def test_escaped_closing_comment_is_not_a_real_marker():
+    example = "<!-- showcase:nav:start -->\n\nAuthored paragraph.\n\\<!-- showcase:nav:end -->\n"
+    assert not mdcode.find_blocks(readme.MARK, example)
+
+
+def test_readme_header_preserves_escaped_marker_examples(tmp_path):
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps({"owner": "Northwind-Trading-Co", "repo": ".github",
+                                "license": "MIT", "files": ["README.md"]}), encoding="utf-8")
+    path = tmp_path / "README.md"
+    literal = (b"# Probe\r\r\\<!-- showcase:nav:start -->\rAuthored marker example should stay."
+               b"\r\\<!-- showcase:nav:end -->\r\rAfter.\r")
+    path.write_bytes(literal)
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--mode", "header", "--write")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert path.read_bytes() == literal
+
+
+@pytest.mark.parametrize("existing_block", [False, True])
+def test_readme_header_keeps_an_authored_bom_after_the_encoding_bom(tmp_path, existing_block):
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps({"owner": "Northwind-Trading-Co", "repo": ".github",
+                                "license": "MIT", "files": ["README.md"]}), encoding="utf-8")
+    path = tmp_path / "README.md"
+    prefix = b"\xef\xbb\xbf\xef\xbb\xbf# Authored\r"
+    original = prefix + (("\r" + readme.wrap("badges", "").replace("\n", "\r") + "\r").encode()
+                         if existing_block else b"")
+    path.write_bytes(original)
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--mode", "header", "--write")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert path.read_bytes().startswith(prefix)
+    if existing_block:
+        assert b"![Type GitHub profile]" in path.read_bytes()
+    else:
+        assert path.read_bytes() == original
+
+
+def test_unmatched_managed_openers_do_not_rescan_the_remaining_document():
+    import subprocess
+    import sys
+
+    from conftest import ROOT
+
+    probe = """
+import sys
+sys.path.insert(0, sys.argv[1])
+from ctshowcase import mdcode, readme
+text = (readme.start("nav") + "\\n") * 10000
+assert mdcode.find_blocks(readme.MARK, text) == []
+assert [m.group(1) for m in mdcode.find_blocks(readme.MARK, text + readme.wrap("tagline", "A live row."))] == ["tagline"]
+"""
+    result = subprocess.run([sys.executable, "-c", probe, str(ROOT / "scripts")],
+                            capture_output=True, text=True, timeout=20, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
