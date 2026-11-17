@@ -264,7 +264,7 @@ def test_formatter_uses_explicit_config_inside_the_checkout(tmp_path, monkeypatc
 
     def run(argv, **kwargs):
         calls.append(argv)
-        data = json.dumps("ok") if suffix == ".md" else "ok"
+        data = json.dumps("ok")
         return SimpleNamespace(returncode=0, stdout=data.encode(), stderr=b"")
 
     monkeypatch.setattr("ctshowcase.formatting.shutil.which", lambda _: "/node")
@@ -322,3 +322,28 @@ def test_formatted_svg_accessible_title_preserves_internal_whitespace():
     assert same_svg(original, protected)
     assert not same_svg(original, protected.replace("AGPL-3.0 | commercial", "AGPL-3.0 |\ncommercial", 2))
     assert not same_svg(original, protected.replace("<title>license: ", "<title>license:\n"))
+
+
+def test_editorconfig_mirror_retains_local_worktree_settings_without_parents(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    local_prettier(repo)
+    (repo / ".git").write_text("gitdir: ../synthetic-worktree-git\n", encoding="utf-8")
+    (tmp_path / ".editorconfig").write_text("[*]\nindent_size = 8\n", encoding="utf-8")
+    settings = "[*.json]\nindent_style = space\nindent_size = 4\n"
+    (repo / ".editorconfig").write_text(settings, encoding="utf-8")
+    monkeypatch.setattr("ctshowcase.formatting.shutil.which", lambda _: "/node")
+
+    def run(argv, **kwargs):
+        from pathlib import Path
+
+        editor_file = Path(argv[-3])
+        root = Path(argv[-2]).parent
+        assert root != repo and (root / ".git").is_dir()
+        assert (root / ".editorconfig").read_text(encoding="utf-8") == settings
+        assert editor_file.relative_to(root).as_posix() == "docs/images/sidecar.json"
+        assert kwargs["cwd"] == repo
+        return SimpleNamespace(returncode=0, stdout=json.dumps('{"ok":true}').encode(), stderr=b"")
+
+    monkeypatch.setattr("ctshowcase.formatting.subprocess.run", run)
+    assert format_text(repo, repo / "docs/images/sidecar.json", '{"ok":true}') == '{"ok":true}'

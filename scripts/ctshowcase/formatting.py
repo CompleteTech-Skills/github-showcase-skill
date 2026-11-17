@@ -44,28 +44,35 @@ PRETTIER_CONFIGS = (
 )
 
 
-# Match Prettier's debug check, but compare and return the same formatting result.
-CHECK_MARKDOWN = r"""
+# Match Prettier's Markdown debug check, using the same formatter result for the write.
+FORMAT_GENERATED = r"""
 const fs = require("node:fs");
+const path = require("node:path");
 const { isDeepStrictEqual } = require("node:util");
 async function main() {
-    const [packagePath, config, editorconfig, filepath] = process.argv.slice(1);
+    const [packagePath, config, editorFile, editorConfig, filepath] = process.argv.slice(1);
     const prettier = require(packagePath);
     const input = fs.readFileSync(0, "utf8");
     for (const ignorePath of [".gitignore", ".prettierignore"]) {
-        if (fs.existsSync(ignorePath) && (await prettier.getFileInfo(filepath, { ignorePath })).ignored) {
+        if (fs.existsSync(ignorePath) && (await prettier.getFileInfo(filepath, { ignorePath, resolveConfig: false })).ignored) {
             process.stdout.write(JSON.stringify(input));
             return;
         }
     }
-    const settings = await prettier.resolveConfig(filepath, { config, editorconfig: editorconfig === "true" });
-    const options = { parser: "markdown", ...settings, filepath };
+    const editor = editorFile ? await prettier.resolveConfig(editorFile, { config: editorConfig, editorconfig: true }) : {};
+    const settings = await prettier.resolveConfig(filepath, { config, editorconfig: false });
+    const extension = path.extname(filepath).toLowerCase();
+    const markdown = extension === ".md";
+    const options = { ...(markdown ? { parser: "markdown" } : {}), ...editor, ...settings, filepath };
+    if (extension === ".svg") options.parser = "html";
     const formatted = await prettier.format(input, options);
-    const original = await prettier.__debug.parse(input, options, { massage: true });
-    const candidate = await prettier.__debug.parse(formatted, options, { massage: true });
-    if (!isDeepStrictEqual(original.ast, candidate.ast)) {
-        process.exitCode = 1;
-        return;
+    if (markdown) {
+        const original = await prettier.__debug.parse(input, options, { massage: true });
+        const candidate = await prettier.__debug.parse(formatted, options, { massage: true });
+        if (!isDeepStrictEqual(original.ast, candidate.ast)) {
+            process.exitCode = 1;
+            return;
+        }
     }
     process.stdout.write(JSON.stringify(formatted));
 }
@@ -368,21 +375,21 @@ def discover(repo_dir: Path | None) -> dict:
             "validators": validators, "status": "not run"}
 
 
-def _configured_prettier(root: Path, destination: Path) -> tuple[Path, bool]:
+def _configured_prettier(root: Path, destination: Path) -> tuple[Path, list[Path]]:
     """Use Prettier's config precedence without loading settings from checkout parents."""
     directory = destination.parent
     config = None
-    bounded_editorconfig = False
+    editorconfigs = []
+    editor_bounded = False
     while directory.is_relative_to(root):
-        editorconfig = directory / ".editorconfig"
-        if editorconfig.exists() or editorconfig.is_symlink():
-            if not _file_inside(root, editorconfig):
-                raise NeedsInput("formatter", "EditorConfig must be inside the target checkout")
-            preamble = _read(root, editorconfig).split("[", 1)[0]
-            bounded_editorconfig |= re.search(r"^[ \t]*root[ \t]*=[ \t]*true[ \t]*$", preamble, re.I | re.M) is not None
-        for vcs in (".git", ".hg"):
-            boundary = directory / vcs
-            bounded_editorconfig |= boundary.is_dir() and not boundary.is_symlink()
+        if not editor_bounded:
+            editorconfig = directory / ".editorconfig"
+            if editorconfig.exists() or editorconfig.is_symlink():
+                if not _file_inside(root, editorconfig):
+                    raise NeedsInput("formatter", "EditorConfig must be inside the target checkout")
+                editorconfigs.append(editorconfig)
+            editor_bounded = any((directory / name).is_dir() and not (directory / name).is_symlink()
+                                 for name in (".git", ".hg"))
         if config is None:
             for name in PRETTIER_CONFIGS:
                 candidate = directory / name
@@ -410,13 +417,13 @@ def _configured_prettier(root: Path, destination: Path) -> tuple[Path, bool]:
         directory = directory.parent
     # package.json supplies the pinned dependency. Passing it explicitly prevents ancestor discovery
     # even when it has no Prettier options.
-    return config or root / "package.json", bounded_editorconfig
+    return config or root / "package.json", editorconfigs
 
 
 def format_text(repo_dir: Path | None, destination: Path, text: str) -> str:
     """Format one generated text value with the target's exact pinned local Prettier.
 
-    No install, package script, shell, or file write occurs here. The caller writes only
+    This uses the installed package and leaves the target files untouched. The caller writes only
     after its usual safety checks. Calling this function is the explicit opt-in.
     """
     destination = Path(destination)
@@ -449,22 +456,32 @@ def format_text(repo_dir: Path | None, destination: Path, text: str) -> str:
     cli = _inside(package_root, package_root / binary)
     if cli is None or not _file_inside(package_root, cli):
         raise NeedsInput("formatter", "the installed Prettier CLI is unavailable")
-    config, use_editorconfig = _configured_prettier(root, root / relative)
-    argv = [node, str(cli), "--stdin-filepath", str(relative), "--config", str(config)]
-    if not use_editorconfig:
-        argv.append("--no-editorconfig")
-    if suffix == ".md":
-        entry = next((resolved for name in ("index.cjs", "index.js")
-                      if (resolved := _inside(package_root, package_root / name)) and resolved.is_file()), None)
-        if entry is None:
-            raise NeedsInput("formatter", "the installed Prettier API is unavailable")
-        argv = [node, "--input-type=commonjs", "-e", CHECK_MARKDOWN, str(entry), str(config),
-                str(use_editorconfig).lower(), str(relative)]
-    elif suffix == ".svg":
-        argv += ["--parser", "html"]
+    entry = next((resolved for name in ("index.cjs", "index.js")
+                  if (resolved := _inside(package_root, package_root / name)) and resolved.is_file()), None)
+    if entry is None:
+        raise NeedsInput("formatter", "the installed Prettier API is unavailable")
+    config, editorconfigs = _configured_prettier(root, root / relative)
     try:
-        result = subprocess.run(argv, cwd=root, input=text.encode("utf-8"),
-                                capture_output=True, timeout=60, check=False)
+        with ExitStack() as stack:
+            editor_file = editor_config = ""
+            if editorconfigs:
+                # Resolve only checkout EditorConfig files in an isolated mirror.
+                # The original filepath still selects the target Prettier overrides.
+                mirror = Path(stack.enter_context(tempfile.TemporaryDirectory()))
+                (mirror / ".git").mkdir()
+                empty = mirror / "empty.json"
+                empty.write_text("{}", encoding="utf-8")
+                for item in editorconfigs:
+                    copy = mirror / item.relative_to(root)
+                    copy.parent.mkdir(parents=True, exist_ok=True)
+                    copy.write_text(_read(root, item), encoding="utf-8")
+                mirrored_destination = mirror / relative
+                mirrored_destination.parent.mkdir(parents=True, exist_ok=True)
+                editor_file, editor_config = str(mirrored_destination), str(empty)
+            argv = [node, "--input-type=commonjs", "-e", FORMAT_GENERATED, str(entry), str(config),
+                    editor_file, editor_config, str(relative)]
+            result = subprocess.run(argv, cwd=root, input=text.encode("utf-8"),
+                                    capture_output=True, timeout=60, check=False)
     except (OSError, subprocess.SubprocessError) as error:
         raise NeedsInput("formatter", "the target's pinned Prettier could not run") from error
     if result.returncode == 1 and suffix == ".md":
@@ -473,16 +490,12 @@ def format_text(repo_dir: Path | None, destination: Path, text: str) -> str:
     if result.returncode:
         raise ShowcaseError("target Prettier failed; verify its configuration and plugins", log="formatter-failed")
     try:
-        formatted = result.stdout.decode("utf-8")
-    except UnicodeError as error:
-        raise ShowcaseError("target Prettier returned invalid UTF-8", log="formatter-failed") from error
-    if suffix == ".md":
-        try:
-            value = json.loads(formatted)
-        except ValueError:
-            value = None
-        if not isinstance(value, str) or (text.strip() and not value.strip()):
+        formatted = json.loads(result.stdout.decode("utf-8"))
+    except (ValueError, UnicodeError):
+        formatted = None
+    if not isinstance(formatted, str) or (text.strip() and not formatted.strip()):
+        if suffix == ".md":
             raise ShowcaseError("target Prettier returned invalid Markdown output", log="formatter-content",
                                 code=CHECK_FAILED)
-        return value
+        raise ShowcaseError("target Prettier returned invalid output", log="formatter-failed")
     return formatted

@@ -20,15 +20,14 @@ Pass `readme --format-generated`, `banner --format-generated`, or
 on both art commands when they update the same JSON sidecar. The banner applies
 formatting to the sidecar, and the card applies it to the SVG and the sidecar
 before writing either one. These commands use the target's installed Prettier
-CLI with an exact version in `package.json` or an
+package with an exact version in `package.json` or an
 exact `node_modules/prettier` version in its npm lockfile. Missing Node.js,
 missing or mismatched local dependencies, and unsupported pinning mechanisms
 return `needs-input:formatter`. No packages are installed or downloaded and no
 package scripts or shell commands are run. Prettier may load the target's own
 JavaScript configuration and plugins, so request formatting only for a trusted
-checkout. Formatter discovery stops at the target checkout. EditorConfig is
-applied when its search is bounded by a target `root = true` or a target
-version-control directory. Formatted outputs, including an optional PNG preview,
+checkout. Formatter discovery stops at the target checkout. The installed
+Prettier applies the target's EditorConfig without inheriting parent settings. Formatted outputs, including an optional PNG preview,
 stay within the target checkout.
 
 Text is passed on stdin with its final target path, so Prettier uses the target's
