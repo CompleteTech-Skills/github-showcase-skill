@@ -2351,13 +2351,14 @@ def _raw_marker_text_spans(source, blocks, tags, inline_literals):
         match = HTML_OPEN_TAG.match(source, start, end)
         if match is None or match.end() != end or match.group(1).lower() not in _MARKER_RAW_NAMES:
             continue
-        if (start, end) not in inline_tags:
-            block = _span_at(blocks, start)
-            if block is None or end > block[1] or _span_at(comments, start) is not None:
-                continue
+        block = _span_at(blocks, start)
+        if block is None and (start, end) in inline_tags:
+            block = _span_at(inline_regions(source), start)
+        if block is None or end > block[1] or _span_at(comments, start) is not None:
+            continue
         closing = closers[match.group(1).lower()]
         index = bisect.bisect_left(closing, (end, -1))
-        covered = closing[index][0] if index < len(closing) else len(source)
+        covered = min(block[1], closing[index][0]) if index < len(closing) else block[1]
         yield end, covered
 
 

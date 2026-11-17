@@ -758,3 +758,24 @@ def test_variant_j_preserves_foreign_profile_workflow_badge(make_ctx, tmp_path, 
         after, removed = readme.header_only(ctx, before), []
     assert badge_block(after) == row
     assert not readme.preservation(before, after, removed, ctx=ctx)
+
+
+def test_legacy_badge_recognizer_bounds_work_for_malformed_delimiters():
+    import subprocess
+    import sys
+
+    from conftest import ROOT
+
+    probe = """
+import sys
+from types import SimpleNamespace
+sys.path.insert(0, sys.argv[1])
+from ctshowcase.readme import legacy_profile_badges
+brand = SimpleNamespace(raw={"badges": {"neutral": "64748B", "accent": "3B82F6"}})
+for ending in ("x", "x)"):
+    row = "[![Language Python](" + "x)](" * 60000 + ending
+    assert not legacy_profile_badges(brand, row)
+"""
+    result = subprocess.run([sys.executable, "-c", probe, str(ROOT / "scripts")],
+                            capture_output=True, text=True, timeout=20, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr

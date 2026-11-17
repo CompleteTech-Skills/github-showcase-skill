@@ -324,3 +324,19 @@ def test_readme_write_does_not_rewrite_markers_inside_textarea(tmp_path, ending)
     assert result.returncode == 0, result.stdout + result.stderr
     assert raw in path.read_bytes()
     assert b"showcase:badges:generated" not in path.read_bytes()
+
+
+@pytest.mark.parametrize("ending", ENDINGS)
+def test_unclosed_raw_text_in_quote_does_not_hide_later_managed_block(tmp_path, ending):
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps({"owner": "Northwind-Trading-Co", "repo": ".github",
+                                "license": "MIT", "files": ["README.md"]}), encoding="utf-8")
+    path = tmp_path / "README.md"
+    quote = "# Probe\n\n> <script>\n> authored raw text\n\n"
+    raw = (quote + readme.wrap("badges", "") + "\n").replace("\n", ending).encode("utf-8")
+    path.write_bytes(raw)
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--mode", "header", "--write")
+    assert result.returncode == 0, result.stdout + result.stderr
+    written = path.read_bytes()
+    assert written.startswith(quote.replace("\n", ending).encode("utf-8"))
+    assert b"![Type GitHub profile]" in written and b"![License MIT]" in written

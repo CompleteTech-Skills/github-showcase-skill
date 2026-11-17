@@ -333,15 +333,20 @@ def legacy_profile_badges(brand, body: str, style: dict | None = None, *, ci_mat
     colors = dict(brand.raw["badges"])
     family = {k: (style or {}).get(f"badge_{k}") for k in ("brand", "accent")}
     for line in lines:
-        linked = re.fullmatch(r"\[!\[([^\]]+)\]\((.+)\)\]\((.+)\)", line)
-        plain = re.fullmatch(r"!\[([^\]]+)\]\((.+)\)", line)
-        if linked:
-            alt, url, link = linked.groups()
-        elif plain:
-            alt, url = plain.groups()
-            link = None
-        else:
+        linked = line.startswith("[![")
+        if not (linked or line.startswith("![")) or not line.endswith(")"):
             return False
+        alt, marker, target = line[3 if linked else 2:-1].partition("](")
+        if not marker or not alt or "]" in alt or not target:
+            return False
+        if linked:
+            # The legacy generator uses this exact separator. Scan once from
+            # the right to preserve the preceding URL without regex backtracking.
+            url, delimiter, link = target.rpartition(")](")
+            if not delimiter or not url or not link:
+                return False
+        else:
+            url, link = target, None
         suffixes = ["", "?labelColor=1E1E1E"]
         links = {None}
         if alt.startswith("License ") and alt[8:]:
