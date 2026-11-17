@@ -87,6 +87,26 @@ def test_cli_doctor_empty_live_description_is_not_drift(tmp_path):
     assert "description-drift:readme" not in report["logs"], report
 
 
+def test_cli_doctor_reports_verified_staged_tagline_against_empty_live_description(tmp_path):
+    capture = tmp_path / "meta.json"
+    capture.write_text(json.dumps(meta_dict(description="")), encoding="utf-8")
+    target = tmp_path / "repo"
+    target.mkdir()
+    common = ["--meta", capture, "--repo-dir", target, "--format", "json"]
+    result = run_cli(*common, "readme", "--mode", "scaffold", "--write", "--description", "Route support requests.")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    report = json.loads(run_cli(*common, "doctor", "--format", "json").stdout)
+    assert report["cells"]["R2"] == "fail"
+    assert "description-drift:readme" in report["logs"]
+
+    readme = target / "README.md"
+    with readme.open("a", encoding="utf-8") as output:
+        output.write("\nAn authored addition.\n")
+    report = json.loads(run_cli(*common, "doctor", "--format", "json").stdout)
+    assert "description-drift:readme" not in report["logs"]
+
+
 @pytest.mark.parametrize("variant", ["G", "H"])
 def test_cli_fork_and_archive_variants_write_no_tagline(tmp_path, variant):
     """G and H write a callout, not a tagline block, so there is nothing to drift; a leftover block is still checked."""
@@ -245,6 +265,23 @@ def test_fingerprint_preserves_legacy_records_on_partial_write(tmp_path):
     data = read_sidecar(tmp_path)
     assert outputs_changed(data, current, {"banner.png", "card.svg"})
     assert not outputs_changed(data, current, {"card.svg"})
+
+
+def test_fingerprint_requires_selected_art_records_in_modern_sidecars(tmp_path):
+    from ctshowcase.fingerprint import fingerprint, outputs_changed, write_sidecar
+
+    inputs = {"description": "Captured description."}
+    current = fingerprint(inputs, "config")
+    legacy = {"fingerprint": current, "outputs": {"card.svg": {"sha256": "card-hash"}}}
+    selected = {"banner.png", "card.svg", "README.md"}
+    assert not outputs_changed(legacy, current, selected)
+
+    write_sidecar(tmp_path, inputs, "config", "card.svg", {"sha256": "card-hash"})
+    modern = read_sidecar(tmp_path)
+    assert outputs_changed(modern, current, selected)
+    assert not outputs_changed(modern, current, {"card.svg", "README.md"})
+    write_sidecar(tmp_path, inputs, "config", "banner.png", {"sha256": "banner-hash"})
+    assert not outputs_changed(read_sidecar(tmp_path), current, selected)
 
 
 @pytest.mark.parametrize("variant,mode,body", [

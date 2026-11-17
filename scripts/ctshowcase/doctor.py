@@ -96,7 +96,7 @@ def row(ctx: RepoContext) -> dict:
     readme = rd / "README.md" if rd else None
     if readme and readme.is_file():
         from .staged import tagline_drift
-        if tagline_drift(ctx, readmemod.read_text(readme)):
+        if tagline_drift(ctx, readmemod.read_text(readme), readme):
             cells["R2"] = "fail"
             logs.append("description-drift:readme")
     if ctx.identity_pending:

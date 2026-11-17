@@ -1,6 +1,7 @@
 """Explicit staged descriptions and per-output provenance; no GitHub writes."""
 from __future__ import annotations
 
+import copy
 import hashlib
 from pathlib import Path
 
@@ -50,12 +51,10 @@ def tagline_forms(ctx) -> set[str]:
     """Every tagline block body `readme` writes for the live description, across all variants.
 
     The format comes only from readme.tagline_body, so a change there cannot drift from this check. Every variant is
-    tried because `readme --variant X` may have written a README whose variant `doctor` does not auto-detect. G and H
-    (fork and archive) write no tagline block at all (callout_only), so they only contribute the shared form.
+    tried because `readme --variant X` may have written a README whose variant `doctor` does not auto-detect. Only
+    Variant F uses a different tagline form.
     Callers must pass a non-empty description: tagline_body logs needs-input:description otherwise.
     """
-    import copy
-
     from .readme import tagline_body
 
     forms = set()
@@ -73,15 +72,29 @@ def tagline_blocks(text: str) -> list[str]:
     return [m.group(2).strip() for m in find_blocks(MARK, normalize_text(text)) if m.group(1) == "tagline"]
 
 
-def tagline_drift(ctx, text: str) -> bool:
+def _matches_staged_readme(ctx, blocks: list[str], path: Path | None) -> bool:
+    if path is None or ctx.repo_dir is None:
+        return False
+    record = (fp.read_sidecar(ctx.repo_dir / "docs/images").get("outputs") or {}).get("README.md", {})
+    proposal = (record.get("staged_description") or {}).get("text")
+    if not isinstance(proposal, str) or not proposal.strip() or record.get("sha256") != fp.file_record(path)["sha256"]:
+        return False
+    staged = copy.copy(ctx)
+    staged.meta = dict(ctx.meta, description=proposal)
+    return bool(tagline_forms(staged).intersection(blocks))
+
+
+def tagline_drift(ctx, text: str, path: Path | None = None) -> bool:
     """True when a managed tagline block differs from what `readme` would write for the live description.
 
     Only the managed tagline block is compared, never a matching sentence elsewhere in the README, and fenced code
-    examples are ignored. An absent or unmanaged tagline is R7's concern, not drift. With an empty live description
-    there is nothing to compare: readme keeps the authored tagline under needs-input:description, so it is not drift.
+    examples are ignored. With an empty live description, authored taglines are preserved. An unchanged README
+    with a managed tagline matching its recorded staged proposal demonstrates drift even against an empty About.
     """
     blocks = tagline_blocks(text)
-    if not blocks or not str(ctx.meta.get("description") or "").strip():
+    if not blocks:
         return False
+    if not str(ctx.meta.get("description") or "").strip():
+        return _matches_staged_readme(ctx, blocks, path)
     forms = tagline_forms(ctx)
     return any(block not in forms for block in blocks)

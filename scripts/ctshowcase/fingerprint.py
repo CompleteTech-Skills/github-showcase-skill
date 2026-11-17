@@ -10,6 +10,7 @@ from . import STANDARD, __version__
 from .config import LOCK, canonical
 
 SIDECAR = ".showcase.json"
+ART_RECORDS = {"banner": "banner.png", "card": "card.svg"}
 
 
 def config_sha256(brand=None) -> str:
@@ -87,7 +88,12 @@ def read_sidecar(out_dir: Path) -> dict:
 def outputs_changed(data: dict, current: str, selected: set[str] | None = None) -> bool:
     """Compare recorded outputs independently, falling back to the original cache for legacy records."""
     previous = data.get("fingerprint")
-    records = [record for name, record in (data.get("outputs") or {}).items()
+    outputs = data.get("outputs") or {}
+    if selected is not None and any("fingerprint" in record for record in outputs.values()):
+        required_art = selected.intersection(ART_RECORDS.values())
+        if required_art.difference(outputs):
+            return True
+    records = [record for name, record in outputs.items()
                if selected is None or name in selected]
     if not records:
         return previous != current

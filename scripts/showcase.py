@@ -725,8 +725,7 @@ def cmd_fingerprint(args):
     f = fp.fingerprint(inp, fp.config_sha256())
     selected = None
     if args.outputs is not None or args.readme is not None:
-        art = {"banner": "banner.png", "card": "card.svg"}
-        selected = {art[kind] for kind in (args.outputs or "").split(",") if kind in art}
+        selected = {fp.ART_RECORDS[kind] for kind in (args.outputs or "").split(",") if kind in fp.ART_RECORDS}
         if args.readme in ("header", "bootstrap"):
             selected.add("README.md")
     changed = fp.outputs_changed(fp.read_sidecar(out_dir), f, selected)
