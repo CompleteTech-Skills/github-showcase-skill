@@ -115,5 +115,29 @@ Every intro owner needs a configured organization row; an unresolved owner retur
 Profile mode also needs a configured or explicit name and eyebrow; missing values
 return `needs-input:name` or `needs-input:eyebrow` instead of guessing profile facts.
 
+The repository `readme` command also uses `assets/intro.svg` for a personal
+owner/owner profile. Generate it with `intro --profile OWNER --out
+CHECKOUT/assets/intro.svg` before scaffolding or refreshing a generated hero.
+Missing profile name/eyebrow facts return `needs-input:intro-identity`; a missing
+local, invalid, or nonmatching intro returns `needs-input:intro` (exit 4), before any README, badge or change
+record write. The asset must pass intro SVG lint and match the current configured default profile generator output
+(static or applicable animated, at 320 or 360 pixels). Explicit generator overrides cannot be verified here;
+matching establishes applicability, not artwork rights. An unresolved identity on a managed intro also refuses
+refresh because ownership cannot be established. This command does not generate artwork implicitly. Organization
+and ordinary repository scaffolds keep `docs/images/banner.png`.
+
+The same rule covers every place the README hero is emitted for the personal profile: scaffold, header and
+upgrade, `--bootstrap`, the G and H callout variants (`--variant G|H`) and the §7.0 preserve-list upgrade (for
+example a README over 15,000 bytes). Each either writes the intro or returns the needs-input result above, and
+none of them writes a README, badge, CONTRIBUTING or change record on that refusal. `lint readme` checks
+`assets/intro.svg` as the first image of the personal README (D13, R7).
+
+Personal header refresh migrates only the exact legacy generated banner body
+(or an empty managed banner block); authored hero bodies and unmarked artwork
+stay owned by their author. Personal upgrade with authored artwork refreshes
+existing marker blocks only. The managed block keeps its `showcase:banner` name
+for compatibility, even when its image is the personal intro. The intro is a
+plain `<img>`; the decision 18 footer remains the only generated `<picture>`.
+
 Eyebrows, names and taglines must fit their fixed size ladders. An exhausted ladder
 returns `art-fail` (exit 3) without writing an SVG; text is never truncated.

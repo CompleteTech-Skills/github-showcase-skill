@@ -8,6 +8,7 @@ from __future__ import annotations
 import re
 from bisect import bisect_right
 from collections import Counter, defaultdict, deque
+from html import escape
 from pathlib import Path
 from urllib.parse import quote
 
@@ -166,8 +167,86 @@ def nav_line(ctx: RepoContext) -> str:
     return line + (" · Internal" if not ctx.public else "")
 
 
+def personal_profile(ctx: RepoContext) -> bool:
+    """Use the same personal-profile exemption as banner generation (decision 15, CQ-03)."""
+    return ctx.det["type"] == "github-profile" and ctx.same_owner(ctx.repo)
+
+
+def personal_intro_applies(ctx: RepoContext) -> bool:
+    """The banner surface is exempt only because this is the personal profile, which opens with its intro instead."""
+    return ctx.art_status()["banner"] == "exempt:profile-readme" and personal_profile(ctx)
+
+
+def hero_path(ctx: RepoContext) -> str:
+    return "assets/intro.svg" if personal_profile(ctx) else "docs/images/banner.png"
+
+
+def legacy_banner_html(ctx: RepoContext) -> str:
+    """The exact previously generated body; a similar authored image is not ours to migrate."""
+    return f'<p align="center">\n  <img src="docs/images/banner.png" alt="{ctx.repo} by {ctx.company}" width="100%">\n</p>'
+
+
+def personal_intro_html(ctx: RepoContext) -> str:
+    profile = ctx.org.get("profile") or {}
+    name = profile.get("name") or ctx.org.get("display_name")
+    if not ctx.org.get("known") or not (name or "").strip() or not (profile.get("eyebrow") or "").strip():
+        raise NeedsInput("intro-identity", "Configure the personal profile name and eyebrow in brand.yaml first.")
+    return f'<p align="center">\n  <img src="assets/intro.svg" alt="{escape(name, quote=True)}" width="100%">\n</p>'
+
+
+def personal_generated_hero(ctx: RepoContext, body: str) -> bool:
+    if body == legacy_banner_html(ctx) or not body.strip():
+        return True
+    try:
+        if body == personal_intro_html(ctx):
+            return True
+        if re.fullmatch(r'<p align="center">\n  <img src="assets/intro\.svg" alt="[^"\n]*" width="100%">\n</p>', body):
+            raise NeedsInput("intro-identity", "Cannot establish ownership of the existing intro hero.")
+        return False
+    except NeedsInput:
+        if "assets/intro.svg" in body:
+            raise  # this may be our generated hero; ownership is unresolved
+        return False
+
+
 def banner_html(ctx: RepoContext) -> str:
-    return (f'<p align="center">\n  <img src="docs/images/banner.png" alt="{ctx.repo} by {ctx.company}" width="100%">\n</p>')
+    if not personal_profile(ctx):
+        return legacy_banner_html(ctx)
+    body = personal_intro_html(ctx)
+    path = ctx.repo_dir / hero_path(ctx) if ctx.repo_dir is not None else None
+    if path is None or not path.is_file():
+        raise NeedsInput("intro", "Generate the personal profile with intro --profile OWNER --out assets/intro.svg first.")
+    # Matching the current default generator output establishes applicability, not asset rights.
+    # Explicit generator overrides cannot be inferred from an SVG and require separate review.
+    from . import intro, svglint
+    from .typeset import Fonts
+    try:
+        raw = path.read_bytes()
+        if svglint.lint_bytes("intro", raw, str(path))["result"] != "PASS":
+            raise ValueError("invalid intro")
+        profile = ctx.org.get("profile") or {}
+        chips = []
+        for chip in profile.get("chips") or []:
+            kind, _, value = chip.partition(":")
+            if kind not in ("key", "attr") or not value:
+                raise ValueError("invalid chips")
+            chips.append((value, kind))
+        complete = ctx.org.get("family") == "completetech"
+        mark = (ctx.brand.mark_dark() or ctx.brand.dark_master()) if complete else ctx.brand.asset(ctx.org.get("mark"))
+        tagline = profile.get("tagline") or (ctx.brand.strings["tagline"] if complete else None)
+        if not mark or not tagline:
+            raise ValueError("missing profile facts")
+        name = profile.get("name") or ctx.org.get("display_name")
+        fonts = Fonts(ctx.brand)
+        variants = (False, True) if ctx.org.get("flagship") else (True,)
+        if not any(raw == intro.build(ctx.brand, fonts, owner=ctx.owner, name=name,
+                                      eyebrow=profile["eyebrow"], tagline=tagline, chips=chips,
+                                      mark_path=mark, height=height, static=static).encode()
+                   for height in (320, 360) for static in variants):
+            raise ValueError("intro does not match configured profile")
+    except (OSError, ValueError, KeyError, TypeError):
+        raise NeedsInput("intro", "Generate an applicable default profile intro with showcase.py first.") from None
+    return body
 
 
 def license_facts(ctx: RepoContext) -> tuple[str | None, bool]:
@@ -699,12 +778,21 @@ def callout_only(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
             ctx.log("needs-input:archive-callout")
         if co:
             out = co + "\n\n" + body.lstrip("\n")
+    replaced_hero: list[str] = []
     if ctx.art_status()["banner"] is None:
         lead_banner = wrap("banner", banner_html(ctx)) + "\n\n"  # decision 13: the hero banner opens G and H too
     elif leading:
-        lead_banner = leading.group(0) + "\n\n"
+        hero_body = leading.group(2)
+        if personal_intro_applies(ctx) and personal_generated_hero(ctx, hero_body):
+            new_hero = banner_html(ctx)
+            lead_banner = wrap("banner", new_hero) + "\n\n"
+            # Count only generated lines that the replacement does not carry again.
+            replaced_hero = list((Counter(ln for ln in source_lines(hero_body) if ln.strip())
+                                  - Counter(source_lines(new_hero))).elements())
+        else:
+            lead_banner = leading.group(0) + "\n\n"
     out = lead_banner + out.lstrip("\n")
-    removed: list[str] = []
+    removed: list[str] = list(replaced_hero)
     if footer_wanted(ctx):
         had_footer = False
         if footermod.check(ctx.brand, out)[0] != "pass":
@@ -1018,9 +1106,19 @@ def upgrade(ctx: RepoContext, text: str, *, already_normalized: bool = False) ->
         return callout_only(ctx, text)
     if variant == "J" and _badge_blocks_need_in_place_refresh(text, find_blocks(MARK, text)):
         return header_only(ctx, text, already_normalized=True), []
+    if personal_profile(ctx):
+        heroes = [m.group(2) for m in find_blocks(MARK, text) if m.group(1) == "banner"]
+        unmarked, _ = _strip_markers(text)
+        preamble, _ = split_sections(unmarked)
+        authored_art = re.search(r"<(?:img|picture)\b|!\[[^\]]*\]\(", masked(preamble), re.I)
+        if any(not personal_generated_hero(ctx, body) for body in heroes) or authored_art:
+            # Personal artwork and its surrounding authored content stay in place. Refresh only owned blocks.
+            return header_only(ctx, text, already_normalized=True), []
     body, blocks = _strip_markers(text)
     want_footer = footer_wanted(ctx)
     removed: list[str] = []
+    if personal_profile(ctx) and "banner" in blocks:
+        removed += blocks["banner"].splitlines()  # only an exact generated hero reaches this branch
     # One multiset of the footer lines the emitted footer carries again, shared by the marked and the unmarked branch
     # because only one new footer is emitted. A compliant footer is re-emitted unchanged and must not weaken the
     # never-drop-a-line guard, so only the old lines it does not carry again are reported as removed.
@@ -1153,7 +1251,9 @@ def upgrade(ctx: RepoContext, text: str, *, already_normalized: bool = False) ->
         # §7.0 preserve list: additive only. The hero banner block goes on top (q57 `pres` default, "Banner above the
         # existing content"; none when the user answers "Leave them unchanged"), with the nav line in the §7.1 order;
         # the README's own banner and every section stay verbatim and in place; add License if missing, then footer.
-        if ctx.preserve_unchanged() or ctx.art_status()["banner"] is not None:
+        # The personal profile's banner exemption is not "no hero": it opens with its intro (decision 15), which
+        # banner_html returns or refuses with needs-input before any write.
+        if ctx.preserve_unchanged() or (ctx.art_status()["banner"] is not None and not personal_intro_applies(ctx)):
             out.append(wrap("nav", nav_line(ctx)))
         else:
             out += lead(ctx, wrap("banner", banner_html(ctx)), wrap("nav", nav_line(ctx)))
@@ -1222,8 +1322,11 @@ def header_only(ctx: RepoContext, text: str, *, already_normalized: bool = False
     if not already_normalized:
         text = normalize_text(text)
     desc = (ctx.meta.get("description") or "").strip()
-    gen = {"nav": nav_line(ctx), "banner": banner_html(ctx), "footer": footermod.markup(ctx.brand)}
-    if ctx.repo_dir is not None and not (ctx.repo_dir / "docs" / "images" / "banner.png").is_file():
+    personal = personal_profile(ctx)
+    gen = {"nav": nav_line(ctx), "footer": footermod.markup(ctx.brand)}
+    if not personal:
+        gen["banner"] = banner_html(ctx)
+    if not personal and ctx.repo_dir is not None and not (ctx.repo_dir / hero_path(ctx)).is_file():
         gen["banner"] = ""  # no image yet (for example no description): an empty block, never a broken image
         ctx.log("needs-input:banner")
     # Preserve the existing preflight for other variants, even without a badge block.
@@ -1243,6 +1346,8 @@ def header_only(ctx: RepoContext, text: str, *, already_normalized: bool = False
         if b == "tagline":  # tagline_body: the description's line, else the block as written unless inherited
             new = tagline_body(ctx, body, text)
             return m.group(0) if not desc and new == body else wrap(b, re.sub(r"\n{3,}", "\n\n", new))
+        if b == "banner" and personal:
+            return wrap(b, banner_html(ctx)) if personal_generated_hero(ctx, body) else m.group(0)
         if b in gen:
             return wrap(b, re.sub(r"\n{3,}", "\n\n", gen[b]))
         return m.group(0)
@@ -1501,9 +1606,12 @@ def bootstrap(ctx: RepoContext, text: str, *, already_normalized: bool = False) 
             # Carry an authored tagline forward under the same rule as an in-place refresh.
             if variant == "J" and _badge_blocks_need_in_place_refresh(text, markers):
                 return header_only(ctx, text, already_normalized=True)
-            blocks = {marker.group(1): marker.group(2) for marker in markers}
+            blocks = {m.group(1): m.group(2) for m in markers}
             old = blocks["tagline"]
-            new_header = header(ctx, title=auto, tagline=tagline_body(ctx, old, text),
+            authored_hero = next((m.group(0) for m in markers
+                                  if m.group(1) == "banner" and personal_profile(ctx)
+                                  and not personal_generated_hero(ctx, m.group(2))), None)
+            new_header = header(ctx, keep_banner=authored_hero, title=auto, tagline=tagline_body(ctx, old, text),
                                 existing_badges=blocks.get("badges"))
             text = new_header + "\n\n" + text[header_end:].lstrip("\n")
     return header_only(ctx, text, already_normalized=True)
