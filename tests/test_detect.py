@@ -277,6 +277,27 @@ def test_mobile_keeps_variant_b_with_mobile_sections():
     assert required_sections({"type": "web-app", "variant": "B"})[1][0] == "Live Site"
 
 
+
+def test_mobile_readme_explicit_variant_keeps_its_verified_manifest_facts(tmp_path, make_ctx):
+    from ctshowcase.readme import section_facts
+
+    files = {
+        "app/src/main/AndroidManifest.xml": "<manifest />",
+        "requirements.txt": "example-dependency==1.0",
+        "package.json": json.dumps({"bin": {"northwind": "app.js"}}),
+    }
+    _tree(tmp_path, files)
+    mobile = make_ctx(repo_dir=tmp_path)
+    assert (mobile.det["type"], mobile.det["variant"]) == ("mobile-app", "B")
+    assert section_facts(mobile, "Install") is None
+    _tree(tmp_path, {".github/showcase.yml": "variant: C"})
+    explicit = make_ctx(repo_dir=tmp_path)
+    assert (explicit.det["type"], explicit.det["variant"]) == ("mobile-app", "C")
+    assert "pip install -r requirements.txt" in section_facts(explicit, "Install")
+    assert "npm install" in section_facts(explicit, "Install")
+    assert "northwind --help" in section_facts(explicit, "Quick Start")
+
+
 def test_owner_rules_use_the_resolver():
     from ctshowcase.resolver import Resolver
     resolver = Resolver(registry={"orgs": {"CompleteTech-Security": {"former_slugs": ["Northwind-Old-Security"]}}})
