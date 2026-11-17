@@ -207,6 +207,31 @@ def test_dedicated_docs_repo_gets_documentation_type_and_sections(make_ctx, visi
     assert "suggestion" not in detect({"files": files + ["src/main.py"]})
 
 
+
+@pytest.mark.parametrize("checkout", [False, True])
+def test_showcase_outputs_do_not_change_documentation_type(tmp_path, checkout):
+    files = {
+        "README.md": "# Guide\n",
+        "docs/guide.md": "# Maintainer guide\n",
+        "docs/images/.showcase.json": '{"captured_bytes":"' + "x" * 2000 + '"}',
+        "docs/images/banner.png": "synthetic banner bytes",
+        "docs/images/card.svg": "synthetic card bytes",
+        "docs/images/badges/type-documentation.svg": "synthetic badge bytes",
+        "assets/icon.png": "synthetic icon bytes",
+    }
+    if checkout:
+        _tree(tmp_path, files)
+    meta = _sized(files, files_complete=True)
+    facts = RepoFacts(meta, tmp_path if checkout else None)
+    assert detect_type(meta, facts) == ("documentation", 25)
+    if checkout:
+        _tree(tmp_path, {"docs/catalog.json": json.dumps(["x"] * 300)})
+    files["docs/catalog.json"] = json.dumps(["x"] * 300)
+    meta = _sized(files, files_complete=True)
+    facts = RepoFacts(meta, tmp_path if checkout else None)
+    assert detect_type(meta, facts) == ("dataset", 24)
+
+
 def test_unknown_tree_suggests_override_and_explicit_type_suppresses_it():
     assert detect({"owner": "Northwind-Trading-Co"})["suggestion"] == "type-suggestion:workspace:file-tree-unknown:override-key=type"
     assert "suggestion" not in detect({"files": ["README.md"]}, type_override="cli")

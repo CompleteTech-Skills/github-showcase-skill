@@ -141,7 +141,9 @@ def substantive_path(parsed: PurePosixPath) -> bool:
     t = standard("types")
     parts = parsed.parts
     excluded = set(t.get("dataset_exclude_dirs", []))
-    return (not any(p in excluded for p in parts[:-1])
+    output = (parsed.as_posix() in t.get("showcase_artifact_paths", []) or
+              (parts[:-1] == ("docs", "images", "badges") and parsed.suffix == ".svg"))
+    return (not output and not any(p in excluded for p in parts[:-1])
             and parts[-1] not in set(t.get("dataset_exclude_files", []))
             and not _EXPORT_NAME.fullmatch(parts[-1]) and not _ISSUE_EXPORT_PATH.fullmatch(parsed.as_posix()))
 

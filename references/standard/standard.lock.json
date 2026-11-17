@@ -874,6 +874,15 @@
   ],
   "research_owner": "CompleteTech-LLC-AI-Research",
   "security_owner": "CompleteTech-Security",
+  "showcase_artifact_paths": [
+   "docs/images/.showcase.json",
+   "docs/images/banner.png",
+   "docs/images/card.svg",
+   "docs/images/card.png",
+   "docs/images/intro.svg",
+   "assets/icon.png",
+   "assets/social-preview.png"
+  ],
   "standard": "ct-std-v1",
   "types": {
    "agent-skills": {
