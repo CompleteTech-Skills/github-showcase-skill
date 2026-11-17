@@ -504,7 +504,8 @@ def test_staged_banner_rejects_link_to_capture(tmp_path):
 
 
 @pytest.mark.requires_bash
-def test_action_commit_step_skips_partial_live_refresh_with_staged_records(tmp_path):
+@pytest.mark.parametrize("staged_directory", ["docs/images", "docs/images/previews", "."])
+def test_action_commit_step_skips_partial_live_refresh_with_staged_records(tmp_path, staged_directory):
     import os
     import yaml
     from conftest import ROOT, run_bash
@@ -513,7 +514,9 @@ def test_action_commit_step_skips_partial_live_refresh_with_staged_records(tmp_p
     images = tmp_path / "docs/images"
     images.mkdir(parents=True)
     proposal = "Unpublished support process."
-    write_sidecar(images, {"description": proposal}, "config", "banner.png",
+    directory = tmp_path / staged_directory
+    directory.mkdir(parents=True, exist_ok=True)
+    write_sidecar(directory, {"description": proposal}, "config", "banner.png",
                   {"sha256": "a" * 64, "staged_description": {"text": proposal}})
     write_sidecar(images, {"description": "Live description."}, "config", "card.svg", {"sha256": "b" * 64})
     definition = yaml.safe_load((ROOT / "action.yml").read_text(encoding="utf-8"))
@@ -525,7 +528,7 @@ def test_action_commit_step_skips_partial_live_refresh_with_staged_records(tmp_p
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert "commit skipped" in result.stdout
     assert proposal not in result.stdout + result.stderr
-    assert read_sidecar(images)["outputs"]["banner.png"]["staged_description"]["text"] == proposal
+    assert read_sidecar(directory)["outputs"]["banner.png"]["staged_description"]["text"] == proposal
 
 
 @pytest.mark.parametrize("collision", ["metadata", "sidecar", "records", "report", "preview-directory"])
@@ -595,3 +598,96 @@ def test_staged_render_marks_output_before_writing_bytes(make_ctx, monkeypatch, 
     sidecar = read_sidecar(art.parent)
     assert "inputs" not in sidecar
     assert sidecar["outputs"]["card.svg"]["staged_description"]["text"] == "Unpublished support process."
+
+
+def test_cli_fingerprint_checks_the_selected_canonical_art(tmp_path):
+    from ctshowcase import fingerprint as fp
+    from ctshowcase.meta import load_file
+
+    capture = tmp_path / "capture.json"
+    capture.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    target = tmp_path / "repo"
+    images = target / "docs/images"
+    images.mkdir(parents=True)
+    card = images / "card.svg"
+    card.write_bytes(b"canonical card")
+    fp.write_sidecar(images, fp.inputs(load_file(capture), target), fp.config_sha256(),
+                     card.name, fp.file_record(card))
+    command = ["--meta", capture, "--repo-dir", target, "--format", "json", "fingerprint", "--outputs", "card"]
+
+    def changed():
+        result = run_cli(*command)
+        assert result.returncode == 0, result.stdout + result.stderr
+        return json.loads(result.stdout)["changed"]
+
+    assert not changed()
+    card.write_bytes(b"unexpected replacement")
+    assert changed()
+    card.unlink()
+    assert changed()
+
+
+def test_staged_report_rejects_a_hardlink_to_canonical_provenance(tmp_path):
+    target = tmp_path / "repo"
+    images = target / "docs/images"
+    images.mkdir(parents=True)
+    canonical = images / ".showcase.json"
+    original = b'{"outputs":{"card.svg":{"staged_description":{"text":"Draft"}}}}'
+    canonical.write_bytes(original)
+    report = tmp_path / "external.json"
+    try:
+        report.hardlink_to(canonical)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"hard links are unavailable: {exc}")
+    capture = tmp_path / "capture.json"
+    capture.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    result = run_cli("--meta", capture, "--repo-dir", target, "--format", "json",
+                     "content", "social", "--description", "Route support requests.", "--report", report)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "staged-description:path" in json.loads(result.stdout)["logs"]
+    assert canonical.read_bytes() == original
+
+
+def test_concurrent_staged_updates_keep_each_record(tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    from ctshowcase import fingerprint as fp
+
+    first_write = Event()
+    release_first = Event()
+    second_started = Event()
+    second_read = Event()
+    original_replace = fp.replace_bytes
+    original_read = fp.read_sidecar
+
+    def pause_first(path, data, **kwargs):
+        if b'"banner.png":' in data and b'"card.svg":' not in data:
+            first_write.set()
+            assert release_first.wait(5)
+        original_replace(path, data, **kwargs)
+
+    def track_read(path):
+        if second_started.is_set():
+            second_read.set()
+        return original_read(path)
+
+    def write_card():
+        second_started.set()
+        fp.write_sidecar(tmp_path, {}, "config", "card.svg", {"staged_description": {"text": "Card proposal."}})
+
+    monkeypatch.setattr(fp, "replace_bytes", pause_first)
+    monkeypatch.setattr(fp, "read_sidecar", track_read)
+    with ThreadPoolExecutor(max_workers=2) as threads:
+        banner = threads.submit(fp.write_sidecar, tmp_path, {}, "config", "banner.png",
+                                {"staged_description": {"text": "Banner proposal."}})
+        assert first_write.wait(5)
+        card = threads.submit(write_card)
+        try:
+            assert second_started.wait(5)
+            assert not second_read.wait(0.2)
+        finally:
+            release_first.set()
+        banner.result(5)
+        card.result(5)
+    assert set(original_read(tmp_path)["outputs"]) == {"banner.png", "card.svg"}

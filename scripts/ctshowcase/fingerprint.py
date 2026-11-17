@@ -6,6 +6,10 @@ import json
 import os
 import re
 import stat
+import tempfile
+import time
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -16,6 +20,7 @@ SIDECAR = ".showcase.json"
 ART_RECORDS = {"banner": "banner.png", "card": "card.svg"}
 ART_NAMES = frozenset(ART_RECORDS.values())
 ART_EXEMPTIONS = ("exempt:no-card", "exempt:profile-readme", "exempt:placeholder-org")
+_HELD_LOCKS = ContextVar("showcase_sidecar_locks", default=frozenset())
 
 
 def config_sha256(brand=None) -> str:
@@ -96,7 +101,7 @@ def output_records(data: dict) -> dict:
     return outputs if isinstance(outputs, dict) else {}
 
 
-def outputs_changed(data: dict, current: str, selected: set[str] | None = None) -> bool:
+def outputs_changed(data: dict, current: str, selected: set[str] | None = None, *, out_dir: Path | None = None) -> bool:
     """Compare recorded outputs independently, falling back to the original cache for legacy records."""
     previous = data.get("fingerprint")
     if "outputs" in data and not isinstance(data["outputs"], dict):
@@ -115,12 +120,56 @@ def outputs_changed(data: dict, current: str, selected: set[str] | None = None) 
             return True
         if record.get("fingerprint", previous) != current:
             return True
+        art = out_dir / name if out_dir is not None and selected is not None and name in ART_NAMES else None
         if name in ART_NAMES and record.get("exempt") in ART_EXEMPTIONS and record.get("fingerprint") == current:
+            if art is not None and (art.exists() or art.is_symlink()):
+                return True
             continue
         digest = record.get("sha256")
         if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
             return True
+        if art is not None:
+            try:
+                if art.is_symlink() or _sha(art) != digest:
+                    return True
+            except OSError:
+                return True
     return False
+
+
+@contextmanager
+def sidecar_lock(path: Path):
+    """Serialize local readers that update an artifact group and its sidecar."""
+    key = hashlib.sha256(os.fsencode(os.path.normcase(str(path.parent.resolve() / path.name)))).hexdigest()
+    held = _HELD_LOCKS.get()
+    if key in held:
+        yield
+        return
+    directory = Path(tempfile.gettempdir()) / "showcase-sidecar-locks"
+    directory.mkdir(exist_ok=True)
+    with (directory / key).open("a+b") as lock:
+        if os.name == "nt":
+            import msvcrt
+
+            deadline = time.monotonic() + 90
+            while True:
+                try:
+                    lock.seek(0)
+                    msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError:
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError("another generator still holds the showcase sidecar lock") from None
+                    time.sleep(0.1)
+        else:
+            import fcntl
+
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        token = _HELD_LOCKS.set(held | {key})
+        try:
+            yield
+        finally:
+            _HELD_LOCKS.reset(token)
 
 
 def replace_bytes(path: Path, data: bytes, *, private: bool = False) -> None:
@@ -149,18 +198,19 @@ def replace_bytes(path: Path, data: bytes, *, private: bool = False) -> None:
 
 
 def write_sidecar(out_dir: Path, inp: dict, cfg_sha: str, name: str, record: dict, *, summarize: bool = True) -> Path:
-    data = read_sidecar(out_dir)
-    previous = data.get("fingerprint")
-    outputs = {key: {"fingerprint": previous, **value} if isinstance(value, dict) else value
-               for key, value in output_records(data).items()}
-    current = fingerprint(inp, cfg_sha)
-    outputs[name] = dict(record, fingerprint=current)
-    data.update(schema=1, skill_version=__version__, standard=STANDARD, outputs=outputs)
-    if summarize:
-        data.update(config_sha256=cfg_sha, inputs=inp, fingerprint=current)
     p = out_dir / SIDECAR
-    replace_bytes(p, (json.dumps(data, sort_keys=True, indent=1, ensure_ascii=False) + "\n").encode("utf-8"))
-    return p
+    with sidecar_lock(p):
+        data = read_sidecar(out_dir)
+        previous = data.get("fingerprint")
+        outputs = {key: {"fingerprint": previous, **value} if isinstance(value, dict) else value
+                   for key, value in output_records(data).items()}
+        current = fingerprint(inp, cfg_sha)
+        outputs[name] = dict(record, fingerprint=current)
+        data.update(schema=1, skill_version=__version__, standard=STANDARD, outputs=outputs)
+        if summarize:
+            data.update(config_sha256=cfg_sha, inputs=inp, fingerprint=current)
+        replace_bytes(p, (json.dumps(data, sort_keys=True, indent=1, ensure_ascii=False) + "\n").encode("utf-8"))
+        return p
 
 
 def file_record(path: Path, **extra) -> dict:

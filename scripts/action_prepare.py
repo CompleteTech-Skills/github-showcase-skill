@@ -23,7 +23,7 @@ from pathlib import Path
 # Keep direct and runpy entry points equivalent when the caller's CWD is a target checkout.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from ctshowcase.fingerprint import ART_NAMES, output_records, read_sidecar, replace_bytes  # noqa: E402
+from ctshowcase.fingerprint import ART_NAMES, output_records, read_sidecar, replace_bytes, sidecar_lock  # noqa: E402
 
 IMAGES = Path("docs/images")
 SIDECAR = IMAGES / ".showcase.json"
@@ -88,27 +88,34 @@ def foreign(full_name: str, artifact: str | None = None) -> bool:
 
 
 def has_staged_outputs() -> bool:
-    data = _sidecar()
-    if not data and (SIDECAR.exists() or SIDECAR.is_symlink()):
-        return True  # an unreadable sidecar cannot authorize a grouped artifact commit
-    return any(isinstance(record, dict) and "staged_description" in record
-               for record in output_records(data).values())
+    # The grouped commit includes nested art and the two root Markdown files.
+    candidates = {SIDECAR, Path(SIDECAR.name), *IMAGES.rglob(SIDECAR.name)}
+    for path in candidates:
+        if not path.exists() and not path.is_symlink():
+            continue
+        outputs = read_sidecar(path.parent).get("outputs")
+        if not isinstance(outputs, dict):
+            return True  # unreadable provenance cannot authorize publication
+        if any(not isinstance(record, dict) or "staged_description" in record for record in outputs.values()):
+            return True
+    return False
 
 
 def drop(name: str) -> None:
-    p = IMAGES / name
-    if p.is_file():
-        p.unlink()
-    data = _sidecar()
-    if not data:
-        return
-    outs = dict(output_records(data))
-    outs.pop(name, None)
-    if outs:
-        data["outputs"] = outs
-        replace_bytes(SIDECAR, (json.dumps(data, sort_keys=True, indent=1, ensure_ascii=False) + "\n").encode("utf-8"))
-    else:
-        SIDECAR.unlink()
+    with sidecar_lock(SIDECAR):
+        p = IMAGES / name
+        if p.is_file():
+            p.unlink()
+        data = _sidecar()
+        if not data:
+            return
+        outs = dict(output_records(data))
+        outs.pop(name, None)
+        if outs:
+            data["outputs"] = outs
+            replace_bytes(SIDECAR, (json.dumps(data, sort_keys=True, indent=1, ensure_ascii=False) + "\n").encode("utf-8"))
+        else:
+            SIDECAR.unlink()
 
 
 def summary(meta: str) -> None:

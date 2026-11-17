@@ -209,19 +209,20 @@ def write_artifact(ctx, path: Path, data: bytes) -> None:
 # ---------------------------------------------------------------------------------------------------
 def write_rendered_art(ctx, *artifacts: tuple[Path, bytes, dict], summarize_art: bool = True) -> None:
     from ctshowcase.fingerprint import bytes_record
-    from ctshowcase.staged import record_output
+    from ctshowcase.staged import lock_outputs, record_output
 
     staged = getattr(ctx, "staged_description", None) is not None
-    if staged:
-        # Record every proposal before changing any artifact. A partial write remains guarded by the Action.
-        for path, data, details in artifacts:
-            record_output(ctx, path, bytes_record(data, **details))
-    for path, data, _ in artifacts:
-        write_artifact(ctx, path, data)
-    if not staged:
-        record = maybe_sidecar if summarize_art else record_output
-        for path, data, details in artifacts:
-            record(ctx, path, bytes_record(data, **details))
+    with lock_outputs(ctx, *(path for path, _, _ in artifacts)):
+        if staged:
+            # Record every proposal before changing any artifact. A partial write remains guarded by the Action.
+            for path, data, details in artifacts:
+                record_output(ctx, path, bytes_record(data, **details))
+        for path, data, _ in artifacts:
+            write_artifact(ctx, path, data)
+        if not staged:
+            record = maybe_sidecar if summarize_art else record_output
+            for path, data, details in artifacts:
+                record(ctx, path, bytes_record(data, **details))
 
 
 def cmd_banner(args):
@@ -551,7 +552,7 @@ def cmd_readme(args):
         fonts = Fonts(ctx.brand)
         for rel, (label, message, colour) in sorted(ctx.badge_files.items()):
             badge_outputs[rel] = badge.svg(ctx.brand, fonts, label, message, colour, style=ctx.style).encode()
-    from ctshowcase.staged import check_outputs, record_output, tagline_blocks, tagline_digest
+    from ctshowcase.staged import check_outputs, lock_outputs, record_output, tagline_blocks, tagline_digest
     from ctshowcase.fingerprint import bytes_record, file_record
 
     staged = getattr(ctx, "staged_description", None) is not None
@@ -562,24 +563,25 @@ def cmd_readme(args):
             destinations.append(path)
         if changed and contrib_new is not None:
             destinations.append(rd / "CONTRIBUTING.md")
-        check_outputs(ctx, *destinations, auxiliary=report)
-        if staged:
-            tagline = readme.tagline_body(ctx).strip()
-            if tagline in tagline_blocks(after):
-                record_output(ctx, path, bytes_record(after.encode("utf-8"), tagline_sha256=tagline_digest(tagline)))
-        for rel, data in badge_outputs.items():
-            write_artifact(ctx, rd / rel, data)
-    if args.write and changed:
-        write_artifact(ctx, path, after.encode("utf-8"))
-        if contrib_new is not None:
-            if getattr(ctx, "staged_description", None) is not None:
-                write_artifact(ctx, rd / "CONTRIBUTING.md", contrib_new.encode("utf-8"))
-            else:
-                (rd / "CONTRIBUTING.md").write_text(contrib_new, encoding="utf-8")
-    if args.write and not staged and str(ctx.meta.get("description") or "").strip():
-        tagline = readme.tagline_body(ctx).strip()
-        if tagline in tagline_blocks(after):
-            record_output(ctx, path, file_record(path))
+        with lock_outputs(ctx, *destinations):
+            check_outputs(ctx, *destinations, auxiliary=report)
+            if staged:
+                tagline = readme.tagline_body(ctx).strip()
+                if tagline in tagline_blocks(after):
+                    record_output(ctx, path, bytes_record(after.encode("utf-8"), tagline_sha256=tagline_digest(tagline)))
+            for rel, data in badge_outputs.items():
+                write_artifact(ctx, rd / rel, data)
+            if changed:
+                write_artifact(ctx, path, after.encode("utf-8"))
+                if contrib_new is not None:
+                    if staged:
+                        write_artifact(ctx, rd / "CONTRIBUTING.md", contrib_new.encode("utf-8"))
+                    else:
+                        (rd / "CONTRIBUTING.md").write_text(contrib_new, encoding="utf-8")
+            if not staged and str(ctx.meta.get("description") or "").strip():
+                tagline = readme.tagline_body(ctx).strip()
+                if tagline in tagline_blocks(after):
+                    record_output(ctx, path, file_record(path))
     if args.records and changed:
         if staged and not args.write:
             check_outputs(ctx, path, auxiliary=report)
@@ -785,7 +787,7 @@ def cmd_fingerprint(args):
         selected = {fp.ART_RECORDS[kind] for kind in (args.outputs or "").split(",") if kind in fp.ART_RECORDS}
         if args.readme in ("header", "bootstrap"):
             selected.add("README.md")
-    changed = fp.outputs_changed(fp.read_sidecar(out_dir), f, selected)
+    changed = fp.outputs_changed(fp.read_sidecar(out_dir), f, selected, out_dir=out_dir)
     if args.github_output and os.environ.get("GITHUB_OUTPUT"):
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
             fh.write(f"changed={'true' if changed else 'false'}\nfingerprint={f}\n")

@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import re
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 from . import fingerprint as fp
@@ -72,8 +73,8 @@ def check_auxiliary(capture: Path | None, checkout: Path | None, *paths: Path) -
     check_capture(capture, *paths)
     for path in paths:
         resolved = path.resolve()
-        if path.is_symlink() or (path.exists() and not path.is_file()):
-            raise ShowcaseError("staged report must be a regular file", log="staged-description:path")
+        if path.is_symlink() or (path.exists() and (not path.is_file() or path.stat().st_nlink > 1)):
+            raise ShowcaseError("staged reports must use an unlinked regular file", log="staged-description:path")
         if checkout is None:
             continue
         root = checkout.resolve()
@@ -101,11 +102,21 @@ def check_outputs(ctx, *paths: Path, auxiliary: tuple[Path, ...] = ()) -> None:
         if (path.name.casefold() == fp.SIDECAR.casefold()
                 or any(_aliases(resolved, sidecar) for sidecar in real_sidecars)):
             raise ShowcaseError("render output overlaps its showcase sidecar", log="staged-description:path")
-        if staged and root and path.absolute().is_relative_to(root) and not resolved.is_relative_to(root):
-            raise ShowcaseError("staged output must not write through a link", log="staged-description:path")
+        if root and path.absolute().is_relative_to(root) and (path.is_symlink() or not resolved.is_relative_to(root)):
+            raise ShowcaseError("render output must not write through a link outside the checkout",
+                                log="staged-description:path")
         if any(_aliases(resolved, other) for other in real_paths):
             raise ShowcaseError("render output paths must be distinct", log="staged-description:path")
         real_paths.append(resolved)
+
+
+@contextmanager
+def lock_outputs(ctx, *paths: Path):
+    sidecars = {_output_slot(ctx, path)[0] / fp.SIDECAR for path in paths}
+    with ExitStack() as locks:
+        for sidecar in sorted(sidecars):
+            locks.enter_context(fp.sidecar_lock(sidecar))
+        yield
 
 
 def record_output(ctx, path: Path, record: dict, *, always: bool = False) -> Path | None:

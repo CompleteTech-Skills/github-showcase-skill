@@ -33,8 +33,8 @@ captured repository ID when available. The sidecar's top-level inputs and
 fingerprint describe the latest live canonical banner or card artifact. Each
 staged record is written before the associated artifact, so a partial render
 remains guarded against automatic publication. Before skipping generation,
-the Action checks the selected banner and card for current records in a sidecar
-with per-output fingerprints. It also checks any existing README record when
+the Action checks the selected banner and card for current records and matching
+artifact hashes in a sidecar with per-output fingerprints. It also checks any existing README record when
 README refresh is enabled. Older sidecars use the top-level fingerprint.
 Canonical art with a stable exemption can cache that decision when no artifact
 is present. Other selected art without a record is rechecked on the next run.
@@ -53,4 +53,5 @@ managed tagline matches the recorded staged tagline digest, even after edits
 elsewhere in the README. Upgrades for variants G (fork) and H (archive) write a callout.
 `doctor` also checks any managed tagline those upgrades preserve.
 
-The composite Action skips automatic commit while any staged record remains in its output sidecar. A partial live refresh preserves unrelated staged records and cannot authorize their publication.
+The composite Action checks the canonical, nested art and root sidecars for staged
+records before committing. Local writes to each output group share a sidecar lock. A partial live refresh preserves unrelated staged records and cannot authorize their publication.

@@ -2608,8 +2608,13 @@ def _finish(args, obj: dict, code: int):
         obj["jobs_file"] = str(args.jobs)
     if getattr(args, "report", None):
         p = Path(args.report)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps(obj, indent=1, ensure_ascii=False, default=str) + "\n", encoding="utf-8")
+        payload = json.dumps(obj, indent=1, ensure_ascii=False, default=str) + "\n"
+        if obj.get("staged_description"):
+            from .fingerprint import replace_bytes
+            replace_bytes(p, payload.encode("utf-8"), private=True)
+        else:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(payload, encoding="utf-8")
     return obj, code
 
 
