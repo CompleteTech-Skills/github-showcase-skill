@@ -9,6 +9,7 @@
   action_prepare.py foreign OWNER/REPO NAME  check a canonical banner or card without removing the icon
   action_prepare.py staged             report whether local output still carries a staged proposal
   action_prepare.py staged-index       check staged sidecar blobs before a grouped Git commit
+  action_prepare.py commit-index MODE INDEX SNAPSHOT [PATH...]  stage and check an index copy under the output lock
   action_prepare.py drop NAME            remove docs/images/NAME and its sidecar record (the sidecar too when empty)
   action_prepare.py summary META_JSON    append the describe and topics proposals to $GITHUB_STEP_SUMMARY
 """
@@ -17,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -102,10 +104,11 @@ def has_staged_outputs() -> bool:
                if path.exists() or path.is_symlink())
 
 
-def has_staged_index(*, allow_icon_removal: bool = False) -> bool:
+def has_staged_index(*, allow_icon_removal: bool = False, snapshot: str | None = None) -> bool:
     """Check the exact index and prevent grouped commits from including unrelated files."""
+    env = {**os.environ, "GIT_INDEX_FILE": snapshot} if snapshot else None
     changes = subprocess.run(["git", "diff", "--cached", "--name-status", "--no-renames", "-z"],
-                             check=True, capture_output=True, timeout=30)
+                             check=True, capture_output=True, timeout=30, env=env)
     columns = changes.stdout.split(b"\0")
     for status, path in zip(columns[::2], columns[1::2]):
         if path.startswith(b"docs/images/") or path in (b"docs/images", b"README.md", b"CONTRIBUTING.md"):
@@ -114,7 +117,7 @@ def has_staged_index(*, allow_icon_removal: bool = False) -> bool:
             continue
         return True  # the bare git commit would include these pre-existing staged changes
     result = subprocess.run(["git", "ls-files", "--stage", "-z", "--", IMAGES.as_posix(), SIDECAR.name],
-                            check=True, capture_output=True, timeout=30)
+                            check=True, capture_output=True, timeout=30, env=env)
     for item in result.stdout.split(b"\0"):
         if not item:
             continue
@@ -133,6 +136,17 @@ def has_staged_index(*, allow_icon_removal: bool = False) -> bool:
         if _has_staged_provenance(data):
             return True
     return False
+
+
+def prepare_commit_index(index: str, snapshot: str, paths: list[str], *, allow_icon_removal: bool = False) -> bool:
+    """Stage one consistent snapshot of the Action-managed render group."""
+    with sidecar_lock(SIDECAR):
+        if paths:
+            subprocess.run(["git", "add", "--", *paths], check=True, timeout=30)
+        if allow_icon_removal:
+            subprocess.run(["git", "rm", "-q", "--cached", "--", "assets/icon.png"], check=True, timeout=30)
+        shutil.copyfile(index, snapshot)
+        return has_staged_index(allow_icon_removal=allow_icon_removal, snapshot=snapshot) or has_staged_outputs()
 
 
 def drop(name: str) -> None:
@@ -195,6 +209,11 @@ def summary(meta: str) -> None:
 if __name__ == "__main__":
     if sys.argv[1:] == ["staged"]:
         print("true" if has_staged_outputs() else "false")
+        sys.exit(0)
+    if len(sys.argv) >= 5 and sys.argv[1] == "commit-index" and sys.argv[2] in ("keep-icon", "icon-removal"):
+        blocked = prepare_commit_index(sys.argv[3], sys.argv[4], sys.argv[5:],
+                                       allow_icon_removal=sys.argv[2] == "icon-removal")
+        print("true" if blocked else "false")
         sys.exit(0)
     if sys.argv[1:] in (["staged-index"], ["staged-index", "icon-removal"]):
         print("true" if has_staged_index(allow_icon_removal=len(sys.argv) == 3) else "false")

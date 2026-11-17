@@ -28,7 +28,10 @@ files the Action commits.
 A preview's sidecar stays beside the private image outside the canonical Action
 artifact group. Reports also preserve existing PNG or JPEG output files.
 `content social --job` requires captured metadata and a live output path outside
-that directory. Staging a preview leaves previously queued live files intact.
+that directory. Live social renders record provenance beside the image, so a
+staged banner or card cannot overwrite that path even in metadata-only mode.
+The default live PNG and JPEG destinations and existing images at the standard
+social-preview dimensions also have this protection for older jobs.
 An ordinary render replaces the record for each refreshed output with its current
 hash and no staged description, while leaving untouched output records intact.
 Card PNG previews have their own records. Banner and card records retain the
@@ -59,4 +62,6 @@ elsewhere in the README. Upgrades for variants G (fork) and H (archive) write a 
 The composite Action checks the canonical, nested art and root sidecars for staged
 records before committing and checks the staged Git blobs for proposals and
 unrelated index changes. Local
-writes to each output group share a sidecar lock. A partial live refresh preserves unrelated staged records and cannot authorize their publication.
+writes to each output group share a sidecar lock. The Action holds that lock
+while staging and validating its index snapshot. A partial live refresh
+preserves unrelated staged records and cannot authorize their publication.

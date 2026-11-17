@@ -216,20 +216,26 @@ def write_artifact(ctx, path: Path, data: bytes) -> None:
 # ---------------------------------------------------------------------------------------------------
 def write_rendered_art(ctx, *artifacts: tuple[Path, bytes, dict], summarize_art: bool = True) -> None:
     from ctshowcase.fingerprint import bytes_record
-    from ctshowcase.staged import lock_outputs, record_output
+    from ctshowcase.staged import check_outputs, lock_outputs, record_output
 
     staged = getattr(ctx, "staged_description", None) is not None
-    with lock_outputs(ctx, *(path for path, _, _ in artifacts)):
+    paths = tuple(path for path, _, _ in artifacts)
+    adjacent = not summarize_art
+    with lock_outputs(ctx, *paths, adjacent=adjacent):
+        check_outputs(ctx, *paths, adjacent=adjacent)
         if staged:
             # Record every proposal before changing any artifact. A partial write remains guarded by the Action.
             for path, data, details in artifacts:
-                record_output(ctx, path, bytes_record(data, **details))
+                record_output(ctx, path, bytes_record(data, **details), adjacent=adjacent)
         for path, data, _ in artifacts:
             write_artifact(ctx, path, data)
         if not staged:
-            record = maybe_sidecar if summarize_art else record_output
             for path, data, details in artifacts:
-                record(ctx, path, bytes_record(data, **details))
+                record = bytes_record(data, **details)
+                if summarize_art:
+                    maybe_sidecar(ctx, path, record)
+                else:
+                    record_output(ctx, path, record, always=True, adjacent=adjacent)
 
 
 def cmd_banner(args):
@@ -318,8 +324,9 @@ def cmd_social(args):
         out = out.with_suffix(".jpg")
         check_social_path(out, staged=staged, job=job, checkout=ctx.repo_dir)
     report = getattr(args, "report", None)
-    check_outputs(ctx, out, auxiliary=(Path(report),) if staged and report else ())
-    write_rendered_art(ctx, (out, data, {}), summarize_art=False)
+    check_outputs(ctx, out, auxiliary=(Path(report),) if staged and report else (), adjacent=True)
+    details = {} if staged else {"live_social_preview": True}
+    write_rendered_art(ctx, (out, data, details), summarize_art=False)
     res = base("social-preview", ctx, result="ok", out=str(out), bytes=len(data), format=fmt, **info)
     if args.command == "social-preview":  # the hidden, deprecated top-level alias of `content social`
         res["logs"] = list(res["logs"]) + ["deprecated:social-preview (use content social)"]

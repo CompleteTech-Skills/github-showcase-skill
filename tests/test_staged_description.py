@@ -924,3 +924,79 @@ def test_action_will_not_commit_a_private_preview_already_in_index(tmp_path, pre
         assert git("rev-parse", "HEAD") != initial
         assert git("diff", "--cached", "--name-only") == ""
         assert git("show", "--format=", "--name-only", "HEAD").strip() == "docs/images/banner.png"
+
+
+@pytest.mark.parametrize("location", ["canonical", "custom", "legacy"])
+def test_staged_art_cannot_replace_a_queued_live_social_preview(tmp_path, location):
+    capture = tmp_path / "capture.json"
+    capture.write_text(json.dumps(meta_dict(description="Run the synthetic support queue.")), encoding="utf-8")
+    checkout = tmp_path / "repo"
+    checkout.mkdir()
+    queue = tmp_path / "jobs.jsonl"
+    destination = checkout / ("assets/social-preview.png" if location == "canonical" else "custom/queued.png")
+    result = run_cli("--meta", capture, "--repo-dir", checkout, "--format", "json", "content", "social",
+                     "--job", "--jobs", queue, "--out", destination)
+    assert result.returncode == 0, result.stdout + result.stderr
+    out = Path(json.loads(result.stdout)["out"])
+    original = out.read_bytes()
+    planned_jobs = queue.read_bytes()
+    assert read_sidecar(out.parent)["outputs"][out.name]["live_social_preview"] is True
+    if location == "legacy":
+        (out.parent / ".showcase.json").unlink()
+
+    attempt = run_cli("--meta", capture, "--no-repo-dir", "--format", "json", "banner",
+                      "--allow-few-chips", "--description", "Unpublished staging exercise.", "--out", out)
+    assert attempt.returncode == 2, attempt.stdout + attempt.stderr
+    assert "staged-description:path" in json.loads(attempt.stdout)["logs"]
+    assert out.read_bytes() == original
+    assert queue.read_bytes() == planned_jobs
+
+
+@pytest.mark.requires_bash
+def test_action_stages_while_holding_the_renderers_lock(tmp_path):
+    import os
+    import subprocess
+    import time
+
+    from conftest import ROOT, find_bash
+    from ctshowcase.fingerprint import sidecar_lock
+
+    def git(*args):
+        return subprocess.run(["git", *args], cwd=tmp_path, capture_output=True, text=True, check=True).stdout
+
+    git("init", "-q")
+    git("-c", "user.name=Synthetic", "-c", "user.email=fixture@example.invalid",
+        "commit", "--allow-empty", "-qm", "base")
+    initial = git("rev-parse", "HEAD")
+    images = tmp_path / "docs/images"
+    images.mkdir(parents=True)
+    banner = images / "banner.png"
+    banner.write_bytes(b"live banner")
+    sidecar = images / ".showcase.json"
+    sidecar.write_text('{"outputs":{"banner.png":{}}}', encoding="utf-8")
+    env = {**os.environ, "SHOWCASE_DRY_RUN": "1"}
+    with sidecar_lock(sidecar):
+        action = subprocess.Popen([find_bash(), str(ROOT / "scripts/action_commit.sh"), "Synthetic", "fail",
+                                   str(ROOT / "scripts/action_prepare.py")], cwd=tmp_path, env=env,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            deadline = time.monotonic() + 10
+            while not any((tmp_path / ".git").glob("showcase-index.*")):
+                assert action.poll() is None and time.monotonic() < deadline
+                time.sleep(0.02)
+            assert git("diff", "--cached", "--name-only") == ""
+            sidecar.write_text('{"outputs":{"banner.png":{"staged_description":{"text":"Draft"}}}}', encoding="utf-8")
+            banner.write_bytes(b"staged banner")
+        except BaseException:
+            action.kill()
+            action.communicate()
+            raise
+    with action:
+        try:
+            stdout, stderr = action.communicate(timeout=15)
+        finally:
+            if action.poll() is None:
+                action.kill()
+    assert action.returncode == 0, (stdout, stderr)
+    assert "commit skipped" in stdout
+    assert git("rev-parse", "HEAD") == initial

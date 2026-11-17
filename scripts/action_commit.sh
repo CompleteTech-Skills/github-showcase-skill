@@ -18,26 +18,26 @@ done
 # stage the deletion on its own: only when the tracked icon is missing from the checkout, and never an edit to it.
 icon_removed="$(git ls-files --deleted -- assets/icon.png)"
 [ "${#paths[@]}" -eq 0 ] && [ -z "$icon_removed" ] && { echo "showcase: nothing to stage"; exit 0; }
-if [ "${#paths[@]}" -gt 0 ]; then
-  git add -- "${paths[@]}"
-fi
-if [ -n "$icon_removed" ]; then
-  git rm -q --cached -- assets/icon.png
-fi
 if [ -n "$prepare" ]; then
-  # Commit the same index snapshot the guard evaluates. The caller's index retains any later edits.
+  # Hold the render lock across staging and validation, then commit the exact
+  # index snapshot. Subsequent edits to the caller's index do not enter it.
   index="$(git rev-parse --path-format=absolute --git-path index)"
   snapshot="$(mktemp "$(dirname -- "$index")/showcase-index.XXXXXXXX")"
   trap 'rm -f -- "$snapshot" "$snapshot.lock"' EXIT
-  cp -- "$index" "$snapshot"
+  icon_mode=keep-icon
+  [ -z "$icon_removed" ] || icon_mode=icon-removal
+  blocked="$(python "$prepare" commit-index "$icon_mode" "$index" "$snapshot" "${paths[@]}")"
   export GIT_INDEX_FILE="$snapshot"
-  index_args=(staged-index)
-  [ -z "$icon_removed" ] || index_args+=(icon-removal)
-  staged_index="$(python "$prepare" "${index_args[@]}")"
-  staged_worktree="$(python "$prepare" staged)"
-  if [ "$staged_index" = "true" ] || [ "$staged_worktree" = "true" ]; then
+  if [ "$blocked" = "true" ]; then
     echo "::warning title=CompleteTech Showcase::commit skipped while unpublished staged output or unrelated index changes are present"
     exit 0
+  fi
+else
+  if [ "${#paths[@]}" -gt 0 ]; then
+    git add -- "${paths[@]}"
+  fi
+  if [ -n "$icon_removed" ]; then
+    git rm -q --cached -- assets/icon.png
   fi
 fi
 if git diff --cached --quiet; then

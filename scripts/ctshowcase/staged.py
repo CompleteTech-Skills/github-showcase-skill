@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import os
 import re
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
@@ -42,9 +43,9 @@ def check_social_path(path: Path, *, staged: bool, job: bool, checkout: Path | N
                             log="staged-description:upload")
 
 
-def _output_slot(ctx, path: Path) -> tuple[Path, str, bool]:
+def _output_slot(ctx, path: Path, *, adjacent: bool = False) -> tuple[Path, str, bool]:
     path = Path(path).resolve()
-    if SOCIAL_STAGING in map(str.casefold, path.parent.parts):
+    if adjacent or SOCIAL_STAGING in map(str.casefold, path.parent.parts):
         return path.parent, path.name, False
     root = Path(ctx.repo_dir).resolve() if ctx.repo_dir else None
     if root is not None and path.is_relative_to(root):
@@ -74,14 +75,18 @@ def check_capture(capture: Path | None, *destinations: Path) -> None:
         raise ShowcaseError("write destination overlaps the metadata capture", log="staged-description:path")
 
 
-def _action_managed_path(path: Path, checkout: Path | None) -> bool:
-    candidates = (path.absolute(), path.resolve())
+def _action_roots(path: Path, checkout: Path | None) -> set[Path]:
     roots = {(checkout or Path.cwd()).resolve()}
-    for destination in candidates:
+    for destination in (path.absolute(), path.resolve()):
         enclosing = next((parent for parent in destination.parents if (parent / ".git").exists()), None)
         if enclosing is not None:
             roots.add(enclosing.resolve())
-    for root in roots:
+    return roots
+
+
+def _action_managed_path(path: Path, checkout: Path | None) -> bool:
+    candidates = (path.absolute(), path.resolve())
+    for root in _action_roots(path, checkout):
         images = root / "docs/images"
         markdown = tuple((root / name).resolve() for name in ("README.md", "CONTRIBUTING.md"))
         for destination in candidates:
@@ -105,9 +110,41 @@ def check_auxiliary(capture: Path | None, checkout: Path | None, *paths: Path) -
             raise ShowcaseError("staged reports must stay outside Action-managed paths", log="staged-description:path")
 
 
-def check_outputs(ctx, *paths: Path, auxiliary: tuple[Path, ...] = ()) -> None:
+def _live_social_output(path: Path) -> bool:
+    resolved = path.resolve()
+    if SOCIAL_STAGING in map(str.casefold, resolved.parent.parts):
+        return False
+    if resolved.name.casefold() in {"social-preview.png", "social-preview.jpg"}:
+        return True
+    if (resolved.parent / fp.SIDECAR).is_symlink():
+        return True
+    records = fp.output_records(fp.read_sidecar(resolved.parent))
+    if any(os.path.normcase(name) == os.path.normcase(resolved.name)
+           and isinstance(record, dict) and record.get("live_social_preview") is True
+           for name, record in records.items()):
+        return True
+    if not resolved.is_file():
+        return False
+    with resolved.open("rb") as stream:
+        signature = stream.read(8)
+        if not signature.startswith((b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff")):
+            return False
+        # Older jobs have only a file path. Preserve images at the published
+        # social-preview dimensions even when there is no adjacent record.
+        from PIL import Image
+        from .social import SH, SW
+
+        stream.seek(0)
+        try:
+            with Image.open(stream, formats=("PNG", "JPEG")) as image:
+                return image.size == (SW, SH)
+        except (OSError, Image.DecompressionBombError):
+            return False
+
+
+def check_outputs(ctx, *paths: Path, auxiliary: tuple[Path, ...] = (), adjacent: bool = False) -> None:
     """Keep renderer outputs and their provenance paths distinct before any write."""
-    sidecars = {_output_slot(ctx, path)[0] / fp.SIDECAR for path in paths}
+    sidecars = {_output_slot(ctx, path, adjacent=adjacent)[0] / fp.SIDECAR for path in paths}
     real_sidecars = {path.resolve() for path in sidecars}
     staged = getattr(ctx, "staged_description", None) is not None
     if staged:
@@ -117,6 +154,8 @@ def check_outputs(ctx, *paths: Path, auxiliary: tuple[Path, ...] = ()) -> None:
         for path in (*paths, *sidecars):
             if path.is_symlink() or (path.exists() and not path.is_file()):
                 raise ShowcaseError("staged output must be a regular file", log="staged-description:path")
+        if any(_live_social_output(path) for path in paths):
+            raise ShowcaseError("staged output must not replace a live social preview", log="staged-description:path")
     root = Path(ctx.repo_dir).resolve() if ctx.repo_dir else None
     real_paths = []
     for path in (*paths, *auxiliary):
@@ -133,20 +172,29 @@ def check_outputs(ctx, *paths: Path, auxiliary: tuple[Path, ...] = ()) -> None:
 
 
 @contextmanager
-def lock_outputs(ctx, *paths: Path):
-    sidecars = {_output_slot(ctx, path)[0] / fp.SIDECAR for path in paths}
+def lock_outputs(ctx, *paths: Path, adjacent: bool = False):
+    sidecars = {_output_slot(ctx, path, adjacent=adjacent)[0] / fp.SIDECAR for path in paths}
+    if getattr(ctx, "staged_description", None) is not None:
+        for path in paths:
+            sidecars.add(path.resolve().parent / fp.SIDECAR)
+            if _action_managed_path(path, ctx.repo_dir):
+                sidecars.update(root / "docs" / "images" / fp.SIDECAR for root in _action_roots(path, ctx.repo_dir))
     with ExitStack() as locks:
         for sidecar in sorted(sidecars):
             locks.enter_context(fp.sidecar_lock(sidecar))
         yield
 
 
-def record_output(ctx, path: Path, record: dict, *, always: bool = False) -> Path | None:
+def record_output(ctx, path: Path, record: dict, *, always: bool = False,
+                  adjacent: bool = False) -> Path | None:
     """Record a generated output and preserve provenance for untouched surfaces."""
     info = getattr(ctx, "staged_description", None)
-    directory, name, summarize = _output_slot(ctx, path)
-    if not always and info is None and name not in fp.output_records(fp.read_sidecar(directory)):
+    directory, name, summarize = _output_slot(ctx, path, adjacent=adjacent)
+    previous = fp.output_records(fp.read_sidecar(directory)).get(name)
+    if not always and info is None and previous is None:
         return None
+    if isinstance(previous, dict) and previous.get("live_social_preview") is True:
+        record = dict(record, live_social_preview=True)
     directory.mkdir(parents=True, exist_ok=True)
     if isinstance(ctx.meta.get("id"), int) and not isinstance(ctx.meta.get("id"), bool):
         record = dict(record, repository_id=ctx.meta["id"])
