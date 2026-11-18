@@ -10,7 +10,7 @@ from bisect import bisect_left, bisect_right
 from collections import Counter, defaultdict, deque
 from html import escape
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 from . import footer as footermod
 from . import tagline as taglinemod
@@ -747,7 +747,7 @@ def _badge_or_logo(source: str, *, personal: bool = False) -> bool:
     return bool(re.search(r"(?:^|[/_.-])logo(?:$|[/_.-])", location, re.I)
                 or re.match(r"https?://(?:img\.)?shields\.io/", location, re.I)
                 or re.fullmatch(r"https://github\.com/[^/]+/[^/]+/actions/workflows/[^/]+/badge\.svg", location, re.I)
-                or location.removeprefix("./").startswith("docs/images/badges/"))
+                or unquote(location).removeprefix("./").startswith("docs/images/badges/"))
 
 
 def _leading_banner(pre: str) -> bool:
@@ -831,7 +831,42 @@ def _personal_banner_blocks(markers: list[re.Match], *, retain: bool) -> list[re
     return banners
 
 
-def callout_only(ctx: RepoContext, text: str, *, retain_personal_banner: bool = False) -> tuple[str, list[str]]:
+def _edit_source_spans(spans: list[tuple[int, int, int, int]] | None,
+                       start: int, end: int, inserted: int) -> None:
+    """Update (output start/end, input start/end) intervals after a proven owned edit."""
+    if spans is None:
+        return
+    delta, kept = inserted - (end - start), []
+    for a, b, c, d in spans:
+        left = min(b, start)
+        if a < left:
+            kept.append((a, left, c, c + left - a))
+        right = max(a, end)
+        if right < b:
+            kept.append((right + delta, b + delta, c + right - a, d))
+    spans[:] = kept
+
+
+def compose_source_spans(spans: list[tuple[int, int, int, int]] | None,
+                         originals: list[tuple[int, int, int, int]] | None) -> None:
+    """Map retained output→intermediate spans through exact intermediate→source spans."""
+    if spans is None or originals is None:
+        return
+    rebased = []
+    for a, b, c, d in spans:
+        covered = 0
+        for i, j, k, _ in originals:
+            left, right = max(c, i), min(d, j)
+            if left < right:
+                rebased.append((a + left - c, a + right - c, k + left - i, k + right - i))
+                covered += right - left
+        if covered != d - c:
+            raise NeedsInput("intro-order", "Cannot establish exact authored source spans for the personal intro refresh.")
+    spans[:] = rebased
+
+
+def callout_only(ctx: RepoContext, text: str, *, retain_personal_banner: bool = False,
+                 source_spans: list[tuple[int, int, int, int]] | None = None) -> tuple[str, list[str]]:
     """Variants G and H (§7.4): the hero banner block, then the callout (unless one is already there), then the body
     unchanged, then the decision 18 footer. Nothing else changes. Watching-org forks never reach here (`readme`
     exempts them). Review q27 "Full CompleteTech treatment" (brand.yaml readme.fork_readme: full) means the fork
@@ -850,6 +885,8 @@ def callout_only(ctx: RepoContext, text: str, *, retain_personal_banner: bool = 
     lead_banner = ""
     leading = leading_banner_block(text)
     personal = personal_intro_applies(ctx)
+    retained = [(0, len(text), 0, len(text))] if personal and source_spans is not None else None
+    body_start = 0
     banner_prefix = text[:leading.start()] if personal and leading is not None else ""
     banner_gap = "\n\n"
     replaced_hero: list[str] = []
@@ -865,15 +902,20 @@ def callout_only(ctx: RepoContext, text: str, *, retain_personal_banner: bool = 
                                  "moving the hero into the opening area.")
             # Move only the owned hero; the authored preamble keeps its bytes and order.
             body = text[:banner.start()] + text[banner.end():]
+            _edit_source_spans(retained, banner.start(), banner.end(), 0)
             lead_banner = wrap("banner", new_hero) + banner_gap
         elif new_hero != old_hero:
             body = text[:banner.start(2)] + new_hero + text[banner.end(2):]
+            _edit_source_spans(retained, banner.start(2), banner.end(2), len(new_hero))
         replaced_hero = _unreemitted(source_lines(old_hero), Counter(line.strip() for line in source_lines(new_hero)))
     if leading:  # our banner block is already on top (a re-run): keep it, look for the callout below
         remainder = text[leading.end():]
         body = remainder.lstrip("\n")
         if personal and body != remainder:
             banner_gap = remainder[:len(remainder) - len(body)]
+        body_start = len(text) - len(body)
+        if retained is not None:
+            retained[:] = [(0, len(body), body_start, len(text))] if body else []
     first = next((ln for ln in source_lines(body) if ln.strip()), "")
     out = body
     if not first.lstrip().startswith(">"):
@@ -884,6 +926,7 @@ def callout_only(ctx: RepoContext, text: str, *, retain_personal_banner: bool = 
             ctx.log("needs-input:archive-callout")
         if co:
             out = co + "\n\n" + (body if personal and not leading else body.lstrip("\n"))
+            _edit_source_spans(retained, 0, 0, len(co) + 2)
     if ctx.art_status()["banner"] is None:
         lead_banner = wrap("banner", banner_html(ctx)) + "\n\n"  # decision 13: the hero banner opens G and H too
     elif leading:
@@ -899,19 +942,33 @@ def callout_only(ctx: RepoContext, text: str, *, retain_personal_banner: bool = 
     elif personal and not retain_personal_banner and not banners and not _personal_preamble_has_art(text):
         lead_banner = wrap("banner", banner_html(ctx)) + "\n\n"
     out = banner_prefix + lead_banner + (out if personal and not leading else out.lstrip("\n"))
+    _edit_source_spans(retained, 0, 0, len(banner_prefix) + len(lead_banner))
+    if retained is not None and leading:
+        prefix_end = len(banner_prefix)
+        hero_end = prefix_end + len(lead_banner) - len(banner_gap)
+        if prefix_end:
+            retained.append((0, prefix_end, 0, leading.start()))
+        if lead_banner[:-len(banner_gap)] == leading.group(0):
+            retained.append((prefix_end, hero_end, leading.start(), leading.end()))
+        if body_start > leading.end():
+            retained.append((hero_end, hero_end + len(banner_gap), leading.end(), body_start))
+        retained.sort()
     removed: list[str] = list(replaced_hero)
     if footer_wanted(ctx):
         had_footer = False
         if footermod.check(ctx.brand, out)[0] != "pass":
-            pos, kept = 0, []
+            pos, kept, cuts = 0, [], []
             for fm in find_blocks(MARK, out):
                 if fm.group(1) == "footer" and is_footer_copy(fm.group(2), ctx.brand):
                     kept.append(out[pos:fm.start()])
                     removed += [ln for ln in source_lines(fm.group(2)) if ln.strip()]
                     had_footer = True
                     pos = fm.end()
+                    cuts.append(fm.span())
             out = "".join(kept) + out[pos:]
-            out, old_footer = drop_old_footer(out, ctx.brand, own_site=True)
+            for a, b in reversed(cuts):
+                _edit_source_spans(retained, a, b, 0)
+            out, old_footer = drop_old_footer(out, ctx.brand, own_site=True, source_spans=retained)
             removed += old_footer
             if old_footer:
                 had_footer = True
@@ -932,6 +989,8 @@ def callout_only(ctx: RepoContext, text: str, *, retain_personal_banner: bool = 
                 else:
                     rest.append(ln)
             removed = rest
+    if retained is not None:
+        source_spans[:] = retained
     return out, removed
 
 
@@ -1164,7 +1223,8 @@ def is_footer_copy(block: str, brand, loose_src: bool = False, own_site: bool = 
     return True
 
 
-def drop_old_footer(text: str, brand, loose_src: bool = False, own_site: bool = False) -> tuple[str, list[str]]:
+def drop_old_footer(text: str, brand, loose_src: bool = False, own_site: bool = False,
+                    source_spans: list[tuple[int, int, int, int]] | None = None) -> tuple[str, list[str]]:
     """(text, removed lines) with a trailing old footer (an unmarked or drifted decision 18 footer: every line a
     footer line, `is_footer_copy`) taken off the end, so the marked footer replaces it instead of following it. Any
     other block, a centred credits block with authored lines included, is left as it is (lint reports a second
@@ -1177,6 +1237,9 @@ def drop_old_footer(text: str, brand, loose_src: bool = False, own_site: bool = 
     tail = body[m.start():]
     if not tail.rstrip().endswith(f"</{m.group(1)}>") or not is_footer_like(tail, brand) or not is_footer_copy(tail, brand, loose_src, own_site):
         return text, []
+    if source_spans is not None:
+        _edit_source_spans(source_spans, m.start(), len(body), 0)
+        return text[:m.start()] + text[len(body):], [ln for ln in source_lines(tail) if ln.strip()]
     return body[:m.start()].rstrip() + "\n", [ln for ln in source_lines(tail) if ln.strip()]
 
 
@@ -1227,7 +1290,8 @@ def _header_upgrade(ctx: RepoContext, text: str, **kwargs) -> tuple[str, list[st
     return after, removed
 
 
-def upgrade(ctx: RepoContext, text: str, *, already_normalized: bool = False) -> tuple[str, list[str]]:
+def upgrade(ctx: RepoContext, text: str, *, already_normalized: bool = False,
+            source_spans: list[tuple[int, int, int, int]] | None = None) -> tuple[str, list[str]]:
     """Return (new text, header lines removed); callers run preservation checks before writing."""
     if not already_normalized:
         text = normalize_text(text)
@@ -1241,7 +1305,7 @@ def upgrade(ctx: RepoContext, text: str, *, already_normalized: bool = False) ->
         return _header_upgrade(ctx, text, preserve_structure=True,
                                retain_personal_banner=retain_personal_banner, callout_refresh=variant in ("G", "H"))
     if variant in ("G", "H"):
-        return callout_only(ctx, text, retain_personal_banner=retain_personal_banner)
+        return callout_only(ctx, text, retain_personal_banner=retain_personal_banner, source_spans=source_spans)
     if retain_personal_banner and any(block.group(1) == "banner" for block in markers):
         return _header_upgrade(ctx, text, retain_personal_banner=True)
     if variant == "J" and _badge_blocks_need_in_place_refresh(text, markers):
@@ -1508,15 +1572,20 @@ def header_only(ctx: RepoContext, text: str, *, already_normalized: bool = False
     return license_block(ctx, refreshed if retain_personal_banner else reorder_lead(ctx, refreshed))
 
 
-def _replace_blocks_in_source(original: str, normalized: str, sub) -> str:
-    """Splice blocks into their source spans, leaving all other bytes in place."""
+def _source_offset_mapper(original: str):
+    """Map offsets in normalize_text(original) to exact decoded source offsets."""
     bom = int(original.startswith(BOM))
     dropped = [m.start() - bom - count
                for count, m in enumerate(re.finditer(r"\r\n", original))]
 
     def source_offset(index):
         return index + bom + bisect_left(dropped, index)
+    return source_offset
 
+
+def _replace_blocks_in_source(original: str, normalized: str, sub) -> str:
+    """Splice blocks into their source spans, leaving all other bytes in place."""
+    source_offset = _source_offset_mapper(original)
     out, pos = [], 0
     for match in find_blocks(MARK, normalized):
         replacement = sub(match)
@@ -1723,11 +1792,14 @@ def reseal_pristine(text: str) -> str | None:
     return text[:digest_start] + body_sha(body) + text[digest_end:]
 
 
-def drop_pristine(text: str) -> str:
+def drop_pristine(text: str, *, source_spans: list[tuple[int, int, int, int]] | None = None) -> str:
     """Remove only a genuine ownership marker inside the first template body."""
+    if source_spans is not None:
+        source_spans[:] = [(0, len(text), 0, len(text))] if text else []
     block = _template_block(text)
     if block is None or (marker := _pristine_marker(text, block)) is None:
         return text
+    _edit_source_spans(source_spans, marker.start(), marker.end(), 0)
     return text[:marker.start()] + text[marker.end():]
 
 
@@ -2045,15 +2117,34 @@ def _managed_line_matches(before: str, after: str, old: list[str], new: list[str
     return matched
 
 
-def restore_line_endings(raw: str, before: str, after: str) -> str:
+def restore_line_endings(raw: str, before: str, after: str, *,
+                        source_spans: list[tuple[int, int, int, int]] | None = None) -> str:
     """`after` with the authored line endings of `raw` restored (#160).
 
     `read_text` decodes with universal newlines, so `before` holds one LF for
     every CRLF, lone CR or LF in `raw` (the file's own text).
     Each line `after` keeps unchanged from `before` takes its original
     ending back; a new or edited line takes the README's most common ending.
-    An LF-only README is returned unchanged.
+    Proven source spans take their exact original bytes instead of heuristic
+    line matches; a join that changes the normalized text refuses before writing.
+    An LF-only README is otherwise returned unchanged.
     """
+    if source_spans:
+        generated = restore_line_endings(raw, before, after)
+        old_offset = _source_offset_mapper(raw)
+        new_offset = _source_offset_mapper(generated)
+        out, pos = [], 0
+        for a, b, c, d in source_spans:
+            if not (0 <= pos <= a < b <= len(after) and 0 <= c < d <= len(before)
+                    and after[a:b] == before[c:d]):
+                raise NeedsInput("intro-order", "Cannot establish exact authored source spans for the personal intro refresh.")
+            out.extend((generated[new_offset(pos):new_offset(a)], raw[old_offset(c):old_offset(d)]))
+            pos = b
+        out.append(generated[new_offset(pos):])
+        restored = "".join(out)
+        if normalize_line_endings(restored) != after:
+            raise NeedsInput("intro-order", "Moving the personal intro would merge authored line endings; keep the hero on separate blank lines.")
+        return restored
     endings = _LINE_END.findall(raw)
     if not endings or all(e == "\n" for e in endings):
         return after

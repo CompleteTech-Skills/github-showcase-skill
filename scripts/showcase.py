@@ -635,6 +635,7 @@ def cmd_readme(args):
         raise ShowcaseError("--no-regroup cannot be combined with --bootstrap or --mode scaffold", log="usage")
     contrib_new = None
     original_contrib = None
+    source_spans = [] if not args.format_generated else None
     if args.bootstrap:
         state = readme.bootstrap_state(before)
         removed = []
@@ -656,8 +657,10 @@ def cmd_readme(args):
             # a person wrote inside the template body: the block is theirs. Drop the marker and upgrade with the
             # never-drop-a-line check; if that check objects, only the marker goes and the header blocks refresh.
             ctx.log("bootstrap:edited")
-            base_text = readme.drop_pristine(before)
-            after, removed = readme.upgrade(ctx, base_text, already_normalized=True)
+            base_spans = [] if source_spans is not None else None
+            base_text = readme.drop_pristine(before, source_spans=base_spans)
+            after, removed = readme.upgrade(ctx, base_text, already_normalized=True, source_spans=source_spans)
+            readme.compose_source_spans(source_spans, base_spans)
             problems = preservation(base_text, after, removed)
             if problems:
                 # a marked footer that holds authored content (partner or foreign image) must never be regenerated
@@ -667,6 +670,8 @@ def cmd_readme(args):
                                 problems=refusal + problems[:19],
                                 logs=ctx.logs + ["readme-shrink"]), CHECK_FAILED
                 ctx.log("readme-shrink")
+                if source_spans is not None:
+                    source_spans.clear()
                 after, removed = readme.header_only(ctx, base_text, already_normalized=True), []
         else:
             after = readme.header_only(ctx, before, already_normalized=True)
@@ -688,7 +693,7 @@ def cmd_readme(args):
         elif mode == "header":
             after = readme.header_only(ctx, before, already_normalized=True)
         else:
-            after, removed = readme.upgrade(ctx, before, already_normalized=True)
+            after, removed = readme.upgrade(ctx, before, already_normalized=True, source_spans=source_spans)
             problems = preservation(before, after, removed)
             if problems:
                 return base("readme", ctx, result="fail", mode=mode, problems=problems[:20],
@@ -748,7 +753,7 @@ def cmd_readme(args):
         restored = after
     elif after != before:
         bom = readme.BOM if raw.startswith(readme.BOM) else ""
-        restored = bom + readme.restore_line_endings(raw, before, after)
+        restored = bom + readme.restore_line_endings(raw, before, after, source_spans=source_spans)
     else:
         restored = raw
     changed = restored != raw
