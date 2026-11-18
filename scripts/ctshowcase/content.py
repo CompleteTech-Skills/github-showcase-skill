@@ -311,21 +311,27 @@ def github_slug(text: str) -> str:
 
 def headings(text: str) -> list[dict]:
     """Markdown headings in order with their GitHub anchors (duplicates get -1, -2 ...)."""
+    from .mdcode import html_block_spans
+
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    starts = [0] + [m.end() for m in re.finditer("\n", text)]
+    html_lines = {line for start, end in html_block_spans(text)
+                  for line in range(bisect.bisect_right(starts, start), bisect.bisect_right(starts, end - 1) + 1)}
     rows, seen = [], {}
     lines = scan_lines(text)
     para = re.compile(r"^\s*([#<>|*+\-!\[]|\d+[.)]\s)")
     for i, (n, t, _) in enumerate(lines):
         if t is None:
             continue
-        m = ATX.match(t)
         title = None
-        if m:
-            title = m.group(2) or ""
-        elif i + 1 < len(lines) and lines[i + 1][1] is not None and SETEXT.match(lines[i + 1][1] or "") \
-                and t.strip() and not para.match(t):
-            title = t.strip()
-        elif HTML_HEADING.search(t):
-            title = HTML_HEADING.search(t).group(2)
+        if n not in html_lines:
+            if m := ATX.match(t):
+                title = m.group(2) or ""
+            elif (i + 1 < len(lines) and n + 1 not in html_lines and SETEXT.match(lines[i + 1][1] or "")
+                  and t.strip() and not para.match(t)):
+                title = t.strip()
+        if title is None and (m := HTML_HEADING.search(t)):
+            title = m.group(2)
         if title is None:
             continue
         base = github_slug(plain_heading(title))

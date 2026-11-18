@@ -348,3 +348,46 @@ def test_cli_comment_tail_references_validate_complete_candidates(tmp_path, endi
     }
     assert "\\u0000" not in images.stdout
     assert readme.read_bytes() == source
+
+
+@pytest.mark.parametrize("ending", ["\n", "\r\n", "\r"], ids=["lf", "crlf", "cr"])
+def test_cli_markdown_headings_respect_raw_html_and_keep_real_anchors(tmp_path, ending):
+    lines = [
+        "<!-- marker --># Inline Fake",
+        "",
+        "<div>",
+        "# Raw<!-- marker -->Fake",
+        "Raw paragraph<!-- marker -->title",
+        "----",
+        '<h2 id="explicit-html">Real HTML</h2>',
+        "</div>",
+        "",
+        "# Real<!-- marker -->Heading",
+        "",
+        "Setext<!-- marker -->Title",
+        "====",
+        "",
+        "[Inline](#inline-fake)",
+        "[Raw](#raw-fake)",
+        "[Raw Setext](#raw-paragraph-title)",
+        "[Real](#real-heading)",
+        "[Setext](#setext-title)",
+        "[HTML](#real-html)",
+        "[HTML ID](#explicit-html)",
+    ]
+    readme = tmp_path / "README.md"
+    authored = (ending.join(lines) + ending).encode("utf-8")
+    readme.write_bytes(authored)
+    result = run_cli("--repo-dir", tmp_path, "content", "links", "README.md")
+    assert result.returncode == 0, result.stdout + result.stderr
+    findings = json.loads(result.stdout)["findings"]
+    assert [(row["target"], row["status"], row["line"]) for row in findings] == [
+        ("#inline-fake", "broken", 15),
+        ("#raw-fake", "broken", 16),
+        ("#raw-paragraph-title", "broken", 17),
+        ("#real-heading", "ok", 18),
+        ("#setext-title", "ok", 19),
+        ("#real-html", "ok", 20),
+        ("#explicit-html", "ok", 21),
+    ]
+    assert readme.read_bytes() == authored
