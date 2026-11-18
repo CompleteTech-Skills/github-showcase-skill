@@ -55,6 +55,8 @@ $S --meta "$F/Jev-Engineering__TypeCheck.json" --no-repo-dir \
 $S org-tile --org CompleteTech-Skills --avatar examples/orgs/CompleteTech-Skills/avatar-500.png --out "$O/org-tile-example.svg" --png "$O/org-tile-example.png"
 $S org-banner --org CompleteTech-Skills --out "$O/org-banner-example.jpg"
 $S intro --profile CompleteDotTech --out "$O/intro-example.svg"
+# Account chart of the synthetic Northwind account (no real account data): Mermaid source, SVG, HD PNG and README block
+$S account-chart render --snapshot examples/account-chart/northwind.snapshot.json --out-dir "$O"    --name account-chart-example >/dev/null
 $S --format json footer --raw > "$O/footer-example.md"
 
 # README scaffold for the synthetic CLI repo (dry run captured as the resulting file)

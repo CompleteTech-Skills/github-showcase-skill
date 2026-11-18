@@ -5,8 +5,9 @@ description: >-
   and footers; audit repos against the CompleteTech GitHub estate standard (About description, topics, labels, README
   variants, links, language bar, Actions, images, About sidebar, SVG rules); render org profile READMEs and plan org
   About fields, pins, star lists, labels and health files; capture, lint and copy GitHub Projects boards from the
-  estate template; and snapshot, check and plan the CompleteTech Enterprise. Read-only toward GitHub: it emits files,
-  JSON plans and gh/writer jobs. Use when creating, polishing or auditing any CompleteTech, AI Ascension, Jev
+  estate template; snapshot, check and plan the CompleteTech Enterprise; and map one account's repositories,
+  enterprises and organizations as a Mermaid tree with a high-definition render. Read-only toward GitHub: it emits
+  files, JSON plans and gh/writer jobs. Use when creating, polishing or auditing any CompleteTech, AI Ascension, Jev
   Engineering, jevplay-games, LibreEvolve or TouchedByAnAgent repo, README, org, org profile, GitHub Project or the
   Enterprise so it matches the rest of the estate.
 version: 1.0.0
@@ -34,7 +35,7 @@ metadata:
 
 | What it creates | Best for | Output |
 |---|---|---|
-| README hero banners, repo cards, social previews, repo icons, org banners and tiles, profile intros, the estate footer, README scaffolds, org profile READMEs, standard checks, and plans for orgs, GitHub Projects, the Enterprise and repository content | Making any CompleteTech-family repository, README, org, org profile, project board, the Enterprise or the profile page match the estate, and keeping it that way | `docs/images/banner.png` (1280×360 or 2560×720), `docs/images/card.svg`, `assets/social-preview.png` (1280×640), `assets/icon.png` (1024×1024), org banner JPG (1600×400), tile and intro SVGs, README marker blocks, `profile/README.md` and `profile/data.json`, JSON check results and plans, change records, `scripts/writer.py` jobs (JSON lines), coverage rows |
+| README hero banners, repo cards, social previews, repo icons, org banners and tiles, profile intros, the estate footer, README scaffolds, org profile READMEs, standard checks, and plans for orgs, GitHub Projects, the Enterprise and repository content | Making any CompleteTech-family repository, README, org, org profile, project board, the Enterprise or the profile page match the estate, and keeping it that way | `docs/images/banner.png` (1280×360 or 2560×720), `docs/images/card.svg`, `assets/social-preview.png` (1280×640), `assets/icon.png` (1024×1024), org banner JPG (1600×400), tile and intro SVGs, README marker blocks, `profile/README.md` and `profile/data.json`, JSON check results and plans, change records, `scripts/writer.py` jobs (JSON lines), coverage rows, and the account chart (`.mmd`, `.svg`, HD `.png` and its Markdown companion) |
 
 Every surface uses one **dark** design on both GitHub themes (decision 21): navy grid canvas, a card for the repo icon (or the org's Neon Night mark), a sky-blue eyebrow, the repo slug in monospace, two to four fact chips and an accent bar. All text is typeset from the bundled OFL fonts with HarfBuzz and outlined to paths, so outputs are deterministic and never depend on a web font or an image model. One CLI, `scripts/showcase.py`, does every generation, check and plan: the repository commands below, and four command groups, `org`, `project`, `enterprise` and `content`, for orgs, GitHub Projects, the Enterprise and repository content.
 
@@ -52,6 +53,7 @@ Every surface uses one **dark** design on both GitHub themes (decision 21): navy
 | A repository's links, language bar, Actions, README images, About sidebar, icon or social preview must be checked or produced | `content links`, `linguist`, `actions`, `images`, `sidebar`, `icon`, `social` ([references/content.md](references/content.md)) |
 | A new repository is created from `completetech-repo-template` | `new OWNER/NAME --type T` (the create job, then `adopt`), then the composite Action in `action.yml` (runs `readme --bootstrap`) |
 | A repository exists but never went through the standard (created by an agent, a pipeline or a transfer) | `adopt OWNER/REPO`; for the whole estate, `doctor --estate` (intake proposals and template drift) |
+| An account's whole GitHub footprint must be shown as one tree: its own repositories, each enterprise, each organization and their public repositories | `account-chart capture`, then `account-chart render` ([references/account-chart.md](references/account-chart.md)) |
 | A set must be reviewed the way GitHub shows it | `contact-sheet` |
 | Coverage must be reported or a repository verified as done | `lint all`, then `doctor` |
 
@@ -199,7 +201,7 @@ footer [--check README.md [--online]] [--org OWNER] [--raw]
 readme [--mode auto|scaffold|upgrade|header] [--variant auto|A|B|C|D|E|F|G|H|I|J]
        [--write] [--diff] [--records FILE] [--bootstrap | --no-regroup] [--description TEXT]
        [--format-generated]
-lint svg --kind intro|card|tile|plate|divider FILE...
+lint svg --kind intro|card|tile|plate|divider|chart FILE...
 lint readme [README.md] [--variant auto]
 lint banner [docs/images/banner.png]
 lint all
@@ -219,6 +221,11 @@ enterprise snapshot --slug SLUG [--out registry/enterprise.snapshot.json]
 enterprise doctor|seat-check|plan --snapshot FILE [--baseline FILE] [--user LOGIN] [--records FILE] [--jobs FILE]
     doctor: [--registry FILE] [--approved FILE] [--approved-yaml FILE] [--actions FILE]
 enterprise diff --baseline OLD --snapshot NEW
+account-chart capture-query [LOGIN]
+account-chart capture [LOGIN] --out FILE
+account-chart render --snapshot FILE --out-dir DIR [--name account-chart] [--width 2400] [--scale 1|2|3|4]
+    [--hide forks|archived]... [--private note|omit] [--avatar PATH] [--no-png] [--mmdc [PATH]] [--mmdc-config FILE]
+    [--registry FILE] [--decisions FILE] [--approved FILE] [--approved-yaml FILE] [--actions FILE] [--allow-t3]
 
 org profile|about|pins|labels|health|doctor ORG [--registry FILE] [--meta-dir DIR] [--decisions FILE]
     [--approved FILE] [--approved-yaml FILE] [--actions FILE] [--allow-t3] [--jobs FILE]
@@ -271,6 +278,7 @@ content sidebar --facts FILE [--packages FILE]... [--current FILE] [--repo OWNER
 | `new` | Plans a repository from the template: the `gh repo create OWNER/NAME --template CompleteTech-LLC/completetech-repo-template --private` writer job, then `adopt` on it (naming N1–N4 and the §5.4 type are checked first; the watching org, placeholder orgs and refused owners exit 2). | `--records`, `--jobs` |
 | `adopt` | What "Use this template" does not carry, as Phase 3 change records and writer jobs: the §10.1 settings (wiki, Projects and Discussions only after their reads), the §5.6 topics, the §6 label passes, private vulnerability reporting and Dependabot alerts on public non-forks, plus a UI checklist (social preview upload job, About sidebar). An archived capture plans no jobs or change records, only a `pending` entry: re-capture the metadata inside the approved unarchive window, then adopt again. Metadata from `--meta`, else read-only `gh api` GETs. A family on hold (`hold: true`) is refused (exit 2). | `--records`, `--jobs` |
 | `enterprise` | Decision 24: `snapshot-query` prints the validated read queries; `discover` and `snapshot` run read-only GraphQL queries; `doctor` (E1–E14), `seat-check`, `diff` and `plan` (change records and writer jobs) work offline on snapshots against `references/enterprise.yaml`. | `--out`, `--records`, `--jobs` |
+| `account-chart` | One account as a tree: its own repositories, each enterprise it owns or belongs to, each organization (inside or outside an enterprise) and every public repository of each. `capture-query` prints the read-only GraphQL reads; `capture` runs them (the signed-in account by default; enterprises and roles are reported for the viewer only) and writes an `account-chart/v1` snapshot that names public repositories only: private and internal repositories are counted (`all` minus `public`), never named. `render` works offline on the snapshot: excluded owners are left out (`exempt:<login>`), T3 orgs wait for `--allow-t3` and a valid record (`t3-signoff:<login>`, per repository inside a granted org), HOLD orgs are shown without naming a repository (`hold:<login>`), exposure-flagged repositories are withheld unnamed, and orgs without a brand row render neutral (`needs-input:org-row:<login>`). It writes `NAME.mmd` (a themed Mermaid `flowchart LR`), `NAME.svg` (the dark compositor tree, `lint svg --kind chart`), `NAME.png` (the same scene at `--scale`, 2x by default) and `NAME.md` (the README block: the image, the counts the image leaves out, and every repository as a link). `--mmdc` also draws the Mermaid source with mermaid-cli (optional, not byte-deterministic). | `--out` (capture), `--out-dir` (render) |
 | `org` | Decisions 5, 8, 9, 14, 15, 18, 20 and 23: the org profile README from the registry's public slice (leak-checked), the personal CompleteDotTech README with `profile --user` (kit order, leak-checked against the whole estate), About payload, pin and star List plan, label jobs for every repository homed in the org, `.github` health cells, and the O-check row. | `--out-dir` (profile only, after the leak check; an existing hand-made profile also needs a `profile-retemplate` approval), `--jobs` |
 | `project` | Decision 23, STANDARD §13: capture query, template spec, board lint (O10), two-stage copy plan (structure only, nothing deleted, mutations inline), board README, and the private Estate board. | `--out`, `--files-dir`, `--jobs` |
 | `content` | Audit gaps CQ-04, RP-09 (links), RP-07, CQ-08 (language bar), RP-06, RP-01, CQ-13 (Actions), RP-03, RP-10 (images), RP-05 (sidebar), RT-04 (repo icon) and R10 (`content social`: the 1280×640 repository social preview, STANDARD §9.5, in the same family design, plus with `--job` its browser upload job). | `--report`, `--jobs`, `--out`, `--out-dir`, `--preview`, `--cache` |
@@ -328,6 +336,7 @@ These user decisions outrank `STANDARD.md` (`ct-std-v1`). Full text: [references
 | [references/projects.md](references/projects.md) | The `project` command group: capture, normalize, lint, the two-stage copy plan, README and the Estate board. |
 | [references/content.md](references/content.md) | The `content` command group: links, language bar, Actions, images, sidebar, repo icon and the social preview. |
 | [references/enterprise.md](references/enterprise.md) | The enterprise module: commands, writer jobs, `enterprise.yaml` desired state, E-checks and guardrails (decision 24). |
+| [references/account-chart.md](references/account-chart.md) | The account chart: capture and snapshot format, privacy by construction, the estate gates, layout, the Mermaid source and the optional mermaid-cli render. |
 | [references/constraints.md](references/constraints.md) | Platform limits, write discipline, approval-gated actions, change records. |
 | [references/definition-of-done.md](references/definition-of-done.md) | Checks R1–R12 and O1–O11 mapped to `doctor` and `lint` cells. |
 | [references/decisions.md](references/decisions.md) | The user decisions this skill implements, verbatim. |
@@ -342,9 +351,9 @@ These user decisions outrank `STANDARD.md` (`ct-std-v1`). Full text: [references
 | Area | Runtime behavior |
 |---|---|
 | Execution | Runs the local Python entry point `scripts/showcase.py` (and `scripts/action_commit.sh`, `scripts/action_prepare.py` inside the Action only). |
-| Reads | The target repository directory (`--repo-dir`), a metadata JSON (`--meta`) or directory (`--meta-dir`), `references/` and `assets/`; for the `org`, `project` and `content` groups also the estate registry and the approval files (`--registry`, `--approved`, `--approved-yaml`, `--actions`, `--decisions`, or the bundle beside the skill), read only and never copied. |
+| Reads | The target repository directory (`--repo-dir`), a metadata JSON (`--meta`) or directory (`--meta-dir`), `references/` and `assets/`; for the `org`, `project` and `content` groups and `account-chart render` also the estate registry and the approval files (`--registry`, `--approved`, `--approved-yaml`, `--actions`, `--decisions`, or the bundle beside the skill), read only and never copied; `account-chart render` reads its `--snapshot` (and an optional `--avatar`). |
 | Writes | Only paths given by `--out`, `--png`, `--records`, `--jobs`, `--report`, `--out-dir`, `--files-dir`, `--preview` or `--cache`; with `--write`, the README marker blocks and `docs/images/*`; with `--bootstrap`, `CONTRIBUTING.md` owner tokens; `content icon normalize` defaults to `assets/icon.png` in the target checkout. `brand ... --write` writes the selected config, adjacent lock and optional mark beneath that config's package root. |
-| Network | None by default. `meta --from-gh`, `labels --plan` and `adopt` without metadata, and opt-in `org labels --repos-from-gh` run read-only `gh api` GETs; `enterprise discover` and `enterprise snapshot` run read-only `gh api graphql` queries; `content links --online` and `content images --online` make cached, rate-limited HEAD/GET requests to the hosts the files link to and read-only `gh api` GETs; `fonts --fetch` downloads the pinned fonts over HTTPS; `footer --check --online` sends one HEAD to each of the two decision 18 logo URLs on raw.githubusercontent.com. `org` without `--repos-from-gh`, `project`, `enterprise snapshot-query`, `plan` and every other command only print the commands they plan. |
+| Network | None by default. `meta --from-gh`, `labels --plan` and `adopt` without metadata, and opt-in `org labels --repos-from-gh` run read-only `gh api` GETs; `enterprise discover`, `enterprise snapshot` and `account-chart capture` run read-only `gh api graphql` queries; `account-chart render --mmdc` runs the local mermaid-cli (a headless browser on this machine); `content links --online` and `content images --online` make cached, rate-limited HEAD/GET requests to the hosts the files link to and read-only `gh api` GETs; `fonts --fetch` downloads the pinned fonts over HTTPS; `footer --check --online` sends one HEAD to each of the two decision 18 logo URLs on raw.githubusercontent.com. `org` without `--repos-from-gh`, `project`, `enterprise snapshot-query`, `account-chart capture-query`, `plan` and every other command only print the commands they plan. |
 
 | Not Included | Boundary |
 |---|---|
@@ -354,7 +363,7 @@ These user decisions outrank `STANDARD.md` (`ct-std-v1`). Full text: [references
 
 ## Network Boundary
 
-Generation, checking and planning are local. The only network calls are the read-only `gh api` GETs of `meta --from-gh`, `labels --plan`, `adopt` and opt-in `org labels ORG --repos-from-gh` (paginated repository and label discovery, plus repository file trees), the read-only GraphQL queries of `enterprise discover` and `enterprise snapshot` (api.github.com), the opt-in link and image checks of `content links --online` and `content images --online` (the hosts the checked files link to, cached and rate-limited), the font download of `fonts --fetch`, and the two read-only HEAD requests of `footer --check --online` (raw.githubusercontent.com), each run only when asked. The skill posts no metadata or run data anywhere else. The composite Action is the only component that pushes, and only into the repository it runs in.
+Generation, checking and planning are local. The only network calls are the read-only `gh api` GETs of `meta --from-gh`, `labels --plan`, `adopt` and opt-in `org labels ORG --repos-from-gh` (paginated repository and label discovery, plus repository file trees), the read-only GraphQL queries of `enterprise discover`, `enterprise snapshot` and `account-chart capture` (api.github.com), the opt-in link and image checks of `content links --online` and `content images --online` (the hosts the checked files link to, cached and rate-limited), the font download of `fonts --fetch`, and the two read-only HEAD requests of `footer --check --online` (raw.githubusercontent.com), each run only when asked. The skill posts no metadata or run data anywhere else. The composite Action is the only component that pushes, and only into the repository it runs in.
 
 ### Target formatter and validator preflight
 
