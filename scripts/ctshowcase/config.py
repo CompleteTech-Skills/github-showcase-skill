@@ -317,6 +317,8 @@ def parse_repo_override(name: str, text: str) -> dict:
     errs = validate(obj, schema)
     if errs:
         raise ConfigError(f"{name}: " + "; ".join(errs), log="config")
+    if obj.get("readme") == "managed":
+        obj["readme"] = {"managed": True}
     return obj
 
 

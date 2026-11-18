@@ -117,19 +117,41 @@
       ]
     },
     "readme": {
-      "type": [
-        "object",
-        "null"
-      ],
-      "additionalProperties": false,
-      "properties": {
-        "header": {
-          "type": "boolean"
+      "anyOf": [
+        {
+          "const": "managed"
         },
-        "footer": {
-          "type": "boolean"
+        {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "managed": {
+              "type": "boolean"
+            },
+            "header": {
+              "type": "boolean"
+            },
+            "footer": {
+              "type": "boolean"
+            },
+            "sections": {
+              "type": "object",
+              "propertyNames": {
+                "minLength": 1
+              },
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 20000
+              },
+              "description": "Operator-authored Markdown for absent variant sections."
+            }
+          }
         }
-      }
+      ]
     },
     "reason": {
       "type": [
