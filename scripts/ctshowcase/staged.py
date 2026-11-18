@@ -5,6 +5,7 @@ import copy
 import hashlib
 import os
 import re
+import stat
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
@@ -111,15 +112,19 @@ def _sidecars(ctx, paths, *, adjacent: bool) -> set[Path]:
             for directory, _, _ in _output_slots(ctx, path, adjacent=adjacent)}
 
 
-def _existing_sidecar(sidecar: Path) -> dict:
+def _existing_sidecar(sidecar: Path, *, formatted: bool = False) -> dict:
     """An absent group can start fresh; an unreadable group cannot lose ownership."""
     try:
-        sidecar.lstat()
+        mode = sidecar.lstat().st_mode
     except FileNotFoundError:
         return {}
     except OSError:
         raise ShowcaseError("existing showcase provenance is unreadable; restore it before rendering",
                             log="staged-description:provenance") from None
+    if not stat.S_ISREG(mode):
+        if formatted:
+            raise ShowcaseError("formatted output must be a regular file", log="formatter-output")
+        raise ShowcaseError("existing showcase provenance must be a regular file", log="staged-description:provenance")
     data = fp.read_sidecar(sidecar.parent)
     outputs = data.get("outputs")
     # Keep legacy sparse records supported, but match the Action's minimum
@@ -268,7 +273,7 @@ def check_outputs(ctx, *paths: Path, auxiliary: tuple[Path, ...] = (), adjacent:
             raise ShowcaseError("render output paths must be distinct", log="staged-description:path")
         real_paths.append(resolved)
     for sidecar in sidecars:
-        _existing_sidecar(sidecar)
+        _existing_sidecar(sidecar, formatted=format_root is not None)
 
 
 @contextmanager
