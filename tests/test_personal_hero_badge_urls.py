@@ -83,11 +83,25 @@ def badge_url(path, spelling):
         return "%64" + path[1:]
     if spelling == "encoded_separators":
         return quote(path, safe="")
+    if spelling == "dot_segments":
+        return path.replace("docs/images/", "docs/./images/", 1)
+    if spelling == "parent_segments":
+        return path.replace("docs/images/", "docs/images/../images/", 1)
+    if spelling == "repeated_relative_prefix":
+        return "././" + path
+    if spelling == "percent_dot_segment":
+        return path.replace("docs/images/", "docs/%2E/images/", 1)
+    if spelling == "dot_segment_encoded_separators":
+        return quote(path.replace("docs/images/", "docs/./images/", 1), safe="")
     assert spelling == "unreserved_filename"
     return path.replace("-", "%2D", 1)
 
 
-URL_SPELLINGS = ["canonical", "unreserved_directory", "encoded_separators", "unreserved_filename"]
+URL_SPELLINGS = [
+    "canonical", "unreserved_directory", "encoded_separators", "unreserved_filename",
+    "dot_segments", "parent_segments", "repeated_relative_prefix", "percent_dot_segment",
+    "dot_segment_encoded_separators",
+]
 
 
 def checkout(tmp_path, generated, *, intro):
@@ -151,7 +165,10 @@ def test_full_upgrade_places_owned_intro_before_equivalent_badge_url(tmp_path, g
     assert "Keep text.\n" in after
 
 
-@pytest.mark.parametrize("url", ["docs/images/custom%2Dbadge%2Dhero.svg", "assets%2Fauthored-badge-art.svg"])
+@pytest.mark.parametrize("url", [
+    "docs/images/custom%2Dbadge%2Dhero.svg", "assets%2Fauthored-badge-art.svg",
+    "docs/images/badges/../custom-art.svg", "docs/images/badges/%2E%2E/custom-art.svg",
+])
 def test_encoded_authored_art_is_not_mistaken_for_generated_badge(tmp_path, generated, url):
     target, capture = checkout(tmp_path, generated, intro=False)
     before = f"# Synthetic profile\r\n\r\n![Authored art]({url})\r\n\r\nKeep  this text.  \r\n".encode()

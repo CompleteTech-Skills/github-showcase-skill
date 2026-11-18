@@ -10,6 +10,7 @@ from bisect import bisect_left, bisect_right
 from collections import Counter, defaultdict, deque
 from html import escape
 from pathlib import Path
+from posixpath import normpath
 from urllib.parse import quote, unquote
 
 from . import footer as footermod
@@ -747,7 +748,7 @@ def _badge_or_logo(source: str, *, personal: bool = False) -> bool:
     return bool(re.search(r"(?:^|[/_.-])logo(?:$|[/_.-])", location, re.I)
                 or re.match(r"https?://(?:img\.)?shields\.io/", location, re.I)
                 or re.fullmatch(r"https://github\.com/[^/]+/[^/]+/actions/workflows/[^/]+/badge\.svg", location, re.I)
-                or unquote(location).removeprefix("./").startswith("docs/images/badges/"))
+                or normpath(unquote(location)).startswith("docs/images/badges/"))
 
 
 def _leading_banner(pre: str) -> bool:
