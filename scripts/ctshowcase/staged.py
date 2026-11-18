@@ -367,8 +367,8 @@ def tagline_blocks(text: str) -> list[str]:
     from .mdcode import find_blocks
     from .readme import MARK, normalize_text
 
-    source = normalize_text(text.replace("\r\n", "\n").replace("\r", "\n"))
-    return [m.group(2).strip() for m in find_blocks(MARK, source) if m.group(1) == "tagline"]
+    source = normalize_text(text)
+    return [m.group(2).strip("\n") for m in find_blocks(MARK, source) if m.group(1) == "tagline"]
 
 
 def tagline_digest(body: str) -> str:

@@ -21,6 +21,7 @@ import os
 import stat
 import subprocess
 import sys
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from tempfile import TemporaryFile
@@ -111,7 +112,8 @@ def has_staged_index(*, allow_icon_removal: bool = False, snapshot: str | None =
     """Check the exact index and prevent grouped commits from including unrelated files."""
     env = {**os.environ, "GIT_INDEX_FILE": snapshot} if snapshot else None
     baseline = [parent] if parent else []
-    changes = subprocess.run(["git", "diff", "--cached", "--name-status", "--no-renames", "-z", *baseline],
+    changes = subprocess.run(["git", "diff", "--cached", "--name-status", "--no-renames",
+                              "--ignore-submodules=none", "-z", *baseline],
                              check=True, capture_output=True, timeout=30, env=env)
     columns = changes.stdout.split(b"\0")
     for status, path in zip(columns[::2], columns[1::2]):
@@ -161,6 +163,8 @@ def _head_ref() -> str:
 def _ref_oid(ref: str) -> str:
     result = subprocess.run(["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
                             capture_output=True, text=True, timeout=30)
+    if result.returncode not in (0, 1):
+        result.check_returncode()
     return result.stdout.strip()
 
 
@@ -197,7 +201,7 @@ def _stop_ref_update(transaction: subprocess.Popen) -> None:
 
 
 def _update_head(ref: str, parent: str, commit: str, subject: str,
-                 index: Path, snapshot: Path, original: bytes | None, original_mode: int | None) -> bool:
+                 index: Path, snapshot: Path, recover_index: Callable[[], None]) -> bool:
     """Hold Git's HEAD lock from the symbolic-ref check through index installation."""
     command = ["git", "update-ref", "-m", f"commit: {subject}", "--stdin"]
     # A dereferencing update of HEAD locks both HEAD and its current branch.
@@ -231,15 +235,7 @@ def _update_head(ref: str, parent: str, commit: str, subject: str,
                     raise RuntimeError(f"Could not commit the Git ref update: {errors.read().strip()}")
             except BaseException:
                 _stop_ref_update(transaction)
-                if _ref_oid(ref) != commit:
-                    if original is None:
-                        index.unlink()
-                    else:
-                        snapshot.touch(mode=0o600, exist_ok=False)
-                        snapshot.write_bytes(original)
-                        if original_mode is not None:
-                            snapshot.chmod(original_mode)
-                        os.replace(snapshot, index)
+                recover_index()
                 raise
             return True
         finally:
@@ -263,7 +259,8 @@ def prepare_commit_index(index: Path, snapshot: Path, ref: str, message: str, pa
             subprocess.run(["git", "read-tree", "--empty"], check=True, timeout=30, env=env)
         else:
             snapshot.write_bytes(original)
-        staged = subprocess.check_output(["git", "diff", "--cached", "--name-only", "--no-renames", "-z", parent],
+        staged = subprocess.check_output(["git", "diff", "--cached", "--name-only", "--no-renames",
+                                          "--ignore-submodules=none", "-z", parent],
                                          timeout=30, env=env)
         staged_tree = subprocess.check_output(["git", "write-tree"], text=True, timeout=30, env=env).strip() \
             if staged else None
@@ -276,7 +273,8 @@ def prepare_commit_index(index: Path, snapshot: Path, ref: str, message: str, pa
             return "blocked"
         tree = subprocess.check_output(["git", "write-tree"], text=True, timeout=30, env=env).strip()
         if staged_tree and staged_tree != tree:
-            restaged = subprocess.check_output(["git", "diff", "--name-only", "--no-renames", "-z", staged_tree, tree],
+            restaged = subprocess.check_output(["git", "diff", "--name-only", "--no-renames",
+                                                 "--ignore-submodules=none", "-z", staged_tree, tree],
                                                timeout=30, env=env)
             if set(staged.rstrip(b"\0").split(b"\0")).intersection(restaged.rstrip(b"\0").split(b"\0")):
                 return "blocked"
@@ -292,6 +290,7 @@ def prepare_commit_index(index: Path, snapshot: Path, ref: str, message: str, pa
         lock.touch(mode=0o600, exist_ok=False)
     except FileExistsError:
         return "changed"
+    release_lock = True
     try:
         if _head_ref() != ref or _index_contents(index) != original:
             return "changed"
@@ -312,9 +311,27 @@ def prepare_commit_index(index: Path, snapshot: Path, ref: str, message: str, pa
             lock.write_bytes(original)
             lock.chmod(original_mode)
             snapshot.chmod(original_mode)
-        return commit if _update_head(ref, parent, commit, subject, index, snapshot, original, original_mode) else "changed"
+
+        def recover_index() -> None:
+            nonlocal release_lock
+            # Consuming the lock releases it. If the outcome cannot be verified
+            # or restoration fails, preserve it for recovery.
+            release_lock = False
+            try:
+                if _ref_oid(ref) == commit:
+                    release_lock = True
+                elif original is None:
+                    index.unlink()
+                    release_lock = True
+                else:
+                    os.replace(lock, index)
+            except (OSError, subprocess.SubprocessError) as error:
+                raise RuntimeError(f"Could not recover the Git index. Its recovery lock remains at {lock}") from error
+
+        return commit if _update_head(ref, parent, commit, subject, index, snapshot, recover_index) else "changed"
     finally:
-        lock.unlink(missing_ok=True)
+        if release_lock:
+            lock.unlink(missing_ok=True)
 
 
 def drop(name: str) -> None:

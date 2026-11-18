@@ -101,6 +101,34 @@ def test_legacy_tagline_provenance_does_not_claim_horizontal_whitespace_edits(ma
     assert not _replaceable_tagline(ctx, reflowed + "  ", original)
 
 
+@pytest.mark.parametrize("edited", ["    **Route support requests.**", "**Route support requests.**  "])
+def test_doctor_preserves_horizontal_whitespace_when_matching_tagline_proof(tmp_path, edited):
+    from ctshowcase.staged import tagline_digest
+
+    proposal = "Route support requests."
+    original = f"**{proposal}**"
+    capture = tmp_path / "meta.json"
+    target = tmp_path / "repo"
+    images = target / "docs" / "images"
+    images.mkdir(parents=True)
+    readme = target / "README.md"
+    sidecar = images / ".showcase.json"
+    entry = {"tagline_sha256": tagline_digest(original),
+             "staged_description": {"text": proposal, "sha256": tagline_digest(proposal)}}
+    sidecar.write_text(json.dumps({"outputs": {"README.md": entry}}), encoding="utf-8")
+
+    def drift(description, body):
+        capture.write_text(json.dumps(meta_dict(description=description)), encoding="utf-8")
+        readme.write_text("# Support Triage Agent\n\n" + TAG.format(f"\n{body}\n"), encoding="utf-8")
+        report = run_cli("--meta", capture, "--repo-dir", target, "doctor", "--format", "json")
+        return "description-drift:readme" in json.loads(report.stdout)["logs"]
+
+    assert not drift(proposal, original)
+    assert drift("", original)
+    assert drift(proposal, edited)
+    assert not drift("", edited)
+
+
 def test_cli_doctor_empty_live_description_is_not_drift(tmp_path):
     capture = tmp_path / "meta.json"
     target = tmp_path / "repo"
@@ -1159,6 +1187,7 @@ def test_action_leaves_an_in_progress_merge_untouched(tmp_path):
 @pytest.mark.requires_bash
 @pytest.mark.parametrize("concurrent_change", [
     "head", "index", "branch", "late-branch", "late-detached", "locked-branch", "ref-failure",
+    "ref-failure-no-space", "ref-failure-restore-error",
 ])
 def test_action_handles_concurrent_git_changes_during_commit(tmp_path, concurrent_change):
     import os
@@ -1183,12 +1212,13 @@ def test_action_handles_concurrent_git_changes_during_commit(tmp_path, concurren
     (tmp_path / "README.md").write_text("live README", encoding="utf-8")
     (tmp_path / "notes.txt").write_text("concurrent staged text", encoding="utf-8")
     index = tmp_path / ".git/index"
-    if os.name == "posix" and concurrent_change in ("locked-branch", "ref-failure"):
+    if os.name == "posix" and (concurrent_change == "locked-branch" or concurrent_change.startswith("ref-failure")):
         index.chmod(0o664)
     original_mode = stat.S_IMODE(index.stat().st_mode)
     original = index.read_bytes()
     wrapper = tmp_path / "update_git_state.py"
     wrapper.write_text(r'''
+import errno
 import os
 import runpy
 import subprocess
@@ -1196,6 +1226,9 @@ import sys
 from pathlib import Path
 
 original_run = subprocess.run
+original_write_bytes = Path.write_bytes
+original_replace = os.replace
+ref_failed = False
 change = os.environ["SHOWCASE_TEST_CONCURRENT_CHANGE"]
 
 
@@ -1215,17 +1248,19 @@ class ObserveRefUpdate(subprocess.Popen):
         super().__init__(argv, *args, **kwargs)
 
     def communicate(self, input=None, timeout=None):
+        global ref_failed
         if self.ref_transaction and input == b"commit\n":
             assert Path(".git/index.lock").is_file()
             if change == "locked-branch":
                 attempt = original_run(["git", "symbolic-ref", "HEAD", "refs/heads/competing"],
                                        capture_output=True, timeout=5)
                 assert attempt.returncode, "HEAD switched during installation of the caller's index"
-            if change == "ref-failure":
+            if change.startswith("ref-failure"):
                 candidate = original_run(["git", "show", ":README.md"], check=True, capture_output=True).stdout
                 Path("failed-ref-candidate").write_bytes(candidate)
                 output = super().communicate(b"abort\n", timeout)
                 self.returncode = 1
+                ref_failed = True
                 return output
         return super().communicate(input, timeout)
 
@@ -1239,8 +1274,22 @@ def change_git_state(argv, *args, **kwargs):
     return original_run(argv, *args, **kwargs)
 
 
+def fail_rollback_write(path, content):
+    if ref_failed and change == "ref-failure-no-space" and path.name.startswith("showcase-index."):
+        raise OSError(errno.ENOSPC, "synthetic disk exhaustion")
+    return original_write_bytes(path, content)
+
+
+def fail_rollback_rename(source, destination):
+    if ref_failed and change == "ref-failure-restore-error" and Path(destination).name == "index":
+        raise OSError(errno.EACCES, "synthetic index restore failure")
+    return original_replace(source, destination)
+
+
 subprocess.Popen = ObserveRefUpdate
 subprocess.run = change_git_state
+Path.write_bytes = fail_rollback_write
+os.replace = fail_rollback_rename
 sys.argv.pop(0)
 runpy.run_path(sys.argv[0], run_name="__main__")
 ''', encoding="utf-8")
@@ -1254,7 +1303,16 @@ bash "$GITHUB_ACTION_PATH/scripts/action_commit.sh" "Synthetic" fail "$GITHUB_AC
     env = {**os.environ, "GITHUB_ACTION_PATH": str(ROOT), "SHOWCASE_DRY_RUN": "1",
            "SHOWCASE_TEST_INDEX_WRAPPER": str(wrapper), "SHOWCASE_TEST_CONCURRENT_CHANGE": concurrent_change}
     result = run_bash(script, cwd=tmp_path, env=env)
-    assert not (tmp_path / ".git/index.lock").exists()
+    lock = tmp_path / ".git/index.lock"
+    if concurrent_change == "ref-failure-restore-error":
+        assert result.returncode != 0, result.stdout + result.stderr
+        assert "Its recovery lock remains" in result.stderr
+        assert "would push" not in result.stdout
+        assert git("rev-parse", "HEAD") == initial
+        assert lock.read_bytes() == original
+        assert stat.S_IMODE(lock.stat().st_mode) == original_mode
+        return
+    assert not lock.exists()
     if concurrent_change == "locked-branch":
         assert result.returncode == 0, result.stdout + result.stderr
         assert "would push" in result.stdout
@@ -1265,7 +1323,7 @@ bash "$GITHUB_ACTION_PATH/scripts/action_commit.sh" "Synthetic" fail "$GITHUB_AC
         assert stat.S_IMODE(index.stat().st_mode) == original_mode
         assert git("diff", "--cached", "--name-only") == ""
         return
-    if concurrent_change == "ref-failure":
+    if concurrent_change.startswith("ref-failure"):
         assert result.returncode != 0, result.stdout + result.stderr
         assert (tmp_path / "failed-ref-candidate").read_bytes() == b"live README"
         assert "would push" not in result.stdout

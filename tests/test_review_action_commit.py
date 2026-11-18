@@ -73,3 +73,30 @@ def test_own_icon_is_kept_and_unstaged_edits_untouched(tmp_path):
     _prepare_and_commit(repo)
     assert (repo / "assets" / "icon.png").is_file()
     assert _git(repo, "status", "--porcelain").splitlines() == [" M assets/icon.png"]  # a modification is never staged
+
+
+def test_grouped_action_refuses_an_unrelated_gitlink_hidden_by_diff_config(tmp_path):
+    repo = tmp_path / "repo"
+    _template_copy(repo)
+    first = _git(repo, "rev-parse", "HEAD").strip()
+    link = "vendor/component"
+    _git(repo, "update-index", "--add", "--cacheinfo", f"160000,{first},{link}")
+    _git(repo, "commit", "-qm", "add a gitlink")
+    parent = _git(repo, "rev-parse", "HEAD").strip()
+    _git(repo, "update-index", "--cacheinfo", f"160000,{parent},{link}")
+    _git(repo, "config", "diff.ignoreSubmodules", "all")
+    assert _git(repo, "diff", "--cached", "--name-only") == ""
+    assert _git(repo, "diff", "--cached", "--ignore-submodules=none", "--name-only").splitlines() == [link]
+    index = repo / ".git" / "index"
+    before = index.read_bytes()
+    readme = repo / "README.md"
+    readme.write_text("# Updated showcase\n", encoding="utf-8")
+
+    result = run_bash('bash "$1" Synthetic fail "$2"', str(ROOT / "scripts" / "action_commit.sh"),
+                      str(ROOT / "scripts" / "action_prepare.py"), cwd=repo, env=ENV)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "conflicting index changes" in result.stdout
+    assert _git(repo, "rev-parse", "HEAD").strip() == parent
+    assert index.read_bytes() == before
+    assert readme.read_text(encoding="utf-8") == "# Updated showcase\n"
