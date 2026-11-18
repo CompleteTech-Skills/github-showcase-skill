@@ -66,3 +66,12 @@ Nothing in this module needs the bundle: the desired state is [`enterprise.yaml`
 - Never: remove or transfer an org, change the slug, remove an enterprise member or admin, enforce 2FA, disable deploy keys, touch the IP allow list, SAML or notification restriction, change Actions permissions, or make a billing change.
 - Free romgenie's seat org by org (enterprise teams first), never with "Remove from enterprise"; CompleteDotTech must be owner of each org first (E4, E5). Re-run `snapshot` and `seat-check` after each org.
 - Enterprise writes need `admin:enterprise`; the writer adds it only for the approved step and removes it afterwards.
+
+## Provenance (decision 25, a proposal)
+
+The Enterprise stamp is private: `<estate root>/registry/enterprise.showcase.json`, beside the snapshot, never a
+public repository and never a writer job. `provenance check enterprise:SLUG --snapshot registry/enterprise.snapshot.json`
+compares the stamp with the snapshot's sections (the snapshot's `taken_at` time is ignored). Without `--snapshot` it
+needs input (exit 4). `provenance stamp enterprise:SLUG --snapshot FILE` writes the stamp into the estate's
+`registry/` (`--out-dir DIR` overrides the folder). `enterprise doctor` adds a `provenance` row beside E1 to E14. The
+Enterprise has no README, so it carries no credit line.

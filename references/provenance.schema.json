@@ -1,0 +1,105 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "https://github.com/CompleteTech-Skills/github-showcase-skill/references/provenance.schema.json",
+ "title": "github-showcase-skill provenance stamp (decision 25, PROPOSAL pending user confirmation)",
+ "description": "The `provenance` block of a target's stamp: docs/images/.showcase.json (repository), .github/showcase.json in ORG/.github (organization) or USER/USER (personal profile), <estate root>/registry/enterprise.showcase.json (Enterprise, private). Timestamps and run_count are never part of `fingerprint`.",
+ "type": "object",
+ "required": [
+  "provenance"
+ ],
+ "properties": {
+  "provenance": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "skill",
+    "skill_url",
+    "publisher",
+    "skill_version",
+    "standard",
+    "target",
+    "first_run_at",
+    "last_run_at",
+    "last_changed_at",
+    "run_count",
+    "fingerprint",
+    "surfaces"
+   ],
+   "properties": {
+    "skill": {
+     "type": "string",
+     "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "skill_url": {
+     "type": "string",
+     "pattern": "^https://github\\.com/"
+    },
+    "publisher": {
+     "type": "string",
+     "minLength": 1
+    },
+    "skill_version": {
+     "type": "string",
+     "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+([.+-][0-9A-Za-z.-]+)?$"
+    },
+    "standard": {
+     "type": "string",
+     "pattern": "^ct-std-v[0-9]+(\\.[0-9]+)?$"
+    },
+    "target": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "kind",
+      "id"
+     ],
+     "properties": {
+      "kind": {
+       "enum": [
+        "repo",
+        "org",
+        "profile",
+        "enterprise"
+       ]
+      },
+      "id": {
+       "type": "string",
+       "minLength": 1
+      }
+     }
+    },
+    "first_run_at": {
+     "$ref": "#/$defs/utc"
+    },
+    "last_run_at": {
+     "$ref": "#/$defs/utc"
+    },
+    "last_changed_at": {
+     "$ref": "#/$defs/utc"
+    },
+    "run_count": {
+     "type": "integer",
+     "minimum": 1
+    },
+    "fingerprint": {
+     "type": "string",
+     "pattern": "^[0-9a-f]{64}$"
+    },
+    "surfaces": {
+     "type": "array",
+     "uniqueItems": true,
+     "items": {
+      "type": "string",
+      "minLength": 1
+     }
+    }
+   }
+  }
+ },
+ "$defs": {
+  "utc": {
+   "type": "string",
+   "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+  }
+ }
+}

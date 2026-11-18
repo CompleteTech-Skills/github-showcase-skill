@@ -368,6 +368,7 @@ def _first_is_foreign(imgs) -> bool:
 def _extra_footer(text: str) -> bool:
     """True when a footer-like block (centred, "Built by", complete.tech) sits anywhere but last: an old footer kept
     beside the decision 18 one."""
+    text, _ = footermod.split_credit(text)  # decision 25: the credit block follows the footer; it is not a block before it
     t = masked(text.replace(footermod.START + "\n", "").replace("\n" + footermod.END, ""))
     blocks = [b for b in re.split(r"\n\s*\n", t.strip()) if b.strip()]
     return any(is_footer_like(b) for b in blocks[:-1])

@@ -1,4 +1,5 @@
 """The command-group contract wired into showcase.py: org, project, enterprise and content (synthetic data only)."""
+from conftest import footer_then_credit  # noqa: E402
 import argparse
 import json
 import os
@@ -132,7 +133,7 @@ def test_org_actions_on_the_example_estate(tmp_path):
     text = (out / "profile" / "README.md").read_text()
     assert "support-triage-agent" in text and "private-pricing-engine" not in text
     assert "never reaches the public profile" not in text  # registry `why` notes stay private
-    assert text.rstrip().endswith("<!-- showcase:footer:end -->")
+    assert footer_then_credit(text)
     p = cli("org", "doctor", "Northwind-Trading-Co", "--meta-dir", ESTATE / "meta", "--doctor-format", "tsv", "--header",
             env=env)
     assert p.returncode == 0 and p.stdout.splitlines()[0].startswith("org\ttier\tO1")

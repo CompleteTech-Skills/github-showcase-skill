@@ -155,3 +155,18 @@ def _isolated_signoff_state():
     finally:
         signoff.reset_file(file)
         signoff.restore(run)
+
+
+def footer_then_credit(text: str) -> bool:
+    """The decision 18 footer ends the README, followed only by the decision 25 credit block."""
+    from ctshowcase import footer
+    rest, credit = footer.split_credit(text)
+    return credit is not None and rest.rstrip().endswith(footer.END)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_run_ledger(tmp_path_factory, monkeypatch):
+    """Decision 25: the operator's run ledger never leaves the test's own directory (subprocess CLI runs inherit it), and
+    no test ever prints the star line by accident."""
+    monkeypatch.setenv("SHOWCASE_STATE_DIR", str(tmp_path_factory.mktemp("showcase-state")))
+    monkeypatch.delenv("SHOWCASE_STAR_PROMPT", raising=False)

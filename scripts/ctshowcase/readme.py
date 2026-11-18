@@ -736,6 +736,7 @@ def callout_only(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
             if old_footer:
                 had_footer = True
         if had_footer or footermod.check(ctx.brand, out)[0] == "fail:missing":
+            out = drop_own_credit(out)  # decision 25: the credit is re-emitted with the footer, never twice
             out = out.rstrip("\n") + "\n\n" + footermod.block(ctx.brand) + "\n"
             # Report only the removed footer lines that the replacement footer does not carry again (multiset
             # difference), so a re-emitted line never counts as lost content in the preservation check.
@@ -764,6 +765,18 @@ def preserved(ctx: RepoContext, text: str) -> bool:
 
 
 CENTRED_OPEN = re.compile(r'(?m)^[ \t]*<(p|div) align="center">')
+
+
+def is_own_credit(body: str) -> bool:
+    """A `showcase:credit` block body that carries this skill's generated-by marker (decision 25): ours to replace."""
+    return bool(footermod.GENERATED_BY.search(body or ""))
+
+
+def drop_own_credit(text: str) -> str:
+    """`text` without our own credit marker blocks; an authored block under the same name stays."""
+    if not any(m.group(1) == "credit" and is_own_credit(m.group(2)) for m in find_blocks(MARK, text)):
+        return text
+    return _sub_blocks(text, lambda m: "" if m.group(1) == "credit" and is_own_credit(m.group(2)) else m.group(0))
 
 
 def is_footer_like(block: str, brand=None) -> bool:
@@ -1237,6 +1250,8 @@ def header_only(ctx: RepoContext, text: str, *, already_normalized: bool = False
     if not already_normalized:
         text = normalize_text(text)
     gen = {"nav": nav_line(ctx), "banner": banner_html(ctx), "footer": footermod.markup(ctx.brand)}
+    credit = footermod.credit_markup(ctx.brand)
+    has_credit = any(m.group(1) == "credit" for m in find_blocks(MARK, text))
     if ctx.repo_dir is not None and not (ctx.repo_dir / "docs" / "images" / "banner.png").is_file():
         gen["banner"] = ""  # no image yet (for example no description): an empty block, never a broken image
         ctx.log("needs-input:banner")
@@ -1257,8 +1272,13 @@ def header_only(ctx: RepoContext, text: str, *, already_normalized: bool = False
         if b == "tagline":  # tagline_body: the description's line, else the block as written unless inherited
             new = tagline_body(ctx, body, text)
             return m.group(0) if new == body else wrap(b, new)
+        if b == "credit" and credit is not None and is_own_credit(body):
+            return m.group(0) if body == credit else wrap(b, credit)  # only our own credit block is refreshed
         if b in gen:
-            return wrap(b, re.sub(r"\n{3,}", "\n\n", gen[b]))
+            out = wrap(b, re.sub(r"\n{3,}", "\n\n", gen[b]))
+            if b == "footer" and credit is not None and not has_credit:
+                out += "\n\n" + wrap("credit", credit)  # decision 25: an old footer gains the credit in one regeneration
+            return out
         return m.group(0)
     if preserve_structure:
         return _replace_blocks_in_source(original, text, sub)
@@ -1727,6 +1747,10 @@ def preservation(before: str, after: str, removed: list[str], *, ctx: RepoContex
         offset = block.end()
     comparison.append(before[offset:])
     before = "".join(comparison)
+    # Decision 25: our own credit block is generated (its marker names the skill version), so a refresh never counts
+    # its previous lines as lost content.
+    before = _sub_blocks(before, lambda m: wrap("credit", "") if m.group(1) == "credit" and is_own_credit(m.group(2))
+                         else m.group(0))
     if replace_tagline:
         # Badge spans belong to the original source; use them before changing
         # tagline lengths. Generated output cannot stand in for authored text.

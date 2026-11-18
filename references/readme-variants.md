@@ -261,7 +261,7 @@ header mode preserves a marked section when no replacement can be derived or pol
 upgrade retains its never-delete check. Never modify, rename or delete an existing
 LICENSE, NOTICE or COPYING file.
 
-## Footer (decision 18; always the last block)
+## Footer (decision 18; the last block, followed only by the decision 25 credit)
 
 ```html
 <!-- showcase:footer:start -->
@@ -276,6 +276,15 @@ LICENSE, NOTICE or COPYING file.
   Built by <a href="https://www.complete.tech">CompleteTech LLC</a> · Innovation at Every Integration
 </p>
 <!-- showcase:footer:end -->
+```
+
+The credit block (decision 25, a proposal) follows the footer directly and ends the README. `footer --check` and `lint readme` fail with `fail:credit-missing` or `fail:credit-drift` without it, and `readme` (header mode too) adds it to an old footer in one regeneration:
+
+```html
+<!-- showcase:credit:start -->
+<!-- generated-by: github-showcase-skill v=1.0.0 std=ct-std-v1 -->
+<p align="center"><sub>README styled with <a href="https://github.com/CompleteTech-Skills/github-showcase-skill">github-showcase-skill</a> by CompleteTech LLC · <a href="https://github.com/CompleteTech-Skills/github-showcase-skill#quick-start">Get the skill</a></sub></p>
+<!-- showcase:credit:end -->
 ```
 
 The logo files are the existing masters published under this skill's `assets/brand/`. The former `.github/main/brand/` publication paths remain in `footer.legacy_logo_urls` solely for safe migration of existing marked or unmarked footers; they are never emitted. Authored partner credits are not migration targets. An unmarked footer's logo is also recognized when it is a configured historical logo URL on the company website host (`footer.legacy_logo_urls` in `references/brand.yaml`, not any file on that host) or the local `docs/images/logo.svg`; fork (G) and backup (H) READMEs apply the same rule to their trailing unmarked footer. `readme --bootstrap --write` never regenerates a marked footer that holds authored content (a partner or foreign image), in any bootstrap state (pristine, edited or none): it fails with `readme-shrink` and leaves the README unchanged. Any other image, including other files on the company host, is authored content and is kept. Migrating an unmarked footer reports as removed only the old lines the new footer does not emit again, so the never-delete check still sees every other line. The 10 lines between the markers are byte-exact; `footer --check` reports `fail:missing`, `fail:not-last`, `fail:drift` or `fail:duplicate` (an old footer-like block, centred with "Built by" and complete.tech outside code, kept before the decision 18 footer), and `footer --check README.md --online` also sends a read-only HEAD to both raw logo URLs and fails (`fail:offline`) unless both return 200 (the Phase 4.0 hard gate before any README PR links them); the `Footer assets` CI job runs the online HEAD on push to main, weekly and on manual dispatch; pull requests run the offline check that the configured logo files exist). It comes after the License section. Scope: every in-scope README, T2 families included. Exceptions: watching-org forks (`exempt`; the watching org's `.github` gets the footer, and its other non-fork repositories are held, `hold:watching-non-fork`, until decided) and T3 until sign-off (refused). TouchedByAnAgent is included (decision 18); an org whose `footer` is set to `hold` in `brand.yaml` logs `hold`. Forks outside the watching org (G), archived repositories (H) and `.github` repositories (J) get the footer too. It is the only `<picture>` the skill emits.

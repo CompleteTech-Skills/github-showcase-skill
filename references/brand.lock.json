@@ -1,4 +1,15 @@
 {
+ "attribution": {
+  "credit_prefix": "README styled with",
+  "credit_suffix": "by CompleteTech LLC",
+  "install_label": "Get the skill",
+  "install_url": "https://github.com/CompleteTech-Skills/github-showcase-skill#quick-start",
+  "publisher": "CompleteTech LLC",
+  "skill": "github-showcase-skill",
+  "skill_repo": "CompleteTech-Skills/github-showcase-skill",
+  "skill_url": "https://github.com/CompleteTech-Skills/github-showcase-skill",
+  "topic": "github-showcase-skill"
+ },
  "badges": {
   "accent": "1E3A8A",
   "brand": "005ADD",
