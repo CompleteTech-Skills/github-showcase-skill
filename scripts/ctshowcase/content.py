@@ -251,14 +251,14 @@ def markdown_files(tree: Tree, readme: str | None) -> list[str]:
 # =====================================================================================================
 ATX = re.compile(r"^ {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$")
 SETEXT = re.compile(r"^ {0,3}(=+|-+)[ \t]*$")
-MD_LINK = re.compile(r"(!?)\[((?:[^\[\]\n]|\[[^\[\]\n]*\])*)\]\(\s*(<[^>\n]*>|[^\s()]*(?:\([^\s()]*\)[^\s()]*)*)"
+MD_LINK = re.compile(r"(!?)\[((?:[^\[\]\n]|\[[^\[\]\n]*\])*)\]\(\s*(<[^>\n\x00]*>|[^\s()\x00]*(?:\([^\s()\x00]*\)[^\s()\x00]*)*)"
                      r"(?:\s+(?:\"[^\"\n]*\"|'[^'\n]*'|\([^)\n]*\)))?\s*\)")
 REF_DEF = re.compile(r"^ {0,3}\[([^\]\n]+)\]:\s*(<[^>\n]*>|\S+)")
 HTML_TAG = re.compile(r"<(a|img|source|link|video|audio|image|use)\b([^>]*)>", re.I)
 ATTR = re.compile(r"""(?<![\w-])(href|src|srcset|alt|xlink:href|name|id)\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))""", re.I)
 ANCHOR_ATTR = re.compile(r"""<[a-z][^>]*?(?<![\w-])(?:name|id)\s*=\s*["']([^"']+)["']""", re.I)
 HTML_HEADING = re.compile(r"<h([1-6])\b[^>]*>(.*?)</h\1>", re.I | re.S)
-BARE_URL = re.compile(r"https?://[^\s<>()\[\]\"'`]+")
+BARE_URL = re.compile(r"https?://[^\s<>()\[\]\"'`\x00]+")
 IMG_EXT = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".avif", ".bmp", ".ico")
 
 
@@ -352,8 +352,27 @@ def _attrs(s: str) -> dict:
             for m in ATTR.finditer(s)}
 
 
+def _reference_excluded_lines(text: str) -> set[int]:
+    """Raw HTML lines where the legacy reference inventory should not read Markdown."""
+    from .mdcode import html_block_spans
+
+    excluded = set()
+    line, pos = 1, 0
+    for start, end in html_block_spans(text):
+        line += text.count("\n", pos, start)
+        pos = start
+        # The semantic projection already removes recognized comment bodies.
+        # Keep the legacy inventory of a definition following a leading comment.
+        if text[start:start + 7].lstrip(" ").startswith("<!--"):
+            continue
+        excluded.update(range(line, line + text.count("\n", start, end - 1) + 1))
+    return excluded
+
+
 def extract_links(text: str) -> list[dict]:
     """Every link and image target outside code: inline, reference definitions, HTML and bare URLs."""
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    reference_excluded = _reference_excluded_lines(text)
     found = []
     for n, markdown, masked in scan_lines(text, markdown_only=True):
         if not masked:
@@ -369,7 +388,7 @@ def extract_links(text: str) -> list[dict]:
                 spans.append((offset + m.start(), offset + m.end()))
                 md(m.group(2), offset + m.start(2))
         md(markdown, 0)
-        m = REF_DEF.match(masked)
+        m = REF_DEF.match(masked) if n not in reference_excluded else None
         if m:
             found.append({"line": n, "target": m.group(2).strip("<>"), "image": False, "alt": m.group(1),
                           "syntax": "reference"})

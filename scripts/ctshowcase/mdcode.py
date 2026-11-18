@@ -1563,10 +1563,10 @@ def _outside_code(text: str, mask_inline: bool = True, *, mask_autolinks: bool =
     comments = []
     tag = comment = raw_html = inline = dest = autolink = None
 
-    def blank(a, b):
+    def blank(a, b, replacement=" "):
         for i in range(a, b):
             if out[i] not in "\r\n":
-                out[i] = " "
+                out[i] = replacement
 
     def next_inline(start):
         while True:
@@ -1632,7 +1632,9 @@ def _outside_code(text: str, mask_inline: bool = True, *, mask_autolinks: bool =
                 else:
                     blank(*nxt.span())
             elif mask_html:
-                blank(*nxt.span())
+                # Use a non-whitespace marker so a tag cannot create a valid
+                # Markdown destination by becoming optional leading whitespace.
+                blank(*nxt.span(), replacement="\x00")
             pos = nxt.end()
         else:
             break

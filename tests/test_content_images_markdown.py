@@ -118,3 +118,33 @@ def test_cli_images_distinguishes_html_tokens_from_markdown(tmp_path):
         ("docs/images/markdown.png", ["README.md:7"]),
     ]
     assert report["remote"] == []
+
+
+def test_cli_links_and_images_ignore_literal_html_reference_and_destination(tmp_path):
+    readme = tmp_path / "README.md"
+    readme.write_text(
+        '<pre>\n'
+        '[Literal]: docs/images/raw-reference.png\n'
+        '<img alt="HTML image" src="docs/images/html.png">\n'
+        '</pre>\n'
+        '\n'
+        '[Visible]: docs/images/visible-reference.png\n'
+        '\n'
+        '![Alt](<span></span> docs/images/pretend.png)\n'
+        '![Visible](<docs/images/visible-image.png> "Title")\n',
+        encoding="utf-8",
+    )
+    result = run_cli("--repo-dir", tmp_path, "content", "links", "README.md")
+    assert result.returncode == 0, result.stderr
+    assert [row["target"] for row in json.loads(result.stdout)["findings"]] == [
+        "docs/images/html.png",
+        "docs/images/visible-reference.png",
+        "docs/images/visible-image.png",
+    ]
+    result = run_cli("--repo-dir", tmp_path, "content", "images", "README.md")
+    assert result.returncode == 1, result.stderr
+    assert [(row["path"], row["referenced_from"]) for row in json.loads(result.stdout)["images"]] == [
+        ("docs/images/html.png", ["README.md:3"]),
+        ("docs/images/visible-image.png", ["README.md:9"]),
+        ("docs/images/visible-reference.png", ["README.md:6"]),
+    ]
