@@ -233,3 +233,46 @@ def test_image_and_link_reports_use_live_html_attributes_and_no_masked_destinati
         target: [f"README.md:{line}"] for target, line in targets.items()
     }
     assert readme.read_bytes() == source
+
+
+@pytest.mark.parametrize("ending", [b"\n", b"\r\n", b"\r"])
+def test_cli_reference_targets_never_include_or_truncate_html_masks(tmp_path, ending):
+    readme = tmp_path / "README.md"
+    authored = ending.join([
+        b"[prefix]: <span>docs/images/prefix.png",
+        b"",
+        b"[interior]: docs/images/interior.png<span>.png invalid title",
+        b"",
+        b"[angle]: <docs/images/angle<span>.png>",
+        b"",
+        b"[<span>label]: docs/images/label.png invalid title",
+        b"",
+        b"[<span>valid]: docs/images/accepted-label.png",
+        b"",
+        b"[real]: <docs/images/reference.png>",
+        b"",
+        b"![Real](docs/images/real.png)",
+        b'<img src="docs/images/html.png" alt="Real HTML">',
+        b"",
+        b"[<span>masked]: docs/images/masked-label.png invalid title",
+        b"",
+    ])
+    readme.write_bytes(authored)
+    links = run_cli("--repo-dir", tmp_path, "content", "links", "README.md")
+    assert links.returncode == 0, links.stderr
+    findings = json.loads(links.stdout)["findings"]
+    assert [(row["target"], row["line"]) for row in findings] == [
+        ("docs/images/accepted-label.png", 9), ("docs/images/reference.png", 11),
+        ("docs/images/real.png", 13), ("docs/images/html.png", 14),
+    ]
+    assert "\\u0000" not in links.stdout
+    images = run_cli("--repo-dir", tmp_path, "content", "images", "README.md")
+    assert images.returncode == 1, images.stderr
+    assert json.loads(images.stdout)["images"] == [
+        {"path": "docs/images/accepted-label.png", "referenced_from": ["README.md:9"], "status": "missing"},
+        {"path": "docs/images/html.png", "referenced_from": ["README.md:14"], "status": "missing"},
+        {"path": "docs/images/real.png", "referenced_from": ["README.md:13"], "status": "missing"},
+        {"path": "docs/images/reference.png", "referenced_from": ["README.md:11"], "status": "missing"},
+    ]
+    assert "\\u0000" not in images.stdout
+    assert readme.read_bytes() == authored
