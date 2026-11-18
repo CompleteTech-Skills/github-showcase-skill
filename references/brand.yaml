@@ -162,6 +162,9 @@ chart:
     empty: no public repositories
     held: on hold
     uncaptured: not captured
+    failed: capture failed
+    partial: partially captured
+    unknown: capture status unknown
     fork: Fork
     archived: Archived
     language: Language

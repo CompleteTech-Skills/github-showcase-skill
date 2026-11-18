@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,18 @@ sys.path.insert(0, str(ROOT / "scripts"))
 FIX = ROOT / "tests" / "fixtures" / "meta"
 EX = ROOT / "examples"
 GOLDEN = ROOT.parent / "art" / "golden" / "readme-banner-php2shell-check.png"
+
+
+def pytest_configure(config):
+    """Keep macOS socket fixtures within its Unix-domain address length limit.
+
+    The default macOS temporary root plus pytest's per-test names is too long
+    before the socket-boundary assertion can run. Use a fresh short base only
+    when the operator has not selected one; workers inherit the controller's
+    choice. No socket test is skipped or relaxed.
+    """
+    if sys.platform == "darwin" and not config.option.basetemp and not hasattr(config, "workerinput"):
+        config.option.basetemp = tempfile.mkdtemp(prefix="sc-", dir="/tmp")
 
 
 def run_cli(*args, cwd=ROOT):
