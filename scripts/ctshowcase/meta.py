@@ -72,7 +72,7 @@ def normalize(raw: dict) -> dict:
     # from one written for this repository
     tts = raw.get("template_taglines")
     tts = [tts] if isinstance(tts, str) else tts if isinstance(tts, list) else []
-    m["template_taglines"] = list(dict.fromkeys(t.strip() for t in tts if isinstance(t, str) and t.strip()))
+    m["template_taglines"] = list(dict.fromkeys(t for t in tts if isinstance(t, str) and t.strip()))
     m["default_branch"] = raw.get("default_branch") or "main"
     m["language"] = raw.get("language")
     m["languages"] = dict(raw.get("languages") or {})
@@ -223,7 +223,9 @@ def _tagline_of(content: object) -> str | None:
     text = base64.b64decode(content["content"]).decode("utf-8", errors="replace").removeprefix("\ufeff")
     for block in find_blocks(MANAGED_BLOCK_PATTERN, text):
         if block.group(1) == "tagline":
-            return block.group(2).replace("\r\n", "\n").replace("\r", "\n").strip() or None
+            from .tagline import inherited_payload
+            body = inherited_payload(block.group(2))
+            return body if body is not None and body.strip() else None
     return None
 
 

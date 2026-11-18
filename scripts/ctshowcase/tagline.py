@@ -1,0 +1,87 @@
+"""Stdlib-only tagline receipts shared by rendering, metadata and lint.
+
+Normalize transport line endings only: whitespace inside the payload is evidence.
+A receipt detects edits; it is not a signature or proof against intentional forgery.
+"""
+from __future__ import annotations
+
+import hashlib
+import re
+
+RECEIPT = re.compile(r"<!-- showcase:tagline:generated sha256=([0-9a-f]{64}) -->\n(.*)", re.S)
+NOTICE = re.compile(r"<!--\s*showcase:tagline:generated\b", re.I)
+
+
+def normalize(body: str) -> str:
+    return body.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def digest(payload: str) -> str:
+    return hashlib.sha256(normalize(payload).encode("utf-8")).hexdigest()
+
+
+def marked(body: str) -> bool:
+    """Receipt-like text blocks every legacy fallback, even when malformed."""
+    return NOTICE.search(body) is not None
+
+
+def generated(payload: str) -> str:
+    return f"<!-- showcase:tagline:generated sha256={digest(payload)} -->\n{payload}"
+
+
+def payload(body: str) -> str | None:
+    """Return the verified payload; None means legacy, edited, or malformed."""
+    source = normalize(body)
+    match = RECEIPT.fullmatch(source)
+    if match is None or marked(match.group(2)) or digest(match.group(2)) != match.group(1):
+        return None
+    return match.group(2)
+
+
+def inherited_payload(body: str) -> str | None:
+    """Preserve exact legacy whitespace, and never launder an invalid receipt."""
+    verified = payload(body)
+    return verified if verified is not None else None if marked(body) else normalize(body)
+
+
+def matches_description(body: str, description: str) -> bool:
+    """R2 is separate from ownership; only verified payloads may use soft wraps."""
+    verified = payload(body)
+    if verified is None and marked(body):
+        return False
+    value = normalize(body) if verified is None else verified
+    description = description.strip()
+    if value == f"**{description}**" or value == f'<p align="center"><b>{description}</b></p>':
+        return True
+    if verified is None:
+        return False
+    if value.startswith("**") and value.endswith("**"):
+        content = value[2:-2]
+    else:
+        match = re.fullmatch(r'<p align="center">[ \t\n]*<b>(.*?)</b>[ \t\n]*</p>', value, re.S)
+        if match is None:
+            return False
+        content = match.group(1)
+    # Soft wrapping is presentation, but blank paragraphs and hard breaks are not.
+    if re.search(r"\n[ \t]*\n|(?: {2}|\\)\n", content):
+        return False
+    return re.sub(r"[ \t]*\n[ \t]*", " ", content) == description
+
+
+def reseal(original: str, formatted: str) -> str | None:
+    """Reseal only previously verified content after the caller's AST check.
+
+    Authored/invalid bodies cannot be normalized back into ownership. Receipt
+    text itself must survive unchanged, including its old digest.
+    """
+    if payload(original) is None:
+        if payload(formatted) is not None or (marked(original) != marked(formatted)):
+            return None
+        return formatted
+    before = RECEIPT.fullmatch(normalize(original))
+    after = RECEIPT.fullmatch(normalize(formatted))
+    if after is None or after.group(1) != before.group(1) or marked(after.group(2)):
+        return None
+    # Replace only the digest in the original transport representation.
+    start = formatted.index("sha256=") + len("sha256=")
+    return formatted[:start] + digest(after.group(2)) + formatted[start + 64:]

@@ -622,6 +622,12 @@ def cmd_readme(args):
         if formatted is None:
             raise ShowcaseError("formatter changed the README badge ownership", log="formatter-content",
                                 code=CHECK_FAILED)
+        # Badge resealing precedes this scan; never reuse potentially stale offsets.
+        formatted = readme.reseal_formatted_taglines(
+            formatted, before_blocks, readme.find_blocks(readme.MARK, formatted))
+        if formatted is None:
+            raise ShowcaseError("formatter changed the README tagline ownership", log="formatter-content",
+                                code=CHECK_FAILED)
         if readme.bootstrap_state(after) == "pristine":
             formatted = readme.reseal_pristine(formatted)
             if formatted is None:

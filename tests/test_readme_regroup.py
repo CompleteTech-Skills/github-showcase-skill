@@ -1,10 +1,16 @@
 """Exercise README proposal controls through the public CLI."""
 
+import hashlib
 import json
 
 import pytest
 
 from conftest import meta_dict, run_cli
+
+
+def receipt(payload, ending="\n"):
+    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return f"<!-- showcase:tagline:generated sha256={digest} -->{ending}{payload}"
 
 
 @pytest.fixture
@@ -22,19 +28,23 @@ def checkout(tmp_path):
 
 
 @pytest.mark.parametrize("mode", ["auto", "upgrade", "header"])
-def test_no_regroup_keeps_mixed_endings_and_authored_bytes(checkout, mode):
+@pytest.mark.parametrize("owned", [False, True])
+def test_no_regroup_keeps_mixed_endings_and_authored_bytes(checkout, mode, owned):
     repo, invoke = checkout
     readme = repo / "README.md"
+    old = receipt("**Old.**", "\r") if owned else "**Old.**"
+    fresh = receipt("**Run the updated workflow.**", "\r") if owned else old
     before = (
         "\ufeff# My Title\r\n\n## Unusual  heading\r Exact text.\r\n\r\n"
-        "<!-- showcase:tagline:start -->\r\n**Old.**\r<!-- showcase:tagline:end -->\n"
+        f"<!-- showcase:tagline:start -->\r\n{old}\r<!-- showcase:tagline:end -->\n"
         "\r\n## Usage\rBody."
     )
     readme.write_bytes(before.encode("utf-8"))
     result = invoke("--write", "--no-regroup", "--mode", mode)
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)["heading_moves"] == []
-    assert readme.read_bytes() == before.replace("Old.", "Run the updated workflow.").encode("utf-8")
+    assert json.loads(result.stdout)["written"] is owned
+    assert readme.read_bytes() == before.replace(old, fresh).encode("utf-8")
     again = invoke("--write", "--no-regroup", "--mode", mode)
     assert again.returncode == 0 and json.loads(again.stdout)["written"] is False
 
@@ -141,7 +151,9 @@ def test_heading_summary_includes_variant_status_rename(checkout):
 def test_no_regroup_rejects_readme_as_records_destination(checkout, write):
     repo, invoke = checkout
     path = repo / "README.md"
-    before = b"# Project\r\n\r\n<!-- showcase:tagline:start -->\r\n**Old.**\r\n<!-- showcase:tagline:end -->"
+    generated = receipt("**Old.**", "\r\n")
+    before = (f"# Project\r\n\r\n<!-- showcase:tagline:start -->\r\n{generated}\r\n"
+              "<!-- showcase:tagline:end -->").encode("utf-8")
     path.write_bytes(before)
     result = invoke("--no-regroup", "--records", path, *(("--write",) if write else ()))
     assert result.returncode == 2
