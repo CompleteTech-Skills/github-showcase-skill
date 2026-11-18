@@ -9,7 +9,7 @@ import subprocess
 from pathlib import Path
 
 from .errors import NeedsInput, ShowcaseError, USAGE
-from .mdcode import find_blocks
+from .mdcode import MANAGED_BLOCK_PATTERN, find_blocks
 
 FIELDS = ("owner", "repo", "description", "homepage", "topics", "fork", "archived", "visibility", "is_template",
           "default_branch", "language", "languages", "license", "stargazers_count", "created_at", "labels",
@@ -18,8 +18,6 @@ FIELDS = ("owner", "repo", "description", "homepage", "topics", "fork", "archive
 # STANDARD §0 / CQ-16: estate commits never count as substantive (the bulk transfer and the run's own commits move
 # pushed_at, so recency uses the newest default-branch commit whose message does not match this)
 NON_SUBSTANTIVE = re.compile(r"ct-std-v1|showcase banner and card|\[skip ci\]")
-# the README tagline marker block; _tagline_of finds the first one outside code, as readme.py does
-TAGLINE_BLOCK = re.compile(r"<!-- showcase:tagline:start -->\n?(.*?)\n?<!-- showcase:tagline:end -->", re.S)
 MANIFEST_PATHS = ("pyproject.toml", "package.json", "requirements.txt", "setup.py", "setup.cfg", "manifest.json",
                   "SKILL.md", "skill-package.json", "CLAW_HUB_PUBLISHING.md", ".github/showcase.yml",
                   ".github/showcase.yaml")  # both spellings config.REPO_CONFIG_NAMES honours
@@ -222,9 +220,11 @@ def _tagline_of(content: object) -> str | None:
     """The first tagline block outside code of a contents-API README object, or None."""
     if not (isinstance(content, dict) and content.get("content")):
         return None
-    text = base64.b64decode(content["content"]).decode("utf-8", errors="replace").replace("\r\n", "\n")
-    found = find_blocks(TAGLINE_BLOCK, text.lstrip("\ufeff"))  # a marker example in code is not the block
-    return (found[0].group(1).strip() or None) if found else None
+    text = base64.b64decode(content["content"]).decode("utf-8", errors="replace").removeprefix("\ufeff")
+    for block in find_blocks(MANAGED_BLOCK_PATTERN, text):
+        if block.group(1) == "tagline":
+            return block.group(2).replace("\r\n", "\n").replace("\r", "\n").strip() or None
+    return None
 
 
 def _template_taglines(tmpl: str, created_at: object) -> list[str]:

@@ -11,7 +11,10 @@ from . import mdcode
 from .mdcode import find_inline_code  # noqa: F401 (compatibility re-export)
 from .context import RepoContext
 from .detect import required_sections, standard
-from .readme import BANNER_BLOCK, EMOJI, MARK, is_footer_like, masked, normalize_text, nav_first, preserved, source_lines, split_sections
+from .readme import (
+    EMOJI, MARK, is_footer_like, leading_banner_block, masked, normalize_text, nav_first, preserved, source_lines,
+    split_sections,
+)
 
 from .mdcode import (  # noqa: F401 (compatibility re-exports)
     _NL,
@@ -185,11 +188,9 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
         fails.append("R7 size >= 500 KiB")
     if variant in ("G", "H"):
         # §7.4 G/H: the hero banner block, then the callout, then the body unchanged, then the footer
-        rest = text.lstrip()
-        m = BANNER_BLOCK.match(rest)
-        if m:
-            rest = rest[m.end():].lstrip()
-        elif ctx.art_status()["banner"] is None:
+        banner = leading_banner_block(text)
+        rest = (text[banner.end():] if banner else text).lstrip()
+        if not banner and ctx.art_status()["banner"] is None:
             fails.append(f"D13 variant {variant} must open with the hero banner block")
         first = rest.splitlines()[0] if rest.strip() else ""
         if not first.startswith(">"):

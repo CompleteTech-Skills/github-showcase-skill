@@ -655,7 +655,13 @@ def fork_callout(ctx: RepoContext) -> str | None:
             "The upstream README follows unchanged; the upstream license applies.")
 
 
-BANNER_BLOCK = re.compile(re.escape(start("banner")) + r".*?" + re.escape(end("banner")) + r"\n*", re.S)
+def leading_banner_block(text: str) -> re.Match | None:
+    """Return the paired banner with no authored content preceding it."""
+    first = next(iter(find_blocks(MARK, text)), None)
+    if (first is not None and first.group(1) == "banner" and not text[:first.start()].strip()
+            and _block_on_separate_lines(text, first)):
+        return first
+    return None
 
 
 def callout_only(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
@@ -675,9 +681,9 @@ def callout_only(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
         ctx.log("needs-input:fork-variant (q27 full treatment: pass readme --variant for the §5.4 variant)")
     body = text
     lead_banner = ""
-    m = BANNER_BLOCK.match(text.lstrip("\n"))
-    if m:  # our banner block is already on top (a re-run): keep it, look for the callout under it
-        body = text.lstrip("\n")[m.end():]
+    leading = leading_banner_block(text)
+    if leading:  # our banner block is already on top (a re-run): keep it, look for the callout below
+        body = text[leading.end():].lstrip("\n")
     first = next((ln for ln in source_lines(body) if ln.strip()), "")
     out = body
     if not first.lstrip().startswith(">"):
@@ -690,8 +696,8 @@ def callout_only(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
             out = co + "\n\n" + body.lstrip("\n")
     if ctx.art_status()["banner"] is None:
         lead_banner = wrap("banner", banner_html(ctx)) + "\n\n"  # decision 13: the hero banner opens G and H too
-    elif m:
-        lead_banner = text.lstrip("\n")[:m.end()].rstrip("\n") + "\n\n"
+    elif leading:
+        lead_banner = leading.group(0) + "\n\n"
     out = lead_banner + out.lstrip("\n")
     removed: list[str] = []
     if footer_wanted(ctx):
@@ -1499,7 +1505,8 @@ def preservation(before: str, after: str, removed: list[str], *, ctx: RepoContex
     """Every original non-header line survives (heading lines may be renamed); size drop <= 10%."""
     # A digest in the output is only a claim. Exempt at most one prior block
     # per claim and independently verify that the prior rows are strict legacy.
-    prior_badges = Counter(m.group(2) for m in find_blocks(MARK, before) if m.group(1) == "badges")
+    prior_blocks = [m for m in find_blocks(MARK, before) if m.group(1) == "badges"]
+    prior_badges = Counter(m.group(2) for m in prior_blocks)
     current_blocks = [m for m in find_blocks(MARK, after) if m.group(1) == "badges"]
     current_badges = Counter(m.group(2) for m in current_blocks)
     replacements = Counter()
@@ -1518,8 +1525,6 @@ def preservation(before: str, after: str, removed: list[str], *, ctx: RepoContex
 
     def omit_owned_badges(m):
         nonlocal brand
-        if m.group(1) != "badges":
-            return m.group(0)
         body = m.group(2)
         if generated_badges(body):
             return wrap("badges", "")
@@ -1538,7 +1543,13 @@ def preservation(before: str, after: str, removed: list[str], *, ctx: RepoContex
             problems.append(f"lost badge block: {body.strip()[:60]}")
         return m.group(0)
 
-    before = _sub_blocks(before, omit_owned_badges)
+    comparison = []
+    offset = 0
+    for block in prior_blocks:
+        comparison.extend((before[offset:block.start()], omit_owned_badges(block)))
+        offset = block.end()
+    comparison.append(before[offset:])
+    before = "".join(comparison)
     before_lines = (line.strip(" \t") for line in source_lines(before))
     b_lines = Counter(line for line in before_lines if line and not line.startswith("<!-- showcase:"))
     for r in removed:

@@ -140,3 +140,51 @@ def test_container_marker_examples_stay_code_without_hiding_later_images(prefix,
               '![Real](docs/images/missing.png)\n').replace('\n', ending)
     assert mdcode.find_blocks(readme.MARK, source) == []
     assert readmelint._images(readmelint._outside_code(source), source) == [('Real', 'docs/images/missing.png')]
+
+
+@pytest.mark.parametrize("ending", ["\n", "\r\n", "\r"])
+def test_metadata_tagline_uses_same_pair_after_repeated_openers(ending):
+    import base64
+
+    from ctshowcase import meta
+
+    source = (
+        "\ufeff<!-- showcase:tagline:start -->\nAuthored before the live pair.\n\n"
+        "<!-- showcase:tagline:start -->\n**Managed tagline.**\n"
+        "Second line.\n<!-- showcase:tagline:end -->\n"
+    ).replace("\n", ending)
+    blocks = mdcode.find_blocks(readme.MARK, source)
+    assert len(blocks) == 1
+    assert "Authored before" not in blocks[0].group(2)
+    capture = {"content": base64.b64encode(source.encode("utf-8")).decode("ascii")}
+    assert meta._tagline_of(capture) == "**Managed tagline.**\nSecond line."
+
+
+def test_archive_upgrade_keeps_authored_heading_after_stray_banner_opener(tmp_path):
+    meta = tmp_path / "meta.json"
+    facts = {"owner": "Northwind-Trading-Co", "repo": "synthetic-archive", "license": "MIT",
+             "description": "A synthetic archive.", "files": ["README.md"]}
+    meta.write_text(json.dumps(facts), encoding="utf-8")
+    path = tmp_path / "README.md"
+    tail = "> Archive notice\n\n" + "Retained documentation row.\n" * 25
+    path.write_bytes(tail.encode("utf-8"))
+    base_args = ("--meta", meta, "--repo-dir", tmp_path)
+    write_args = (*base_args, "readme", "--variant", "H", "--mode", "upgrade", "--write")
+    initial = run_cli(*write_args)
+    assert initial.returncode == 0, initial.stdout + initial.stderr
+    generated = readme.leading_banner_block(path.read_bytes().decode("utf-8"))
+    assert generated is not None
+
+    authored = "<!-- showcase:banner:start -->\n## Authored heading\n\n"
+    original = authored + generated.group(0) + "\n\n" + tail
+    path.write_bytes(original.encode("utf-8"))
+    lint = run_cli(*base_args, "lint", "readme", str(path), "--variant", "H")
+    assert "D13 variant H must open with the hero banner block" in json.loads(lint.stdout)["fails"]
+    result = run_cli(*write_args)
+    assert result.returncode == 0, result.stdout + result.stderr
+    updated = path.read_bytes()
+    assert original.encode("utf-8") in updated
+    assert readme.leading_banner_block(updated.decode("utf-8")) is not None
+    retry = run_cli(*write_args)
+    assert retry.returncode == 0, retry.stdout + retry.stderr
+    assert path.read_bytes() == updated
