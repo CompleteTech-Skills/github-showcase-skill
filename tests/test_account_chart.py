@@ -249,16 +249,83 @@ def test_exposure_flagged_repositories_are_withheld_without_their_name(brand):
     assert "demand-model" not in md and "demand-model" not in mmd
 
 
-def test_hide_and_private_options(brand):
-    m, _ = build(brand, base(), hide=("forks", "archived"))
-    assert m["counts"]["hidden"] == 5
-    assert not any(rp["fork"] or rp["archived"] for n in [m["personal"], *m["orgs"]] for rp in n["repos"])
-    m, _ = build(brand, base(), private="omit")
-    assert "private" not in m["personal"]["notes"]
-    m, _ = build(brand, base())
+def lanes(model) -> list[dict]:
+    return [model["personal"], *model["orgs"], *[o for e in model["enterprises"] for o in e["orgs"]]]
+
+
+def test_hide_drops_forks_and_archived(brand):
+    m, logs = build(brand, base(), hide=("forks", "archived"))
+    assert m["counts"]["hidden_by"] == {".github": 1, "forks": 2, "archived": 1}
+    assert m["counts"]["hidden"] == 4
+    assert not any(rp["fork"] or rp["archived"] for n in lanes(m) for rp in n["repos"])
+    # Northwind-Archive holds only archived repositories: with them hidden it has nothing to show, so it is left off
+    assert "no-public:Northwind-Archive" in logs and m["counts"]["orgs_without_public"] == 3
+
+
+def test_defaults_leave_out_private_work_github_repositories_and_orgs_without_public(brand):
+    m, logs = build(brand, base())
+    assert not any("private" in n["notes"] for n in lanes(m))  # no 'private work' pill by default
+    assert not any(rp["name"] == ".github" for n in lanes(m) for rp in n["repos"])
+    assert m["counts"]["hidden_by"] == {".github": 1}
+    assert {o["login"] for o in m["orgs"]} == {"Northwind-Games"}  # Community (private only) and Sandbox (empty) left off
+    assert {"no-public:Northwind-Community", "no-public:Northwind-Sandbox"} <= set(logs)
+    assert m["counts"]["orgs_without_public"] == 2 and m["counts"]["organizations"] == 4
+    assert m["counts"]["not_public"] == 8  # an org left off contributes nothing to the map's totals
+    assert not any(x.endswith(("Northwind-Community", "Northwind-Sandbox")) for x in logs if x.startswith("needs-input"))
+
+
+def test_show_brings_back_each_default(brand):
+    m, logs = build(brand, base(), show=("all-orgs", "private-work", ".github"))
     assert "private" in m["personal"]["notes"]
-    sandbox = next(o for o in m["orgs"] if o["login"] == "Northwind-Sandbox")
-    assert sandbox["notes"] == ["empty"]
+    assert any(rp["name"] == ".github" for n in lanes(m) for rp in n["repos"])
+    by = {o["login"]: o for o in m["orgs"]}
+    assert set(by) == {"Northwind-Community", "Northwind-Games", "Northwind-Sandbox"}
+    assert by["Northwind-Community"]["notes"] == ["private"] and by["Northwind-Sandbox"]["notes"] == ["empty"]
+    assert m["counts"]["orgs_without_public"] == 0 and m["counts"]["hidden"] == 0 and m["counts"]["not_public"] == 11
+    m, _ = build(brand, base(), show=("all-orgs",))  # an org shown without private work says what is true
+    assert next(o for o in m["orgs"] if o["login"] == "Northwind-Community")["notes"] == ["empty"]
+
+
+def test_an_org_whose_only_public_repository_is_hidden_is_left_off(brand):
+    d = with_orgs(org("Northwind-Labs", ".github"), org("Northwind-Games", "arcade", fork=True))
+    m, logs = build(brand, d)
+    assert [o["login"] for o in m["orgs"]] == ["Northwind-Games"]
+    assert "no-public:Northwind-Labs" in logs
+    m, _ = build(brand, d, hide=("forks",))
+    assert m["orgs"] == [] and m["counts"]["orgs_without_public"] == 2
+    m, _ = build(brand, d, show=(".github",))
+    assert {o["login"] for o in m["orgs"]} == {"Northwind-Labs", "Northwind-Games"}
+
+
+def test_an_org_without_complete_capture_is_never_left_off(brand):
+    d = with_orgs(dict(org("Northwind-Labs"), captured=False, capture_status="failed"),
+                  dict(org("Northwind-Games"), captured=False, capture_status="partial"))
+    m, logs = build(brand, d)
+    assert {o["login"]: o["notes"] for o in m["orgs"]} == {"Northwind-Labs": ["failed"], "Northwind-Games": ["partial"]}
+    assert not any(x.startswith("no-public:") for x in logs)
+
+
+def test_a_hold_org_with_public_repositories_stays_and_one_without_is_left_off(brand):
+    m, logs = build(brand, with_orgs(org("TouchedByAnAgent", "northwind-held")))
+    assert m["orgs"][0]["notes"] == ["held"]
+    m, logs = build(brand, with_orgs(org("TouchedByAnAgent")))
+    assert m["orgs"] == [] and "no-public:TouchedByAnAgent" in logs and "hold:TouchedByAnAgent" not in logs
+
+
+def test_an_enterprise_stays_when_none_of_its_orgs_has_public_repositories(brand, tmp_path):
+    d = with_orgs(org("Northwind-Labs"), enterprises=[{"slug": "northwind-holdings", "name": "Northwind Holdings",
+                                                       "role": "owner", "organizations": ["Northwind-Labs"]}])
+    m, _ = build(brand, d)
+    assert [e["slug"] for e in m["enterprises"]] == ["northwind-holdings"] and m["enterprises"][0]["orgs"] == []
+    r, out = render(tmp_path, d, "--no-png")
+    assert r.returncode == 0 and out["lint"]["result"] == "PASS", r.stdout + r.stderr
+
+
+def test_legend_explains_only_the_markers_drawn(brand):
+    m, _ = build(brand, base())
+    assert C.markers(m) == {"fork", "archived"}
+    m, _ = build(brand, base(), hide=("forks", "archived"), show=("private-work",))
+    assert C.markers(m) == {"private"}
 
 
 def test_family_neutral_and_pending_styles(brand):
@@ -283,6 +350,8 @@ def test_enterprise_orgs_hang_under_their_enterprise(brand):
     assert [e["slug"] for e in m["enterprises"]] == ["northwind-holdings"]
     assert {o["login"] for o in m["enterprises"][0]["orgs"]} == {"Northwind-Archive", "Northwind-Labs",
                                                                   "Northwind-Trading-Co"}
+    assert {o["login"] for o in m["orgs"]} == {"Northwind-Games"}
+    m, _ = build(brand, base(), show=("all-orgs",))
     assert {o["login"] for o in m["orgs"]} == {"Northwind-Community", "Northwind-Games", "Northwind-Sandbox"}
     assert m["roles"] == ["member", "owner"]
 
@@ -324,9 +393,17 @@ def test_markdown_repeats_every_named_repository_as_a_link_with_the_counts(brand
     m, _ = build(brand, base())
     for full in names(m):
         assert f"(https://github.com/{full})" in md
-    assert f"{out['counts']['named']} public repositories across 1 enterprise and 6 organizations" in md
-    assert "11 private or internal repositories are counted, never named" in md
+    assert f"{out['counts']['named']} public repositories across 1 enterprise and 4 organizations" in md
+    assert "private or internal" not in md  # private work is shown only on request
+    assert "Not shown: organizations without public repositories and `.github` repositories" in md
+    assert "/.github)" not in md and "Northwind-Sandbox" not in md
     assert 'href="account-chart.svg"' in md  # without a PNG the image links to the SVG
+    r, out = render(tmp_path, None, "--no-png", "--show", "all-orgs", "--show", "private-work", "--show", ".github",
+                    out="all")
+    md = (tmp_path / "all" / "account-chart.md").read_text(encoding="utf-8")
+    assert r.returncode == 0 and "Not shown" not in md and "/.github)" in md
+    assert "11 private or internal repositories are counted, never named" in md
+    assert "across 1 enterprise and 6 organizations" in md
 
 
 def test_mermaid_source_is_themed_ordered_and_unique(brand):
