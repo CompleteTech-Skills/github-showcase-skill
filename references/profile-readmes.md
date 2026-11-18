@@ -138,9 +138,9 @@ that hero ahead of the badges. A full G or H upgrade also moves a managed hero
 out of the authored body. Header-only and `--no-regroup` refreshes instead
 return `needs-input:intro-order` before writing, because they cannot move the
 existing marker block. Fenced or commented image examples do not affect the image order.
-Local generated-badge paths are recognized after URL percent decoding and path
+Relative local generated-badge paths are recognized after URL percent decoding and path
 normalization; their authored URL spelling stays unchanged. Paths that leave the badge
-directory remain authored artwork. Moving a G or H hero retains the exact authored source
+directory and remote artwork URLs remain authored artwork. Moving a G or H hero retains the exact authored source
 on both sides, including mixed line endings and blank separators. If joining those
 spans would merge line endings, the command returns `needs-input:intro-order` before
 writing; put the managed hero on separate blank lines before retrying.

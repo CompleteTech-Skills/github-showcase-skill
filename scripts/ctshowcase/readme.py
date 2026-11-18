@@ -11,7 +11,7 @@ from collections import Counter, defaultdict, deque
 from html import escape
 from pathlib import Path
 from posixpath import normpath
-from urllib.parse import quote, unquote
+from urllib.parse import quote, unquote, urlsplit
 
 from . import footer as footermod
 from . import tagline as taglinemod
@@ -745,10 +745,16 @@ def _badge_or_logo(source: str, *, personal: bool = False) -> bool:
         return bool(re.search(r"logo", source, re.I) or "shields.io" in source
                     or "badge.svg" in source or "docs/images/badges/" in source)
     location = re.split(r"[?#]", source, maxsplit=1)[0]
+    try:
+        parsed = urlsplit(location)
+        local_badge = (not (parsed.scheme or parsed.netloc)
+                       and normpath(unquote(parsed.path)).startswith("docs/images/badges/"))
+    except ValueError:
+        local_badge = False
     return bool(re.search(r"(?:^|[/_.-])logo(?:$|[/_.-])", location, re.I)
                 or re.match(r"https?://(?:img\.)?shields\.io/", location, re.I)
                 or re.fullmatch(r"https://github\.com/[^/]+/[^/]+/actions/workflows/[^/]+/badge\.svg", location, re.I)
-                or normpath(unquote(location)).startswith("docs/images/badges/"))
+                or local_badge)
 
 
 def _leading_banner(pre: str) -> bool:

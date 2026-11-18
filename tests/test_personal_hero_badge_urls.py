@@ -177,3 +177,28 @@ def test_encoded_authored_art_is_not_mistaken_for_generated_badge(tmp_path, gene
     result = readme(target, capture, "scaffold")
     assert result.returncode == 0, result.stdout + result.stderr
     assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("url", [
+    pytest.param("https://example.test/docs/images/badges/profile-art.svg", id="https_canonical"),
+    pytest.param("https://example.test/../../docs/images/badges/profile-art.svg", id="https_dot_segments"),
+    pytest.param("//example.test/docs/images/badges/profile-art.svg", id="network_relative_canonical"),
+    pytest.param("//example.test/../../docs/images/badges/profile-art.svg", id="network_relative_dot_segments"),
+])
+@pytest.mark.parametrize("available", [False, True], ids=["missing_intro", "applicable_intro"])
+def test_remote_authored_art_never_becomes_a_local_badge(tmp_path, generated, url, available):
+    target, capture = checkout(tmp_path, generated, intro=available)
+    before = (f"# Synthetic profile\r\n\r\n![Authored remote art]({url})\r\n\r\n"
+              "Keep  authored text.\t\r\n").encode()
+    path = target / "README.md"
+    path.write_bytes(before)
+
+    def files():
+        return {str(p.relative_to(tmp_path)): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+
+    initial_files = files()
+    result = readme(target, capture, "scaffold")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert path.read_bytes() == before
+    assert files() == initial_files
+    assert not (tmp_path / "records.json").exists()
