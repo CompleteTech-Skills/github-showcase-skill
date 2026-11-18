@@ -43,27 +43,50 @@ def check_social_path(path: Path, *, staged: bool, job: bool, checkout: Path | N
                             log="staged-description:upload")
 
 
-def _output_slot(ctx, path: Path, *, adjacent: bool = False) -> tuple[Path, str, bool]:
+def _checkout_slot(path: Path, root: Path) -> tuple[Path, str, bool]:
+    directory = root / "docs" / "images"
+    if not directory.resolve().is_relative_to(root):
+        raise ShowcaseError("the showcase sidecar must stay inside the target checkout", log="staged-description:path")
+    relative = path.relative_to(root).as_posix()
+    if path.parent == directory and path.name != "README.md":
+        name = path.name
+    elif (path.parent == root and path.name != "README.md") or path.parent == directory:
+        name = "./" + relative
+    else:
+        name = relative
+    return directory, name, path.parent == directory and name in fp.ART_NAMES
+
+
+def _output_slots(ctx, path: Path, *, adjacent: bool = False) -> tuple[tuple[Path, str, bool], ...]:
     path = Path(path).resolve()
     if adjacent or SOCIAL_STAGING in map(str.casefold, path.parent.parts):
-        return path.parent, path.name, False
+        return ((path.parent, path.name, False),)
+    adjacent_slot = (path.parent, path.name, True)
     root = Path(ctx.repo_dir).resolve() if ctx.repo_dir else None
-    if root is not None and path.is_relative_to(root):
-        directory = root / "docs" / "images"
-        if not directory.resolve().is_relative_to(root):
-            raise ShowcaseError("the showcase sidecar must stay inside the target checkout", log="staged-description:path")
-        relative = path.relative_to(root).as_posix()
-        if path.parent == directory and path.name != "README.md":
-            name = path.name
-        elif (path.parent == root and path.name != "README.md") or path.parent == directory:
-            name = "./" + relative
-        else:
-            name = relative
-        summarize = path.parent == directory and name in fp.ART_NAMES
+    if root is not None:
+        if not path.is_relative_to(root):
+            return (adjacent_slot,)
+        primary, alternate = _checkout_slot(path, root), adjacent_slot
     else:
-        directory, name = path.parent, path.name
-        summarize = True
-    return directory, name, summarize
+        primary = adjacent_slot
+        # Metadata-only rendering still shares any existing checkout provenance.
+        # A synthetic or exported checkout can have the same layout without .git.
+        enclosing = next((parent for parent in path.parents if (parent / ".git").exists()), None)
+        if enclosing is None:
+            images = next((parent for parent in path.parents
+                           if parent.name == "images" and parent.parent.name == "docs"), None)
+            enclosing = images.parent.parent if images else None
+        if enclosing is None or not (enclosing / "docs/images").resolve().is_relative_to(enclosing):
+            return (primary,)
+        alternate = _checkout_slot(path, enclosing)
+    # Within the same sidecar, a differently spelled key may belong to a
+    # different artifact (for example, root and docs/images README.md).
+    return (primary,) if primary[0] == alternate[0] else (primary, alternate)
+
+
+def _sidecars(ctx, paths, *, adjacent: bool) -> set[Path]:
+    return {directory / fp.SIDECAR for path in paths
+            for directory, _, _ in _output_slots(ctx, path, adjacent=adjacent)}
 
 
 def _aliases(left: Path, right: Path) -> bool:
@@ -120,6 +143,10 @@ def protected_auxiliary(capture: Path | None, checkout: Path | None, path: Path)
         yield
 
 
+def _marked_live_social(record: object) -> bool:
+    return isinstance(record, dict) and record.get("live_social_preview") is True
+
+
 def _live_social_output(path: Path) -> bool:
     resolved = path.resolve()
     if SOCIAL_STAGING in map(str.casefold, resolved.parent.parts):
@@ -130,7 +157,7 @@ def _live_social_output(path: Path) -> bool:
         return True
     records = fp.output_records(fp.read_sidecar(resolved.parent))
     if any(os.path.normcase(name) == os.path.normcase(resolved.name)
-           and isinstance(record, dict) and record.get("live_social_preview") is True
+           and _marked_live_social(record)
            for name, record in records.items()):
         return True
     if not resolved.is_file():
@@ -155,13 +182,17 @@ def _live_social_output(path: Path) -> bool:
 def check_outputs(ctx, *paths: Path, auxiliary: tuple[Path, ...] = (), adjacent: bool = False,
                   format_root: Path | None = None) -> None:
     """Keep renderer outputs and their provenance paths distinct before any write."""
-    sidecars = {_output_slot(ctx, path, adjacent=adjacent)[0] / fp.SIDECAR for path in paths}
+    sidecars = _sidecars(ctx, paths, adjacent=adjacent)
     if format_root is not None:
         from .formatting import target_relative
 
         for sidecar in sidecars:
             target_relative(format_root, sidecar)
-    real_sidecars = {path.resolve() for path in sidecars}
+    real_sidecars = [path.resolve() for path in sorted(sidecars)]
+    if any(_aliases(path, other) for index, path in enumerate(real_sidecars) for other in real_sidecars[:index]):
+        raise ShowcaseError("showcase sidecars must use distinct files", log="staged-description:path")
+    metadata_path = getattr(getattr(ctx, "facts", None), "metadata_path", None)
+    check_capture(metadata_path, *real_sidecars)
     staged = getattr(ctx, "staged_description", None) is not None
     if staged:
         capture = getattr(ctx, "meta_path", None)
@@ -170,7 +201,11 @@ def check_outputs(ctx, *paths: Path, auxiliary: tuple[Path, ...] = (), adjacent:
         for path in (*paths, *sidecars):
             if path.is_symlink() or (path.exists() and not path.is_file()):
                 raise ShowcaseError("staged output must be a regular file", log="staged-description:path")
-        if any(_live_social_output(path) for path in paths):
+        if any(_live_social_output(path) or any(
+            _marked_live_social(fp.output_records(fp.read_sidecar(directory)).get(name))
+            for directory, name, _ in _output_slots(ctx, path, adjacent=adjacent)
+            if directory != path.resolve().parent
+        ) for path in paths):
             raise ShowcaseError("staged output must not replace a live social preview", log="staged-description:path")
     declared_root = Path(os.path.abspath(ctx.repo_dir)) if ctx.repo_dir else None
     root = declared_root.resolve() if declared_root else None
@@ -193,7 +228,7 @@ def check_outputs(ctx, *paths: Path, auxiliary: tuple[Path, ...] = (), adjacent:
 
 @contextmanager
 def lock_outputs(ctx, *paths: Path, adjacent: bool = False, auxiliary: tuple[Path, ...] = ()):
-    sidecars = {_output_slot(ctx, path, adjacent=adjacent)[0] / fp.SIDECAR for path in paths}
+    sidecars = _sidecars(ctx, paths, adjacent=adjacent)
     if getattr(ctx, "staged_description", None) is not None:
         for path in paths:
             sidecars.add(path.resolve().parent / fp.SIDECAR)
@@ -212,15 +247,17 @@ def plan_sidecars(ctx, *entries: tuple[Path, dict, bool], adjacent: bool = False
     info = getattr(ctx, "staged_description", None)
     inputs = None
     for path, record, always in entries:
-        directory, name, summarize = _output_slot(ctx, path, adjacent=adjacent)
-        sidecar = directory / fp.SIDECAR
-        data = planned.get(sidecar)
-        if data is None:
-            data = fp.read_sidecar(directory)
-        previous = fp.output_records(data).get(name)
-        if not always and info is None and previous is None:
+        slots = []
+        for directory, name, summarize in _output_slots(ctx, path, adjacent=adjacent):
+            sidecar = directory / fp.SIDECAR
+            data = planned.get(sidecar)
+            if data is None:
+                data = fp.read_sidecar(directory)
+            previous = fp.output_records(data).get(name)
+            slots.append((sidecar, name, summarize, data, previous))
+        if not always and info is None and all(previous is None for _, _, _, _, previous in slots):
             continue
-        if isinstance(previous, dict) and previous.get("live_social_preview") is True:
+        if any(_marked_live_social(previous) for _, _, _, _, previous in slots):
             record = dict(record, live_social_preview=True)
         if isinstance(ctx.meta.get("id"), int) and not isinstance(ctx.meta.get("id"), bool):
             record = dict(record, repository_id=ctx.meta["id"])
@@ -230,23 +267,26 @@ def plan_sidecars(ctx, *entries: tuple[Path, dict, bool], adjacent: bool = False
             metadata_path = getattr(getattr(ctx, "facts", None), "metadata_path", None)
             inputs = fp.inputs(ctx.meta, ctx.repo_dir, same_owner=lambda a, b: ctx.brand.resolver().same(a, b),
                                metadata_path=metadata_path)
-        planned[sidecar] = fp.update_sidecar(data, inputs, ctx.brand.sha256, name, record,
-                                             summarize=summarize and info is None and "exempt" not in record)
+        for index, (sidecar, name, summarize, data, previous) in enumerate(slots):
+            if previous is None and (index or (not always and info is None)):
+                continue
+            current = fp.update_sidecar(data, inputs, ctx.brand.sha256, name, record,
+                                        summarize=not index and summarize and info is None and "exempt" not in record)
+            if index:
+                current["outputs"] = {**fp.output_records(data), name: current["outputs"][name]}
+            planned[sidecar] = current
     return planned
 
 
 def record_output(ctx, path: Path, record: dict, *, always: bool = False,
                   adjacent: bool = False) -> Path | None:
     """Record a generated output and preserve provenance for untouched surfaces."""
-    directory, _, _ = _output_slot(ctx, path, adjacent=adjacent)
-    sidecar = directory / fp.SIDECAR
-    with fp.sidecar_lock(sidecar):
-        data = plan_sidecars(ctx, (path, record, always), adjacent=adjacent).get(sidecar)
-        if data is None:
-            return None
-        private = fp.has_staged_outputs(data)
-        fp.replace_bytes(sidecar, fp.sidecar_text(data).encode("utf-8"), private=private, preserve_mode=not private)
-    return sidecar
+    with lock_outputs(ctx, path, adjacent=adjacent):
+        planned = plan_sidecars(ctx, (path, record, always), adjacent=adjacent)
+        for sidecar, data in planned.items():
+            private = fp.has_staged_outputs(data)
+            fp.replace_bytes(sidecar, fp.sidecar_text(data).encode("utf-8"), private=private, preserve_mode=not private)
+    return next(iter(planned), None)
 
 
 def tagline_forms(ctx) -> set[str]:
