@@ -197,22 +197,34 @@ def replace_bytes(path: Path, data: bytes, *, private: bool = False, preserve_mo
         source.replace(path)
 
 
+def update_sidecar(data: dict, inp: dict, cfg_sha: str, name: str, record: dict, *, summarize: bool = True) -> dict:
+    previous = data.get("fingerprint")
+    outputs = {key: {"fingerprint": previous, **value} if isinstance(value, dict) else value
+               for key, value in output_records(data).items()}
+    current = fingerprint(inp, cfg_sha)
+    outputs[name] = dict(record, fingerprint=current)
+    updated = dict(data, schema=1, skill_version=__version__, standard=STANDARD, outputs=outputs)
+    if summarize:
+        updated.update(config_sha256=cfg_sha, inputs=inp, fingerprint=current)
+    return updated
+
+
+def sidecar_text(data: dict) -> str:
+    return json.dumps(data, sort_keys=True, indent=1, ensure_ascii=False) + "\n"
+
+
+def has_staged_outputs(data: dict) -> bool:
+    return any(isinstance(record, dict) and "staged_description" in record
+               for record in output_records(data).values())
+
+
 def write_sidecar(out_dir: Path, inp: dict, cfg_sha: str, name: str, record: dict, *, summarize: bool = True) -> Path:
     p = out_dir / SIDECAR
     with sidecar_lock(p):
-        data = read_sidecar(out_dir)
-        previous = data.get("fingerprint")
-        outputs = {key: {"fingerprint": previous, **value} if isinstance(value, dict) else value
-                   for key, value in output_records(data).items()}
-        current = fingerprint(inp, cfg_sha)
-        outputs[name] = dict(record, fingerprint=current)
-        data.update(schema=1, skill_version=__version__, standard=STANDARD, outputs=outputs)
-        if summarize:
-            data.update(config_sha256=cfg_sha, inputs=inp, fingerprint=current)
-        private = any(isinstance(value, dict) and "staged_description" in value for value in outputs.values())
-        replace_bytes(p, (json.dumps(data, sort_keys=True, indent=1, ensure_ascii=False) + "\n").encode("utf-8"),
-                      private=private, preserve_mode=not private)
-        return p
+        updated = update_sidecar(read_sidecar(out_dir), inp, cfg_sha, name, record, summarize=summarize)
+        private = has_staged_outputs(updated)
+        replace_bytes(p, sidecar_text(updated).encode("utf-8"), private=private, preserve_mode=not private)
+    return p
 
 
 def file_record(path: Path, **extra) -> dict:

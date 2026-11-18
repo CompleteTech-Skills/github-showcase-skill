@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 
 from . import STANDARD
+from .output_lock import output_lock
 
 
 def record(owner: str, repo: str, kind: str, target: str, before, after, rule: str) -> dict:
@@ -22,14 +24,28 @@ def record(owner: str, repo: str, kind: str, target: str, before, after, rule: s
     return rec
 
 
-def append(path: str | Path | None, recs: list[dict]) -> None:
+def json_lines(recs: list[dict]) -> str:
+    """Serialize signed change records or writer jobs in the queue format."""
+    from .signoff import stamp
+    stamp(recs)  # jobs and change records of a signed-off T3 owner carry signoff_id
+    return "".join(json.dumps(record, sort_keys=True, ensure_ascii=False) + "\n" for record in recs)
+
+
+def append(path: str | Path | None, recs: list[dict], *, private: bool = False) -> None:
     """Append JSON lines (change records or scripts/writer.py jobs) to PATH, creating its directory."""
     if not path or not recs:
         return
-    from .signoff import stamp
-    stamp(recs)  # jobs and change records of a signed-off T3 owner carry signoff_id
     p = Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    with p.open("a", encoding="utf-8") as fh:
-        for r in recs:
-            fh.write(json.dumps(r, sort_keys=True, ensure_ascii=False) + "\n")
+    with output_lock(p):
+        p.parent.mkdir(parents=True, exist_ok=True)
+        if private:
+            flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
+            with os.fdopen(os.open(p, flags, 0o600), "a", encoding="utf-8") as fh:
+                if os.fstat(fh.fileno()).st_nlink != 1:
+                    raise OSError(f"staged records must use an unlinked regular file: {p}")
+                if hasattr(os, "fchmod"):
+                    os.fchmod(fh.fileno(), 0o600)
+                fh.write(json_lines(recs))
+        else:
+            with p.open("a", encoding="utf-8") as fh:
+                fh.write(json_lines(recs))

@@ -128,8 +128,11 @@ def context(args, b=None, *, for_coverage=False):
     proposal_meta, staged = prepare(meta, getattr(args, "description", None))
     ctx = RepoContext(b, meta if args.command == "readme" else proposal_meta, rd,
                       type_override=getattr(args, "type_override", None), for_coverage=for_coverage)
-    if staged is not None:
+    if staged is not None or getattr(args, "format_generated", False):
         ctx.meta_path = Path(args.meta).resolve() if args.meta else None
+    if getattr(args, "format_generated", False):
+        ctx.format_root = rd.resolve() if rd else None
+    if staged is not None:
         ctx.staged_description = staged
         ctx.log("staged-description")
     return ctx
@@ -197,6 +200,60 @@ def record_art_exemption(ctx, kind: str, out: str | None, reason: str) -> None:
         record_output(ctx, canonical, {"exempt": reason}, always=True)
 
 
+def ensure_distinct_outputs(*destinations: Path) -> None:
+    for i, path in enumerate(destinations):
+        for other in destinations[:i]:
+            if path.resolve() == other.resolve() or (path.exists() and other.exists() and path.samefile(other)):
+                raise ShowcaseError("output paths must be distinct", log="usage")
+
+
+def _sidecar_text(ctx, path: Path, data: dict) -> str:
+    from ctshowcase.fingerprint import sidecar_text
+    from ctshowcase.formatting import format_text, same_json
+
+    summary = sidecar_text(data)
+    formatted = format_text(ctx.repo_dir, path, summary)
+    if not same_json(summary, formatted):
+        raise ShowcaseError("formatter changed the art sidecar data", log="formatter-content")
+    return formatted
+
+
+def write_art(ctx, out: Path, data: bytes, *, format_generated: bool, preview=None, **extra) -> None:
+    from ctshowcase.fingerprint import bytes_record, has_staged_outputs
+    from ctshowcase.formatting import target_relative, write_formatted_outputs
+    from ctshowcase.staged import check_outputs, lock_outputs, plan_sidecars
+
+    artifacts = [(out, data, extra)]
+    if preview is not None:
+        artifacts.append((*preview, {}))
+    paths = [path for path, _, _ in artifacts]
+    if not format_generated:
+        check_outputs(ctx, *paths)
+        write_rendered_art(ctx, *artifacts)
+        return
+    root = getattr(ctx, "format_root", None) or (ctx.repo_dir.resolve() if ctx.repo_dir else None)
+    for path in paths:
+        target_relative(root, path)
+    capture = getattr(ctx, "meta_path", None)
+    ensure_distinct_outputs(*paths, *((capture,) if capture else ()))
+    with lock_outputs(ctx, *paths):
+        check_outputs(ctx, *paths, format_root=root)
+        records = [(path, bytes_record(content, **details),
+                    path.parent.name == "images" and path.parent.parent.name == "docs")
+                   for path, content, details in artifacts]
+        planned = plan_sidecars(ctx, *records)
+        if capture is not None:
+            ensure_distinct_outputs(capture, *planned)
+        provenance = [(path, _sidecar_text(ctx, path, summary).encode("utf-8")) for path, summary in planned.items()]
+        for path in planned:
+            target_relative(root, path)
+        private_metadata = {path for path, summary in planned.items() if has_staged_outputs(summary)}
+        artifacts_to_write = [(path, content) for path, content, _ in artifacts]
+        staged = getattr(ctx, "staged_description", None) is not None
+        outputs = provenance + artifacts_to_write if staged else artifacts_to_write + provenance
+        write_formatted_outputs(outputs, repo_root=root, private=staged, private_metadata=private_metadata)
+
+
 def write_bytes(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(data)
@@ -240,7 +297,6 @@ def write_rendered_art(ctx, *artifacts: tuple[Path, bytes, dict], summarize_art:
 
 def cmd_banner(args):
     from ctshowcase import banner
-    from ctshowcase.staged import check_outputs
     from ctshowcase.typeset import Fonts
     ctx = context(args)
     gate_owner(ctx, args.allow_hold)
@@ -260,9 +316,8 @@ def cmd_banner(args):
     data, info = banner.render(ctx, fonts, scale=args.scale, budget=args.png_budget, subtitle=args.subtitle,
                                keys=args.key_chip or None, attrs=args.chip or None, category=args.category, icon=args.icon,
                                allow_few_chips=args.allow_few_chips)
-    check_outputs(ctx, out)
-    write_rendered_art(ctx, (out, data, dict(px=info["px"], scale=info["scale"], chips=info["chips"],
-                                           icon_source=info["icon"]["source"])))
+    write_art(ctx, out, data, format_generated=args.format_generated, px=info["px"], scale=info["scale"],
+              chips=info["chips"], icon_source=info["icon"]["source"])
     alt = f"{ctx.repo} by {ctx.company}"
     return base("banner", ctx, result="incomplete" if info["incomplete"] else "ok", out=str(out), bytes=info["bytes"], px=info["px"], save=info["save"],
                 alt=alt, eyebrow=info["eyebrow"], title_lines=info["title_lines"], subtitle=info["subtitle"],
@@ -271,7 +326,6 @@ def cmd_banner(args):
 
 def cmd_card(args):
     from ctshowcase import card, svglint
-    from ctshowcase.staged import check_outputs
     from ctshowcase.scene import png_bytes
     from ctshowcase.typeset import Fonts
     ctx = context(args)
@@ -285,16 +339,20 @@ def cmd_card(args):
     out = Path(args.out) if args.out else default_out(args, "docs/images/card.svg")
     fonts = Fonts(ctx.brand)
     svg, scene, info = card.render(ctx, fonts, args.icon, keys=args.key_chip or None, attrs=args.chip or None)
+    if args.format_generated:
+        from ctshowcase.formatting import format_text, protect_svg_title, same_svg
+
+        # Prettier's HTML parser wraps SVG title text, which must equal aria-label.
+        formatted = format_text(ctx.repo_dir, out, protect_svg_title(svg))
+        if not same_svg(svg, formatted):
+            raise ShowcaseError("formatter changed the SVG drawing", log="formatter-content", code=CHECK_FAILED)
+        svg = formatted
     lint = svglint.lint_bytes("card", svg.encode(), str(out))
     if lint["result"] != "PASS":
         return base("card", ctx, result="fail", lint=lint), CHECK_FAILED
-    preview = Path(args.png) if args.png else None
-    check_outputs(ctx, out, *([preview] if preview is not None else []))
-    artifacts = [(out, svg.encode("utf-8"), {})]
-    if preview is not None:
-        artifacts.append((preview, png_bytes(card.preview_png(scene, fonts)), {}))
-    write_rendered_art(ctx, *artifacts)
-    outputs = [str(out)] + ([args.png] if preview is not None else [])
+    preview = (Path(args.png), png_bytes(card.preview_png(scene, fonts))) if args.png else None
+    write_art(ctx, out, svg.encode(), format_generated=args.format_generated, preview=preview)
+    outputs = [str(out)] + ([args.png] if preview else [])
     return base("card", ctx, result="ok", out=str(out), outputs=outputs, bytes=len(svg.encode()),
                 alt=f"{ctx.repo}: {ctx.meta.get('description')}", items=info["items"], icon=info["icon"],
                 lint=lint), OK
@@ -501,17 +559,34 @@ def cmd_readme(args):
     if rd is None:
         raise ShowcaseError("readme needs the repository checkout (--repo-dir DIR, or run inside it)", log="usage")
     path = rd / "README.md"
-    original = path.read_bytes() if path.is_file() else None
-    before = readme.normalize_text((original or b"").decode("utf-8").replace("\r\n", "\n").replace("\r", "\n"))
+    contrib_path = rd / "CONTRIBUTING.md"
+    if args.format_generated and getattr(args, "no_regroup", False):
+        raise ShowcaseError("--no-regroup preserves outside bytes and cannot be combined with --format-generated",
+                            log="usage")
     if ctx.watching_status() == "exempt:watching-fork":
         return base("readme", ctx, result="exempt", logs=["exempt"]), OK
     # a watching-org non-fork other than `.github`: held until decided (no README change, no --allow-hold)
     gate_watching(ctx, remedy=README_HOLD_REMEDY)
+    if args.format_generated:
+        from ctshowcase.formatting import target_relative
+        target_relative(rd, path)
+    original_readme = path.read_bytes() if path.is_file() else None
+    raw_readme = (original_readme or b"").decode("utf-8")
+    before = readme.normalize_text(raw_readme.replace("\r\n", "\n").replace("\r", "\n"))
     if args.variant and args.variant != "auto":
         ctx.det["variant"] = args.variant
     ctx.local_badges = args.badges == "local"
+    def preservation(old, new, removed):
+        problems = readme.preservation(old, new, removed)
+        if problems and args.format_generated:
+            from ctshowcase.formatting import match_formatted_managed_blocks
+            comparable = match_formatted_managed_blocks(rd, path, old, new)
+            problems = readme.preservation(old, comparable, removed)
+        return problems
+
     mode = args.mode
     contrib_new = None
+    original_contrib = None
     if args.bootstrap:
         state = readme.bootstrap_state(before)
         removed = []
@@ -522,9 +597,11 @@ def cmd_readme(args):
                         logs=ctx.logs + ["readme-shrink"]), CHECK_FAILED
         if state == "pristine":
             after = readme.bootstrap(ctx, before)
-            cp = rd / "CONTRIBUTING.md"
-            if cp.is_file() and after != before:
-                c0 = cp.read_text(encoding="utf-8")
+            if contrib_path.is_file() and after != before:
+                if args.format_generated:
+                    target_relative(rd, contrib_path)
+                original_contrib = contrib_path.read_bytes()
+                c0 = original_contrib.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
                 c1 = readme.bootstrap_contributing(ctx, c0)
                 contrib_new = c1 if c1 != c0 else None
         elif state == "edited":
@@ -533,12 +610,13 @@ def cmd_readme(args):
             ctx.log("bootstrap:edited")
             base_text = readme.drop_pristine(before)
             after, removed = readme.upgrade(ctx, base_text)
-            if readme.preservation(base_text, after, removed):
+            problems = preservation(base_text, after, removed)
+            if problems:
                 # a marked footer that holds authored content (partner or foreign image) must never be regenerated
                 refusal = _authored_footer_refusal(ctx, base_text)
                 if refusal:
                     return base("readme", ctx, result="fail", mode="bootstrap",
-                                problems=refusal + readme.preservation(base_text, after, removed)[:19],
+                                problems=refusal + problems[:19],
                                 logs=ctx.logs + ["readme-shrink"]), CHECK_FAILED
                 ctx.log("readme-shrink")
                 after, removed = readme.header_only(ctx, base_text), []
@@ -554,10 +632,28 @@ def cmd_readme(args):
             after = readme.header_only(ctx, before)
         else:
             after, removed = readme.upgrade(ctx, before)
-            problems = readme.preservation(before, after, removed)
+            problems = preservation(before, after, removed)
             if problems:
                 return base("readme", ctx, result="fail", mode=mode, problems=problems[:20],
                             logs=ctx.logs + ["readme-shrink"]), CHECK_FAILED
+    if args.format_generated:
+        from ctshowcase.formatting import format_text, markdown_source_style
+        encoding_bom = "\ufeff" if raw_readme.startswith("\ufeff") else ""
+        formatted = format_text(rd, path, encoding_bom + markdown_source_style(after, raw_readme))
+        markers = [m.group(1) for m in readme.find_blocks(readme.MARK, after)]
+        if markers != [m.group(1) for m in readme.find_blocks(readme.MARK, formatted)]:
+            raise ShowcaseError("formatter changed the README managed blocks", log="formatter-content",
+                                code=CHECK_FAILED)
+        if readme.bootstrap_state(after) == "pristine":
+            formatted = readme.reseal_pristine(formatted)
+            if formatted is None:
+                raise ShowcaseError("formatter changed the README template-body markers", log="formatter-content",
+                                    code=CHECK_FAILED)
+        after = formatted
+        # Prettier can emit CRLF. Compare against the exact bytes used for the plan.
+        before = raw_readme
+        if contrib_new is not None:
+            contrib_new = format_text(rd, contrib_path, markdown_source_style(contrib_new, original_contrib.decode("utf-8")))
     changed = after != before
     diff = "".join(difflib.unified_diff(before.splitlines(True), after.splitlines(True), "a/README.md", "b/README.md"))
     badge_outputs = {}
@@ -566,53 +662,109 @@ def cmd_readme(args):
         from ctshowcase.typeset import Fonts
         fonts = Fonts(ctx.brand)
         for rel, (label, message, colour) in sorted(ctx.badge_files.items()):
-            badge_outputs[rel] = badge.svg(ctx.brand, fonts, label, message, colour, style=ctx.style).encode()
-    from ctshowcase.staged import check_outputs, lock_outputs, record_output, tagline_blocks, tagline_digest
-    from ctshowcase.fingerprint import bytes_record, file_record
+            drawing = badge.svg(ctx.brand, fonts, label, message, colour, style=ctx.style)
+            if args.format_generated:
+                from ctshowcase.formatting import protect_svg_title, same_svg
+                formatted = format_text(rd, rd / rel, protect_svg_title(drawing))
+                if not same_svg(drawing, formatted):
+                    raise ShowcaseError("formatter changed the local badge drawing", log="formatter-content",
+                                        code=CHECK_FAILED)
+                drawing = formatted
+            badge_outputs[rel] = drawing.encode("utf-8")
+    from ctshowcase.fingerprint import bytes_record, has_staged_outputs
+    from ctshowcase.staged import (
+        check_outputs, lock_outputs, plan_sidecars, protected_auxiliary, record_output, tagline_blocks, tagline_digest,
+    )
 
     staged = getattr(ctx, "staged_description", None) is not None
     report = (Path(args.records),) if staged and args.records and changed else ()
-    if args.write:
-        destinations = [rd / rel for rel in badge_outputs]
-        if changed or staged or str(ctx.meta.get("description") or "").strip():
-            destinations.append(path)
-        if changed and contrib_new is not None:
-            destinations.append(rd / "CONTRIBUTING.md")
-        with lock_outputs(ctx, path, *destinations):
-            check_outputs(ctx, *destinations, auxiliary=report)
-            current = path.read_bytes() if path.is_file() else None
-            if current != original:
-                raise ShowcaseError("README changed while the refresh was being prepared", log="readme-source-changed",
-                                    code=CHECK_FAILED)
-            if staged:
-                tagline = readme.tagline_body(ctx).strip()
-                if tagline in tagline_blocks(after):
-                    rendered = after.encode("utf-8") if changed else original or b""
-                    record_output(ctx, path, bytes_record(rendered, tagline_sha256=tagline_digest(tagline)))
-            for rel, data in badge_outputs.items():
-                write_artifact(ctx, rd / rel, data)
-            if changed:
-                write_artifact(ctx, path, after.encode("utf-8"))
-                if contrib_new is not None:
-                    if staged:
-                        write_artifact(ctx, rd / "CONTRIBUTING.md", contrib_new.encode("utf-8"))
-                    else:
-                        (rd / "CONTRIBUTING.md").write_text(contrib_new, encoding="utf-8")
-            if not staged and str(ctx.meta.get("description") or "").strip():
-                tagline = readme.tagline_body(ctx).strip()
-                if tagline in tagline_blocks(after):
-                    record_output(ctx, path, file_record(path))
+    capture = getattr(ctx, "meta_path", None)
+    change_records = []
     if args.records and changed:
+        change_records.append(records.record(ctx.owner, ctx.repo, "readme", "README.md", before, after,
+                                             f"§7 variant {ctx.det['variant']} ({mode})"))
+    if args.format_generated and change_records:
+        ensure_distinct_outputs(Path(args.records), path, contrib_path, *(rd / rel for rel in badge_outputs),
+                                *((capture,) if capture else ()))
+    if args.write:
+        if badge_outputs or (changed and contrib_new is not None):
+            ensure_distinct_outputs(path, contrib_path, *(rd / rel for rel in badge_outputs))
+        outputs = [(rd / rel, content) for rel, content in badge_outputs.items()]
+        if changed:
+            outputs.append((path, after.encode("utf-8")))
+            if contrib_new is not None:
+                outputs.append((contrib_path, contrib_new.encode("utf-8")))
+        tagline = readme.tagline_body(ctx).strip() if staged or str(ctx.meta.get("description") or "").strip() else ""
+        record_tagline = tagline and tagline in tagline_blocks(after)
+        destinations = [target for target, _ in outputs]
+        if record_tagline and path not in destinations:
+            destinations.append(path)
+        with lock_outputs(ctx, path, *destinations, auxiliary=report):
+            check_outputs(ctx, *destinations, auxiliary=report,
+                          format_root=getattr(ctx, "format_root", None))
+            if not args.format_generated:
+                current = path.read_bytes() if path.is_file() else None
+                if current != original_readme:
+                    raise ShowcaseError("README changed while the refresh was being prepared", log="readme-source-changed",
+                                        code=CHECK_FAILED)
+            if args.format_generated:
+                from ctshowcase.formatting import write_formatted_outputs
+                from ctshowcase.output_lock import output_lock
+                ensure_distinct_outputs(*(target for target, _ in outputs), *((capture,) if capture else ()))
+                snapshots = {path: original_readme}
+                if contrib_new is not None:
+                    snapshots[contrib_path] = original_contrib
+                for target, original in snapshots.items():
+                    target_relative(ctx.format_root, target)
+                    current = target.read_bytes() if target.is_file() else None
+                    if current != original:
+                        raise ShowcaseError("README inputs changed during formatting", log="formatter-source-changed",
+                                            code=CHECK_FAILED)
+                extra = {"tagline_sha256": tagline_digest(tagline)} if staged and record_tagline else {}
+                rendered_readme = after.encode("utf-8") if changed else original_readme or b""
+                planned = plan_sidecars(ctx, (path, bytes_record(rendered_readme, **extra), False)) if record_tagline else {}
+                if capture is not None:
+                    ensure_distinct_outputs(capture, *planned)
+                for sidecar in planned:
+                    target_relative(ctx.format_root, sidecar)
+                provenance = [(target, _sidecar_text(ctx, target, data).encode("utf-8")) for target, data in planned.items()]
+                private_metadata = {target for target, data in planned.items() if has_staged_outputs(data)}
+                output_group = provenance + outputs if staged else outputs + provenance
+                record_path = Path(args.records) if change_records else None
+                append_output = None
+                if record_path is not None:
+                    ensure_distinct_outputs(record_path, *(target for target, _ in output_group))
+                    encoded = records.json_lines(change_records).replace("\n", os.linesep).encode("utf-8")
+                    append_output = (record_path, encoded)
+                    if staged:
+                        private_metadata.add(record_path)
+                with output_lock(record_path):
+                    if record_path is not None:
+                        if staged:
+                            check_outputs(ctx, *destinations, auxiliary=report)
+                        ensure_distinct_outputs(record_path, path, contrib_path, *(target for target, _ in provenance),
+                                                *(rd / rel for rel in badge_outputs), *((capture,) if capture else ()))
+                    write_formatted_outputs(output_group, repo_root=ctx.format_root, snapshots=snapshots,
+                                            private=staged, private_metadata=private_metadata, append_output=append_output)
+            else:
+                rendered_readme = after.encode("utf-8") if changed else original_readme or b""
+                if staged and record_tagline:
+                    record_output(ctx, path, bytes_record(rendered_readme, tagline_sha256=tagline_digest(tagline)))
+                for target, data in outputs:
+                    if target == contrib_path and not staged:
+                        target.write_text(contrib_new, encoding="utf-8")
+                    else:
+                        write_artifact(ctx, target, data)
+                if not staged and record_tagline:
+                    record_output(ctx, path, bytes_record(rendered_readme))
+    if change_records and not (args.format_generated and args.write):
         if staged and not args.write:
             check_outputs(ctx, path, auxiliary=report)
-        change = records.record(ctx.owner, ctx.repo, "readme", "README.md", before, after,
-                                f"§7 variant {ctx.det['variant']} ({mode})")
         if staged:
-            from ctshowcase.staged import protected_auxiliary
-            with protected_auxiliary(getattr(ctx, "meta_path", None), ctx.repo_dir, Path(args.records)):
-                records.append(args.records, [change])
+            with protected_auxiliary(capture, ctx.repo_dir, Path(args.records)):
+                records.append(args.records, change_records, private=True)
         else:
-            records.append(args.records, [change])
+            records.append(args.records, change_records)
     res = base("readme", ctx, result="changed" if changed else "unchanged", mode="bootstrap" if args.bootstrap else mode,
                variant=ctx.det["variant"], written=bool(args.write and changed))
     if args.diff or not args.write:
@@ -1044,6 +1196,8 @@ def cmd_doctor(args):
         print(doctor.as_md(r, args.header))
     else:
         print(json.dumps(r, ensure_ascii=False))
+    if fmt != "json" and (r["tooling"]["formatters"] or r["tooling"]["validators"]):
+        print("Tooling preflight (not run): " + json.dumps(r["tooling"], ensure_ascii=False), file=sys.stderr)
     return None, CHECK_FAILED if any(v == "fail" for v in r["cells"].values()) else OK
 
 
@@ -1164,6 +1318,8 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--allow-few-chips", action="store_true",
                    help="render with fewer than 2 chips (result incomplete, needs-input:banner-chips) instead of exit 4")
     s.add_argument("--description", help="render a staged description; log and record it without changing GitHub")
+    s.add_argument("--format-generated", action="store_true",
+                   help="format the shared JSON sidecar with the target's pinned local Prettier")
     s.set_defaults(func=cmd_banner)
 
     s = sub.add_parser("card", help="repo card SVG (dark only)")
@@ -1175,6 +1331,7 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--description", help="render a staged description; log and record it without changing GitHub")
     s.add_argument("--key-chip", action="append", default=[])
     s.add_argument("--chip", action="append", default=[])
+    s.add_argument("--format-generated", action="store_true", help="format SVG with the target's pinned local Prettier")
     s.set_defaults(func=cmd_card)
 
     # deprecated alias of the contract name `content social` (same options, same file); added without `help`, so
@@ -1236,6 +1393,7 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--badges", choices=("shields", "local"), default="shields",
                    help="local renders badges offline to docs/images/badges/*.svg (profile READMEs)")
     s.add_argument("--description", help="render a staged description; log and record it without changing GitHub")
+    s.add_argument("--format-generated", action="store_true", help="format generated text with the target's pinned local Prettier")
     s.set_defaults(func=cmd_readme)
 
     s = sub.add_parser("describe", help="lint a description against §4.1 and propose keep/edit")

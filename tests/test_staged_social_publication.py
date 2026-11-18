@@ -70,3 +70,26 @@ def test_staged_provenance_restricts_an_existing_public_sidecar(tmp_path):
     sidecar.chmod(0o644)
     write_sidecar(tmp_path, {}, "config", "banner.png", {"staged_description": {"text": "Private proposal."}})
     assert stat.S_IMODE(sidecar.stat().st_mode) == 0o600
+
+
+@pytest.mark.parametrize("format_generated", [False, True])
+@pytest.mark.skipif(os.name != "posix", reason="POSIX permission bits required")
+def test_readme_staged_records_and_provenance_restrict_existing_permissions(tmp_path, monkeypatch, format_generated):
+    capture = tmp_path / "capture.json"
+    capture.write_text(json.dumps(meta_dict(description="Run the synthetic support queue.")), encoding="utf-8")
+    checkout = tmp_path / "repo"
+    images = checkout / "docs/images"
+    images.mkdir(parents=True)
+    sidecar = images / ".showcase.json"
+    sidecar.write_text('{"outputs":{}}', encoding="utf-8")
+    sidecar.chmod(0o644)
+    records = tmp_path / "records.jsonl"
+    records.touch(mode=0o644)
+    records.chmod(0o644)
+    monkeypatch.setattr("ctshowcase.formatting.format_text", lambda root, path, text: text)
+    flags = ["--format-generated"] if format_generated else []
+    assert showcase.main(["--meta", str(capture), "--repo-dir", str(checkout), "readme", "--write",
+                          "--description", "A synthetic private proposal.", "--records", str(records), *flags]) == 0
+    assert stat.S_IMODE(sidecar.stat().st_mode) == stat.S_IMODE(records.stat().st_mode) == 0o600
+    assert json.loads(sidecar.read_text(encoding="utf-8"))["outputs"]["README.md"]["staged_description"]
+    assert "A synthetic private proposal." in json.loads(records.read_text(encoding="utf-8"))["after"]

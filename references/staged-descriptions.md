@@ -26,7 +26,9 @@ Staged social previews default to `assets/.showcase-staging/social-preview.png`.
 An explicit staged path uses a `.showcase-staging` directory outside the
 files the Action commits.
 A preview's sidecar stays beside the private image outside the canonical Action
-artifact group. Reports also preserve existing PNG or JPEG output files.
+artifact group. Reports preserve existing PNG and JPEG files, as well as paths
+reserved by a queued live preview. On POSIX, staged provenance, reports and
+change records use owner-only file permissions.
 `content social --job` requires captured metadata and a live output path outside
 that directory. Live social renders record provenance beside the image, so a
 staged banner or card cannot overwrite that path even in metadata-only mode.

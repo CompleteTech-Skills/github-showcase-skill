@@ -152,9 +152,15 @@ def _live_social_output(path: Path) -> bool:
             return False
 
 
-def check_outputs(ctx, *paths: Path, auxiliary: tuple[Path, ...] = (), adjacent: bool = False) -> None:
+def check_outputs(ctx, *paths: Path, auxiliary: tuple[Path, ...] = (), adjacent: bool = False,
+                  format_root: Path | None = None) -> None:
     """Keep renderer outputs and their provenance paths distinct before any write."""
     sidecars = {_output_slot(ctx, path, adjacent=adjacent)[0] / fp.SIDECAR for path in paths}
+    if format_root is not None:
+        from .formatting import target_relative
+
+        for sidecar in sidecars:
+            target_relative(format_root, sidecar)
     real_sidecars = {path.resolve() for path in sidecars}
     staged = getattr(ctx, "staged_description", None) is not None
     if staged:
@@ -182,36 +188,59 @@ def check_outputs(ctx, *paths: Path, auxiliary: tuple[Path, ...] = (), adjacent:
 
 
 @contextmanager
-def lock_outputs(ctx, *paths: Path, adjacent: bool = False):
+def lock_outputs(ctx, *paths: Path, adjacent: bool = False, auxiliary: tuple[Path, ...] = ()):
     sidecars = {_output_slot(ctx, path, adjacent=adjacent)[0] / fp.SIDECAR for path in paths}
     if getattr(ctx, "staged_description", None) is not None:
         for path in paths:
             sidecars.add(path.resolve().parent / fp.SIDECAR)
             if _action_managed_path(path, ctx.repo_dir):
                 sidecars.update(root / "docs" / "images" / fp.SIDECAR for root in _action_roots(path, ctx.repo_dir))
+    sidecars.update(path.resolve().parent / fp.SIDECAR for path in auxiliary)
     with ExitStack() as locks:
         for sidecar in sorted(sidecars):
             locks.enter_context(fp.sidecar_lock(sidecar))
         yield
 
 
+def plan_sidecars(ctx, *entries: tuple[Path, dict, bool], adjacent: bool = False) -> dict[Path, dict]:
+    """Prepare output records while retaining earlier records in the same locked group."""
+    planned = {}
+    info = getattr(ctx, "staged_description", None)
+    inputs = None
+    for path, record, always in entries:
+        directory, name, summarize = _output_slot(ctx, path, adjacent=adjacent)
+        sidecar = directory / fp.SIDECAR
+        data = planned.get(sidecar)
+        if data is None:
+            data = fp.read_sidecar(directory)
+        previous = fp.output_records(data).get(name)
+        if not always and info is None and previous is None:
+            continue
+        if isinstance(previous, dict) and previous.get("live_social_preview") is True:
+            record = dict(record, live_social_preview=True)
+        if isinstance(ctx.meta.get("id"), int) and not isinstance(ctx.meta.get("id"), bool):
+            record = dict(record, repository_id=ctx.meta["id"])
+        if info is not None:
+            record = dict(record, staged_description=info)
+        if inputs is None:
+            inputs = fp.inputs(ctx.meta, ctx.repo_dir)
+        planned[sidecar] = fp.update_sidecar(data, inputs, ctx.brand.sha256, name, record,
+                                             summarize=summarize and info is None and "exempt" not in record)
+    return planned
+
+
 def record_output(ctx, path: Path, record: dict, *, always: bool = False,
                   adjacent: bool = False) -> Path | None:
     """Record a generated output and preserve provenance for untouched surfaces."""
-    info = getattr(ctx, "staged_description", None)
-    directory, name, summarize = _output_slot(ctx, path, adjacent=adjacent)
-    previous = fp.output_records(fp.read_sidecar(directory)).get(name)
-    if not always and info is None and previous is None:
-        return None
-    if isinstance(previous, dict) and previous.get("live_social_preview") is True:
-        record = dict(record, live_social_preview=True)
-    directory.mkdir(parents=True, exist_ok=True)
-    if isinstance(ctx.meta.get("id"), int) and not isinstance(ctx.meta.get("id"), bool):
-        record = dict(record, repository_id=ctx.meta["id"])
-    if info is not None:
-        record = dict(record, staged_description=info)
-    return fp.write_sidecar(directory, fp.inputs(ctx.meta, ctx.repo_dir), ctx.brand.sha256, name,
-                            record, summarize=summarize and info is None and "exempt" not in record)
+    directory, _, _ = _output_slot(ctx, path, adjacent=adjacent)
+    sidecar = directory / fp.SIDECAR
+    with fp.sidecar_lock(sidecar):
+        data = plan_sidecars(ctx, (path, record, always), adjacent=adjacent).get(sidecar)
+        if data is None:
+            return None
+        private = fp.has_staged_outputs(data)
+        fp.replace_bytes(sidecar, fp.sidecar_text(data).encode("utf-8"), private=private, preserve_mode=not private)
+    return sidecar
 
 
 def tagline_forms(ctx) -> set[str]:
