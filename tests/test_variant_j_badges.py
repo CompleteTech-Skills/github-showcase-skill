@@ -801,3 +801,39 @@ for ending in ("x", "x)"):
     result = subprocess.run([sys.executable, "-c", probe, str(ROOT / "scripts")],
                             capture_output=True, text=True, timeout=20, check=False)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("mode", ["header", "upgrade"])
+@pytest.mark.parametrize("linked", [False, True])
+@pytest.mark.parametrize("local", [False, True])
+def test_legacy_dual_license_badge_requires_generated_link(make_ctx, tmp_path, mode, linked, local):
+    ctx = profile_context(make_ctx, tmp_path, license="MIT")
+    before = readme.scaffold(ctx)
+    url = (
+        "docs/images/badges/license-agpl-3-0-commercial.svg" if local
+        else "https://img.shields.io/badge/license-AGPL--3.0%20%7C%20commercial-64748B"
+    )
+    row = f"![AGPL-3.0 or commercial license]({url})"
+    if linked:
+        row = f"[{row}](LICENSING.md)"
+    path = tmp_path / "README.md"
+    path.write_text(before.replace(badge_block(before), row), encoding="utf-8")
+    profile_cli(ctx, tmp_path, "readme", "--mode", mode, "--write")
+    updated = badge_block(path.read_text(encoding="utf-8"))
+    if linked:
+        assert readme.generated_badges(updated)
+        assert "![License MIT]" in updated
+    else:
+        assert updated == row
+
+
+@pytest.mark.parametrize(("language", "historical", "authored", "logo"), [
+    ("Python", "3.12", "latest", "python"),
+    ("Node", "20", "20.4", "nodedotjs"),
+])
+def test_legacy_runtime_badges_require_generated_version_shape(make_ctx, tmp_path, language, historical, authored, logo):
+    ctx = profile_context(make_ctx, tmp_path)
+    for version, legacy in ((historical, True), (authored, False)):
+        row = (f"![{language} {version}+](https://img.shields.io/badge/"
+               f"{language.lower()}-{readme.shield(version + '+')}-1E3A8A?logo={logo}&logoColor=white)")
+        assert readme.legacy_profile_badges(ctx.brand, row) is legacy

@@ -360,19 +360,19 @@ def legacy_profile_badges(brand, body: str, style: dict | None = None, *, ci_mat
         else:
             url, link = target, None
         suffixes = ["", "?labelColor=1E1E1E"]
-        links = {None}
+        expected_link = None
         if alt.startswith("License ") and alt[8:]:
             kind, label, message, color = 1, "license", alt[8:], colors["neutral"]
         elif alt == "AGPL-3.0 or commercial license":
             kind, label, message, color = 1, "license", "AGPL-3.0 | commercial", colors["neutral"]
-            links.add("LICENSING.md")
+            expected_link = "LICENSING.md"
             suffixes = [""]
         elif alt.startswith("Language ") and alt[9:]:
             kind, label, message, color = 0, "language", alt[9:], colors["accent"]
-        elif alt.startswith("Python ") and alt.endswith("+"):
+        elif re.fullmatch(r"Python \d+\.\d+\+", alt):
             kind, label, message, color = 0, "python", alt[7:], colors["accent"]
             suffixes = ["?logo=python&logoColor=white"]
-        elif alt.startswith("Node ") and alt.endswith("+"):
+        elif re.fullmatch(r"Node \d+\+", alt):
             kind, label, message, color = 0, "node", alt[5:], colors["accent"]
             suffixes = ["?logo=nodedotjs&logoColor=white"]
         elif alt in ("CI", "Tests"):
@@ -392,7 +392,7 @@ def legacy_profile_badges(brand, body: str, style: dict | None = None, *, ci_mat
         urls = {f"{SHIELDS}{label}-{shield(message)}-{c}{suffix}" for suffix in suffixes for c in shades}
         slug = re.sub(r"[^a-z0-9]+", "-", f"{label}-{message}".lower()).strip("-")
         urls.add(f"docs/images/badges/{slug}.svg")
-        if url not in urls or link not in links:
+        if url not in urls or link != expected_link:
             return False
         kinds.append(kind)
     return kinds == sorted(set(kinds))
