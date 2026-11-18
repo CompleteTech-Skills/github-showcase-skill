@@ -195,7 +195,7 @@ intro (--profile CompleteDotTech | --org OWNER) [--name TEXT] [--eyebrow TEXT] [
       [--chip key:TEXT] [--chip attr:TEXT]... [--mark PATH] [--height 320|360] [--static] [--out assets/intro.svg]
 footer [--check README.md [--online]] [--org OWNER] [--raw]
 readme [--mode auto|scaffold|upgrade|header] [--variant auto|A|B|C|D|E|F|G|H|I|J]
-       [--write] [--diff] [--records FILE] [--bootstrap] [--format-generated]
+       [--write] [--diff] [--records FILE] [--bootstrap | --no-regroup] [--format-generated]
 lint svg --kind intro|card|tile|plate|divider FILE...
 lint readme [README.md] [--variant auto]
 lint banner [docs/images/banner.png]
