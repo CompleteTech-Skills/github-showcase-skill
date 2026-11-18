@@ -49,7 +49,10 @@ def matches_description(body: str, description: str) -> bool:
     verified = payload(body)
     if verified is None and marked(body):
         return False
-    value = normalize(body) if verified is None else verified
+    # Formatters may separate the paragraph from surrounding comments. Only
+    # after exact verification may those outer blank lines be ignored for R2;
+    # the receipt digest and replacement ownership still cover every byte.
+    value = normalize(body) if verified is None else verified.strip("\n")
     description = description.strip()
     if value == f"**{description}**" or value == f'<p align="center"><b>{description}</b></p>':
         return True
