@@ -302,3 +302,49 @@ def test_cli_references_after_comments_use_the_complete_definition_grammar(tmp_p
         path: [f"README.md:{line}"] for path, line in refs.items()
     }
     assert readme.read_bytes() == source
+
+
+@pytest.mark.parametrize("ending", ["\n", "\r\n", "\r"], ids=["lf", "crlf", "cr"])
+@pytest.mark.parametrize("comment", ["<!-- c -->", "<!-- first\nsecond -->", "<!-- a --><!-- b -->"],
+                         ids=["inline", "multiline", "adjacent"])
+def test_cli_comment_tail_references_validate_complete_candidates(tmp_path, ending, comment):
+    parts = []
+    for candidate in (
+        "[prefix]: <span>docs/images/prefix.png",
+        "[short]: <span>.png",
+        "[interior]: docs/images/interior.png<span>.png invalid title",
+        "[angle]: <docs/images/angle<span>.png>",
+        "[label<span>]: docs/images/label.png invalid title",
+        "[title]: docs/images/title.png not-a-title",
+    ):
+        parts.append(comment + candidate + "\n\n")
+    expected = {}
+    for label, destination, target, title in (
+        ("good", "docs/images/reference.png", "docs/images/reference.png", ""),
+        ("angle", "<docs/images/angle.png>", "docs/images/angle.png", ' "Real title"'),
+        ("<span>label", "docs/images/literal-label.png", "docs/images/literal-label.png", ""),
+        ("literal", "docs/images/literal<span>.png", "docs/images/literal<span>.png", ""),
+    ):
+        expected[target] = ("".join(parts) + comment).count("\n") + 1
+        parts.append(f"{comment}[{label}]: {destination}{title}\n\n")
+    expected["docs/images/actual.png"] = "".join(parts).count("\n") + 1
+    parts.append("![Actual](docs/images/actual.png)\n\n")
+    parts.append("<!-- Unterminated comment\n[hidden]: docs/images/hidden.png\n")
+    source = "".join(parts).replace("\n", ending).encode("utf-8")
+    readme = tmp_path / "README.md"
+    readme.write_bytes(source)
+
+    links = run_cli("--repo-dir", tmp_path, "content", "links", "README.md")
+    assert links.returncode == 0, links.stdout + links.stderr
+    report = json.loads(links.stdout)
+    assert {row["target"]: row["line"] for row in report["findings"]} == expected
+    assert {row[3]: int(row[1]) for row in report["dead_links_tsv"]} == expected
+    assert "\\u0000" not in links.stdout
+
+    images = run_cli("--repo-dir", tmp_path, "content", "images", "README.md")
+    assert images.returncode == 1, images.stdout + images.stderr
+    assert {row["path"]: row["referenced_from"] for row in json.loads(images.stdout)["images"]} == {
+        target: [f"README.md:{line}"] for target, line in expected.items()
+    }
+    assert "\\u0000" not in images.stdout
+    assert readme.read_bytes() == source
