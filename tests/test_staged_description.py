@@ -734,6 +734,12 @@ def test_action_refuses_a_staged_proposal_captured_in_the_git_index(tmp_path):
     git("-c", "user.name=Synthetic", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-qm", "base")
     initial = git("rev-parse", "HEAD")
     (tmp_path / "docs/images").mkdir(parents=True)
+    readme = tmp_path / "README.md"
+    readme.write_text("pre-existing staged text", encoding="utf-8")
+    git("add", "--", "README.md")
+    index = tmp_path / ".git/index"
+    original_index = index.read_bytes()
+    readme.write_text("working tree text", encoding="utf-8")
     definition = yaml.safe_load((ROOT / "action.yml").read_text(encoding="utf-8"))
     script = next(step["run"] for step in definition["runs"]["steps"]
                   if "action_commit.sh" in step.get("run", ""))
@@ -755,6 +761,11 @@ def observe_add(argv, *args, **kwargs):
                        encoding="utf-8")
     Path("docs/images/card.svg").write_text("staged drawing", encoding="utf-8")
     result = original_run(argv, *args, **kwargs)
+    candidate = original_run(["git", "show", ":docs/images/.showcase.json"], env=kwargs["env"],
+                             check=True, capture_output=True).stdout
+    assert b"staged_description" in candidate
+    assert original_run(["git", "show", ":README.md"], env=kwargs["env"],
+                        check=True, capture_output=True).stdout == b"working tree text"
     sidecar.write_text('{"outputs":{}}', encoding="utf-8")
     return result
 
@@ -777,7 +788,9 @@ export -f python
     assert "commit skipped" in result.stdout
     assert "Unpublished draft" not in result.stdout + result.stderr
     assert git("rev-parse", "HEAD") == initial
-    assert "staged_description" in git("show", ":docs/images/.showcase.json")
+    assert index.read_bytes() == original_index
+    assert git("diff", "--cached", "--name-only").splitlines() == ["README.md"]
+    assert git("show", ":README.md") == "pre-existing staged text"
     assert "staged_description" not in (tmp_path / "docs/images/.showcase.json").read_text(encoding="utf-8")
 
 
@@ -938,10 +951,11 @@ def test_action_will_not_commit_a_private_preview_already_in_index(tmp_path, pre
     if pre_staged:
         assert "commit skipped" in result.stdout
         assert git("rev-parse", "HEAD") == initial
-        assert f"assets/{SOCIAL_STAGING}/preview.png" in git("diff", "--cached", "--name-only")
+        assert git("diff", "--cached", "--name-only").splitlines() == [
+            f"assets/{SOCIAL_STAGING}/.showcase.json", f"assets/{SOCIAL_STAGING}/preview.png"]
     else:
         assert "would push" in result.stdout
-        assert git("rev-parse", "HEAD") != initial
+        assert git("rev-parse", "HEAD^") == initial
         assert git("diff", "--cached", "--name-only") == ""
         assert git("show", "--format=", "--name-only", "HEAD").strip() == "docs/images/banner.png"
 
@@ -1020,3 +1034,84 @@ def test_action_stages_while_holding_the_renderers_lock(tmp_path):
     assert action.returncode == 0, (stdout, stderr)
     assert "commit skipped" in stdout
     assert git("rev-parse", "HEAD") == initial
+    assert git("diff", "--cached", "--name-only") == ""
+
+
+@pytest.mark.requires_bash
+@pytest.mark.parametrize("concurrent_change", ["head", "index", "branch"])
+def test_action_skips_commit_when_git_state_changes_after_staging(tmp_path, concurrent_change):
+    import os
+    import subprocess
+
+    from conftest import ROOT, run_bash
+
+    def git(*args):
+        return subprocess.run(["git", *args], cwd=tmp_path, capture_output=True, text=True, check=True).stdout.strip()
+
+    git("init", "-q")
+    git("config", "user.name", "Synthetic")
+    git("config", "user.email", "fixture@example.invalid")
+    git("commit", "--allow-empty", "-qm", "base")
+    initial = git("rev-parse", "HEAD")
+    (tmp_path / "README.md").write_text("live README", encoding="utf-8")
+    (tmp_path / "notes.txt").write_text("concurrent staged text", encoding="utf-8")
+    index = tmp_path / ".git/index"
+    original = index.read_bytes()
+    wrapper = tmp_path / "update_git_state.py"
+    wrapper.write_text(r'''
+import os
+import runpy
+import subprocess
+import sys
+
+original_run = subprocess.run
+
+
+def change_git_state(argv, *args, **kwargs):
+    operation = argv[:2]
+    change = os.environ["SHOWCASE_TEST_CONCURRENT_CHANGE"]
+    if change == "head" and operation == ["git", "update-ref"]:
+        parent = argv[-1]
+        tree = subprocess.check_output(["git", "rev-parse", f"{parent}^{{tree}}"], text=True).strip()
+        advanced = subprocess.check_output(["git", "commit-tree", tree, "-p", parent, "-m", "Concurrent"],
+                                           text=True).strip()
+        original_run(["git", "update-ref", "HEAD", advanced, parent], check=True)
+    if operation == ["git", "write-tree"]:
+        if change == "index":
+            original_run(["git", "add", "--", "notes.txt"], check=True)
+        if change == "branch":
+            original_run(["git", "switch", "-qc", "competing"], check=True)
+    return original_run(argv, *args, **kwargs)
+
+
+subprocess.run = change_git_state
+sys.argv.pop(0)
+runpy.run_path(sys.argv[0], run_name="__main__")
+''', encoding="utf-8")
+    script = '''
+python() {
+  command python "$SHOWCASE_TEST_INDEX_WRAPPER" "$@"
+}
+export -f python
+bash "$GITHUB_ACTION_PATH/scripts/action_commit.sh" "Synthetic" fail "$GITHUB_ACTION_PATH/scripts/action_prepare.py"
+'''
+    env = {**os.environ, "GITHUB_ACTION_PATH": str(ROOT), "SHOWCASE_DRY_RUN": "1",
+           "SHOWCASE_TEST_INDEX_WRAPPER": str(wrapper), "SHOWCASE_TEST_CONCURRENT_CHANGE": concurrent_change}
+    result = run_bash(script, cwd=tmp_path, env=env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "commit skipped because HEAD or the caller's Git index changed" in result.stdout
+    assert "would push" not in result.stdout
+    assert not (tmp_path / ".git/index.lock").exists()
+    if concurrent_change == "head":
+        assert git("rev-parse", "HEAD^") == initial
+        assert git("log", "-1", "--format=%s") == "Concurrent"
+        assert index.read_bytes() == original
+        assert git("diff", "--cached", "--name-only") == ""
+    elif concurrent_change == "branch":
+        assert git("symbolic-ref", "--short", "HEAD") == "competing"
+        assert git("rev-parse", "HEAD") == initial
+        assert git("diff", "--cached", "--name-only") == ""
+    else:
+        assert git("rev-parse", "HEAD") == initial
+        assert git("diff", "--cached", "--name-only") == "notes.txt"
+        assert git("show", ":notes.txt") == "concurrent staged text"

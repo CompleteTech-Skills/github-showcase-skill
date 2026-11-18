@@ -18,20 +18,31 @@ done
 # stage the deletion on its own: only when the tracked icon is missing from the checkout, and never an edit to it.
 icon_removed="$(git ls-files --deleted -- assets/icon.png)"
 [ "${#paths[@]}" -eq 0 ] && [ -z "$icon_removed" ] && { echo "showcase: nothing to stage"; exit 0; }
+ref="$(git symbolic-ref --quiet HEAD)" || ref=HEAD
+branch="${ref#refs/heads/}"
 if [ -n "$prepare" ]; then
-  # Hold the render lock across staging and validation, then commit the exact
-  # index snapshot. Subsequent edits to the caller's index do not enter it.
+  # Hold the render lock while staging and validating the private index.
+  # Advance the checked parent and install the candidate only on success.
   index="$(git rev-parse --path-format=absolute --git-path index)"
   snapshot="$(mktemp "$(dirname -- "$index")/showcase-index.XXXXXXXX")"
   trap 'rm -f -- "$snapshot" "$snapshot.lock"' EXIT
   icon_mode=keep-icon
   [ -z "$icon_removed" ] || icon_mode=icon-removal
-  blocked="$(python "$prepare" commit-index "$icon_mode" "$index" "$snapshot" "${paths[@]}")"
-  export GIT_INDEX_FILE="$snapshot"
-  if [ "$blocked" = "true" ]; then
-    echo "::warning title=CompleteTech Showcase::commit skipped while unpublished staged output or unrelated index changes are present"
-    exit 0
-  fi
+  commit="$(python "$prepare" commit-index "$icon_mode" "$index" "$snapshot" "$ref" "$msg" "${paths[@]}")"
+  case "$commit" in
+    blocked)
+      echo "::warning title=CompleteTech Showcase::commit skipped while unpublished staged output or unrelated index changes are present"
+      exit 0
+      ;;
+    changed)
+      echo "::warning title=CompleteTech Showcase::commit skipped because HEAD or the caller's Git index changed"
+      exit 0
+      ;;
+    unchanged)
+      echo "showcase: no changes"
+      exit 0
+      ;;
+  esac
 else
   if [ "${#paths[@]}" -gt 0 ]; then
     git add -- "${paths[@]}"
@@ -39,18 +50,18 @@ else
   if [ -n "$icon_removed" ]; then
     git rm -q --cached -- assets/icon.png
   fi
+  if git diff --cached --quiet; then
+    echo "showcase: no changes"
+    exit 0
+  fi
+  git commit -q -m "$msg"
+  commit="$(git rev-parse HEAD)"
 fi
-if git diff --cached --quiet; then
-  echo "showcase: no changes"
-  exit 0
-fi
-git commit -q -m "$msg"
-branch="$(git rev-parse --abbrev-ref HEAD)"
 if [ "${SHOWCASE_DRY_RUN:-0}" = "1" ]; then
-  echo "showcase: dry run; would push $(git rev-parse --short HEAD) to $branch"
+  echo "showcase: dry run; would push $(git rev-parse --short "$commit") to $branch"
   exit 0
 fi
-if git push origin "HEAD:$branch"; then
+if git push origin "$commit:$ref"; then
   echo "showcase: pushed to $branch"
   exit 0
 fi
@@ -58,7 +69,7 @@ case "$on_protected" in
   pr)
     # showcase/regenerate is owned by this bot: overwrite it outright (a lease needs a remote-tracking ref that a
     # fresh checkout does not have, so --force-with-lease would be rejected once the branch exists).
-    git push --force origin "HEAD:refs/heads/showcase/regenerate"
+    git push --force origin "$commit:refs/heads/showcase/regenerate"
     open_prs="$(gh pr list --head showcase/regenerate --base "$branch" --state open --json number --jq length 2>/dev/null || echo 0)"
     if [ "${open_prs:-0}" != "0" ]; then
       echo "showcase: pull request already open for showcase/regenerate (updated)"

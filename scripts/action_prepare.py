@@ -9,7 +9,7 @@
   action_prepare.py foreign OWNER/REPO NAME  check a canonical banner or card without removing the icon
   action_prepare.py staged             report whether local output still carries a staged proposal
   action_prepare.py staged-index       check staged sidecar blobs before a grouped Git commit
-  action_prepare.py commit-index MODE INDEX SNAPSHOT [PATH...]  stage and check an index copy under the output lock
+  action_prepare.py commit-index MODE INDEX SNAPSHOT REF MESSAGE [PATH...]  check an index copy and commit its tree
   action_prepare.py drop NAME            remove docs/images/NAME and its sidecar record (the sidecar too when empty)
   action_prepare.py summary META_JSON    append the describe and topics proposals to $GITHUB_STEP_SUMMARY
 """
@@ -18,7 +18,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -104,10 +103,11 @@ def has_staged_outputs() -> bool:
                if path.exists() or path.is_symlink())
 
 
-def has_staged_index(*, allow_icon_removal: bool = False, snapshot: str | None = None) -> bool:
+def has_staged_index(*, allow_icon_removal: bool = False, snapshot: str | None = None, parent: str | None = None) -> bool:
     """Check the exact index and prevent grouped commits from including unrelated files."""
     env = {**os.environ, "GIT_INDEX_FILE": snapshot} if snapshot else None
-    changes = subprocess.run(["git", "diff", "--cached", "--name-status", "--no-renames", "-z"],
+    baseline = [parent] if parent else []
+    changes = subprocess.run(["git", "diff", "--cached", "--name-status", "--no-renames", "-z", *baseline],
                              check=True, capture_output=True, timeout=30, env=env)
     columns = changes.stdout.split(b"\0")
     for status, path in zip(columns[::2], columns[1::2]):
@@ -138,15 +138,71 @@ def has_staged_index(*, allow_icon_removal: bool = False, snapshot: str | None =
     return False
 
 
-def prepare_commit_index(index: str, snapshot: str, paths: list[str], *, allow_icon_removal: bool = False) -> bool:
-    """Stage one consistent snapshot of the Action-managed render group."""
+def _index_contents(index: Path) -> bytes | None:
+    try:
+        return index.read_bytes()
+    except FileNotFoundError:
+        return None
+
+
+def prepare_commit_index(index: Path, snapshot: Path, ref: str, message: str, paths: list[str], *,
+                         allow_icon_removal: bool = False) -> str:
+    """Commit the checked tree against its checked parent, then install the successful index."""
+    env = {**os.environ, "GIT_INDEX_FILE": str(snapshot)}
     with sidecar_lock(SIDECAR):
+        parent = subprocess.check_output(["git", "rev-parse", "--verify", f"{ref}^{{commit}}"],
+                                         text=True, timeout=30).strip()
+        original = _index_contents(index)
+        if original is None:
+            snapshot.unlink()
+            subprocess.run(["git", "read-tree", "--empty"], check=True, timeout=30, env=env)
+        else:
+            snapshot.write_bytes(original)
         if paths:
-            subprocess.run(["git", "add", "--", *paths], check=True, timeout=30)
+            subprocess.run(["git", "add", "--", *paths], check=True, timeout=30, env=env)
         if allow_icon_removal:
-            subprocess.run(["git", "rm", "-q", "--cached", "--", "assets/icon.png"], check=True, timeout=30)
-        shutil.copyfile(index, snapshot)
-        return has_staged_index(allow_icon_removal=allow_icon_removal, snapshot=snapshot) or has_staged_outputs()
+            subprocess.run(["git", "rm", "-q", "--cached", "--", "assets/icon.png"], check=True, timeout=30, env=env)
+        if has_staged_index(allow_icon_removal=allow_icon_removal, snapshot=str(snapshot), parent=parent) \
+                or has_staged_outputs():
+            return "blocked"
+        tree = subprocess.check_output(["git", "write-tree"], text=True, timeout=30, env=env).strip()
+        parent_tree = subprocess.check_output(["git", "rev-parse", f"{parent}^{{tree}}"],
+                                             text=True, timeout=30).strip()
+    if tree == parent_tree:
+        return "unchanged"
+
+    # Take the same lock as Git index writers and compare against the original
+    # bytes before replacing the caller's index. Keep the lock through ref update.
+    lock = index.with_name(index.name + ".lock")
+    try:
+        staged = lock.open("xb")
+    except FileExistsError:
+        return "changed"
+    installed = False
+    try:
+        with staged:
+            symbolic_head = subprocess.run(["git", "symbolic-ref", "--quiet", "HEAD"],
+                                           capture_output=True, text=True, timeout=30)
+            current_ref = symbolic_head.stdout.strip() if symbolic_head.returncode == 0 else "HEAD"
+            if current_ref != ref or _index_contents(index) != original:
+                return "changed"
+            staged.write(snapshot.read_bytes())
+        commit = subprocess.check_output(["git", "commit-tree", tree, "-p", parent, "-m", message],
+                                         text=True, timeout=30).strip()
+        subject = message.split("\n", 1)[0]
+        update = subprocess.run(["git", "update-ref", "--no-deref", "-m", f"commit: {subject}", ref, commit, parent],
+                                capture_output=True, timeout=30)
+        if update.returncode:
+            if subprocess.check_output(["git", "rev-parse", "--verify", f"{ref}^{{commit}}"],
+                                       text=True, timeout=30).strip() != parent:
+                return "changed"
+            update.check_returncode()
+        os.replace(lock, index)
+        installed = True
+        return commit
+    finally:
+        if not installed:
+            lock.unlink(missing_ok=True)
 
 
 def drop(name: str) -> None:
@@ -210,10 +266,10 @@ if __name__ == "__main__":
     if sys.argv[1:] == ["staged"]:
         print("true" if has_staged_outputs() else "false")
         sys.exit(0)
-    if len(sys.argv) >= 5 and sys.argv[1] == "commit-index" and sys.argv[2] in ("keep-icon", "icon-removal"):
-        blocked = prepare_commit_index(sys.argv[3], sys.argv[4], sys.argv[5:],
-                                       allow_icon_removal=sys.argv[2] == "icon-removal")
-        print("true" if blocked else "false")
+    if len(sys.argv) >= 7 and sys.argv[1] == "commit-index" and sys.argv[2] in ("keep-icon", "icon-removal"):
+        result = prepare_commit_index(Path(sys.argv[3]), Path(sys.argv[4]), sys.argv[5], sys.argv[6], sys.argv[7:],
+                                      allow_icon_removal=sys.argv[2] == "icon-removal")
+        print(result)
         sys.exit(0)
     if sys.argv[1:] in (["staged-index"], ["staged-index", "icon-removal"]):
         print("true" if has_staged_index(allow_icon_removal=len(sys.argv) == 3) else "false")

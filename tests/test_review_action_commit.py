@@ -43,7 +43,7 @@ def _prepare_and_commit(repo):
     assert p.stdout.strip() == "true", p.stdout + p.stderr
     (repo / "docs" / "images" / "banner.png").write_bytes(b"own banner")  # the regenerated art
     p = run_bash((ROOT / "scripts" / "action_commit.sh").read_text(encoding="utf-8"),
-                 "docs: regenerate [skip ci]", "fail", cwd=repo, env=ENV)
+                 "docs: regenerate [skip ci]", "fail", str(ROOT / "scripts" / "action_prepare.py"), cwd=repo, env=ENV)
     assert p.returncode == 0, p.stdout + p.stderr
 
 
