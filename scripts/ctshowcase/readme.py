@@ -186,9 +186,9 @@ def hero_path(ctx: RepoContext) -> str:
     return "assets/intro.svg" if personal_profile(ctx) else "docs/images/banner.png"
 
 
-def legacy_banner_html(ctx: RepoContext) -> str:
+def legacy_banner_html(ctx: RepoContext, repo: str | None = None) -> str:
     """The exact previously generated body; a similar authored image is not ours to migrate."""
-    return f'<p align="center">\n  <img src="docs/images/banner.png" alt="{ctx.repo} by {ctx.company}" width="100%">\n</p>'
+    return f'<p align="center">\n  <img src="docs/images/banner.png" alt="{repo or ctx.repo} by {ctx.company}" width="100%">\n</p>'
 
 
 def personal_intro_html(ctx: RepoContext) -> str:
@@ -200,7 +200,10 @@ def personal_intro_html(ctx: RepoContext) -> str:
 
 
 def personal_generated_hero(ctx: RepoContext, body: str) -> bool:
-    if body == legacy_banner_html(ctx) or not body.strip():
+    if body == legacy_banner_html(ctx) or not body.strip(" \t\n\r"):
+        return True
+    legacy = re.search(r' alt="([A-Za-z0-9-]+) by ', body)
+    if legacy and body == legacy_banner_html(ctx, legacy.group(1)) and ctx.same_owner(legacy.group(1)):
         return True
     try:
         if body == personal_intro_html(ctx):
@@ -673,6 +676,10 @@ def callout(ctx) -> str | None:
 # Modes
 # ------------------------------------------------------------------------------------------------
 def scaffold(ctx: RepoContext, existing: str = "") -> str:
+    if existing and personal_profile(ctx):
+        normalized = normalize_text(existing)
+        if _personal_has_authored_hero(ctx, normalized, find_blocks(MARK, normalized)):
+            return header_only(ctx, existing, preserve_structure=True)
     variant = ctx.det["variant"]
     order = required_sections(ctx.det, meta=ctx.meta)
     parts = [header(ctx)]
@@ -770,6 +777,11 @@ def _personal_preamble_has_art(text: str) -> bool:
                for _, source, _ in _image_entries(masked(unmarked)[:len(preamble)], unmarked))
 
 
+def _personal_has_authored_hero(ctx: RepoContext, text: str, markers: list[re.Match]) -> bool:
+    return (any(m.group(1) == "banner" and not personal_generated_hero(ctx, m.group(2)) for m in markers)
+            or _personal_preamble_has_art(text))
+
+
 def callout_only(ctx: RepoContext, text: str, *, retain_personal_banner: bool = False) -> tuple[str, list[str]]:
     """Variants G and H (§7.4): the hero banner block, then the callout (unless one is already there), then the body
     unchanged, then the decision 18 footer. Nothing else changes. Watching-org forks never reach here (`readme`
@@ -791,8 +803,11 @@ def callout_only(ctx: RepoContext, text: str, *, retain_personal_banner: bool = 
     personal = personal_intro_applies(ctx)
     banner_gap = "\n\n"
     replaced_hero: list[str] = []
-    banners = [block for block in find_blocks(MARK, text) if block.group(1) == "banner"] if personal and not leading else []
-    if (not retain_personal_banner and len(banners) == 1 and _block_on_separate_lines(text, banners[0])
+    banners = [block for block in find_blocks(MARK, text) if block.group(1) == "banner"] if personal else []
+    if not retain_personal_banner and len(banners) > 1:
+        raise NeedsInput("intro", "Keep one managed personal hero block before refreshing the intro.")
+    if (not retain_personal_banner and not leading and len(banners) == 1
+            and _block_on_separate_lines(text, banners[0])
             and personal_generated_hero(ctx, banners[0].group(2))):
         banner = banners[0]
         old_hero = banner.group(2)
@@ -1143,12 +1158,10 @@ def upgrade(ctx: RepoContext, text: str, *, already_normalized: bool = False) ->
     personal = personal_profile(ctx)
     retain_personal_banner = personal and ctx.preserve_unchanged() and preserved(ctx, text)
     markers = find_blocks(MARK, text) if personal or variant == "J" else []
-    if personal:
-        heroes = [m.group(2) for m in markers if m.group(1) == "banner"]
-        if any(not personal_generated_hero(ctx, body) for body in heroes) or _personal_preamble_has_art(text):
-            # Every personal variant preserves authored artwork and refreshes only existing owned blocks.
-            return header_only(ctx, text, already_normalized=True, preserve_structure=True,
-                               retain_personal_banner=retain_personal_banner), []
+    if personal and _personal_has_authored_hero(ctx, text, markers):
+        # Every personal variant preserves authored artwork and refreshes only existing owned blocks.
+        return header_only(ctx, text, already_normalized=True, preserve_structure=True,
+                           retain_personal_banner=retain_personal_banner), []
     if variant in ("G", "H"):
         return callout_only(ctx, text, retain_personal_banner=retain_personal_banner)
     if retain_personal_banner and any(block.group(1) == "banner" for block in markers):

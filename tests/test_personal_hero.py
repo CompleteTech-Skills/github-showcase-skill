@@ -53,12 +53,36 @@ def test_personal_scaffold_missing_intro_refuses_before_writes(tmp_path):
     assert not (tmp_path / "docs").exists()
 
 
+@pytest.mark.parametrize("mode", ["auto", "scaffold"])
+@pytest.mark.parametrize("with_intro", [False, True])
+def test_personal_short_readme_keeps_authored_hero_when_scaffolding(tmp_path, intro_bytes, mode, with_intro):
+    meta = metadata(tmp_path)
+    if with_intro:
+        put_intro(tmp_path, intro_bytes)
+    readme = tmp_path / "README.md"
+    before = b"\xef\xbb\xbf![Custom hero](hero.svg)  \r\n\r# Synthetic Profile\n"
+    readme.write_bytes(before)
+    records = tmp_path / "records.jsonl"
+    modes = [] if mode == "auto" else ["--mode", mode]
+
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "--format", "json", "readme",
+                     *modes, "--records", records, "--write")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    report = json.loads(result.stdout)
+    assert report["mode"] == "scaffold"
+    assert report["result"] == "unchanged" and report["written"] is False
+    assert readme.read_bytes() == before
+    assert not records.exists()
+
+
 @pytest.mark.parametrize("mode", ["header", "upgrade"])
-def test_personal_refresh_migrates_only_the_exact_old_generated_hero(tmp_path, intro_bytes, mode):
+@pytest.mark.parametrize("legacy_repo", ["CompleteDotTech", "completedottech"])
+def test_personal_refresh_migrates_only_the_exact_old_generated_hero(tmp_path, intro_bytes, mode, legacy_repo):
     meta = metadata(tmp_path)
     put_intro(tmp_path, intro_bytes)
     source = ('<!-- showcase:banner:start -->\n<p align="center">\n'
-              '  <img src="docs/images/banner.png" alt="CompleteDotTech by CompleteTech LLC" width="100%">\n'
+              f'  <img src="docs/images/banner.png" alt="{legacy_repo} by CompleteTech LLC" width="100%">\n'
               '</p>\n<!-- showcase:banner:end -->\n\n# Synthetic profile\n\nAuthored project notes stay.\n')
     path = tmp_path / "README.md"
     path.write_bytes(source.encode("utf-8"))
@@ -83,6 +107,16 @@ def test_personal_refresh_keeps_authored_marked_hero_without_intro(tmp_path, mod
     assert body in text and "Authored notes." in text
     assert "assets/intro.svg" not in text and "docs/images/banner.png" not in text
 
+
+
+def test_personal_scaffold_keeps_nonbreaking_space_in_authored_hero(tmp_path):
+    meta = metadata(tmp_path)
+    path = tmp_path / "README.md"
+    before = "<!-- showcase:banner:start -->\r\n \n<!-- showcase:banner:end -->\r\n".encode("utf-8")
+    path.write_bytes(before)
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--mode", "scaffold", "--write")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert path.read_bytes() == before
 
 def test_personal_header_keeps_authored_bytes_and_crlf(tmp_path, intro_bytes):
     meta = metadata(tmp_path)
@@ -329,6 +363,21 @@ def test_personal_callout_variant_refreshes_managed_hero_to_intro(tmp_path, intr
     assert text.count('src="assets/intro.svg"') == 1 and "docs/images/banner.png" not in text
     assert "> Synthetic callout." in text and "Authored notes." in text
 
+    lint_args = ("--meta", meta, "--repo-dir", tmp_path, "lint", "readme", path, "--variant", variant)
+    lint = run_cli(*lint_args)
+    assert lint.returncode == 0, lint.stdout + lint.stderr
+    legacy = text.replace('src="assets/intro.svg"', 'src="docs/images/banner.png"', 1)
+    path.write_text(legacy, encoding="utf-8")
+    lint = run_cli(*lint_args)
+    assert lint.returncode == 1
+    assert "D13 the hero must be the first image (assets/intro.svg)" in json.loads(lint.stdout)["fails"]
+
+    picture = text.replace('<p align="center">', '<picture>', 1).replace("</p>", "</picture>", 1)
+    path.write_text(picture, encoding="utf-8")
+    lint = run_cli(*lint_args)
+    assert lint.returncode == 1
+    assert "D13 banner must be a plain <img>, not <picture>" in json.loads(lint.stdout)["fails"]
+
 
 @pytest.mark.parametrize("variant", ["G", "H"])
 def test_personal_callout_variant_missing_intro_refuses_before_writes(tmp_path, variant):
@@ -342,6 +391,21 @@ def test_personal_callout_variant_missing_intro_refuses_before_writes(tmp_path, 
     assert result.returncode == 4 and "needs-input:intro" in result.stdout, result.stdout + result.stderr
     assert path.read_bytes() == source.encode("utf-8")
     assert not records.exists() and not (tmp_path / "docs").exists()
+
+
+@pytest.mark.parametrize("variant", ["G", "H"])
+def test_personal_callout_refuses_multiple_owned_heroes_before_writes(tmp_path, variant):
+    meta = metadata(tmp_path)
+    source = ("> [!NOTE]\n> Synthetic callout.\n\n" + LEGACY_HERO + "# Profile\n\n"
+              + LEGACY_HERO + "Authored notes.\n").encode("utf-8")
+    path = tmp_path / "README.md"
+    path.write_bytes(source)
+    records = tmp_path / "records.jsonl"
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "--format", "json", "readme",
+                     "--mode", "upgrade", "--variant", variant, "--records", records, "--write")
+    assert result.returncode == 4 and "needs-input:intro" in result.stdout, result.stdout + result.stderr
+    assert path.read_bytes() == source
+    assert not records.exists()
 
 
 @pytest.mark.parametrize("variant", ["G", "H"])

@@ -187,11 +187,16 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
     variant = variant if variant and variant != "auto" else ctx.det["variant"]
     if len(raw) >= 512_000:
         fails.append("R7 size >= 500 KiB")
+    hero = hero_path(ctx)
+    personal = hero == "assets/intro.svg"
     if variant in ("G", "H"):
         # §7.4 G/H: the hero banner block, then the callout, then the body unchanged, then the footer
         banner = leading_banner_block(text)
         rest = (text[banner.end():] if banner else text).lstrip()
-        if not banner and ctx.art_status()["banner"] is None:
+        if personal:
+            unchanged = ctx.preserve_unchanged() and preserved(ctx, text)
+            fails.extend(_personal_hero_failures(banner.group(2) if banner else text, hero, unchanged))
+        elif not banner and ctx.art_status()["banner"] is None:
             fails.append(f"D13 variant {variant} must open with the hero banner block")
         first = rest.splitlines()[0] if rest.strip() else ""
         if not first.startswith(">"):
@@ -211,8 +216,6 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
     lines = [line for line in source_lines(plain) if line.strip(" \t")]
     preserve = preserved(ctx, text)
     unchanged = preserve and ctx.preserve_unchanged()
-    hero = hero_path(ctx)
-    personal = hero == "assets/intro.svg"
     # §7.1 order (q57 `nav`): hero banner, then the nav line; "Nav line first" (readme.nav_first) puts the nav on top
     navs = lines
     if not nav_first(ctx) and not unchanged:
@@ -236,15 +239,7 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
             warns.append("preserve: §7.0 additive-only README under the hero banner (q57 pres); R2 tagline and R7 H2 "
                          "order are n/a")
     if personal:
-        parsed = _image_entries(_outside_code(plain), plain, source_order=True)
-        if not unchanged:
-            if not parsed:
-                fails.append("D13 no banner image")
-            elif not _is_personal_hero(parsed[0], hero):
-                fails.append(f"D13 the hero must be the first image ({hero})")
-        pictures = re.finditer(r"<picture\b[^>]*>.*?</picture\s*>", _outside_code(plain), re.I | re.S)
-        if any(_has_personal_hero(picture.group(0), hero) for picture in pictures):
-            fails.append("D13 banner must be a plain <img>, not <picture>")
+        fails.extend(_personal_hero_failures(plain, hero, unchanged))
     elif imgs:
         _, first = imgs[0]
         if hero not in first and not unchanged:
@@ -365,6 +360,21 @@ def _is_personal_hero(image: tuple[str, str, bool], hero: str) -> bool:
 
 def _has_personal_hero(text: str, hero: str) -> bool:
     return any(_is_personal_hero(image, hero) for image in _image_entries(_outside_code(text), text))
+
+
+def _personal_hero_failures(text: str, hero: str, unchanged: bool) -> list[str]:
+    image_view = _outside_code(text)
+    parsed = _image_entries(image_view, text, source_order=True)
+    failures = []
+    if not unchanged:
+        if not parsed:
+            failures.append("D13 no banner image")
+        elif not _is_personal_hero(parsed[0], hero):
+            failures.append(f"D13 the hero must be the first image ({hero})")
+    pictures = re.finditer(r"<picture\b[^>]*>.*?</picture\s*>", image_view, re.I | re.S)
+    if any(_has_personal_hero(picture.group(0), hero) for picture in pictures):
+        failures.append("D13 banner must be a plain <img>, not <picture>")
+    return failures
 
 
 def _lead_banner_lines(lines: list[str], hero: str = "docs/images/banner.png") -> int | None:

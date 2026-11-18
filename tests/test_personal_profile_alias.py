@@ -1,6 +1,7 @@
 """Personal profile identity is shared by banner and README commands."""
 import copy
 import json
+import re
 
 import yaml
 
@@ -50,6 +51,21 @@ def test_personal_owner_alias_uses_intro_instead_of_banner(tmp_path, monkeypatch
     assert '<img src="assets/intro.svg"' in text
     assert "docs/images/banner.png" not in text
 
+
+    path = tmp_path / "README.md"
+    legacy, count = re.subn(
+        r'src="assets/intro\.svg" alt="[^"\n]*"',
+        f'src="docs/images/banner.png" alt="{owner} by CompleteTech LLC"',
+        text,
+        count=1,
+    )
+    assert count == 1
+    path.write_text(legacy, encoding="utf-8")
+    readme = run_cli(*args, "readme", "--mode", "header", "--write")
+    assert readme.returncode == 0, readme.stdout + readme.stderr
+    refreshed = path.read_text(encoding="utf-8")
+    assert '<img src="assets/intro.svg"' in refreshed
+    assert "docs/images/banner.png" not in refreshed
 
 def test_alias_does_not_exempt_other_repositories(brand, monkeypatch, tmp_path):
     from ctshowcase.config import Brand
