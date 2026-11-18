@@ -18,8 +18,8 @@ from .context import RepoContext
 from .detect import required_sections, standard
 from .errors import ArtFail, ConfigError, NeedsInput
 from .mdcode import (  # noqa: F401  (code_spans: re-exported for callers)
-    MANAGED_BLOCK_PATTERN, _image_entries, after_line_end, code_block_spans, code_spans, find_blocks, html_block_spans,
-    masked, top_level_heading_spans,
+    MANAGED_BLOCK_PATTERN, _image_entries, _outside_code, after_line_end, code_block_spans, code_spans, find_blocks,
+    html_block_spans, masked, top_level_heading_spans,
 )
 
 MARK = MANAGED_BLOCK_PATTERN
@@ -685,7 +685,8 @@ def callout(ctx) -> str | None:
 # ------------------------------------------------------------------------------------------------
 def scaffold(ctx: RepoContext, existing: str = "") -> str:
     variant = ctx.det["variant"]
-    if personal_profile(ctx):
+    personal = personal_profile(ctx)
+    if personal:
         normalized = normalize_text(existing)
         if variant in ("G", "H"):
             return upgrade(ctx, normalized, already_normalized=True)[0]
@@ -700,12 +701,12 @@ def scaffold(ctx: RepoContext, existing: str = "") -> str:
     co = callout(ctx)
     if co:
         parts.append(co)
-    keep = [ln for ln in source_lines(existing) if ln.strip(" \t") and not ln.startswith("# ")]
+    keep = [ln for ln in source_lines(existing) if (personal or ln.strip(" \t")) and not ln.startswith("# ")]
     for h2, req in order:
         if h2 in ("License", "Licensing"):
             continue
         body = section_facts(ctx, h2)
-        if h2 == "About" and keep:
+        if h2 == "About" and any(ln.strip(" \t") for ln in keep):
             body = "\n".join(keep)
         if body:
             parts.append(f"## {h2}\n\n{body}")
@@ -794,7 +795,7 @@ def _personal_preamble_has_art(text: str) -> bool:
     unmarked, _ = _strip_markers(text)
     end = personal_header_end(unmarked)
     return any(not _badge_or_logo(source, personal=True)
-               for _, source, _ in _image_entries(masked(unmarked)[:end], unmarked))
+               for _, source, _ in _image_entries(_outside_code(unmarked)[:end], unmarked))
 
 
 def _personal_has_authored_hero(ctx: RepoContext, text: str, markers: list[re.Match]) -> bool:
@@ -803,7 +804,7 @@ def _personal_has_authored_hero(ctx: RepoContext, text: str, markers: list[re.Ma
 
 
 def _badges_precede_banner(text: str, banner: re.Match) -> bool:
-    images = _image_entries(masked(text)[:banner.start()], text)
+    images = _image_entries(_outside_code(text)[:banner.start()], text)
     return bool(images) and all(_badge_or_logo(source, personal=True) for _, source, _ in images)
 
 

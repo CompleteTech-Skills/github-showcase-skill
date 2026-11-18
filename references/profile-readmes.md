@@ -137,7 +137,11 @@ When authored badges precede an owned personal hero, a full upgrade moves only
 that hero ahead of the badges. A full G or H upgrade also moves a managed hero
 out of the authored body. Header-only and `--no-regroup` refreshes instead
 return `needs-input:intro-order` before writing, because they cannot move the
-existing marker block. Fenced image examples do not affect the image order.
+existing marker block. Fenced or commented image examples do not affect the image order.
+Images inside HTML comments do not count as authored heroes or badges; the README
+still needs its applicable intro or an actionable missing-input result.
+Personal scaffolding retains the authored body's blank separators, including
+those that keep prose outside a preceding callout or comment.
 G and H can refresh an exactly owned hero body in place when authored text touches
 its marker lines; that text keeps its original bytes. If preceding badges require
 moving such a block, they instead return `needs-input:intro-order` before writing.
