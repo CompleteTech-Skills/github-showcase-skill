@@ -14,7 +14,8 @@ from .mdcode import MANAGED_BLOCK_PATTERN, find_blocks
 FIELDS = ("owner", "repo", "description", "homepage", "topics", "fork", "archived", "visibility", "is_template",
           "default_branch", "language", "languages", "license", "stargazers_count", "created_at", "labels",
           "readme_head", "parent", "health_percentage", "has_issues", "has_wiki", "has_projects", "has_discussions",
-          "delete_branch_on_merge", "files", "manifests", "homepage_status", "file_sizes", "template_repository", "template_taglines")
+          "delete_branch_on_merge", "files", "manifests", "homepage_status", "file_sizes", "template_repository",
+          "template_taglines", "template_tagline_sources")
 # STANDARD §0 / CQ-16: estate commits never count as substantive (the bulk transfer and the run's own commits move
 # pushed_at, so recency uses the newest default-branch commit whose message does not match this)
 NON_SUBSTANTIVE = re.compile(r"ct-std-v1|showcase banner and card|\[skip ci\]")
@@ -73,6 +74,10 @@ def normalize(raw: dict) -> dict:
     tts = raw.get("template_taglines")
     tts = [tts] if isinstance(tts, str) else tts if isinstance(tts, list) else []
     m["template_taglines"] = list(dict.fromkeys(t for t in tts if isinstance(t, str) and t.strip()))
+    if "template_tagline_sources" in raw:
+        sources = raw["template_tagline_sources"]
+        m["template_tagline_sources"] = list(dict.fromkeys(
+            item for item in sources if isinstance(item, str) and item.strip())) if isinstance(sources, list) else []
     m["default_branch"] = raw.get("default_branch") or "main"
     m["language"] = raw.get("language")
     m["languages"] = dict(raw.get("languages") or {})
@@ -216,32 +221,38 @@ def last_substantive(commits) -> tuple[str, str] | None:
     return None
 
 
-def _tagline_of(content: object) -> str | None:
+def _tagline_of(content: object, *, sources: list[str] | None = None) -> str | None:
     """The first tagline block outside code of a contents-API README object, or None."""
     if not (isinstance(content, dict) and content.get("content")):
         return None
     text = base64.b64decode(content["content"]).decode("utf-8", errors="replace").removeprefix("\ufeff")
     for block in find_blocks(MANAGED_BLOCK_PATTERN, text):
         if block.group(1) == "tagline":
-            from .tagline import inherited_payload
-            body = inherited_payload(block.group(2))
-            return body if body is not None and body.strip() else None
+            from .tagline import inherited_payload, visible
+
+            exact = inherited_payload(block.group(2))
+            if exact is not None and exact.strip():
+                if sources is not None:
+                    sources.append(exact)
+                projected = visible(block.group(2))
+                return projected if projected is not None else exact
+            return None
     return None
 
 
-def _template_taglines(tmpl: str, created_at: object) -> list[str]:
+def _template_taglines(tmpl: str, created_at: object) -> tuple[list[str], list[str]]:
     """The template's README tagline when this repository was generated from it (the last README commit at or before
     `created_at`) and today; read-only GETs, an unreadable step is simply skipped."""
     current = _gh(f"repos/{tmpl}/readme")
     path = current.get("path") if isinstance(current, dict) else None
-    out = []
+    out, sources = [], []
     if path and isinstance(created_at, str) and re.fullmatch(r"\d{4}-\d\d-\d\dT[\d:]+Z", created_at):
         hist = _gh(f"repos/{tmpl}/commits?path={path}&until={created_at}&per_page=1")
         sha = hist[0].get("sha") if isinstance(hist, list) and hist and isinstance(hist[0], dict) else None
         if sha and re.fullmatch(r"[0-9a-f]{40}", sha):
-            out.append(_tagline_of(_gh(f"repos/{tmpl}/contents/{path}?ref={sha}")))
-    out.append(_tagline_of(current))
-    return list(dict.fromkeys(t for t in out if t))
+            out.append(_tagline_of(_gh(f"repos/{tmpl}/contents/{path}?ref={sha}"), sources=sources))
+    out.append(_tagline_of(current, sources=sources))
+    return list(dict.fromkeys(t for t in out if t)), list(dict.fromkeys(sources))
 
 
 def from_gh(full_name: str) -> dict:
@@ -262,7 +273,7 @@ def from_gh(full_name: str) -> dict:
     tmpl = repo.get("template_repository")
     tmpl_name = tmpl.get("full_name") if isinstance(tmpl, dict) else None
     if tmpl_name and re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", tmpl_name):
-        raw["template_taglines"] = _template_taglines(tmpl_name, repo.get("created_at"))
+        raw["template_taglines"], raw["template_tagline_sources"] = _template_taglines(tmpl_name, repo.get("created_at"))
     branch = repo.get("default_branch") or "main"
     hit = last_substantive(_gh(f"repos/{full_name}/commits?sha={branch}&per_page=100"))
     if hit:

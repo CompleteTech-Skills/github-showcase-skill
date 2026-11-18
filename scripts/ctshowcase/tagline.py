@@ -55,8 +55,8 @@ def visible(body: str) -> str | None:
 
 
 def inherited_payload(body: str) -> str | None:
-    """Preserve exact legacy whitespace, and never launder an invalid receipt."""
-    verified = visible(body)
+    """Return exact inheritance evidence, retaining verified separator whitespace."""
+    verified = payload(body)
     return verified if verified is not None else None if marked(body) else normalize(body)
 
 

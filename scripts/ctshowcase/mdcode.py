@@ -2397,7 +2397,10 @@ def tagline_reflow_key(body: str) -> str:
     # cannot be equated with ordinary wrapping.
     # Try a space run only at its first byte. Retrying the greedy hard-break
     # alternative at every space makes newline-free metadata quadratic.
-    opaque.extend(m.span() for m in re.finditer(r"(?:(?<! ) {2,}|\\)\n|\n[ \t]*\n|(?m:^[ ]{4,}[^ \t\n])", body))
+    # A hard break and following blank line share a newline. Record both, so
+    # the first match cannot hide the rest of a paragraph separator.
+    opaque.extend(m.span() for m in re.finditer(r"(?:(?<! ) {2,}|\\)\n", body))
+    opaque.extend(m.span() for m in re.finditer(r"\n(?:[ \t]*\n)+|(?m:^[ ]{4,}[^ \t\n])", body))
     parts = []
     cursor = 0
     for start, end in sorted(opaque):

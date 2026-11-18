@@ -145,7 +145,8 @@ def test_verified_outer_blank_lines_and_soft_wraps_match_without_sidecar_authori
                                     "outputs": {}}), encoding="utf-8")
     assert assert_receipt(body) == payload
     assert tagline.payload(body) == payload
-    assert tagline.inherited_payload(body) == visible
+    assert tagline.visible(body) == visible
+    assert tagline.inherited_payload(body) == payload
     original = receipt(f"**{DESCRIPTION}**")
     stamp = original.split("\n", 1)[0]
     assert tagline.reseal(original, f"{stamp}\n{payload}") == receipt(payload)
@@ -231,3 +232,16 @@ def test_verified_tagline_keeps_preformatted_html_whitespace(tmp_path, element):
         assert tagline.matches_description(original, description)
         assert not tagline.matches_description(receipt(wrapper.format(changed)), description)
         assert tagline.reseal(original, f"{stamp}\n{wrapper.format(changed)}") is None
+
+
+@pytest.mark.parametrize("hard_break", ["  ", "\\"], ids=["two-space", "backslash"])
+@pytest.mark.parametrize("paragraph", ["\n", " \t\n", "\n\n"], ids=["empty", "space-tab", "multiple"])
+def test_centered_tagline_retains_paragraph_after_hard_break(hard_break, paragraph):
+    description = f"Compare synthetic{hard_break}\n{paragraph}Northwind values offline."
+    changed = f"Compare synthetic{hard_break}\n Northwind values offline."
+    wrapper = '<p align="center"><b>{}</b></p>'
+    original = receipt(wrapper.format(description))
+    stamp = original.split("\n", 1)[0]
+    assert tagline.matches_description(original, description)
+    assert not tagline.matches_description(original, changed)
+    assert tagline.reseal(original, f"{stamp}\n{wrapper.format(changed)}") is None

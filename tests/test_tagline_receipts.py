@@ -122,6 +122,33 @@ def test_meta_reads_payload_and_rejects_edited_receipt(tmp_path):
     assert metadata._tagline_of(capture(source.replace(OLD, NEW))) is None
 
 
+@pytest.mark.parametrize("local_matches_source", [False, True], ids=["authored", "inherited"])
+def test_projected_template_capture_is_not_inheritance_evidence(tmp_path, monkeypatch, local_matches_source):
+    path, capture_path, argv = generated_checkout(tmp_path)
+    visible = f"**{OLD}**"
+    source_payload = f" \t\n{visible}\n\t"
+    digest = hashlib.sha256(source_payload.encode()).hexdigest()
+    stamped = f"<!-- showcase:tagline:generated sha256={digest} -->\n{source_payload}"
+    content = base64.b64encode(readme.wrap("tagline", stamped).encode()).decode()
+    snapshot = {
+        "repos/Northwind-Trading-Co/project": meta_dict(
+            repo="project", description="", template_repository={"full_name": "Northwind-Trading-Co/template"}),
+        "repos/Northwind-Trading-Co/template/readme": {"path": "README.md", "content": content},
+    }
+    monkeypatch.setattr(metadata, "_gh", lambda path, **kwargs: snapshot.get(path))
+    captured = metadata.normalize(metadata.from_gh("Northwind-Trading-Co/project"))
+    assert captured["template_taglines"] == [visible]
+    assert captured["template_tagline_sources"] == [source_payload]
+    capture_path.write_text(json.dumps(captured), encoding="utf-8")
+
+    local = stamped if local_matches_source else visible
+    original = path.read_text(encoding="utf-8")
+    path.write_text(original.replace(body(original), local), encoding="utf-8")
+    result = run_cli(*argv, "--mode", "header")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert body(path.read_text(encoding="utf-8")) == ("" if local_matches_source else local)
+
+
 def test_lint_checks_live_block_not_matching_sentence_elsewhere(tmp_path):
     path, meta, _ = generated_checkout(tmp_path)
     path.write_text(path.read_text(encoding="utf-8") + f"\n**{NEW}**\n", encoding="utf-8")
