@@ -162,3 +162,17 @@ def test_cli_html_heading_uses_the_live_closer_outside_quoted_attributes(tmp_pat
     assert headings(source) == [{"line": 1, "text": "Real HTML", "slug": "real-html"}]
     finding, = json.loads(result.stdout)["findings"]
     assert finding["target"] == "#real-html" and finding["status"] == "ok"
+
+
+@pytest.mark.parametrize("ending", [b"\n", b"\r\n", b"\r"])
+@pytest.mark.parametrize("before", [[], [b"<!DECLARATION", b"</div>"]], ids=["first-heading", "declaration"])
+def test_cli_document_bom_does_not_change_visible_heading_boundaries(tmp_path, ending, before):
+    lines = [*before, b"# Candidate", b"", b"[Candidate](#candidate)", b""]
+    original = b"\xef\xbb\xbf" + ending.join(lines)
+    path = tmp_path / "README.md"
+    path.write_bytes(original)
+    result = run_cli("--repo-dir", tmp_path, "content", "links", "README.md")
+    assert result.returncode == 0, result.stdout + result.stderr
+    finding, = json.loads(result.stdout)["findings"]
+    assert (finding["line"], finding["target"], finding["status"]) == (len(before) + 3, "#candidate", "ok")
+    assert path.read_bytes() == original

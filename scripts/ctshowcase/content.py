@@ -342,7 +342,7 @@ def headings(text: str) -> list[dict]:
     """Markdown headings in order with their GitHub anchors (duplicates get -1, -2 ...)."""
     from .mdcode import html_block_spans
 
-    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = text.removeprefix("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
     starts = [0] + [m.end() for m in re.finditer("\n", text)]
     html_lines = {line for start, end in html_block_spans(text)
                   for line in range(bisect.bisect_right(starts, start), bisect.bisect_right(starts, end - 1) + 1)}
