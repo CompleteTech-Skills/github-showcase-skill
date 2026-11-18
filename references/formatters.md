@@ -39,7 +39,10 @@ README change record participates in the same write. README and CONTRIBUTING
 formatting checks the Markdown AST and repeat-format stability with the pinned
 Prettier. GitHub alerts are protected with a Prettier ignore comment on their enclosing
 Markdown block, and Showcase refreshes the
-ownership digest of a pristine template body after formatting. Bootstrap
+ownership digest of a pristine template body after formatting. Verified generated
+tagline receipts are similarly resealed after the content check. The receipt
+itself must survive unchanged before resealing; an authored or edited tagline
+cannot gain ownership through formatting. These checks happen before any write. Bootstrap
 applies the normal CONTRIBUTING owner-token replacement before formatting.
 The art sidecar must retain the same typed JSON values and unique keys.
 `.github/showcase.yml` supplies input configuration. Format it and author-maintained

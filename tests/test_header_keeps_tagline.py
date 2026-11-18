@@ -2,7 +2,8 @@
 when the repository has no description yet, the tagline block stays as written and the run logs
 needs-input:description (guardrail 6, improve never erase). Only an inherited tagline is emptied:
 the block holds exactly a tagline of the template the repository was generated from (as generated, or as today), or,
-only when those are unknown, the template body is still pristine. With a description, the tagline is regenerated.
+only when exact captured template payload evidence is available. A pristine body does not prove tagline ownership.
+With a description, only a valid receipted tagline is regenerated.
 bootstrap (the template workflow's step before header mode) and upgrade (its rebuilt header and its additive preserve
 mode) decide the tagline block by the same rule (readme.tagline_body). With no description, when upgrade rebuilds the
 header (not in preserve mode), a single bare **...** line opening the README after its header lines (H1, badges,
@@ -10,9 +11,15 @@ banner, ---) moves into the block by that rule instead of being erased; a second
 block that already holds a line, a bold line inside a centred <div>/<p> block, one in preserve mode, or one in an
 untouched template copy whose template taglines are unknown (the rule would empty it there on the next run) stays
 as authored text."""
+import hashlib
 from pathlib import Path
 
 from ctshowcase import readme as R
+
+def receipt(body):
+    digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
+    return f"<!-- showcase:tagline:generated sha256={digest} -->\n{body}"
+
 
 TAGLINE = "**Route Northwind support tickets to the right queue.**"
 TEXT = (
@@ -37,9 +44,11 @@ def test_missing_description_key_keeps_the_authored_tagline(make_ctx, tmp_path):
 
 def test_description_regenerates_the_tagline(make_ctx, tmp_path):
     ctx = make_ctx(tmp_path, description="Run the Northwind triage agent.")
-    out = R.header_only(ctx, TEXT)
-    assert "**Run the Northwind triage agent.**" in out
+    generated = TEXT.replace(TAGLINE, receipt(TAGLINE))
+    out = R.header_only(ctx, generated)
+    assert receipt("**Run the Northwind triage agent.**") in out
     assert TAGLINE not in out
+    assert TAGLINE in R.header_only(ctx, TEXT)  # ambiguous legacy body remains authored
 
 
 def test_empty_block_and_no_description_stays_empty(make_ctx, tmp_path):
@@ -52,10 +61,12 @@ def test_empty_block_and_no_description_stays_empty(make_ctx, tmp_path):
 def test_untouched_template_copy_drops_the_template_tagline(make_ctx, tmp_path):
     # a repository fresh from the template still has the template's tagline and a pristine template body:
     # with no description of its own it must not keep another repository's line
-    ctx = make_ctx(tmp_path, description="")
+    ctx = make_ctx(tmp_path, description="", template_taglines=[TAGLINE])
     text = TEXT + "\n" + R.pristine_block("## About\n\nTemplate body.") + "\n"
     out = R.header_only(ctx, text)
     assert TAGLINE not in out
+    unknown = make_ctx(tmp_path, description="")
+    assert TAGLINE in R.header_only(unknown, text)  # the separate body digest proves no tagline bytes
     assert "needs-input:description" in ctx.logs
 
 
@@ -132,7 +143,8 @@ def test_normalize_template_taglines_shapes():
     from ctshowcase import meta as M
     from conftest import meta_dict
     assert M.normalize(meta_dict(template_taglines="**One.**"))["template_taglines"] == ["**One.**"]
-    assert M.normalize(meta_dict(template_taglines=[" **One.** ", "", None, 5, "**One.**"]))["template_taglines"] == ["**One.**"]
+    assert M.normalize(meta_dict(template_taglines=[" **One.** ", "", None, 5, "**One.**"]))["template_taglines"] == [
+        " **One.** ", "**One.**"]
     assert M.normalize(meta_dict())["template_taglines"] == []
 
 
@@ -148,7 +160,12 @@ def _set_tagline(text: str, body: str) -> str:
 
 
 def _tagline_body(text: str) -> str:
-    return next(m.group(2) for m in R.find_blocks(R.MARK, text) if m.group(1) == "tagline").strip()
+    body = next(m.group(2) for m in R.find_blocks(R.MARK, text) if m.group(1) == "tagline")
+    if body.startswith("<!-- showcase:tagline:generated sha256="):
+        marker, payload = body.split("\n", 1)
+        assert marker == receipt(payload).split("\n", 1)[0]
+        return payload
+    return body
 
 
 def _bootstrapped_once(make_ctx, tmp_path, **kw):
@@ -173,9 +190,10 @@ def test_bootstrap_keeps_a_tagline_the_owner_wrote(make_ctx, tmp_path):
 def test_bootstrap_drops_the_inherited_template_tagline(make_ctx, tmp_path):
     from conftest import ROOT
     text = (ROOT / "tests" / "fixtures" / "template-README.md").read_text(encoding="utf-8")
-    for kw in ({"template_taglines": [TEMPLATE_TAGLINE]}, {}):  # known template tagline, or unknown (pristine body)
-        ctx = make_ctx(tmp_path, repo="new-thing", description="", **kw)
-        assert _tagline_body(R.bootstrap(ctx, text)) == "", kw
+    ctx = make_ctx(tmp_path, repo="new-thing", description="", template_taglines=[TEMPLATE_TAGLINE])
+    assert _tagline_body(R.bootstrap(ctx, text)) == ""
+    unknown = make_ctx(tmp_path, repo="new-thing", description="")
+    assert _tagline_body(R.bootstrap(unknown, text)) == TEMPLATE_TAGLINE
     # the inherited line is still dropped after the H1 was rebuilt (second push)
     once = _bootstrapped_once(make_ctx, tmp_path, template_taglines=[TEMPLATE_TAGLINE])
     ctx = make_ctx(tmp_path, repo="new-thing", description="", template_taglines=[TEMPLATE_TAGLINE])
@@ -183,7 +201,7 @@ def test_bootstrap_drops_the_inherited_template_tagline(make_ctx, tmp_path):
 
 
 def test_bootstrap_with_a_description_writes_it(make_ctx, tmp_path):
-    text = _set_tagline(_bootstrapped_once(make_ctx, tmp_path), TAGLINE)
+    text = _set_tagline(_bootstrapped_once(make_ctx, tmp_path), receipt(TAGLINE))
     ctx = make_ctx(tmp_path, repo="new-thing", description="Route Northwind tickets.")
     assert _tagline_body(R.bootstrap(ctx, text)) == "**Route Northwind tickets.**"
 
@@ -217,7 +235,7 @@ def test_variant_f_bootstrap_keeps_a_tagline_the_owner_wrote(make_ctx, tmp_path)
     ctx.det["variant"] = "F"
     text = (R.header(ctx) + "\n\n" + R.pristine_block("## About\n\nTemplate body.") + "\n")
     text = _set_tagline(text, authored)
-    assert _tagline_body(R.bootstrap(ctx, text)) == ""  # unknown template taglines + pristine body: inherited
+    assert _tagline_body(R.bootstrap(ctx, text)) == authored  # body receipt cannot prove this independent tagline
     ctx = make_ctx(tmp_path, repo="new-thing", description="", template_taglines=[TEMPLATE_TAGLINE])
     ctx.det["variant"] = "F"
     assert _tagline_body(R.bootstrap(ctx, text)) == authored
@@ -263,7 +281,7 @@ def test_upgrade_keeps_a_tagline_the_owner_wrote(make_ctx, tmp_path):
     ctx = make_ctx(tmp_path, description="", template_taglines=[inherited])
     assert _tagline_body(R.upgrade(ctx, TEXT.replace(TAGLINE, inherited))[0]) == ""
     out, removed = R.upgrade(ctx, TEXT.replace(TAGLINE, inherited))
-    assert not R.preservation(TEXT.replace(TAGLINE, inherited), out, removed)  # dropped on purpose, not lost
+    assert not R.preservation(TEXT.replace(TAGLINE, inherited), out, removed, ctx=ctx)  # captured inheritance proof
 
 
 def test_cli_upgrade_empties_an_inherited_tagline(tmp_path):
@@ -338,7 +356,7 @@ def test_cli_upgrade_moves_an_unmarked_tagline_into_the_block(tmp_path):
 
 def test_upgrade_unmarked_tagline_follows_the_header_rule(make_ctx, tmp_path):
     # a second bold line stays as authored text; an inherited unmarked line is emptied on purpose; a description
-    # still replaces the old line
+    # generates a separate tagline while preserving the old unverified line
     second = "**Owned by the Northwind support team.**"
     text = PLAIN.replace(TAGLINE, TAGLINE + "\n\n" + second)
     ctx = make_ctx(tmp_path, description="")
@@ -352,7 +370,8 @@ def test_upgrade_unmarked_tagline_follows_the_header_rule(make_ctx, tmp_path):
     assert _tagline_body(out) == "" and TAGLINE not in out and not R.preservation(PLAIN, out, removed)
     ctx = make_ctx(tmp_path, description="Route Northwind tickets.")
     out, removed = R.upgrade(ctx, PLAIN)
-    assert _tagline_body(out) == "**Route Northwind tickets.**" and TAGLINE not in out
+    assert _tagline_body(out) == "**Route Northwind tickets.**" and TAGLINE in out
+    assert not R.preservation(PLAIN, out, removed)  # unknown unmarked prose survives beside generated header
 
 
 def test_upgrade_leaves_other_unmarked_taglines_as_authored_text(make_ctx, tmp_path):
