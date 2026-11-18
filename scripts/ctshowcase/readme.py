@@ -222,13 +222,16 @@ def banner_html(ctx: RepoContext) -> str:
         return legacy_banner_html(ctx)
     body = personal_intro_html(ctx)
     path = ctx.repo_dir / hero_path(ctx) if ctx.repo_dir is not None else None
-    if path is None or not path.is_file():
-        raise NeedsInput("intro", "Generate the personal profile with intro --profile OWNER --out assets/intro.svg first.")
+    if path is None or path.parent.is_symlink() or path.is_symlink() or not path.is_file():
+        raise NeedsInput("intro", "Generate the personal profile with intro --profile OWNER --out assets/intro.svg "
+                         "as a regular file in the checkout.")
     # Matching the current default generator output establishes applicability, not asset rights.
     # Explicit generator overrides cannot be inferred from an SVG and require separate review.
     from . import intro, svglint
     from .typeset import Fonts
     try:
+        if path.resolve() != path.parent.parent.resolve() / "assets" / "intro.svg":
+            raise ValueError("intro is outside the checkout's assets directory")
         raw = path.read_bytes()
         if svglint.lint_bytes("intro", raw, str(path))["result"] != "PASS":
             raise ValueError("invalid intro")
@@ -724,9 +727,10 @@ def _strip_markers(text: str, keep: dict[str, str] | None = None) -> tuple[str, 
     return "".join(out) + text[pos:], blocks
 
 
-def _badge_or_logo(source: str) -> bool:
-    return (bool(re.search(r"logo", source, re.I)) or "shields.io" in source
-            or "badge.svg" in source or "docs/images/badges/" in source)
+def _badge_or_logo(source: str, *, personal: bool = False) -> bool:
+    logo = (re.search(r"(?:^|[/_.-])logo(?:$|[/_.-])", re.split(r"[?#]", source, maxsplit=1)[0], re.I)
+            if personal else re.search(r"logo", source, re.I))
+    return bool(logo or "shields.io" in source or "badge.svg" in source or "docs/images/badges/" in source)
 
 
 def _leading_banner(pre: str) -> bool:
@@ -773,7 +777,7 @@ def leading_banner_block(text: str) -> re.Match | None:
 def _personal_preamble_has_art(text: str) -> bool:
     unmarked, _ = _strip_markers(text)
     preamble, _ = split_sections(unmarked)
-    return any(not _badge_or_logo(source)
+    return any(not _badge_or_logo(source, personal=True)
                for _, source, _ in _image_entries(masked(unmarked)[:len(preamble)], unmarked))
 
 

@@ -118,6 +118,7 @@ return `needs-input:name` or `needs-input:eyebrow` instead of guessing profile f
 The repository `readme` command also uses `assets/intro.svg` for a personal
 owner/owner profile. Generate it with `intro --profile OWNER --out
 CHECKOUT/assets/intro.svg` before scaffolding or refreshing a generated hero.
+Use a regular file under the checkout's own `assets/` directory.
 Missing profile name/eyebrow facts return `needs-input:intro-identity`; a missing
 local, invalid, or nonmatching intro returns `needs-input:intro` (exit 4), before any README, badge or change
 record write. The asset must pass intro SVG lint and match the current configured default profile generator output

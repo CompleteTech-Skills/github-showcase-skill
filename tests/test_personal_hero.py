@@ -53,6 +53,33 @@ def test_personal_scaffold_missing_intro_refuses_before_writes(tmp_path):
     assert not (tmp_path / "docs").exists()
 
 
+@pytest.mark.parametrize("link_asset_directory", [False, True])
+def test_personal_scaffold_does_not_use_linked_intro_outside_the_checkout(tmp_path, intro_bytes, link_asset_directory):
+    target = tmp_path / "repo"
+    target.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "intro.svg").write_bytes(intro_bytes)
+    assets = target / "assets"
+    try:
+        if link_asset_directory:
+            assets.symlink_to(outside, target_is_directory=True)
+        else:
+            assets.mkdir()
+            (assets / "intro.svg").symlink_to(outside / "intro.svg")
+    except (OSError, NotImplementedError) as error:
+        pytest.skip(f"checkout links unavailable: {error}")
+    records = tmp_path / "records.jsonl"
+
+    result = run_cli("--meta", metadata(tmp_path), "--repo-dir", target, "--format", "json", "readme",
+                     "--mode", "scaffold", "--badges", "local", "--records", records, "--write")
+
+    assert result.returncode == 4 and "needs-input:intro" in result.stdout, result.stdout + result.stderr
+    assert not (target / "README.md").exists()
+    assert not (target / "docs").exists()
+    assert not records.exists()
+
+
 @pytest.mark.parametrize("mode", ["auto", "scaffold"])
 @pytest.mark.parametrize("with_intro", [False, True])
 def test_personal_short_readme_keeps_authored_hero_when_scaffolding(tmp_path, intro_bytes, mode, with_intro):
@@ -680,6 +707,19 @@ def test_personal_upgrade_adds_intro_and_preserves_authored_leading_badge(tmp_pa
     assert updated.startswith(b"<!-- showcase:banner:start -->\n")
     assert b'src="assets/intro.svg"' in updated
     assert LEADING_BUILD_BADGE in updated and b"Authored profile notes." in updated
+
+
+def test_personal_callout_does_not_treat_catalogo_as_a_logo(tmp_path, intro_bytes):
+    meta = metadata(tmp_path)
+    put_intro(tmp_path, intro_bytes)
+    path = tmp_path / "README.md"
+    before = (b'<img src="assets/catalogo.svg" alt="Authored profile hero" width="100%">  \r\n'
+              b'\r\n# Profile\n\nAuthored notes.\r')
+    path.write_bytes(before)
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme",
+                     "--variant", "G", "--mode", "upgrade", "--write")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert path.read_bytes() == before
 
 
 @pytest.mark.parametrize("mode", ["header", "upgrade"])
