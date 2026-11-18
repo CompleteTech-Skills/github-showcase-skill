@@ -145,8 +145,6 @@ Put those markers on separate lines before requesting that move.
 An existing initial H1 title belongs to the opening area; the next visible
 Markdown heading begins the authored body. This permits an owned intro beside
 authored opening text to refresh without moving that text.
-G and H also move an owned hero out of the authored body into the opening area;
-a header-only refresh reports the same ordering refusal when that move is needed.
 
 Personal header refresh migrates only the exact legacy generated banner body
 (or an empty managed banner block). Owner spelling and configured former slugs
@@ -154,10 +152,16 @@ can identify the same profile. Authored hero bodies and unmarked artwork
 stay owned by their author, including Markdown reference images whose definitions
 appear later in the document. For personal READMEs with authored artwork,
 scaffold, header and upgrade refresh existing marker blocks in place, including variants G and H.
+Running scaffold again on a personal README with a managed hero and nav refreshes the existing layout in place.
 A full G or H upgrade with authored artwork refreshes only an owned hero or a
 recognized generated footer. Authored footer, navigation and body bytes stay in place.
 A G or H README with multiple managed hero blocks needs review before refresh.
 Without authored artwork or a leading managed hero, those variants require and emit the intro too.
+Their scaffold follows the same callout layout and preservation check as an
+upgrade. Existing callouts and body text stay in place. A new fork callout
+requires the upstream repository in the capture, and an archive callout needs
+the date and reason from the registry.
+README outputs and change records require destinations distinct from the intro.
 The managed block keeps its `showcase:banner` name
 for compatibility, even when its image is the personal intro. The intro is a
 plain `<img>`; the decision 18 footer remains the only generated `<picture>`.

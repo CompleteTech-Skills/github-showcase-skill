@@ -527,6 +527,7 @@ def cmd_readme(args):
     if args.variant and args.variant != "auto":
         ctx.det["variant"] = args.variant
     ctx.local_badges = args.badges == "local"
+    personal = readme.personal_profile(ctx)
     def preservation(old, new, removed):
         problems = readme.preservation(old, new, removed, ctx=ctx)
         if problems and args.format_generated:
@@ -537,7 +538,7 @@ def cmd_readme(args):
 
     reason = readme.managed_reason(ctx, before)
     if reason:
-        if (readme.personal_profile(ctx) and args.mode in ("auto", "upgrade") and not args.bootstrap
+        if (personal and args.mode in ("auto", "upgrade") and not args.bootstrap
                 and not args.format_generated and (ctx.override.get("readme") or {}).get("managed") is not True):
             from ctshowcase.org import USER_GENERATED_NOTICE
             if before.partition("\n")[0] == USER_GENERATED_NOTICE:
@@ -616,7 +617,8 @@ def cmd_readme(args):
         if mode == "auto":
             mode = "scaffold" if len([ln for ln in readme.source_lines(before) if ln.strip(" \t")]) < 3 else "upgrade"
         removed = []
-        if mode == "scaffold":
+        callout_scaffold = personal and mode == "scaffold" and ctx.det["variant"] in ("G", "H")
+        if mode == "scaffold" and not callout_scaffold:
             after = readme.scaffold(ctx, before)
         elif mode == "header":
             after = readme.header_only(ctx, before, already_normalized=True)
@@ -684,9 +686,12 @@ def cmd_readme(args):
                 drawing = formatted
             badge_outputs[rel] = drawing.encode("utf-8")
     change_records = []
+    intro_path = rd / readme.hero_path(ctx) if personal else None
     if args.records and changed:
         change_records.append(records.record(ctx.owner, ctx.repo, "readme", "README.md", raw, restored,
                                              f"§7 variant {ctx.det['variant']} ({mode})"))
+        if intro_path is not None:
+            ensure_distinct_outputs(Path(args.records), intro_path)
     if args.no_regroup and change_records:
         capture = (Path(args.meta),) if args.meta else ()
         ensure_distinct_outputs(Path(args.records), path, rd / "docs/images/.showcase.json",
@@ -703,6 +708,9 @@ def cmd_readme(args):
             outputs.append((path, restored.encode("utf-8")))
             if contrib_new is not None:
                 outputs.append((contrib_path, contrib_new.encode("utf-8")))
+        if intro_path is not None:
+            for target, _ in outputs:
+                ensure_distinct_outputs(target, intro_path)
         if args.format_generated:
             from ctshowcase.formatting import write_formatted_outputs
             from ctshowcase.output_lock import output_lock
@@ -728,6 +736,8 @@ def cmd_readme(args):
                 if record_path is not None:
                     ensure_distinct_outputs(record_path, path, contrib_path, *(rd / rel for rel in badge_outputs),
                                             *([capture] if capture else []))
+                    if intro_path is not None:
+                        ensure_distinct_outputs(record_path, intro_path)
                 write_formatted_outputs(outputs, repo_root=ctx.format_root, snapshots=dict(snapshots),
                                         append_output=append_output)
         else:

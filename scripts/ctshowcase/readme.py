@@ -680,14 +680,15 @@ def callout(ctx) -> str | None:
 # ------------------------------------------------------------------------------------------------
 def scaffold(ctx: RepoContext, existing: str = "") -> str:
     variant = ctx.det["variant"]
-    if existing and personal_profile(ctx):
+    if personal_profile(ctx):
         normalized = normalize_text(existing)
-        markers = find_blocks(MARK, normalized)
         if variant in ("G", "H"):
-            _personal_banner_blocks(markers, retain=False)
-        if _personal_has_authored_hero(ctx, normalized, markers):
+            return upgrade(ctx, normalized, already_normalized=True)[0]
+        markers = find_blocks(MARK, normalized)
+        managed = {marker.group(1) for marker in markers}
+        if {"banner", "nav"} <= managed or _personal_has_authored_hero(ctx, normalized, markers):
             return header_only(ctx, existing, preserve_structure=True)
-        if any(marker.group(1) == "banner" for marker in markers):
+        if "banner" in managed:
             existing = _sub_blocks(normalized, lambda marker: "" if marker.group(1) == "banner" else marker.group(0))
     order = required_sections(ctx.det, meta=ctx.meta)
     parts = [header(ctx)]
@@ -843,6 +844,7 @@ def callout_only(ctx: RepoContext, text: str, *, retain_personal_banner: bool = 
     lead_banner = ""
     leading = leading_banner_block(text)
     personal = personal_intro_applies(ctx)
+    banner_prefix = text[:leading.start()] if personal and leading is not None else ""
     banner_gap = "\n\n"
     replaced_hero: list[str] = []
     banners = _personal_banner_blocks(find_blocks(MARK, text), retain=retain_personal_banner) if personal else []
@@ -890,7 +892,7 @@ def callout_only(ctx: RepoContext, text: str, *, retain_personal_banner: bool = 
             lead_banner = leading.group(0) + banner_gap
     elif personal and not retain_personal_banner and not banners and not _personal_preamble_has_art(text):
         lead_banner = wrap("banner", banner_html(ctx)) + "\n\n"
-    out = lead_banner + (out if personal and not leading else out.lstrip("\n"))
+    out = banner_prefix + lead_banner + (out if personal and not leading else out.lstrip("\n"))
     removed: list[str] = list(replaced_hero)
     if footer_wanted(ctx):
         had_footer = False
@@ -908,7 +910,12 @@ def callout_only(ctx: RepoContext, text: str, *, retain_personal_banner: bool = 
             if old_footer:
                 had_footer = True
         if had_footer or footermod.check(ctx.brand, out)[0] == "fail:missing":
-            out = out.rstrip("\n") + "\n\n" + footermod.block(ctx.brand) + "\n"
+            body_without_gap = out.rstrip("\n")
+            if personal:
+                out += "\n" * max(0, 2 - (len(out) - len(body_without_gap)))
+            else:
+                out = body_without_gap + "\n\n"
+            out += footermod.block(ctx.brand) + "\n"
             # Report only the removed footer lines that the replacement footer does not carry again (multiset
             # difference), so a re-emitted line never counts as lost content in the preservation check.
             kept = Counter(ln.strip() for ln in source_lines(footermod.block(ctx.brand)) if ln.strip())
@@ -1473,7 +1480,7 @@ def header_only(ctx: RepoContext, text: str, *, already_normalized: bool = False
         return m.group(0)
     if preserve_structure:
         return _replace_blocks_in_source(original, text, sub)
-    refreshed = _sub_blocks(text, sub)
+    refreshed = _replace_blocks_in_source(text, text, sub) if personal else _sub_blocks(text, sub)
     return license_block(ctx, refreshed if retain_personal_banner else reorder_lead(ctx, refreshed))
 
 

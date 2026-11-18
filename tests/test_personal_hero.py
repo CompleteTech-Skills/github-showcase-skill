@@ -43,6 +43,19 @@ def test_personal_scaffold_uses_generated_intro_and_lints_hero(tmp_path, intro_b
     assert not [failure for failure in failures if "banner" in failure or "image" in failure], failures
 
 
+def test_personal_scaffold_keeps_the_existing_managed_layout_on_retry(tmp_path, intro_bytes):
+    meta = metadata(tmp_path)
+    put_intro(tmp_path, intro_bytes)
+    args = ("--meta", meta, "--repo-dir", tmp_path, "readme", "--mode", "scaffold", "--write")
+    first = run_cli(*args)
+    assert first.returncode == 0, first.stdout + first.stderr
+    readme = tmp_path / "README.md"
+    original = readme.read_bytes()
+    second = run_cli(*args)
+    assert second.returncode == 0, second.stdout + second.stderr
+    assert readme.read_bytes() == original
+
+
 def test_personal_scaffold_missing_intro_refuses_before_writes(tmp_path):
     meta = metadata(tmp_path)
     result = run_cli("--format", "json", "--meta", meta, "--repo-dir", tmp_path,

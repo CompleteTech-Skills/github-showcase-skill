@@ -1,5 +1,6 @@
 """Public CLI regressions for owned personal heroes sharing authored marker lines."""
 import json
+import os
 import re
 
 import pytest
@@ -144,3 +145,69 @@ def test_modified_authored_hero_with_inline_seams_is_not_adopted(
     updated = (tmp_path / "README.md").read_bytes()
     assert prefix + hero + suffix in updated, "Modified authored hero and its seams must remain intact"
     assert b"assets/intro.svg" not in updated, "An available asset does not confer ownership"
+
+
+@pytest.mark.parametrize("mode,variant", [
+    ("header", "J"), ("upgrade", "G"), ("upgrade", "H"), ("scaffold", "G"), ("scaffold", "H"),
+])
+@pytest.mark.parametrize("ending", ENDINGS)
+def test_legacy_hero_refresh_keeps_separate_authored_seams(
+        tmp_path, applicable_intro, mode, variant, ending):
+    prefix = ending + b"\t" + ending
+    hero = LEGACY_HERO.replace(b"\n", ending)
+    suffix = ending.join((b"", b"", b"", b"", b"> [!NOTE]", b"> Authored callout.",
+                          b"", b"# Synthetic profile", b"", b"Authored notes.  ", b"", b""))
+    meta = fixture_repo(tmp_path, prefix + hero + suffix, applicable_intro)
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--mode", mode,
+                     "--variant", variant, "--write")
+    assert result.returncode == 0, result.stdout + result.stderr
+    readme = tmp_path / "README.md"
+    updated = readme.read_bytes()
+    block, = BLOCK.finditer(updated)
+    assert updated[:block.start()] == prefix
+    assert b'src="assets/intro.svg"' in block.group()
+    assert updated[block.end():].startswith(suffix)
+    if variant in ("G", "H"):
+        lint = run_cli("--meta", meta, "--repo-dir", tmp_path, "lint", "readme", readme,
+                       "--variant", variant)
+        assert lint.returncode == 0, lint.stdout + lint.stderr
+
+
+def test_new_personal_g_scaffold_places_verified_intro_before_callout(tmp_path, applicable_intro):
+    meta = fixture_repo(tmp_path, b"", applicable_intro)
+    capture = json.loads(meta.read_text(encoding="utf-8"))
+    capture.update({"parent": {"full_name": "example-org/example-project"}, "ahead_by": 0})
+    meta.write_text(json.dumps(capture), encoding="utf-8")
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--mode", "scaffold",
+                     "--variant", "G", "--write")
+    assert result.returncode == 0, result.stdout + result.stderr
+    readme = tmp_path / "README.md"
+    updated = readme.read_bytes()
+    block, = BLOCK.finditer(updated)
+    assert b'src="assets/intro.svg"' in block.group()
+    assert updated[block.end():].lstrip().startswith(b"> [!NOTE]")
+    lint = run_cli("--meta", meta, "--repo-dir", tmp_path, "lint", "readme", readme, "--variant", "G")
+    assert lint.returncode == 0, lint.stdout + lint.stderr
+
+
+@pytest.mark.parametrize("alias,mode_args", [
+    ("direct", ("--mode", "scaffold")),
+    ("direct", ("--mode", "upgrade", "--no-regroup")),
+    ("hardlink", ("--mode", "upgrade", "--no-regroup")),
+], ids=["scaffold-direct", "no-regroup-direct", "no-regroup-hardlink"])
+def test_personal_hero_refresh_cannot_append_records_to_the_intro(tmp_path, applicable_intro, alias, mode_args):
+    source = LEGACY_HERO + b"\n\nAuthored  notes.  \n"
+    meta = fixture_repo(tmp_path, source, applicable_intro)
+    records = tmp_path / "assets" / "intro.svg"
+    if alias == "hardlink":
+        linked = tmp_path / "alias.jsonl"
+        try:
+            os.link(records, linked)
+        except (OSError, NotImplementedError) as error:
+            pytest.skip(f"checkout hard links unavailable: {error}")
+        records = linked
+    before = snapshot(tmp_path)
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", *mode_args, "--records", records, "--write")
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "output paths must be distinct" in result.stdout + result.stderr
+    assert snapshot(tmp_path) == before
