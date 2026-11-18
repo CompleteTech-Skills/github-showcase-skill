@@ -36,6 +36,7 @@ from pathlib import Path, PurePosixPath
 from . import ROOT, STANDARD, __version__, estate_candidates
 from .config import load_yaml_text
 from .errors import CHECK_FAILED, OK, ArtFail, NeedsInput, Refused, ShowcaseError
+from .mdcode import HTML_SPACE
 from .resolver import Resolver
 
 # the estate hand-off tree when the skill lives inside it (or is its installed copy); optional everywhere
@@ -257,7 +258,7 @@ MD_LINK = re.compile(r"(!?)\[((?:[^\[\]\n]|\[[^\[\]\n]*\])*)\]\(\s*(<[^>\n\x00]*
 REF_DEF = re.compile(r"^ {0,3}\[([^\]\n\x00]+)\]:\s*(<[^>\n\x00]*>|[^\s\x00]+)(?=\s|$)")
 HTML_LINK_TAGS = frozenset(("a", "img", "source", "link", "video", "audio", "image", "use"))
 ANCHOR_ATTR = re.compile(r"""<[a-z][^>]*?(?<![\w-])(?:name|id)\s*=\s*["']([^"']+)["']""", re.I)
-HTML_HEADING = re.compile(r"<(/?)(h[1-6])(?=[ \t\n/>])", re.I)
+HTML_HEADING = re.compile(rf"<(/?)(h[1-6])(?={HTML_SPACE}|/|>)", re.I)
 BARE_URL = re.compile(r"https?://[^\s<>()\[\]\"'`\x00]+")
 IMG_EXT = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".avif", ".bmp", ".ico")
 
@@ -311,10 +312,26 @@ def github_slug(text: str) -> str:
 
 def _html_heading_titles(text: str, starts: list[int]) -> dict[int, str]:
     """Pair real HTML heading tags on the same physical line."""
-    from .mdcode import _outside_code, live_html_tags
+    from .mdcode import HTML_COMMENT, find_blocks, live_html_tags
 
     if not HTML_HEADING.search(text):
         return {}
+    comments = find_blocks(HTML_COMMENT, text)
+    comment_starts = [comment.start() for comment in comments]
+
+    def title_part(start: int, end: int) -> str:
+        # Keep the original document's lexical context. Detached HTML text may
+        # resemble Markdown indentation or fences without being Markdown code.
+        parts = []
+        index = bisect.bisect_left(comment_starts, start)
+        while index < len(comments) and comments[index].start() < end:
+            comment = comments[index]
+            parts.extend((text[start:comment.start()], " "))
+            start = comment.end()
+            index += 1
+        parts.append(text[start:end])
+        return "".join(parts)
+
     titles = {}
     opened = {}
     tokens = list(live_html_tags(text, include_closing=True))
@@ -330,11 +347,10 @@ def _html_heading_titles(text: str, starts: list[int]) -> dict[int, str]:
             parts = []
             start = tokens[opening].end()
             for nested in tokens[opening + 1:index]:
-                parts.append(text[start:nested.start()])
+                parts.append(title_part(start, nested.start()))
                 start = nested.end()
-            parts.append(text[start:tag.start()])
-            titles[line] = _outside_code("".join(parts), mask_inline=False, mask_autolinks=False,
-                                         collapse_comments=True)
+            parts.append(title_part(start, tag.start()))
+            titles[line] = "".join(parts)
     return titles
 
 
