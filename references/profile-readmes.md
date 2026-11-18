@@ -134,8 +134,11 @@ none of them writes a README, badge, CONTRIBUTING or change record on that refus
 
 Personal header refresh migrates only the exact legacy generated banner body
 (or an empty managed banner block); authored hero bodies and unmarked artwork
-stay owned by their author. Personal upgrade with authored artwork refreshes
-existing marker blocks only. The managed block keeps its `showcase:banner` name
+stay owned by their author, including Markdown reference images whose definitions
+appear later in the document. Personal upgrade with authored artwork refreshes
+existing marker blocks only, including the G and H variants. Without authored
+artwork or a leading managed hero, those variants require and emit the intro too.
+The managed block keeps its `showcase:banner` name
 for compatibility, even when its image is the personal intro. The intro is a
 plain `<img>`; the decision 18 footer remains the only generated `<picture>`.
 

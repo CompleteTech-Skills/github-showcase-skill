@@ -1119,18 +1119,19 @@ def upgrade(ctx: RepoContext, text: str, *, already_normalized: bool = False) ->
     rv = standard("readme-variants")
     personal = personal_profile(ctx)
     retain_personal_banner = personal and ctx.preserve_unchanged() and preserved(ctx, text)
+    markers = find_blocks(MARK, text) if personal or variant == "J" else []
+    if personal:
+        heroes = [m.group(2) for m in markers if m.group(1) == "banner"]
+        if any(not personal_generated_hero(ctx, body) for body in heroes) or _personal_preamble_has_art(text):
+            # Every personal variant preserves authored artwork and refreshes only existing owned blocks.
+            return header_only(ctx, text, already_normalized=True,
+                               retain_personal_banner=retain_personal_banner), []
     if variant in ("G", "H"):
         return callout_only(ctx, text, retain_personal_banner=retain_personal_banner)
-    markers = find_blocks(MARK, text) if personal or variant == "J" else []
     if retain_personal_banner and any(block.group(1) == "banner" for block in markers):
         return header_only(ctx, text, already_normalized=True, retain_personal_banner=True), []
     if variant == "J" and _badge_blocks_need_in_place_refresh(text, markers):
         return header_only(ctx, text, already_normalized=True), []
-    if personal:
-        heroes = [m.group(2) for m in markers if m.group(1) == "banner"]
-        if any(not personal_generated_hero(ctx, body) for body in heroes) or _personal_preamble_has_art(text):
-            # Personal artwork and its surrounding authored content stay in place. Refresh only owned blocks.
-            return header_only(ctx, text, already_normalized=True), []
     body, blocks = _strip_markers(text)
     want_footer = footer_wanted(ctx)
     removed: list[str] = []

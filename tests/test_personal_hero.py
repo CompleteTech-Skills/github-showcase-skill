@@ -499,3 +499,58 @@ def test_personal_preserve_unchanged_keeps_managed_intro_in_place(tmp_path, intr
     assert updated.split(opener, 1)[0] == source.split(opener, 1)[0]
     assert updated.split(closer, 1)[1] == source.split(closer, 1)[1]
     assert b"![Language Python](docs/images/badges/language-python.svg)" in updated
+
+
+@pytest.mark.parametrize("image", ["![Authored hero][hero]", "![hero][]", "![hero]"])
+@pytest.mark.parametrize("has_intro", [False, True])
+def test_personal_reference_hero_stays_authored_with_definition_after_section(tmp_path, intro_bytes, image,
+                                                                           has_intro):
+    meta = metadata(tmp_path)
+    if has_intro:
+        put_intro(tmp_path, intro_bytes)
+    source = (f"\ufeff{image}\r\n\r\n# Profile\r\n\r\nAuthored  notes.  \r\n\r\n"
+              "## Details\r\n\r\n[hero]: custom.svg\r\n").encode("utf-8")
+    path = tmp_path / "README.md"
+    path.write_bytes(source)
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--mode", "upgrade", "--write")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert path.read_bytes() == source
+    assert not (tmp_path / "docs").exists()
+
+
+@pytest.mark.parametrize("variant", ["G", "H"])
+def test_personal_callout_variant_preserves_unmarked_reference_hero(tmp_path, variant):
+    meta = metadata(tmp_path)
+    source = ("![Authored hero][hero]\n\n# Profile\n\nAuthored notes.\n\n"
+              "## Details\n\n[hero]: custom.svg\n").encode("utf-8")
+    path = tmp_path / "README.md"
+    path.write_bytes(source)
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--mode", "upgrade",
+                     "--variant", variant, "--write")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert path.read_bytes() == source
+
+
+@pytest.mark.parametrize("variant", ["G", "H"])
+@pytest.mark.parametrize("has_intro", [False, True])
+def test_personal_callout_variant_without_banner_requires_intro(tmp_path, intro_bytes, variant, has_intro):
+    meta = metadata(tmp_path)
+    if has_intro:
+        put_intro(tmp_path, intro_bytes)
+    source = b"# Profile\r\n\r\nAuthored notes.\r\n"
+    path, records = tmp_path / "README.md", tmp_path / "records.jsonl"
+    path.write_bytes(source)
+    result = run_cli("--format", "json", "--meta", meta, "--repo-dir", tmp_path, "readme", "--mode", "upgrade",
+                     "--variant", variant, "--badges", "local", "--records", records, "--write")
+    if has_intro:
+        assert result.returncode == 0, result.stdout + result.stderr
+        updated = path.read_bytes()
+        assert updated.count(b'src="assets/intro.svg"') == 1
+        assert updated.index(b'src="assets/intro.svg"') < updated.index(b"# Profile")
+        assert b"Authored notes.\r\n" in updated
+        assert b"docs/images/banner.png" not in updated
+    else:
+        assert result.returncode == 4, result.stdout + result.stderr
+        assert "needs-input:intro" in result.stdout
+        assert path.read_bytes() == source
+        assert not records.exists() and not (tmp_path / "docs").exists()
