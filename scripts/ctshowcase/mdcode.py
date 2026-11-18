@@ -2154,10 +2154,10 @@ def _quote_continuation_view(text: str) -> str:
     return "".join(chars) if chars is not None else text
 
 
-def _inline_image_target(text: str, start: int, *, title_quotes: list[tuple[int, int]] | None = None) -> tuple[str, int] | None:
+def _inline_image_target(text: str, start: int, *, delimiters: dict[int, str] | None = None) -> tuple[str, int] | None:
     """Read a Markdown destination and optional title after its opening parenthesis. Destination nesting deeper than
     32 parentheses is no link (CommonMark's limit), which bounds each call and keeps the opener pass linear.
-    Optionally collect the quote offsets of a title whose complete destination parsed successfully."""
+    Optionally record equivalent delimiters of a successfully parsed destination and title."""
     text = _source_view(text)
     global _DEST_STEPS
     original = text
@@ -2165,6 +2165,7 @@ def _inline_image_target(text: str, start: int, *, title_quotes: list[tuple[int,
     text = _quote_continuation_view(text)
     pos = start + 1
     quoted_title = None
+    angle_target = None
     while pos < len(text) and text[pos] in _LINK_SPACE:
         _DEST_STEPS += 1
         pos += 1
@@ -2181,6 +2182,7 @@ def _inline_image_target(text: str, start: int, *, title_quotes: list[tuple[int,
         if pos >= len(text):
             return None
         target = text[begin:pos]
+        angle_target = (begin - 1, pos)
         pos += 1
     else:
         depth = 0
@@ -2241,8 +2243,13 @@ def _inline_image_target(text: str, start: int, *, title_quotes: list[tuple[int,
         return None
     if region is None or pos >= region[1]:
         return None  # destination whitespace cannot join separate Markdown blocks either
-    if title_quotes is not None and quoted_title is not None:
-        title_quotes.append(quoted_title)
+    if delimiters is not None:
+        if quoted_title is not None:
+            opening, closing = quoted_title
+            delimiters[opening] = delimiters[closing] = '"'
+        if angle_target is not None:
+            opening, closing = angle_target
+            delimiters[opening] = delimiters[closing] = ""
     return _destination_value(target), pos + 1
 
 
@@ -2389,7 +2396,7 @@ def _tagline_preformatted_spans(body, tokens, raw, link_literals):
         yield starts[0][1], len(body)
 
 
-def tagline_reflow_key(body: str, *, markdown: bool = False) -> str:
+def tagline_reflow_key(body: str, *, markdown: bool = False) -> tuple[tuple[str, str], ...]:
     """Normalize prose wrapping outside syntax with meaningful source whitespace."""
     body = body.replace("\r\n", "\n").replace("\r", "\n")
     link_literals = _link_literal_spans(body)
@@ -2400,19 +2407,13 @@ def tagline_reflow_key(body: str, *, markdown: bool = False) -> str:
         raw = tuple(_raw_marker_text_spans(body, blocks, tags, _accepted_inline(body)[3]))
         preformatted = tuple(_tagline_preformatted_spans(body, tags, raw, link_literals))
     opaque = [*inline_code_spans(body), *link_literals, *blocks, *tags, *raw, *preformatted]
-    lexical = body
+    delimiter_edits: dict[int, str] = {}
     if markdown and link_literals:
-        # Formatter quote choices can differ; keep the source title and target
-        # themselves opaque, and never treat literal HTML text as Markdown.
-        title_quotes = []
+        # Formatter delimiters can differ; the title and target themselves
+        # stay opaque. Literal HTML is not Markdown syntax.
         for start, _ in link_literals:
             if all(_span_at(spans, start) is None for spans in (blocks, raw, preformatted)):
-                _inline_image_target(body, start, title_quotes=title_quotes)
-        if title_quotes:
-            chars = list(body)
-            for opening, closing in title_quotes:
-                chars[opening] = chars[closing] = '"'
-            lexical = "".join(chars)
+                _inline_image_target(body, start, delimiters=delimiter_edits)
     # Two-space or backslash hard breaks, paragraph breaks, and indented code
     # cannot be equated with ordinary wrapping.
     # Try each run only at its first byte for bounded work. An unescaped
@@ -2421,17 +2422,36 @@ def tagline_reflow_key(body: str, *, markdown: bool = False) -> str:
     # the first match cannot hide the rest of a paragraph separator.
     opaque.extend(m.span() for m in re.finditer(r"(?:(?<! ) {2,}|(?<!\\)(?:\\\\)*\\)\n", body))
     opaque.extend(m.span() for m in re.finditer(r"\n(?:[ \t]*\n)+|(?m:^[ ]{4,}[^ \t\n])", body))
+    ranges: list[tuple[int, int]] = []
+    for start, end in sorted(opaque):
+        if end <= start:
+            continue
+        if ranges and start <= ranges[-1][1]:
+            first, previous_end = ranges[-1]
+            ranges[-1] = (first, max(previous_end, end))
+        else:
+            ranges.append((start, end))
+
+    # Keep segment identity. An invalidated link target can become prose and
+    # normalize to the same characters as the previous literal destination.
     parts = []
     cursor = 0
-    for start, end in sorted(opaque):
-        if end <= cursor:
-            continue
-        if start > cursor:
-            parts.append(re.sub(r"[ \t\n]+", " ", body[cursor:start]))
-        parts.append(lexical[max(cursor, start):end])
+    for start, end in ranges:
+        prose = re.sub(r"[ \t\n]+", " ", body[cursor:start])
+        if cursor == 0:
+            prose = prose.lstrip(" ")
+        if prose:
+            parts.append(("prose", prose))
+        literal = ("".join(delimiter_edits.get(index, body[index]) for index in range(start, end))
+                   if delimiter_edits else body[start:end])
+        parts.append(("literal", literal))
         cursor = end
-    parts.append(re.sub(r"[ \t\n]+", " ", body[cursor:]))
-    return "".join(parts).strip(" ")
+    prose = re.sub(r"[ \t\n]+", " ", body[cursor:]).rstrip(" ")
+    if cursor == 0:
+        prose = prose.lstrip(" ")
+    if prose:
+        parts.append(("prose", prose))
+    return tuple(parts)
 
 
 def find_inline_code(text: str, start: int = 0) -> tuple[int, int] | None:

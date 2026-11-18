@@ -274,7 +274,7 @@ def test_tagline_wrap_preserves_backslash_hard_break_parity(slashes):
 
 
 def test_markdown_tagline_can_requote_a_link_title_without_editing_it():
-    original_text = "Inspect [the guide](docs/guide.md 'Keep two  spaces') before publishing."
+    original_text = "Inspect [the guide](<docs/guide.md> 'Keep two  spaces') before publishing."
     updated_text = 'Inspect [the guide](docs/guide.md "Keep two  spaces")\nbefore publishing.'
     original = receipt(f"**{original_text}**")
     updated = f"**{updated_text}**"
@@ -287,3 +287,18 @@ def test_markdown_tagline_can_requote_a_link_title_without_editing_it():
 
     html = '<p align="center"><b>{}</b></p>'
     assert not tagline.matches_description(receipt(html.format(updated_text)), original_text)
+
+
+def test_a_literal_link_destination_cannot_be_reclassified_as_wrapped_prose(tmp_path):
+    repo, meta = target(tmp_path)
+    description = "See [guide](<docs/one two.md>) offline."
+    changed = description.replace("one two", "one\ntwo")
+    write_meta(meta, description)
+    original = receipt(f"**{description}**")
+    edited = f"**{changed}**"
+    stamp = original.split("\n", 1)[0]
+    write_source(repo, original, "\n")
+    assert R2 not in lint_report(repo, meta)["fails"]
+    write_source(repo, receipt(edited), "\n")
+    assert R2 in lint_report(repo, meta)["fails"]
+    assert tagline.reseal(original, f"{stamp}\n{edited}") is None
