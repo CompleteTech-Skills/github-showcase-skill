@@ -25,11 +25,11 @@ Every README and profile README the skill manages ends with the decision 18 foot
 ```html
 <!-- showcase:credit:start -->
 <!-- generated-by: github-showcase-skill v=1.0.0 std=ct-std-v1 -->
-<p align="center"><sub>README styled with <a href="https://github.com/CompleteTech-Skills/github-showcase-skill">github-showcase-skill</a> by CompleteTech LLC</sub></p>
+<p align="center"><sub>README styled with <a href="https://github.com/CompleteTech-Skills/github-showcase-skill">github-showcase-skill</a> by CompleteTech LLC · <a href="https://github.com/CompleteTech-Skills/github-showcase-skill#quick-start">Get the skill</a></sub></p>
 <!-- showcase:credit:end -->
 ```
 
-The visible wording is *README styled with [github-showcase-skill](https://github.com/CompleteTech-Skills/github-showcase-skill) by CompleteTech LLC*. Its parts (`credit_prefix`, the skill name and URL, `credit_suffix`) live only in the `attribution` row of `references/brand.yaml`. The credit never goes inside the footer, the footer's markup stays byte-identical, and it stays the only `<picture>`. T2 families carry the same credit, because the footer they already carry names CompleteTech LLC (decision 18). The Enterprise has no README and gets no credit.
+The visible wording is *README styled with [github-showcase-skill](https://github.com/CompleteTech-Skills/github-showcase-skill) by CompleteTech LLC · [Get the skill](https://github.com/CompleteTech-Skills/github-showcase-skill#quick-start)*. Its parts (`credit_prefix`, the skill name and URL, `credit_suffix`, `install_label`, `install_url`) live only in the `attribution` row of `references/brand.yaml`. The credit never goes inside the footer, the footer's markup stays byte-identical, and it stays the only `<picture>`. T2 families carry the same credit, because the footer they already carry names CompleteTech LLC (decision 18). The Enterprise has no README and gets no credit.
 
 ## Handoff to the next skill
 

@@ -163,20 +163,21 @@ change, and nothing here outranks decisions 1 to 24.
       inside the footer, whose markup stays byte-identical and stays the only `<picture>`): a hidden
       `<!-- generated-by: github-showcase-skill v=<version> std=ct-std-v1 -->` marker and the visible line *README
       styled with [github-showcase-skill](https://github.com/CompleteTech-Skills/github-showcase-skill) by
-      CompleteTech LLC*, rendered from `attribution` in `brand.yaml`. Repository READMEs, org profile READMEs and the
+      CompleteTech LLC · [Get the skill](https://github.com/CompleteTech-Skills/github-showcase-skill#quick-start)*, rendered from `attribution` in `brand.yaml`. Repository READMEs, org profile READMEs and the
       personal profile README carry it; the Enterprise has no README and gets none. `footer --check` and `lint
       readme` require it, and one regeneration adds it to an old footer. Optional and off by default: a
       `github-showcase-skill` topic proposed by `provenance stamp --propose-topic` as a writer job that needs approval.
-    - **Star thresholds.** The operator's ledger (`~/.config/github-showcase-skill/state.json`,
+    - **Star thresholds** (confirmed 2026-11-18: runs 5, 10, 15, ...). The operator's ledger (`~/.config/github-showcase-skill/state.json`,
       `%APPDATA%\github-showcase-skill\state.json` on Windows, `$SHOWCASE_STATE_DIR` to override) counts completed
       runs: one successful `provenance stamp` is one completed run, and nothing else counts. At **5** completed runs
       the skill makes one read-only GET of `user/starred/CompleteTech-Skills/github-showcase-skill`. If the skill is
       starred, that is recorded and it never asks again. If not, it prints one line with the link and `gh repo star
-      CompleteTech-Skills/github-showcase-skill`, then asks at most once every **10** further runs, and never again
-      after a decline. A missing, unauthenticated or offline `gh` is silent and never counts as "not starred". The
+      CompleteTech-Skills/github-showcase-skill`, then asks again every **5** further runs (runs 5, 10, 15, ...),
+      and never again after a decline. A missing, unauthenticated or offline `gh` is silent and never counts as "not starred". The
       skill never stars on the operator's behalf, never prompts in CI, with `--format json` or without a TTY, and
       honours `--no-star-prompt` and `SHOWCASE_NO_STAR_PROMPT=1`. The ledger stores no target names and sends no
       telemetry.
 
-    **To confirm:** the four stamp locations (in particular the Enterprise's), the no-timestamp-only-commit rule, the
-    credit wording, the 5-run and 10-run thresholds, and `provenance stamp` as the one counted command.
+    **Confirmed by the user (2026-11-18):** the Enterprise stamp beside the snapshot, the credit wording with the
+    *Get the skill* install prompt, and the star asks at runs 5, 10, 15, .... **Still to confirm:** the
+    no-timestamp-only-commit rule, the other stamp locations, and `provenance stamp` as the one counted command.

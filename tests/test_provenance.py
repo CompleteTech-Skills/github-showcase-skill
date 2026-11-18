@@ -312,10 +312,12 @@ def test_credit_follows_the_unchanged_decision_18_footer(brand):
     assert block.count("<picture>") == 1  # the footer stays the only <picture>
     assert footer.credit_line(brand) == (
         '<p align="center"><sub>README styled with <a href="https://github.com/CompleteTech-Skills/'
-        'github-showcase-skill">github-showcase-skill</a> by CompleteTech LLC</sub></p>')
+        'github-showcase-skill">github-showcase-skill</a> by CompleteTech LLC · <a href="https://github.com/'
+        'CompleteTech-Skills/github-showcase-skill#quick-start">Get the skill</a></sub></p>')
     assert footer.generated_by(brand) == "<!-- generated-by: github-showcase-skill v=1.0.0 std=ct-std-v1 -->"
     assert footer.check(brand, "# X\n\n" + block + "\n")[0] == "pass"
     assert footer.check(brand, "# X\n\n" + footer.footer_block(brand) + "\n")[0] == "fail:credit-missing"
+    assert footer.check(brand, "# X\n\n" + block.replace(" · <a href", " <a href") + "\n")[0] == "fail:credit-drift"
     drift = block.replace("README styled with", "Styled by")
     assert footer.check(brand, "# X\n\n" + drift + "\n")[0] == "fail:credit-drift"
     older = block.replace("v=1.0.0", "v=0.9.0")
@@ -432,11 +434,11 @@ def test_below_the_threshold_nothing_is_checked(brand, tmp_path):
     assert gh.argv == [] and ledger.load(tmp_path)["completed_runs"] == ledger.STAR_THRESHOLD - 1
 
 
-def test_not_starred_asks_once_then_every_ten_runs(brand, tmp_path):
+def test_not_starred_asks_at_five_then_every_five_runs(brand, tmp_path):
     gh = StarGh(NOT_STARRED)
-    lines = [nudge(brand, tmp_path, gh)[1] for _ in range(ledger.STAR_THRESHOLD + 2 * ledger.STAR_REASK)]
+    lines = [nudge(brand, tmp_path, gh)[1] for _ in range(25)]
     asked = [i + 1 for i, line in enumerate(lines) if line]
-    assert asked == [5, 15, 25]
+    assert asked == [5, 10, 15, 20, 25]
     assert "gh repo star CompleteTech-Skills/github-showcase-skill" in lines[4]
     assert "https://github.com/CompleteTech-Skills/github-showcase-skill" in lines[4]
     never_writes(gh)

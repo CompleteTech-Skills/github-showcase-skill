@@ -45,12 +45,15 @@ def generated_by(brand) -> str | None:
 
 
 def credit_line(brand) -> str | None:
-    """The visible credit, rendered from brand.yaml: README styled with github-showcase-skill by CompleteTech LLC."""
+    """The visible credit, rendered from brand.yaml: README styled with github-showcase-skill by CompleteTech LLC,
+    then the install prompt (` · Get the skill`, linking to the skill's quick start) when `install_label` is set."""
     a = attribution(brand)
     if not a:
         return None
+    install = (f' · <a href="{a["install_url"]}">{a["install_label"]}</a>'
+               if a.get("install_label") and a.get("install_url") else "")
     return (f'<p align="center"><sub>{a["credit_prefix"]} <a href="{a["skill_url"]}">{a["skill"]}</a> '
-            f'{a["credit_suffix"]}</sub></p>')
+            f'{a["credit_suffix"]}{install}</sub></p>')
 
 
 def credit_markup(brand) -> str | None:

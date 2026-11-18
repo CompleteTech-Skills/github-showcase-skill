@@ -13,7 +13,7 @@ generators never touch the ledger. Nothing is counted in CI.
 The nudge: from `completed_runs >= STAR_THRESHOLD`, one read-only `gh api user/starred/OWNER/REPO` GET (204 starred,
 404 not starred; any other outcome is unknown and stays silent). Starred is recorded and never asked again. Not
 starred prints one line on stderr at the end of the run with the link and the `gh repo star` command for the operator
-to run; it is asked again at most once every STAR_REASK further runs, and never again after `provenance star
+to run; it is asked again every STAR_REASK further runs (5, 10, 15, ...), and never again after `provenance star
 --decline`. The skill never stars on anyone's behalf: it never runs `gh repo star` and never sends `PUT /user/starred`.
 Silent in CI (`CI`, `GITHUB_ACTIONS`), with `--format json`, `--quiet`, without a TTY on stderr, with
 `--no-star-prompt` or `SHOWCASE_NO_STAR_PROMPT=1`. An agent that runs the skill for a person and relays the line sets
@@ -29,7 +29,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 STAR_THRESHOLD = 5      # completed runs before the first ask
-STAR_REASK = 10         # further completed runs between asks while not starred and not declined
+STAR_REASK = 5          # further completed runs between asks: runs 5, 10, 15, ... (user answer, 2026-11-18)
 STATE_FILE = "state.json"
 APP = "github-showcase-skill"
 COUNTED = ("provenance stamp",)   # the only command that counts a completed run (documented in SKILL.md)

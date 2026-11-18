@@ -200,5 +200,5 @@ Code, templates, and documentation are licensed under the MIT License. CompleteT
 
 <!-- showcase:credit:start -->
 <!-- generated-by: github-showcase-skill v=1.0.0 std=ct-std-v1 -->
-<p align="center"><sub>README styled with <a href="https://github.com/CompleteTech-Skills/github-showcase-skill">github-showcase-skill</a> by CompleteTech LLC</sub></p>
+<p align="center"><sub>README styled with <a href="https://github.com/CompleteTech-Skills/github-showcase-skill">github-showcase-skill</a> by CompleteTech LLC · <a href="https://github.com/CompleteTech-Skills/github-showcase-skill#quick-start">Get the skill</a></sub></p>
 <!-- showcase:credit:end -->
