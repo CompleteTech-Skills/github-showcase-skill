@@ -1038,6 +1038,99 @@ def test_action_stages_while_holding_the_renderers_lock(tmp_path):
 
 
 @pytest.mark.requires_bash
+@pytest.mark.parametrize("protection", ["signing", "hook", "staged"])
+def test_action_leaves_checkout_untouched_when_publication_is_refused(tmp_path, protection):
+    import os
+    import subprocess
+
+    from conftest import ROOT, run_bash
+
+    def git(*args):
+        return subprocess.run(["git", *args], cwd=tmp_path, capture_output=True, text=True, check=True).stdout.strip()
+
+    git("init", "-q")
+    git("-c", "user.name=Synthetic", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgSign=false",
+        "commit", "--allow-empty", "-qm", "base")
+    parent = git("rev-parse", "HEAD")
+    images = tmp_path / "docs" / "images"
+    images.mkdir(parents=True)
+    card = images / "card.svg"
+    if protection == "signing":
+        git("config", "commit.gpgSign", "yes")
+        git("config", "gpg.format", "openpgp")
+        git("config", "gpg.program", str(tmp_path / "missing-signer"))
+    elif protection == "hook":
+        git("config", "core.hooksPath", "custom-hooks")
+        hook = tmp_path / "custom-hooks" / "pre-commit"
+        hook.parent.mkdir()
+        hook.write_bytes(b"#!/bin/sh\nexit 1\n")
+        hook.chmod(0o700)
+    else:
+        card.write_bytes(b"previously staged card")
+        git("add", "--", "docs/images/card.svg")
+    staged = git("diff", "--cached", "--binary")
+    card.write_bytes(b"candidate card")
+
+    result = run_bash('bash "$1" Synthetic fail "$2"', str(ROOT / "scripts/action_commit.sh"),
+                      str(ROOT / "scripts/action_prepare.py"), cwd=tmp_path,
+                      env={**os.environ, "SHOWCASE_DRY_RUN": "1"})
+
+    if protection == "signing":
+        assert result.returncode != 0
+        assert "missing-signer" in result.stderr
+    else:
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        reason = "local Git commit hooks" if protection == "hook" else "conflicting index changes"
+        assert reason in result.stdout
+    assert git("rev-parse", "HEAD") == parent
+    assert git("diff", "--cached", "--binary") == staged
+    assert card.read_bytes() == b"candidate card"
+
+
+@pytest.mark.requires_bash
+def test_action_leaves_an_in_progress_merge_untouched(tmp_path):
+    import os
+    import subprocess
+
+    from conftest import ROOT, run_bash
+
+    def git(*args, check=True):
+        return subprocess.run(["git", *args], cwd=tmp_path, capture_output=True, text=True, check=check)
+
+    git("init", "-q")
+    git("config", "user.name", "Synthetic")
+    git("config", "user.email", "fixture@example.invalid")
+    git("config", "commit.gpgSign", "false")
+    card = tmp_path / "docs" / "images" / "card.svg"
+    card.parent.mkdir(parents=True)
+    card.write_bytes(b"base\n")
+    git("add", "--", "docs/images/card.svg")
+    git("commit", "-qm", "base")
+    git("switch", "-q", "-c", "incoming")
+    card.write_bytes(b"incoming\n")
+    git("commit", "-qam", "incoming")
+    git("switch", "-q", "-")
+    card.write_bytes(b"current\n")
+    git("commit", "-qam", "current")
+    assert git("merge", "incoming", check=False).returncode == 1
+    card.write_bytes(b"resolved\n")
+    git("add", "--", "docs/images/card.svg")
+    head = git("rev-parse", "HEAD", "MERGE_HEAD").stdout
+    index = tmp_path / ".git" / "index"
+    original_index = index.read_bytes()
+
+    result = run_bash('bash "$1" Synthetic fail "$2"', str(ROOT / "scripts/action_commit.sh"),
+                      str(ROOT / "scripts/action_prepare.py"), cwd=tmp_path,
+                      env={**os.environ, "SHOWCASE_DRY_RUN": "1"})
+
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert "Git operation is in progress" in result.stdout
+    assert git("rev-parse", "HEAD", "MERGE_HEAD").stdout == head
+    assert index.read_bytes() == original_index
+    assert card.read_bytes() == b"resolved\n"
+
+
+@pytest.mark.requires_bash
 @pytest.mark.parametrize("concurrent_change", [
     "head", "index", "branch", "late-branch", "late-detached", "locked-branch", "ref-failure",
 ])

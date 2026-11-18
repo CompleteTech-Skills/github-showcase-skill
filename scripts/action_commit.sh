@@ -31,11 +31,19 @@ if [ -n "$prepare" ]; then
   commit="$(python "$prepare" commit-index "$icon_mode" "$index" "$snapshot" "$ref" "$msg" "${paths[@]}")"
   case "$commit" in
     blocked)
-      echo "::warning title=CompleteTech Showcase::commit skipped while unpublished staged output or unrelated index changes are present"
+      echo "::warning title=CompleteTech Showcase::commit skipped while unpublished staged output or conflicting index changes are present"
       exit 0
       ;;
     changed)
       echo "::warning title=CompleteTech Showcase::commit skipped because HEAD or the caller's Git index changed"
+      exit 0
+      ;;
+    busy)
+      echo "::warning title=CompleteTech Showcase::commit skipped because a Git operation is in progress"
+      exit 0
+      ;;
+    hooks)
+      echo "::warning title=CompleteTech Showcase::commit skipped because local Git commit hooks are configured"
       exit 0
       ;;
     unchanged)

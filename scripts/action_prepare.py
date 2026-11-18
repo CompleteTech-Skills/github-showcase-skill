@@ -162,6 +162,13 @@ def _ref_oid(ref: str) -> str:
     return result.stdout.strip()
 
 
+def _git_operation_in_progress(git_dir: Path) -> bool:
+    # A generated one-parent commit cannot participate in a caller's Git operation.
+    return any((git_dir / name).exists() for name in (
+        "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-apply", "rebase-merge", "sequencer",
+    ))
+
+
 def _stop_ref_update(transaction: subprocess.Popen) -> None:
     if transaction.poll() is None:
         transaction.terminate()
@@ -223,7 +230,11 @@ def prepare_commit_index(index: Path, snapshot: Path, ref: str, message: str, pa
                          allow_icon_removal: bool = False) -> str:
     """Commit the checked tree against its checked parent, then install the successful index."""
     env = {**os.environ, "GIT_INDEX_FILE": str(snapshot)}
+    git_dir = Path(subprocess.check_output(["git", "rev-parse", "--absolute-git-dir"],
+                                           text=True, timeout=30).rstrip("\n"))
     with sidecar_lock(SIDECAR):
+        if _git_operation_in_progress(git_dir):
+            return "busy"
         parent = subprocess.check_output(["git", "rev-parse", "--verify", f"{ref}^{{commit}}"],
                                          text=True, timeout=30).strip()
         original = _index_contents(index)
@@ -232,6 +243,10 @@ def prepare_commit_index(index: Path, snapshot: Path, ref: str, message: str, pa
             subprocess.run(["git", "read-tree", "--empty"], check=True, timeout=30, env=env)
         else:
             snapshot.write_bytes(original)
+        staged = subprocess.check_output(["git", "diff", "--cached", "--name-only", "--no-renames", "-z", parent],
+                                         timeout=30, env=env)
+        staged_tree = subprocess.check_output(["git", "write-tree"], text=True, timeout=30, env=env).strip() \
+            if staged else None
         if paths:
             subprocess.run(["git", "add", "--", *paths], check=True, timeout=30, env=env)
         if allow_icon_removal:
@@ -240,6 +255,11 @@ def prepare_commit_index(index: Path, snapshot: Path, ref: str, message: str, pa
                 or has_staged_outputs():
             return "blocked"
         tree = subprocess.check_output(["git", "write-tree"], text=True, timeout=30, env=env).strip()
+        if staged_tree and staged_tree != tree:
+            restaged = subprocess.check_output(["git", "diff", "--name-only", "--no-renames", "-z", staged_tree, tree],
+                                               timeout=30, env=env)
+            if set(staged.rstrip(b"\0").split(b"\0")).intersection(restaged.rstrip(b"\0").split(b"\0")):
+                return "blocked"
         parent_tree = subprocess.check_output(["git", "rev-parse", f"{parent}^{{tree}}"],
                                              text=True, timeout=30).strip()
     if tree == parent_tree:
@@ -255,9 +275,25 @@ def prepare_commit_index(index: Path, snapshot: Path, ref: str, message: str, pa
     try:
         if _head_ref() != ref or _index_contents(index) != original:
             return "changed"
-        commit = subprocess.check_output(["git", "commit-tree", tree, "-p", parent, "-m", message],
-                                         text=True, timeout=30).strip()
+        if _git_operation_in_progress(git_dir):
+            return "busy"
+        hooks = Path(subprocess.check_output(["git", "rev-parse", "--git-path", "hooks"],
+                                             text=True, timeout=30).rstrip("\n"))
+        # Hooks run by git commit may modify its candidate or enforce local policy.
+        if any(os.access(hooks / name, os.X_OK) for name in (
+            "pre-commit", "prepare-commit-msg", "commit-msg", "post-commit",
+        )):
+            return "hooks"
+        sign = subprocess.check_output(["git", "config", "--type=bool", "--default=false", "--get", "commit.gpgSign"],
+                                       text=True, timeout=30).strip()
+        command = ["git", "commit-tree", tree, "-p", parent, "-m", message]
+        if sign == "true":
+            command.append("-S")
+        commit = subprocess.check_output(command, text=True, timeout=30).strip()
         subject = message.split("\n", 1)[0]
+        # Retain the original bytes in the lock file for recovery after an interrupted process.
+        if original is not None:
+            lock.write_bytes(original)
         return commit if _update_head(ref, parent, commit, subject, index, snapshot, original) else "changed"
     finally:
         lock.unlink(missing_ok=True)
