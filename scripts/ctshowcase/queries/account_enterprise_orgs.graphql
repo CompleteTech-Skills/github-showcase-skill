@@ -1,0 +1,6 @@
+# `account-chart capture` (read only): the organizations inside one enterprise (logins only), one page at a time.
+query AccountEnterpriseOrgs($slug: String!, $after: String) {
+  enterprise(slug: $slug) {
+    organizations(first: 100, after: $after) { pageInfo { hasNextPage endCursor } nodes { login } }
+  }
+}

@@ -128,7 +128,7 @@ def validate_mermaid(skip: bool) -> None:
 SHOWCASE = [sys.executable, str(ROOT / "scripts" / "showcase.py")]
 SUBCOMMANDS = ["banner", "card", "org-banner", "org-tile", "intro", "footer", "readme", "describe", "topics",
                "labels", "meta", "fingerprint", "fonts", "lint", "contact-sheet", "doctor", "enterprise", "config",
-               "org", "project", "content", "new", "adopt", "brand"]
+               "org", "project", "content", "new", "adopt", "brand", "account-chart"]
 # hidden, deprecated aliases: still parse (`--help` works) but are not listed or documented as commands
 DEPRECATED_ALIASES = {"social-preview": "content social"}
 # the command-group contract other workstreams call by name (org/project/enterprise/content); every action is documented
@@ -136,7 +136,8 @@ GROUP_ACTIONS = {"brand": ("add-family", "add-org"),
                  "org": ("profile", "about", "pins", "labels", "health", "doctor"),
                  "project": ("capture-query", "normalize", "copy-plan", "readme", "lint", "estate-plan"),
                  "enterprise": ("snapshot-query", "doctor", "plan", "discover", "snapshot", "seat-check", "diff"),
-                 "content": ("social", "icon", "links", "linguist", "actions", "images", "sidebar")}
+                 "content": ("social", "icon", "links", "linguist", "actions", "images", "sidebar"),
+                 "account-chart": ("capture-query", "capture", "render")}
 # Checks specific to this package. The family's scripts/validate_package.py is a shared, drift-audited file and stays
 # byte-identical to its siblings; everything this package needs beyond it lives here (review A8).
 PACKAGE_FILES = ("action.yml", "references/brand.yaml", "references/standard/labels.yml", "docs/images/banner.png",
@@ -234,7 +235,15 @@ def gate_render_examples() -> None:
         showcase("lint", "svg", "--kind", "tile", str(t / "tile.svg"))
         showcase("intro", "--profile", "CompleteDotTech", "--out", str(t / "intro.svg"))
         showcase("lint", "svg", "--kind", "intro", str(t / "intro.svg"))
-    print(f"render gates ok ({len(metas)} fixtures, rendered twice)")
+        snapshot = ROOT / "examples" / "account-chart" / "northwind.snapshot.json"
+        for run in ("a", "b"):
+            showcase("account-chart", "render", "--snapshot", str(snapshot), "--out-dir", str(t / run / "chart"))
+        for name in ("account-chart.mmd", "account-chart.svg", "account-chart.png", "account-chart.md"):
+            a, b = (t / run / "chart" / name for run in ("a", "b"))
+            if hashlib.sha256(a.read_bytes()).digest() != hashlib.sha256(b.read_bytes()).digest():
+                raise RuntimeError(f"non-deterministic account chart {name}")
+        showcase("lint", "svg", "--kind", "chart", str(t / "a" / "chart" / "account-chart.svg"))
+    print(f"render gates ok ({len(metas)} fixtures and the account chart, rendered twice)")
 
 
 def gate_package_extras() -> None:

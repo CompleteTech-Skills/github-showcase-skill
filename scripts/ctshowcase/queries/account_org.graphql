@@ -1,0 +1,13 @@
+# `account-chart capture` (read only): one organization and its public repositories, one page at a time. As for the
+# account, private and internal repositories are counted (`all` minus `public`), never named.
+query AccountOrg($org: String!, $after: String) {
+  organization(login: $org) {
+    login name viewerCanAdminister
+    all: repositories { totalCount }
+    public: repositories(privacy: PUBLIC) { totalCount }
+    repositories(first: 100, after: $after, privacy: PUBLIC, orderBy: {field: NAME, direction: ASC}) {
+      pageInfo { hasNextPage endCursor }
+      nodes { name description isFork isArchived primaryLanguage { name } }
+    }
+  }
+}

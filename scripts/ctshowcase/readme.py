@@ -1628,11 +1628,17 @@ def _personal_context_views(text: str) -> tuple:
     from .content import extract_links
 
     markdown = _outside_code(text, mask_html=True, mask_autolinks=False)
-    syntax = list(re.sub(r"[^\[\]!*_~`#>|\\]", " ", markdown))
+    syntax = list(re.sub(r"[^\[\]!*_~`#>@|\\]", " ", markdown))
     # Plain prose may move out of raw HTML without changing its meaning. Keep
     # Markdown delimiters and line-start list/rule markers visible in the proof.
     for match in re.finditer(r"(?m)^ {0,3}(?:(?:[-+]|[0-9]{1,9}[.)])(?=[ \t])|(?:-[ \t]*){3,}(?=\n|$))", markdown):
         syntax[match.start():match.end()] = markdown[match.start():match.end()]
+    # Spaces before a continuing line can become a hard break outside raw HTML.
+    # Bare URLs and mentions likewise acquire Markdown/GitHub link semantics.
+    for match in re.finditer(r"(?m)\S([ \t]* {2,})(?=\n[ \t]*\S)", markdown):
+        syntax[match.start(1)] = "\x01"
+    for match in re.finditer(r"(?i)(?:https?://|www\.)[^\s<>]+", markdown):
+        syntax[match.start()] = "\x01"
     links = defaultdict(list)
     for row in extract_links(text):
         links[row["line"]].append((row["target"], row["syntax"], row["image"], row.get("alt") or ""))
@@ -1641,9 +1647,38 @@ def _personal_context_views(text: str) -> tuple:
 
 def _personal_context_key(text: str, views: tuple, start: int, end: int) -> tuple:
     visible, markdown, links, headings = views
-    line = text.count("\n", 0, start) + 1
-    return (visible[start:end], markdown[start:end], tuple(sorted(links.get(line, ()))), tuple(
-        (a - start, level) for a, _, level in headings if start <= a < end))
+    first = text.count("\n", 0, start) + 1
+    last = text.count("\n", 0, max(start, end - 1)) + 1
+    inventory = tuple((line - first, tuple(sorted(links[line])))
+                      for line in range(first, last + 1) if links.get(line))
+    return (visible[start:end], markdown[start:end], inventory,
+            tuple((a - start, level) for a, _, level in headings if start <= a < end))
+
+
+def _personal_hero_context_regions(text: str, block: re.Match) -> list[tuple[int, int]]:
+    """Authored regions sharing the hero's raw HTML context, plus its physical suffix.
+
+    A closing HTML tag or a marker on its own line does not end a raw HTML block.
+    Its following lines stay literal until the parser's actual block boundary.
+    Prefixes of enclosing HTML blocks need the same proof when the hero moves.
+    """
+    end = text.find("\n", block.end())
+    regions = [(block.end(), end + 1 if end >= 0 else len(text))]
+    for a, b in html_block_spans(text):
+        if a < block.end() and b > block.start():
+            if a < block.start():
+                regions.append((a, block.start()))
+            if b > block.end():
+                regions.append((block.end(), b))
+    merged = []
+    for a, b in sorted(regions):
+        if a == b:
+            continue
+        if merged and a <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(b, merged[-1][1]))
+        else:
+            merged.append((a, b))
+    return merged
 
 
 def personal_hero_source_spans(ctx: RepoContext, before: str, after: str) -> list[tuple[int, int, int, int]]:
@@ -1658,8 +1693,8 @@ def personal_hero_source_spans(ctx: RepoContext, before: str, after: str) -> lis
     if before[:block.start()] != after[:current[0].start()]:
         return []
     spans = [(0, block.start(), 0, block.start())] if block.start() else []
-    end = before.find("\n", block.end())
-    end = end + 1 if end >= 0 else len(before)
+    end = max((b for a, b in _personal_hero_context_regions(before, block)
+               if a == block.end()), default=block.end())
     seam = before[block.end():end]
     if seam.strip(" \t\n") and after.count(seam) == 1:
         start = after.find(seam)
@@ -1671,15 +1706,14 @@ def personal_hero_source_spans(ctx: RepoContext, before: str, after: str) -> lis
 
 
 def guard_personal_hero_context(ctx: RepoContext, original: str, updated: str, *, already_normalized: bool = False) -> None:
-    """Refuse an owned inline hero edit that changes an authored source seam."""
+    """Refuse an owned hero edit that changes authored bytes or their original parsing context."""
     if original == updated:
         return
     before = original if already_normalized else normalize_text(original)
     after = updated if already_normalized else normalize_text(updated)
-    inline = [block for block in find_blocks(MARK, before)
-              if block.group(1) == "banner" and personal_generated_hero(ctx, block.group(2))
-              and not _block_on_separate_lines(before, block)]
-    if not inline:
+    owned = [block for block in find_blocks(MARK, before)
+             if block.group(1) == "banner" and personal_generated_hero(ctx, block.group(2))]
+    if not owned:
         return
     current = [block for block in find_blocks(MARK, after) if block.group(1) == "banner"]
     old_offset = _source_offset_mapper(original, strip_bom=not already_normalized)
@@ -1697,18 +1731,18 @@ def guard_personal_hero_context(ctx: RepoContext, original: str, updated: str, *
             result[_personal_context_key(text, views, start, start + width)] += 1
         return result
 
-    for block in inline:
+    for block in owned:
         prefix = original[:old_offset(block.start())]
-        if len(current) != 1 or updated[:new_offset(current[0].start())] != prefix:
+        if (not _block_on_separate_lines(before, block)
+                and (len(current) != 1 or updated[:new_offset(current[0].start())] != prefix)):
             raise NeedsInput("intro-order", "Put the managed personal hero markers on their own lines before "
                              "a refresh that would move the authored prefix.")
-        tail = original[old_offset(block.end()):]
-        ending = re.search(r"\r\n|[\r\n]", tail)
-        seam = tail[:ending.end()] if ending else tail
-        if (seam.strip(" \t\r\n")
-                and signatures(original, before, old_views, seam) != signatures(updated, after, new_views, seam)):
-            raise NeedsInput("intro-order", "Put the managed personal hero markers on their own lines before "
-                             "a refresh that would change adjacent authored text or its line ending.")
+        for a, b in _personal_hero_context_regions(before, block):
+            fragment = original[old_offset(a):old_offset(b)]
+            if (fragment.strip(" \t\r\n") and signatures(original, before, old_views, fragment)
+                    != signatures(updated, after, new_views, fragment)):
+                raise NeedsInput("intro-order", "Keep authored content outside the hero's raw HTML block "
+                                 "before a refresh that would change its parsing context or source bytes.")
 
 
 def _replace_blocks_in_source(original: str, normalized: str, sub) -> str:

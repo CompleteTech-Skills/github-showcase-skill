@@ -1,0 +1,3 @@
+# `account-chart capture` (read only): the signed-in account, the default LOGIN and the only one whose roles and
+# enterprises GitHub reports.
+query AccountViewer { viewer { login } }

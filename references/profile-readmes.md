@@ -166,6 +166,13 @@ README, badge, sidecar or change-record write. Put the managed markers on their 
 lines before retrying. Ordinary safe inline refreshes remain supported. The source
 check also compares Markdown visibility, headings and the local link inventory;
 literal Markdown inside a raw HTML block cannot become an active link or image.
+The comparison also protects hard breaks, bare URLs and email/mention syntax
+whose interpretation would change when moved out of raw HTML.
+The proof covers every authored line sharing the hero's original raw HTML block,
+including enclosing prefixes and later lines up to the parser's block boundary.
+Markers on their own lines do not establish that boundary; without a blank
+separator, following Markdown may still be literal. Unknown or changed context
+refuses before any write, including when formatting is requested.
 `--format-generated` runs the context check before formatting and cannot bypass it.
 Artwork visibility is determined in the original document before excluding managed
 ranges: removing a nav block cannot turn literal Markdown inside HTML into artwork,

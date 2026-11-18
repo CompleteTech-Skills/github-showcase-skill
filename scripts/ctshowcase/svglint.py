@@ -13,7 +13,20 @@ KIND = {  # viewBoxes, hard budget, animation allowed, target budget
     "tile": (("0 0 400 160",), 40 * KB, False, 30 * KB),
     "plate": (("0 0 1280 320",), 150 * KB, False, 80 * KB),
     "divider": (("0 0 1200 20",), 4 * KB, False, 4 * KB),
+    # the account chart grows with the account: a viewBox inside CHART_BOUNDS instead of one fixed size
+    "chart": (None, 2000 * KB, False, 1000 * KB),
 }
+CHART_BOUNDS = ((1200, 4800), (480, 40000))  # (min, max) width, (min, max) height in px
+CHART_VIEWBOX = re.compile(r"0 0 (\d+) (\d+)")
+
+
+def _viewbox_ok(kind: str, vb: str | None) -> bool:
+    vbs = KIND[kind][0]
+    if vbs is not None:
+        return vb in vbs
+    m = CHART_VIEWBOX.fullmatch(vb or "")
+    (w0, w1), (h0, h1) = CHART_BOUNDS
+    return bool(m) and w0 <= int(m.group(1)) <= w1 and h0 <= int(m.group(2)) <= h1
 BANNED_EL = {"script", "foreignObject", "iframe", "video", "audio", "canvas", "a", "font", "font-face"}
 TEXT_EL = {"text", "tspan", "textPath"}
 FILTER_EL = {"feTurbulence", "feDisplacementMap"}
@@ -46,8 +59,9 @@ def lint_bytes(kind: str, raw: bytes, name: str = "<svg>") -> dict:
     except ET.ParseError as e:
         return dict(file=name, result="FAIL", fails=sorted(set(fails + [f"S01 not well-formed: {e}"])), warns=warns,
                     bytes=len(raw), animated=False)
-    if root.get("viewBox") not in vbs:
-        fails.append(f"S02 viewBox {root.get('viewBox')} not in {list(vbs)}")
+    if not _viewbox_ok(kind, root.get("viewBox")):
+        allowed = list(vbs) if vbs is not None else "0 0 W H with W {}-{} and H {}-{}".format(*CHART_BOUNDS[0], *CHART_BOUNDS[1])
+        fails.append(f"S02 viewBox {root.get('viewBox')} not in {allowed}")
     else:
         w, h = root.get("viewBox").split()[2:]
         if (root.get("width"), root.get("height")) != (w, h):
