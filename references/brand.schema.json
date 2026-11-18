@@ -484,6 +484,303 @@
     "$ref": "#/$defs/hex"
    }
   },
+  "chart": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "surface",
+    "pill",
+    "connector",
+    "junction",
+    "muted",
+    "archived_opacity",
+    "enterprise",
+    "neutral",
+    "labels",
+    "mermaid"
+   ],
+   "properties": {
+    "surface": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "color",
+      "opacity"
+     ],
+     "properties": {
+      "color": {
+       "$ref": "#/$defs/hex"
+      },
+      "opacity": {
+       "type": "number",
+       "minimum": 0,
+       "maximum": 1
+      }
+     }
+    },
+    "pill": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "color",
+      "opacity"
+     ],
+     "properties": {
+      "color": {
+       "$ref": "#/$defs/hex"
+      },
+      "opacity": {
+       "type": "number",
+       "minimum": 0,
+       "maximum": 1
+      }
+     }
+    },
+    "connector": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "color",
+      "opacity",
+      "width"
+     ],
+     "properties": {
+      "color": {
+       "$ref": "#/$defs/hex"
+      },
+      "opacity": {
+       "type": "number",
+       "minimum": 0,
+       "maximum": 1
+      },
+      "width": {
+       "type": "number",
+       "exclusiveMinimum": 0,
+       "maximum": 8
+      }
+     }
+    },
+    "junction": {
+     "$ref": "#/$defs/hex"
+    },
+    "muted": {
+     "$ref": "#/$defs/hex"
+    },
+    "archived_opacity": {
+     "type": "number",
+     "minimum": 0,
+     "maximum": 1
+    },
+    "enterprise": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "accent",
+      "eyebrow",
+      "fill",
+      "fill_opacity",
+      "edge_opacity"
+     ],
+     "properties": {
+      "accent": {
+       "$ref": "#/$defs/hex"
+      },
+      "eyebrow": {
+       "$ref": "#/$defs/hex"
+      },
+      "fill": {
+       "$ref": "#/$defs/hex"
+      },
+      "fill_opacity": {
+       "type": "number",
+       "minimum": 0,
+       "maximum": 1
+      },
+      "edge_opacity": {
+       "type": "number",
+       "minimum": 0,
+       "maximum": 1
+      }
+     }
+    },
+    "neutral": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "eyebrow",
+      "title",
+      "accent",
+      "accent_mid",
+      "accent_deep",
+      "plate_low",
+      "edge",
+      "bar"
+     ],
+     "properties": {
+      "eyebrow": {
+       "$ref": "#/$defs/hex"
+      },
+      "title": {
+       "$ref": "#/$defs/hex"
+      },
+      "accent": {
+       "$ref": "#/$defs/hex"
+      },
+      "accent_mid": {
+       "$ref": "#/$defs/hex"
+      },
+      "accent_deep": {
+       "$ref": "#/$defs/hex"
+      },
+      "plate_low": {
+       "$ref": "#/$defs/hex"
+      },
+      "edge": {
+       "type": "object",
+       "additionalProperties": false,
+       "required": [
+        "color",
+        "opacity"
+       ],
+       "properties": {
+        "color": {
+         "$ref": "#/$defs/hex"
+        },
+        "opacity": {
+         "type": "number",
+         "minimum": 0,
+         "maximum": 1
+        }
+       }
+      },
+      "bar": {
+       "type": "object",
+       "additionalProperties": false,
+       "required": [
+        "from",
+        "to"
+       ],
+       "properties": {
+        "from": {
+         "$ref": "#/$defs/hex"
+        },
+        "to": {
+         "$ref": "#/$defs/hex"
+        }
+       }
+      }
+     }
+    },
+    "labels": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "account",
+      "personal",
+      "personal_title",
+      "enterprise",
+      "organization",
+      "organizations",
+      "owner",
+      "member",
+      "private",
+      "empty",
+      "held",
+      "uncaptured",
+      "fork",
+      "archived",
+      "language",
+      "legend_private"
+     ],
+     "properties": {
+      "account": {
+       "type": "string",
+       "minLength": 1
+      },
+      "personal": {
+       "type": "string",
+       "minLength": 1
+      },
+      "personal_title": {
+       "type": "string",
+       "minLength": 1
+      },
+      "enterprise": {
+       "type": "string",
+       "minLength": 1
+      },
+      "organization": {
+       "type": "string",
+       "minLength": 1
+      },
+      "organizations": {
+       "type": "string",
+       "minLength": 1
+      },
+      "owner": {
+       "type": "string",
+       "minLength": 1
+      },
+      "member": {
+       "type": "string",
+       "minLength": 1
+      },
+      "private": {
+       "type": "string",
+       "minLength": 1
+      },
+      "empty": {
+       "type": "string",
+       "minLength": 1
+      },
+      "held": {
+       "type": "string",
+       "minLength": 1
+      },
+      "uncaptured": {
+       "type": "string",
+       "minLength": 1
+      },
+      "fork": {
+       "type": "string",
+       "minLength": 1
+      },
+      "archived": {
+       "type": "string",
+       "minLength": 1
+      },
+      "language": {
+       "type": "string",
+       "minLength": 1
+      },
+      "legend_private": {
+       "type": "string",
+       "minLength": 1
+      }
+     }
+    },
+    "mermaid": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "font_family",
+      "columns"
+     ],
+     "properties": {
+      "font_family": {
+       "type": "string",
+       "minLength": 1,
+       "pattern": "^[^;{}\"]+$"
+      },
+      "columns": {
+       "type": "integer",
+       "minimum": 1,
+       "maximum": 12
+      }
+     }
+    }
+   }
+  },
   "defaults": {
    "$ref": "#/$defs/family"
   },

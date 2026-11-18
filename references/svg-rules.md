@@ -9,7 +9,7 @@ Decision 21 is already applied here: every surface ships as **one dark file** us
 | ID | Rule |
 |---|---|
 | S01 | The file parses with a real XML parser. UTF-8, no BOM. |
-| S02 | The root `viewBox` exactly matches the asset kind, and `width`/`height` equal the viewBox size. Kinds: intro `0 0 1280 320` (or `0 0 1280 360` when chosen); card `0 0 400 160` (embedded at `width="400"`, so 1 unit = 1 display px); tile `0 0 400 160`; plate `0 0 1280 320`; divider `0 0 1200 20`. A new kind needs an entry here first. |
+| S02 | The root `viewBox` exactly matches the asset kind, and `width`/`height` equal the viewBox size. Kinds: intro `0 0 1280 320` (or `0 0 1280 360` when chosen); card `0 0 400 160` (embedded at `width="400"`, so 1 unit = 1 display px); tile `0 0 400 160`; plate `0 0 1280 320`; divider `0 0 1200 20`; chart `0 0 W H` with W 1200–4800 and H 480–40000 (the account chart grows with the account; embedded at `width="100%"`). A new kind needs an entry here first. |
 | S03 | No `--` inside an XML comment (it blanks the whole image). A bare `&` is written `&amp;`. |
 | S04 | The plate is opaque. Transparency is allowed only in the rounded-corner pixels outside the plate's `rx` (≤ 16). Text never sits directly on the GitHub page colour. |
 | S06 | Never stroke an axis-aligned `<line>` with a gradient (its bounding box has zero area, so it paints nothing). Use a `<rect>` or `gradientUnits="userSpaceOnUse"`. |
@@ -34,7 +34,7 @@ Decision 21 is already applied here: every surface ships as **one dark file** us
 | S12 | No `feTurbulence` or `feDisplacementMap`. |
 | S14 | Nothing animates under or through a filter. Glow comes from radial-gradient fills, not `feGaussianBlur`. |
 | S15 | Nothing in the image is meant to be clicked or copied. Every link, contact detail and number shown in the image is repeated as real Markdown next to it. |
-| S16 | No liveness labels, no hand-typed numbers, no vanity stats. Counts that change (repository or org totals) go in Markdown, not in images. |
+| S16 | No liveness labels, no hand-typed numbers, no vanity stats. Counts that change (repository or org totals) go in Markdown, not in images: the account chart names repositories but leaves every count to its Markdown block. |
 
 ## 4. Animation
 
@@ -67,7 +67,7 @@ Decision 21 is already applied here: every surface ships as **one dark file** us
 
 | ID | Rule |
 |---|---|
-| S10 | Hard limits and targets: intro ≤ 300 KB hard, ≤ 120 KB target; card or tile ≤ 40 KB hard, ≤ 30 KB target; stack plate ≤ 150 KB; divider ≤ 4 KB; a GIF fallback ≤ 1 MB and only if an animated SVG is refused. Embedded rasters are WebP at 2× display size, quality 82–86. A whole profile page (intro and 12 cards) stays ≤ 600 KB. |
+| S10 | Hard limits and targets: intro ≤ 300 KB hard, ≤ 120 KB target; card or tile ≤ 40 KB hard, ≤ 30 KB target; stack plate ≤ 150 KB; divider ≤ 4 KB; account chart ≤ 2 MB hard, ≤ 1 MB target; a GIF fallback ≤ 1 MB and only if an animated SVG is refused. Embedded rasters are WebP at 2× display size, quality 82–86. A whole profile page (intro and 12 cards) stays ≤ 600 KB. |
 | S10a | Never wrap a raster in an SVG unless the SVG adds vector text or motion. |
 
 ## 8. Accessibility and legibility

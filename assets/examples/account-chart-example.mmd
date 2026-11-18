@@ -1,0 +1,130 @@
+%%{init: {"theme": "base", "fontFamily": "Poppins, ui-sans-serif, system-ui, sans-serif", "themeVariables": {"darkMode": true, "background": "#0F172A", "fontSize": "15px", "primaryColor": "#001F3F", "primaryTextColor": "#F1F5F9", "primaryBorderColor": "#00A7FD", "secondaryColor": "#001F3F", "tertiaryColor": "#001F3F", "mainBkg": "#001F3F", "nodeBorder": "#00A7FD", "lineColor": "#085F94", "textColor": "#CBD5E1", "titleColor": "#F1F5F9", "clusterBkg": "#081B33", "clusterBorder": "#0B3F65", "edgeLabelBackground": "#0F172A"}, "flowchart": {"curve": "basis", "htmlLabels": true, "wrappingWidth": 600, "nodeSpacing": 18, "rankSpacing": 56, "padding": 14, "diagramPadding": 24}}}%%
+flowchart LR
+    accTitle: GitHub account map of Northwind Developer (@northwind-dev)
+    accDescr: personal repositories, 1 enterprise and 6 organizations, each with its public repositories
+
+    acct(["Northwind Developer<br/>@northwind-dev"])
+    me("Personal repositories<br/>@northwind-dev")
+    acct ---> me
+    subgraph me_r [" "]
+        direction LR
+        me_r1(["dotfiles"]) ~~~ me_r2(["northwind-dev"]) ~~~ me_r3(["terminal-theme · fork"]) ~~~ me_r4(["private work"])
+    end
+    me --> me_r
+    me ~~~ me_r1
+    e1{{"Northwind Holdings<br/>Enterprise · Owner"}}
+    acct --> e1
+    e1o1("Northwind Trading Co.<br/>@Northwind-Trading-Co · Owner")
+    e1 --> e1o1
+    subgraph e1o1_r [" "]
+        direction LR
+        e1o1_r1([".github"]) ~~~ e1o1_r2(["catalog-api"]) ~~~ e1o1_r3(["customer-portal"]) ~~~ e1o1_r4(["invoice-renderer"]) ~~~ e1o1_r5(["loyalty-points"]) ~~~ e1o1_r6(["northwind-cve-2026-00001-check"])
+        e1o1_r7(["order-desk"]) ~~~ e1o1_r8(["pos-terminal"]) ~~~ e1o1_r9(["returns-portal"]) ~~~ e1o1_r10(["shipping-rates"]) ~~~ e1o1_r11(["support-triage-agent"]) ~~~ e1o1_r12(["warehouse-sync"])
+        e1o1_r13(["private work"])
+    end
+    e1o1 --> e1o1_r
+    e1o1 ~~~ e1o1_r1
+    e1o1 ~~~ e1o1_r7
+    e1o1 ~~~ e1o1_r13
+    e1o2("Northwind Archive<br/>@Northwind-Archive · Owner")
+    e1 --> e1o2
+    subgraph e1o2_r [" "]
+        direction LR
+        e1o2_r1(["legacy-erp · archived"]) ~~~ e1o2_r2(["legacy-storefront · archived"])
+    end
+    e1o2 --> e1o2_r
+    e1o2 ~~~ e1o2_r1
+    e1o3("Northwind Labs<br/>@Northwind-Labs · Owner")
+    e1 --> e1o3
+    subgraph e1o3_r [" "]
+        direction LR
+        e1o3_r1(["demand-model"]) ~~~ e1o3_r2(["edge-scanner · archived"]) ~~~ e1o3_r3(["forecasting-notebooks"]) ~~~ e1o3_r4(["vector-search-lab · fork"]) ~~~ e1o3_r5(["private work"])
+    end
+    e1o3 --> e1o3_r
+    e1o3 ~~~ e1o3_r1
+    hub(["Organizations"])
+    acct --> hub
+    o1("Northwind Community<br/>@Northwind-Community · Member")
+    hub --> o1
+    subgraph o1_r [" "]
+        direction LR
+        o1_r1(["private work"])
+    end
+    o1 --> o1_r
+    o1 ~~~ o1_r1
+    o2("Northwind Games<br/>@Northwind-Games · Member")
+    hub --> o2
+    subgraph o2_r [" "]
+        direction LR
+        o2_r1(["arcade-hub"]) ~~~ o2_r2(["tile-puzzle"])
+    end
+    o2 --> o2_r
+    o2 ~~~ o2_r1
+    o3("Northwind Sandbox<br/>@Northwind-Sandbox · Owner")
+    hub --> o3
+    subgraph o3_r [" "]
+        direction LR
+        o3_r1(["no public repositories"])
+    end
+    o3 --> o3_r
+    o3 ~~~ o3_r1
+
+    classDef account fill:#005ADD,stroke:#00A7FD,stroke-width:2px,color:#F1F5F9,font-weight:600
+    classDef hub fill:#001F3F,stroke:#00A7FD,stroke-width:1.5px,color:#F1F5F9
+    classDef enterprise fill:#021E3D,stroke:#FFC300,stroke-width:2px,color:#F1F5F9,font-weight:600
+    classDef f_completetech fill:#001F3F,stroke:#00A7FD,stroke-width:1.5px,color:#F1F5F9
+    classDef f_neutral fill:#1E293B,stroke:#94A3B8,stroke-width:1.5px,color:#F1F5F9
+    classDef repo fill:#2A3243,stroke:#066DA9,stroke-width:1px,color:#F1F5F9,font-family:monospace
+    classDef l_cpp stroke:#F34B7D
+    classDef l_csharp stroke:#178600
+    classDef l_default stroke:#94A3B8
+    classDef l_gdscript stroke:#355570
+    classDef l_go stroke:#00ADD8
+    classDef l_javascript stroke:#F1E05A
+    classDef l_jupyter_notebook stroke:#DA5B0B
+    classDef l_kotlin stroke:#A97BFF
+    classDef l_lua stroke:#000080
+    classDef l_php stroke:#4F5D95
+    classDef l_python stroke:#3572A5
+    classDef l_rust stroke:#DEA584
+    classDef l_shell stroke:#89E051
+    classDef l_svelte stroke:#FF3E00
+    classDef l_swift stroke:#F05138
+    classDef l_typescript stroke:#3178C6
+    classDef l_vue stroke:#41B883
+    classDef fork stroke-dasharray:5 3
+    classDef archived color:#94A3B8,stroke:#525D71
+    classDef note fill:#0F172A,stroke:#5F6B7F,stroke-dasharray:3 3,color:#94A3B8
+    class acct account
+    class hub hub
+    class e1 enterprise
+    class me,e1o1 f_completetech
+    class e1o2,e1o3,o1,o2,o3 f_neutral
+    class me_r1,me_r2,me_r3,e1o1_r1,e1o1_r2,e1o1_r3,e1o1_r4,e1o1_r5,e1o1_r6,e1o1_r7,e1o1_r8,e1o1_r9,e1o1_r10,e1o1_r11,e1o1_r12,e1o2_r1,e1o2_r2,e1o3_r1,e1o3_r2,e1o3_r3,e1o3_r4,o2_r1,o2_r2 repo
+    class e1o3_r2 l_cpp
+    class e1o2_r1 l_csharp
+    class me_r2,e1o1_r1 l_default
+    class o2_r2 l_gdscript
+    class e1o1_r4 l_go
+    class o2_r1 l_javascript
+    class e1o3_r3 l_jupyter_notebook
+    class e1o1_r5 l_kotlin
+    class me_r3 l_lua
+    class e1o2_r2 l_php
+    class e1o1_r6,e1o1_r10,e1o1_r11,e1o3_r1 l_python
+    class e1o1_r12,e1o3_r4 l_rust
+    class me_r1 l_shell
+    class e1o1_r9 l_svelte
+    class e1o1_r8 l_swift
+    class e1o1_r2,e1o1_r7 l_typescript
+    class e1o1_r3 l_vue
+    class me_r3,e1o3_r4 fork
+    class e1o2_r1,e1o2_r2,e1o3_r2 archived
+    class me_r4,e1o1_r13,e1o3_r5,o1_r1,o3_r1 note
+    style me_r fill:#081B33,stroke:#0B3F65,stroke-width:1px
+    style e1o1_r fill:#081B33,stroke:#0B3F65,stroke-width:1px
+    style e1o2_r fill:#081B33,stroke:#374155,stroke-width:1px
+    style e1o3_r fill:#081B33,stroke:#374155,stroke-width:1px
+    style o1_r fill:#081B33,stroke:#374155,stroke-width:1px
+    style o2_r fill:#081B33,stroke:#374155,stroke-width:1px
+    style o3_r fill:#081B33,stroke:#374155,stroke-width:1px

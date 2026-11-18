@@ -129,6 +129,47 @@ languages:
   Mermaid: "#FF3670"
   default: "#94A3B8"
 
+# Account chart (`account-chart render`): one account's repositories, enterprises and organizations as a dark tree.
+# Orgs with a brand row keep their family tokens (accent, eyebrow, bar, fonts); these are the chart's own surfaces, and
+# the neutral style for orgs without a row or with a pending identity, which never inherit CompleteTech art.
+chart:
+  surface: {color: "#001F3F", opacity: 0.88}           # account, enterprise and org cards over the canvas
+  pill: {color: "#F1F5F9", opacity: 0.06}              # repository pills on the canvas
+  connector: {color: "#00A7FD", opacity: 0.5, width: 2}
+  junction: "#FFC300"
+  muted: "#94A3B8"
+  archived_opacity: 0.5
+  enterprise: {accent: "#FFC300", eyebrow: "#FFC300", fill: "#001F3F", fill_opacity: 0.4, edge_opacity: 0.45}
+  neutral:
+    eyebrow: "#94A3B8"
+    title: "#F1F5F9"
+    accent: "#94A3B8"
+    accent_mid: "#64748B"
+    accent_deep: "#475569"
+    plate_low: "#1E293B"
+    edge: {color: "#94A3B8", opacity: 0.3}
+    bar: {from: "#94A3B8", to: "#64748B"}
+  labels:
+    account: GITHUB ACCOUNT MAP
+    personal: PERSONAL
+    personal_title: Personal repositories
+    enterprise: ENTERPRISE
+    organization: ORGANIZATION
+    organizations: Organizations
+    owner: Owner
+    member: Member
+    private: private work
+    empty: no public repositories
+    held: on hold
+    uncaptured: not captured
+    fork: Fork
+    archived: Archived
+    language: Language
+    legend_private: Private work is counted, never named
+  mermaid:
+    font_family: "Poppins, ui-sans-serif, system-ui, sans-serif"
+    columns: 6                     # repository pills per row inside an org's cluster
+
 # Defaults every family inherits (deep merge) before its own block applies.
 defaults:
   measured: true

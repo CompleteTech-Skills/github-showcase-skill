@@ -9,8 +9,10 @@ Usage: python3 scripts/showcase.py [--config PATH] [--repo-dir DIR] [--meta FILE
 Command groups: org {profile,about,pins,labels,health,doctor} · project {capture-query,normalize,copy-plan,readme,lint,
 estate-plan} · enterprise {snapshot-query,discover,snapshot,doctor,seat-check,diff,plan} · content {social,icon,links,
 linguist,actions,images,sidebar}. `content social` is the contract name for the social preview (`social-preview` is a
-hidden, deprecated alias); `org-banner` and `org-tile` are top-level generators. `provenance {check,stamp,star}`
-(decision 25, a proposal) tells before a run whether a target was already showcased and records the run.
+hidden, deprecated alias); `org-banner` and `org-tile` are top-level generators. `account-chart {capture-query,capture,
+render}` maps one account's repositories, enterprises and organizations (Mermaid source, dark SVG, HD PNG).
+`provenance {check,stamp,star}` (decision 25, a proposal) tells before a run whether a target was already showcased
+and records the run.
 """
 from __future__ import annotations
 
@@ -1413,8 +1415,9 @@ def cmd_config(args):
     errs = C.schema_errors(b.raw)
     crops = C.write_crops(b) if args.crop and not errs else None  # NeedsInput (exit 4) until the boxes are measured
     if args.write_lock:
-        C.LOCK.write_text(C.lock_text(b.raw), encoding="utf-8")
-        STANDARD_LOCK.write_text(standard_lock_text(), encoding="utf-8")
+        # LF on every OS: the committed locks are LF, and a CRLF rewrite on Windows would change every line
+        C.LOCK.write_text(C.lock_text(b.raw), encoding="utf-8", newline="\n")
+        STANDARD_LOCK.write_text(standard_lock_text(), encoding="utf-8", newline="\n")
     in_sync = C.lock_in_sync(b) and STANDARD_LOCK.is_file() and STANDARD_LOCK.read_text(encoding="utf-8") == standard_lock_text()
     ok = not errs and in_sync
     out = {"command": "config", "result": "pass" if ok else "fail", "schema_errors": errs, "lock_in_sync": in_sync,
@@ -1606,7 +1609,7 @@ def parser() -> argparse.ArgumentParser:
     s = sub.add_parser("lint", help="lint svg|readme|banner|all|public-leak|prose")
     s.add_argument("what", choices=("svg", "readme", "banner", "all", "public-leak", "prose"))
     s.add_argument("files", nargs="*")
-    s.add_argument("--kind", choices=("intro", "card", "tile", "plate", "divider"))
+    s.add_argument("--kind", choices=("intro", "card", "tile", "plate", "divider", "chart"))
     s.add_argument("--variant", default="auto")
     s.add_argument("--denylist", help="public-leak: UTF-8 literal names, one per line; case-insensitive; never echoed")
     s.add_argument("--registry", help="public-leak: registry/estate.yaml (default: the bundle beside the skill; read only)")
@@ -1706,10 +1709,11 @@ def parser() -> argparse.ArgumentParser:
 
     # command groups (decisions 5, 14, 15, 18, 21, 23 and 24; COVERAGE gaps): each module registers its own parser, and
     # every org lookup inside them goes through ctshowcase.resolver (old and new logins resolve alike, CQ-03)
-    from ctshowcase import brand_commands, content, org, project
+    from ctshowcase import account, brand_commands, content, org, project
     brand_commands.register(sub)
     org.register(sub)
     project.register(sub)
+    account.register(sub)
     content.add_parser(sub, sys.modules.get(__name__))  # None when loaded by path: content finds showcase.py itself
     from ctshowcase import provenance
     provenance.register(sub, cmd_provenance)  # decision 25: run-once check, stamp and the local run ledger

@@ -1,0 +1,9 @@
+# `account-chart capture` (read only, viewer only): the enterprises the signed-in account owns or belongs to.
+query AccountEnterprises($after: String) {
+  viewer {
+    enterprises(first: 25, after: $after, membershipType: ALL) {
+      pageInfo { hasNextPage endCursor }
+      nodes { slug name viewerIsAdmin }
+    }
+  }
+}
