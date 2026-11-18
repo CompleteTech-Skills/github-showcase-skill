@@ -91,3 +91,47 @@ def test_header_refresh_keeps_bom_prefix_and_immediately_adjacent_authored_suffi
     report = json.loads(retry.stdout)
     assert report["result"] == "unchanged" and report["written"] is False, report
     assert snapshot(tmp_path) == before_retry, "Repeating the refresh must be byte-idempotent"
+
+
+@pytest.mark.parametrize("variant", ["J", "G", "H"])
+@pytest.mark.parametrize("bom_count", [1, 2], ids=["encoding-bom-control", "encoding-and-authored-bom"])
+def test_scaffold_keeps_bom_prefix_and_complete_authored_suffix(
+        tmp_path, applicable_intro, variant, bom_count):
+    prefix = BOM * bom_count
+    suffix = (b"Authored  scaffold suffix.  \r\n\r\n"
+              b"A second authored paragraph.\t\r\n")
+    source = prefix + LEGACY_HERO.replace(b"\n", b"\r\n") + suffix
+    meta = fixture_repo(tmp_path, source, applicable_intro)
+
+    def scaffold():
+        return run_cli("--format", "json", "--meta", meta, "--repo-dir", tmp_path,
+                       "readme", "--mode", "scaffold", "--variant", variant, "--badges", "local",
+                       "--records", tmp_path / "records.jsonl", "--write")
+
+    result = scaffold()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    updated = (tmp_path / "README.md").read_bytes()
+    block, = HERO.finditer(updated)
+    assert updated[:block.start()] == prefix, "Scaffolding must retain both encoding and authored BOM bytes"
+    assert updated.count(BOM) == bom_count
+    assert updated.count(b"<!-- showcase:banner:start -->") == 1
+    assert updated.count(b"<!-- showcase:banner:end -->") == 1
+    assert b'src="assets/intro.svg"' in block.group()
+    assert b"docs/images/banner.png" not in updated
+    assert updated.count(suffix) == 1, "The complete authored suffix, including spaces and tab, must survive"
+    # J scaffolding may place the authored content inside About; G/H retain it
+    # beside the replaced hero under their additive callout contract.
+    if variant in ("G", "H"):
+        assert updated[block.end():].startswith(suffix)
+    assert b"\n" not in updated.replace(b"\r\n", b"")
+    assert b"\r" not in updated.replace(b"\r\n", b"")
+    assert (tmp_path / "assets/intro.svg").read_bytes() == applicable_intro
+    before_retry = snapshot(tmp_path)
+
+    retry = scaffold()
+
+    assert retry.returncode == 0, retry.stdout + retry.stderr
+    report = json.loads(retry.stdout)
+    assert report["result"] == "unchanged" and report["written"] is False, report
+    assert snapshot(tmp_path) == before_retry, "Repeating scaffold must be byte-idempotent"

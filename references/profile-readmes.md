@@ -146,6 +146,8 @@ spans would merge line endings, the command returns `needs-input:intro-order` be
 writing; put the managed hero on separate blank lines before retrying.
 Source mapping distinguishes the file's encoding BOM from an authored U+FEFF prefix;
 both that prefix and text immediately beside a managed hero stay intact.
+Scaffold uses the CLI's already-normalized view and retains an authored U+FEFF prefix
+before the new header when migrating a lone managed hero.
 Images inside HTML comments do not count as authored heroes or badges; the README
 still needs its applicable intro or an actionable missing-input result.
 Personal scaffolding retains the authored body's blank separators, including

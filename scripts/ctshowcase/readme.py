@@ -684,19 +684,24 @@ def callout(ctx) -> str | None:
 # ------------------------------------------------------------------------------------------------
 # Modes
 # ------------------------------------------------------------------------------------------------
-def scaffold(ctx: RepoContext, existing: str = "") -> str:
+def scaffold(ctx: RepoContext, existing: str = "", *, already_normalized: bool = False) -> str:
     variant = ctx.det["variant"]
     personal = personal_profile(ctx)
+    authored_prefix = ""
     if personal:
-        normalized = normalize_text(existing)
+        normalized = existing if already_normalized else normalize_text(existing)
         if variant in ("G", "H"):
             return upgrade(ctx, normalized, already_normalized=True)[0]
         markers = find_blocks(MARK, normalized)
         managed = {marker.group(1) for marker in markers}
         if {"banner", "nav"} <= managed or _personal_has_authored_hero(ctx, normalized, markers):
-            return header_only(ctx, existing, preserve_structure=True)
+            return header_only(ctx, existing, already_normalized=already_normalized, preserve_structure=True)
         if "banner" in managed:
-            existing = _sub_blocks(normalized, lambda marker: "" if marker.group(1) == "banner" else marker.group(0))
+            # A leading U+FEFF in this view is authored, not the removed encoding BOM.
+            # Keep it before the replacement header instead of moving it into About.
+            authored_prefix = normalized[:len(normalized) - len(normalized.lstrip(BOM))]
+            existing = _sub_blocks(normalized[len(authored_prefix):],
+                                   lambda marker: "" if marker.group(1) == "banner" else marker.group(0))
     order = required_sections(ctx.det, meta=ctx.meta)
     parts = [header(ctx)]
     co = callout(ctx)
@@ -718,7 +723,7 @@ def scaffold(ctx: RepoContext, existing: str = "") -> str:
         parts.append(f"## {lic[0]}\n\n{managed_license(lic[1])}")
     if footer_wanted(ctx):
         parts.append(footermod.block(ctx.brand))
-    return "\n\n".join(parts) + "\n"
+    return authored_prefix + "\n\n".join(parts) + "\n"
 
 
 HEADER_LINE = re.compile(

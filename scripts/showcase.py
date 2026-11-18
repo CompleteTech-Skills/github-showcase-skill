@@ -689,7 +689,7 @@ def cmd_readme(args):
         removed = []
         callout_scaffold = personal and mode == "scaffold" and ctx.det["variant"] in ("G", "H")
         if mode == "scaffold" and not callout_scaffold:
-            after = readme.scaffold(ctx, before)
+            after = readme.scaffold(ctx, before, already_normalized=True)
         elif mode == "header":
             after = readme.header_only(ctx, before, already_normalized=True)
         else:

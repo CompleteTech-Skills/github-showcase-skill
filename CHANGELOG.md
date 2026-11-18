@@ -41,6 +41,7 @@ All notable changes to `github-showcase-skill` are recorded here. Versions follo
 
 ### Fixed
 
+- Personal scaffolding normalizes the encoding BOM once and retains authored U+FEFF prefixes before a replacement header, including when migrating a lone managed hero (#159).
 - Full-suite CI budgets now allow the expanded personal-hero CLI coverage to complete: 75 minutes for Quality and Linux/macOS portability, and 90 minutes for Windows portability. The test and validation commands are unchanged (#159).
 - Source mapping preserves authored U+FEFF prefixes during personal header refresh and G/H upgrades, including text immediately adjacent to managed markers (#159).
 - Personal hero ordering recognizes equivalent relative local badge paths, including percent encoding and dot segments, without changing authored URLs or claiming remote artwork. G and H hero relocation preserves exact authored source bytes, including mixed line endings and blank separators, and refuses before writing if the move would merge line endings (#159).
