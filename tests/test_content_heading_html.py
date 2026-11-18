@@ -124,3 +124,41 @@ def test_cli_other_raw_html_blocks_do_not_add_heading_duplicates(tmp_path, endin
         (12, "#same-heading", "ok"), (13, "#same-setext", "ok"),
     ]
     assert path.read_bytes() == original
+
+
+@pytest.mark.parametrize("ending", [b"\n", b"\r\n", b"\r"])
+@pytest.mark.parametrize("opener,closer", [
+    (b"<textarea>", (b"</textarea>",)),
+    (b"<script>", (b"</script>",)),
+    (b'<div title="', (b'">', b"</div>")),
+])
+def test_literal_html_heading_spellings_do_not_consume_real_heading_slugs(tmp_path, ending, opener, closer):
+    lines = [opener, b"# Literal <h2>Same</h2>", *closer, b"", b"# Same", b"",
+             b"[Real](#same)", b"[Duplicate](#same-1)", b"[Literal](#literal-same)", b""]
+    readme = tmp_path / "README.md"
+    original = ending.join(lines)
+    readme.write_bytes(original)
+
+    result = run_cli("--repo-dir", tmp_path, "content", "links", "README.md")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    findings = json.loads(result.stdout)["findings"]
+    assert [(row["line"], row["target"], row["status"]) for row in findings] == [
+        (lines.index(b"[Real](#same)") + 1, "#same", "ok"),
+        (lines.index(b"[Duplicate](#same-1)") + 1, "#same-1", "broken"),
+        (lines.index(b"[Literal](#literal-same)") + 1, "#literal-same", "broken"),
+    ]
+    assert readme.read_bytes() == original
+
+
+def test_cli_html_heading_uses_the_live_closer_outside_quoted_attributes(tmp_path):
+    source = ('<h2 title="Literal </h2> > text">Real<!-- marker -->HTML'
+              '<span title="Ignore </h2> here"></span></h2>\n\n'
+              '[Real](#real-html)\n')
+    readme = tmp_path / "README.md"
+    readme.write_text(source, encoding="utf-8")
+    result = run_cli("--repo-dir", tmp_path, "content", "links", "README.md")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert headings(source) == [{"line": 1, "text": "Real HTML", "slug": "real-html"}]
+    finding, = json.loads(result.stdout)["findings"]
+    assert finding["target"] == "#real-html" and finding["status"] == "ok"

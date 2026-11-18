@@ -257,7 +257,7 @@ MD_LINK = re.compile(r"(!?)\[((?:[^\[\]\n]|\[[^\[\]\n]*\])*)\]\(\s*(<[^>\n\x00]*
 REF_DEF = re.compile(r"^ {0,3}\[([^\]\n\x00]+)\]:\s*(<[^>\n\x00]*>|[^\s\x00]+)(?=\s|$)")
 HTML_LINK_TAGS = frozenset(("a", "img", "source", "link", "video", "audio", "image", "use"))
 ANCHOR_ATTR = re.compile(r"""<[a-z][^>]*?(?<![\w-])(?:name|id)\s*=\s*["']([^"']+)["']""", re.I)
-HTML_HEADING = re.compile(r"<h([1-6])\b[^>]*>(.*?)</h\1>", re.I | re.S)
+HTML_HEADING = re.compile(r"<(/?)(h[1-6])(?=[ \t\n/>])", re.I)
 BARE_URL = re.compile(r"https?://[^\s<>()\[\]\"'`\x00]+")
 IMG_EXT = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".avif", ".bmp", ".ico")
 
@@ -309,6 +309,35 @@ def github_slug(text: str) -> str:
     return "".join(out)
 
 
+def _html_heading_titles(text: str, starts: list[int]) -> dict[int, str]:
+    """Pair real HTML heading tags on the same physical line."""
+    from .mdcode import _outside_code, live_html_tags
+
+    if not HTML_HEADING.search(text):
+        return {}
+    titles = {}
+    opened = {}
+    tokens = list(live_html_tags(text, include_closing=True))
+    for index, tag in enumerate(tokens):
+        name = HTML_HEADING.match(tag.group(0))
+        if name is None:
+            continue
+        line = bisect.bisect_right(starts, tag.start())
+        key = (line, name.group(2).lower())
+        if not name.group(1):
+            opened.setdefault(key, index)
+        elif (opening := opened.pop(key, None)) is not None and line not in titles:
+            parts = []
+            start = tokens[opening].end()
+            for nested in tokens[opening + 1:index]:
+                parts.append(text[start:nested.start()])
+                start = nested.end()
+            parts.append(text[start:tag.start()])
+            titles[line] = _outside_code("".join(parts), mask_inline=False, mask_autolinks=False,
+                                         collapse_comments=True)
+    return titles
+
+
 def headings(text: str) -> list[dict]:
     """Markdown headings in order with their GitHub anchors (duplicates get -1, -2 ...)."""
     from .mdcode import html_block_spans
@@ -317,6 +346,7 @@ def headings(text: str) -> list[dict]:
     starts = [0] + [m.end() for m in re.finditer("\n", text)]
     html_lines = {line for start, end in html_block_spans(text)
                   for line in range(bisect.bisect_right(starts, start), bisect.bisect_right(starts, end - 1) + 1)}
+    html_titles = _html_heading_titles(text, starts)
     rows, seen = [], {}
     lines = scan_lines(text)
     para = re.compile(r"^\s*([#<>|*+\-!\[]|\d+[.)]\s)")
@@ -330,8 +360,8 @@ def headings(text: str) -> list[dict]:
             elif (i + 1 < len(lines) and n + 1 not in html_lines and SETEXT.match(lines[i + 1][1] or "")
                   and t.strip() and not para.match(t)):
                 title = t.strip()
-        if title is None and (m := HTML_HEADING.search(t)):
-            title = m.group(2)
+        if title is None:
+            title = html_titles.get(n)
         if title is None:
             continue
         base = github_slug(plain_heading(title))
