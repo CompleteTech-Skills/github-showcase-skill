@@ -289,20 +289,28 @@ def load_repo_override(repo_dir: str | Path | None, *, facts: RepoFacts | None =
     for name in REPO_CONFIG_NAMES:
         if facts.is_file(name):
             data = (Path(repo_dir) / name).read_bytes()
-            return parse_repo_override(name, data.decode("utf-8")), hashlib.sha256(data).hexdigest()
+            try:
+                text = data.decode("utf-8")
+            except UnicodeDecodeError:
+                raise ConfigError(f"{name}: repository override must be UTF-8") from None
+            return parse_repo_override(name, text), hashlib.sha256(data).hexdigest()
     return {}, None
 
 
 def parse_repo_override(name: str, text: str) -> dict:
     """One repository override file's text, parsed and checked against repo-config.schema.json (colours and fonts are
     rejected). Shared by the checkout and the metadata-only path (`manifests`), so both read the same override."""
-    obj = load_yaml_text(text)
-    if obj is None:
-        # An empty YAML document has no node or a zero-width implicit null node.
-        # Written null values still have a source span and are not mappings.
-        node = yaml.compose(text, Loader=yaml.SafeLoader)
-        if node is None or node.start_mark.index == node.end_mark.index:
-            obj = {}
+    if yaml is None:
+        raise ConfigError("PyYAML is required for this command (pip install -r requirements.txt)")
+    try:
+        obj = load_yaml_text(text)
+        if obj is None:
+            # An empty YAML document has no node or a zero-width implicit null node.
+            node = yaml.compose(text, Loader=yaml.SafeLoader)
+            if node is None or node.start_mark.index == node.end_mark.index:
+                obj = {}
+    except (yaml.YAMLError, RecursionError):
+        raise ConfigError(f"{name}: repository override contains invalid YAML") from None
     if not isinstance(obj, dict):
         raise ConfigError(f"{name} must be a mapping")
     schema = json.loads((REFERENCES / "repo-config.schema.json").read_text(encoding="utf-8"))

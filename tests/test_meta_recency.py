@@ -110,3 +110,18 @@ def test_meta_from_gh_keeps_unreadable_preferred_override(tmp_path, monkeypatch,
     diagnostic = json.loads(capsys.readouterr().out)
     assert diagnostic["logs"] == ["config"]
     assert f"{preferred}: captured override contents unavailable" in diagnostic["error"]
+
+
+def test_raw_meta_response_with_invalid_utf8_is_unavailable(monkeypatch):
+    import sys
+
+    from ctshowcase import meta
+
+    real_run = meta.subprocess.run
+
+    def synthetic_bytes(argv, **kwargs):
+        assert argv[:1] == ["gh"] and argv[4:6] == ["-X", "GET"]
+        return real_run([sys.executable, "-c", "import sys; sys.stdout.buffer.write(bytes([255, 254]))"], **kwargs)
+
+    monkeypatch.setattr(meta.subprocess, "run", synthetic_bytes)
+    assert meta._gh("repos/Northwind-Trading-Co/handbook/contents/.github/showcase.yml", raw=True) is None

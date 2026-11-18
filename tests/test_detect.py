@@ -636,3 +636,20 @@ def test_stdlib_meta_preserves_override_for_later_validation(tmp_path):
     assert result["manifests"] == manifests
     assert "suggestion" not in result["detected"]
     assert json.loads(snapshot.stdout)["logs"] == []
+
+
+@pytest.mark.parametrize("bad_input,error", [(bytes([255, 254]), "must be UTF-8"), (b"type: [", "invalid YAML")])
+def test_local_unreadable_preferred_override_has_a_structured_config_error(tmp_path, bad_input, error):
+    repo = tmp_path / "repo"
+    _tree(repo, {"README.md": "# Handbook", "docs/guide.md": "# Guide", ".github/showcase.yaml": "type: cli\n"})
+    (repo / ".github/showcase.yml").write_bytes(bad_input)
+    capture = tmp_path / "capture.json"
+    snapshot = run_cli("--repo-dir", repo, "meta", "--out", capture)
+    assert snapshot.returncode == 0, snapshot.stdout + snapshot.stderr
+    detected = json.loads(capture.read_text())["detected"]
+    assert detected["type"] == "documentation"
+    assert "suggestion" not in detected
+    doctor = run_cli("--repo-dir", repo, "doctor", "--format", "json")
+    assert doctor.returncode == 2, doctor.stdout + doctor.stderr
+    report = json.loads(doctor.stdout)
+    assert report["logs"] == ["config"] and error in report["error"]
