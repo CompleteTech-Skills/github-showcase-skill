@@ -135,8 +135,15 @@ after it. Rebuild the appropriate prefix for every invocation; do not let one re
 4. Run four candidate slots serially, one image per invocation, each in its own new empty absolute SLOT.
    Build argv `['codex', 'exec', '--json', '--skip-git-repo-check', '-C', str(SLOT), ... , '-']`, adding
    `['-m', IMAGE_MODEL]` only for a named model and repeatable `['-i', str(REFERENCE)]` for approved references.
-   Use `subprocess.run(argv, input=PROMPT_TEXT, text=True, encoding='utf-8', shell=False)` and save stdout
-   to SLOT/run.jsonl; PROMPT_TEXT is read from the absolute P/prompt.txt. Never use shell input redirection.
+   Read PROMPT_TEXT from the absolute P/prompt.txt, then capture the result explicitly:
+   ```python
+   result = subprocess.run(argv, input=PROMPT_TEXT, capture_output=True,
+                           text=True, encoding="utf-8", shell=False)
+   (SLOT / "run.jsonl").write_text(result.stdout, encoding="utf-8")
+   (SLOT / "run.stderr.txt").write_text(result.stderr, encoding="utf-8")
+   ```
+   Record `result.returncode` in the scratch ledger and handle nonzero exits as failed attempts before
+   selecting an image. Never use shell input redirection.
    - Select the first readable image path reported by THAT invocation, then copy to absolute C/slot-N.png.
      Never use a directory listing or the newest generated image. No readable path: retry the unchanged
      prompt at most 3 attempts for that slot, then stop it with `art-fail`.
