@@ -22,17 +22,37 @@ python3 $S lint svg --kind chart docs/images/account-chart.svg
 
 `render` options: `--name` (file stem, default `account-chart`; a `-dark`/`-light` stem is refused, decision 21), `--width` (1600–4800 px, default 2400; the height follows the account), `--scale 1|2|3|4` (PNG pixels per px; lowered automatically above 120 megapixels and logged `png-scale:<n>`), `--hide forks` and `--hide archived`, `--private note|omit`, `--avatar PATH` (the account's picture; default its brand mark, else a monogram), `--no-png`, `--mmdc [PATH]` with `--mmdc-config FILE`, and the resolver inputs `--registry`, `--decisions`, `--approved`, `--approved-yaml` and `--actions`. The global `--allow-t3` (or `--allow-t3` after the command) admits T3 orgs that have a valid sign-off record.
 
+The resolver inputs `--registry`, `--approved`, `--approved-yaml` and `--actions`
+also apply to `capture`. T3 reads require both `--allow-t3` and a valid applicable
+sign-off record; a flag alone grants nothing.
+
 ## Capture and the snapshot
 
 `capture` runs only GraphQL queries (`scripts/ctshowcase/queries/account_*.graphql`, each checked for a mutation before it runs) through `gh api graphql`, with string variables passed raw (`-f`). It pages every connection (`after` while `hasNextPage`). Enterprises and roles are what GitHub reports for the signed-in viewer, so they are captured only when LOGIN is the viewer (`enterprises:viewer-only` otherwise). An organization the viewer cannot read (SAML enforcement, a removed membership) is kept with `captured: false` and logged `org-uncaptured:<login>`; the chart shows it as "not captured", never as empty.
 
 The snapshot (`account-chart/v1`, LF JSON) holds `captured` (an absolute date), `viewer`, `account` (login, name, company, location, website), the account's public `repositories`, its `not_public` count, `enterprises` (slug, name, role, organization logins) and `organizations` (login, name, member, role, captured, public `repositories`, `not_public`). A repository is `name`, `description`, `language`, `fork` and `archived`.
 
+Capture evidence stays explicit. Optional `capture_state` values are `complete`,
+`partial`, `uncaptured` and `unknown`; the root also records `organizations_state`
+and `enterprises_state`, and each enterprise can record its membership
+`capture_state`. Interrupted pagination retains partial evidence. Missing private
+or internal counts are `null`, never an observed zero. Legacy snapshots retain
+their explicit capture flags; an organization without a known capture flag is
+unknown. The model, Markdown, Mermaid, SVG labels/descriptions and render JSON
+`coverage` report retain these distinctions. Uncaptured or unknown lanes neither
+name stale repositories nor claim that no public repositories exist.
+
 **Privacy by construction.** Every connection that returns repository names asks for `privacy: PUBLIC`. Private and internal repositories are counted as `all` minus `public` and never named, so no private name can reach a snapshot, a chart, a fixture or a log. `render` refuses a hand-edited snapshot that marks a repository `private`, `isPrivate` or non-public `visibility` (exit 2, `privacy:not-public-repository`). The snapshot is still the account's own data: keep real snapshots out of fixtures and examples (synthetic stand-ins live in `examples/account-chart/`).
 
 ## The estate gates
 
-`render` applies the same owner rules as every other command, through the shared resolver (renamed orgs resolve, CQ-03):
+`capture` checks an explicit account before any API read, checks the default
+viewer immediately after identifying its login, and checks every discovered
+organization before reading its repositories. Exclusions, aliases, HOLD and T3
+sign-off use the shared resolver. Restricted repository rows are withheld before
+snapshot publication. Permitted unregistered accounts retain neutral behavior.
+
+`render` applies the same owner rules through that resolver (renamed orgs resolve, CQ-03):
 
 | Owner or repository | In the chart | Log |
 |---|---|---|
@@ -47,6 +67,13 @@ The snapshot (`account-chart/v1`, LF JSON) holds `captured` (an absolute date), 
 | Org whose family identity is pending | Neutral style, never CompleteTech art | `needs-input:brand-identity:<login>` |
 
 With the private registry available (`--registry` or the bundle beside the skill), the Mermaid source, the SVG and the Markdown are also checked with the `lint public-leak` scope before anything is written (exit 1 on a hit).
+
+Every selected output is preflighted before generation or capture. Symlinked
+ancestors or leaves, nonregular files, hardlinks, collisions between outputs, and
+aliases of snapshots, avatars, configuration or policy inputs are refused without
+writing. Outputs are prepared together and published through the shared rollback
+transaction; a generation or commit failure preserves previous output bytes.
+Optional Mermaid rendering runs in temporary staging before publication.
 
 ## Layout
 

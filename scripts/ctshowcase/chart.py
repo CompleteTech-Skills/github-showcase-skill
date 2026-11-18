@@ -327,10 +327,17 @@ class _Draw:
 # =====================================================================================================
 # layout
 # =====================================================================================================
+def note_text(note: str, labels: dict) -> str:
+    """Older custom brand configs need truthful labels for incomplete captures too."""
+    return labels.get(note) or {"uncaptured": "not captured", "partial": "partially captured",
+                                "unknown": "capture status unknown",
+                                "unknown_private": "private repository count unknown"}[note]
+
+
 def _items(node: dict, labels: dict) -> list[dict]:
     items = [{"kind": "repo", **r} for r in node["repos"]]
     for note in node["notes"]:
-        items.append({"kind": "note", "note": note, "text": labels[note], "icon": note == "private"})
+        items.append({"kind": "note", "note": note, "text": note_text(note, labels), "icon": note == "private"})
     return items
 
 

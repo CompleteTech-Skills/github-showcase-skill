@@ -77,6 +77,10 @@ All notable changes to `github-showcase-skill` are recorded here. Versions follo
 - Label job plans include a per-repository `labels:OWNER/REPO` group for writer reconciliation. Explicit orchestrator groups are preserved.
 - `adopt` withholds jobs and change records for an archived capture, with instructions to re-capture inside the approved unarchive/polish/re-archive cycle. Security jobs are emitted only for active eligible repositories.
 
+### Security
+
+- Account charts apply shared owner/exclusion/HOLD/T3 gates before capture reads, preflight every output and input alias, and publish through the shared rollback transaction. Symlinks, hardlinks and unsafe destinations cannot overwrite unrelated authored data. Partial, uncaptured and unknown evidence stays explicit across every chart representation and counts; 44 additional boundary cases and five independent regressions cover the repairs (#203).
+
 ## 1.0.0 — 2026-10-26
 
 First public release, for the CompleteTech GitHub estate standard `ct-std-v1`.

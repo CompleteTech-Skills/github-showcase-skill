@@ -14,13 +14,15 @@ import argparse
 import json
 import re
 import shutil
+import stat
 import subprocess
+import tempfile
 from datetime import date
 from pathlib import Path
 
 from . import STANDARD
 from .chips import SEP
-from .errors import CHECK_FAILED, OK, NeedsInput, ShowcaseError
+from .errors import CHECK_FAILED, OK, NeedsInput, Refused, ShowcaseError
 
 SCHEMA = "account-chart/v1"
 ACTIONS = ("capture-query", "capture", "render")
@@ -32,7 +34,7 @@ NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 MAX_PAGES = 200
 NOT_PUBLIC_KEYS = ("private", "isPrivate", "visibility")
 ROLES = ("owner", "member")
-NOTES = ("held", "uncaptured", "private", "empty")
+CAPTURE_STATES = ("complete", "partial", "uncaptured", "unknown")
 
 
 # =====================================================================================================
@@ -74,22 +76,32 @@ def _dig(obj, path):
     return obj
 
 
-def _paged(run, name: str, path: tuple, **variables) -> tuple[dict, list | None]:
-    """(the first page's data, every node of the connection at `path`), following endCursor while hasNextPage.
-    None for the nodes when the connection is missing (an account or org the viewer cannot see)."""
-    first, nodes, after = None, [], None
+def _paged(run, name: str, path: tuple, **variables) -> tuple[dict, list | None, str]:
+    """First-page data, captured nodes and completeness; unavailable or interrupted reads never mean empty."""
+    first, nodes, after, cursors = None, [], None, set()
     for _ in range(MAX_PAGES):
-        data = run(name, **variables, after=after)
+        try:
+            data = run(name, **variables, after=after)
+        except ShowcaseError:
+            if first is None:
+                raise
+            return first, nodes, "partial"
         first = data if first is None else first
         conn = _dig(data, path)
         if not isinstance(conn, dict):
-            return first or {}, None
-        nodes += [n for n in conn.get("nodes") or [] if isinstance(n, dict)]
+            return first or {}, nodes if after is not None else None, "partial" if after is not None else "uncaptured"
+        page_nodes = conn.get("nodes")
+        if not isinstance(page_nodes, list) or any(not isinstance(n, dict) for n in page_nodes):
+            return first or {}, nodes, "partial"
+        nodes += page_nodes
         page = conn.get("pageInfo") or {}
         after = page.get("endCursor")
-        if not page.get("hasNextPage") or not after:
-            return first or {}, nodes
-    raise ShowcaseError(f"{name}: more than {MAX_PAGES} pages", log="needs-input:gh")
+        if page.get("hasNextPage") is False:
+            return first or {}, nodes, "complete"
+        if page.get("hasNextPage") is not True or not after or after in cursors:
+            return first or {}, nodes, "partial"
+        cursors.add(after)
+    return first or {}, nodes, "partial"
 
 
 def _repo(node: dict) -> dict | None:
@@ -107,10 +119,10 @@ def _repos(nodes) -> list[dict]:
     return sorted(seen.values(), key=lambda r: (r["name"].lower(), r["name"]))
 
 
-def _not_public(node) -> int:
+def _not_public(node) -> int | None:
     """Owned repositories the viewer can see that are not public (private and internal): a count, never names."""
     a, p = _dig(node, ("all", "totalCount")), _dig(node, ("public", "totalCount"))
-    return max(0, a - p) if isinstance(a, int) and isinstance(p, int) else 0
+    return a - p if type(a) is int and type(p) is int and 0 <= p <= a else None
 
 
 def _logins(nodes) -> dict[str, str]:
@@ -136,34 +148,68 @@ def capture_reads(login: str | None = None) -> dict:
                     "named; `account-chart capture` runs these reads and writes the snapshot."}
 
 
-def capture(login: str | None = None, run=_gh, today: str | None = None) -> dict:
+def _capture_owner(resolver, login: str, allow_t3: bool) -> None:
+    resolver.check_owner(login, allow_t3=allow_t3)
+    if resolver.family_hold(login):
+        raise Refused(f"{login} is on HOLD", log="hold")
+
+
+def capture(login: str | None = None, run=_gh, today: str | None = None, *, resolver=None,
+            allow_t3: bool = False) -> dict:
     """Run the reads and return an account-chart/v1 snapshot (public repository names, non-public counts)."""
+    from .config import load_brand
+    from .resolver import Resolver
+    resolver = resolver or Resolver.from_paths(load_brand())
+    if login is not None:
+        login = login.strip()
+        if not LOGIN_RE.fullmatch(login):
+            raise ShowcaseError(f"not a GitHub login: {login!r}", log="usage")
+        _capture_owner(resolver, login, allow_t3)  # explicit refusals precede even the viewer read
     viewer = _dig(run("account_viewer"), ("viewer", "login"))
     if not isinstance(viewer, str) or not viewer:
         raise NeedsInput("gh", "gh is not signed in (gh auth status)")
     login = (login or viewer).strip()
     if not LOGIN_RE.match(login):
         raise ShowcaseError(f"not a GitHub login: {login!r}", log="usage")
+    _capture_owner(resolver, login, allow_t3)
     is_viewer = login.lower() == viewer.lower()
-    first, nodes = _paged(run, "account_user", ("user", "repositories"), login=login)
+    first, nodes, state = _paged(run, "account_user", ("user", "repositories"), login=login)
     user = first.get("user")
     if not isinstance(user, dict) or nodes is None:
         raise NeedsInput("account", f"{login} is not a user account {viewer} can see")
     notes: list[str] = []
-    _, org_nodes = _paged(run, "account_orgs", ("user", "organizations"), login=login)
+    _capture_owner(resolver, user.get("login") or login, allow_t3)
+
+    def permitted_repos(owner, items, state, metadata):
+        out = []
+        for repo in _repos(items):
+            try:
+                resolver.check_owner(owner, allow_t3=allow_t3, repo=repo["name"])
+            except Refused as exc:
+                notes.append(f"{exc.log}:{owner}")
+            else:
+                out.append(repo)
+        total = _dig(metadata, ("public", "totalCount"))
+        if len(out) != len(items or []) or (type(total) is int and total != len(items or [])):
+            state = "partial"
+        return {"repositories": out, "capture_state": state}
+
+    _, org_nodes, org_state = _paged(run, "account_orgs", ("user", "organizations"), login=login)
     member_of = _logins(org_nodes)
     enterprises = []
+    ent_state = "uncaptured"
     if is_viewer:
-        _, ent_nodes = _paged(run, "account_enterprises", ("viewer", "enterprises"))
+        _, ent_nodes, ent_state = _paged(run, "account_enterprises", ("viewer", "enterprises"))
         for e in ent_nodes or []:
             slug = e.get("slug")
             if not isinstance(slug, str) or not SLUG_RE.match(slug):
                 continue
-            _, eo = _paged(run, "account_enterprise_orgs", ("enterprise", "organizations"), slug=slug)
+            _, eo, eo_state = _paged(run, "account_enterprise_orgs", ("enterprise", "organizations"), slug=slug)
             if eo is None:
                 notes.append(f"enterprise-orgs-unavailable:{slug}")
             enterprises.append({"slug": slug, "name": " ".join(str(e.get("name") or slug).split()),
                                 "role": "owner" if e.get("viewerIsAdmin") else "member",
+                                "capture_state": eo_state,
                                 "organizations": sorted(_logins(eo).values(), key=str.lower)})
     else:
         notes.append("enterprises:viewer-only")  # GitHub reports enterprises and roles for the signed-in account only
@@ -175,26 +221,33 @@ def capture(login: str | None = None, run=_gh, today: str | None = None) -> dict
     for key in sorted(logins):
         o = logins[key]
         try:
-            ofirst, rnodes = _paged(run, "account_org", ("organization", "repositories"), org=o)
+            _capture_owner(resolver, o, allow_t3)
+            ofirst, rnodes, ostate = _paged(run, "account_org", ("organization", "repositories"), org=o)
+            _capture_owner(resolver, (ofirst.get("organization") or {}).get("login") or o, allow_t3)
+        except Refused as exc:
+            notes.append(f"{exc.log}:{o}")
+            ofirst, rnodes, ostate = {}, None, "uncaptured"
         except ShowcaseError:
-            ofirst, rnodes = {}, None
+            ofirst, rnodes, ostate = {}, None, "uncaptured"
         org = ofirst.get("organization")
         if not isinstance(org, dict) or rnodes is None:
             notes.append(f"org-uncaptured:{o}")
             orgs.append({"login": o, "name": "", "member": key in member_of, "role": None, "captured": False,
-                         "repositories": [], "not_public": 0})
+                         "capture_state": "uncaptured", "repositories": [], "not_public": None})
             continue
         role = None
         if is_viewer:
             role = "owner" if org.get("viewerCanAdminister") else ("member" if key in member_of else None)
         orgs.append({"login": org.get("login") or o, "name": " ".join(str(org.get("name") or "").split()),
-                     "member": key in member_of, "role": role, "captured": True, "repositories": _repos(rnodes),
+                     "member": key in member_of, "role": role, "captured": True,
+                     **permitted_repos(org.get("login") or o, rnodes, ostate, org),
                      "not_public": _not_public(org)})
     acct = {"login": user.get("login") or login}
     for k, src in (("name", "name"), ("company", "company"), ("location", "location"), ("website", "websiteUrl")):
         acct[k] = " ".join(str(user.get(src) or "").split())
     return {"schema": SCHEMA, "std": STANDARD, "captured": today or date.today().isoformat(), "viewer": viewer,
-            "account": acct, "repositories": _repos(nodes), "not_public": _not_public(user),
+            "account": acct, **permitted_repos(acct["login"], nodes, state, user), "not_public": _not_public(user),
+            "organizations_state": org_state, "enterprises_state": ent_state,
             "enterprises": sorted(enterprises, key=lambda e: (e["name"].casefold(), e["slug"])),
             "organizations": orgs, "notes": sorted(set(notes))}
 
@@ -227,12 +280,28 @@ def _clean_repos(items, where: str) -> list[dict]:
     return sorted(out, key=lambda r: (r["name"].lower(), r["name"]))
 
 
-def _count(v, where: str) -> int:
+def _count(v, where: str) -> int | None:
     if v is None:
-        return 0
+        return None
     if not isinstance(v, int) or isinstance(v, bool) or v < 0:
         raise _bad(f"{where}.not_public must be a non-negative integer")
     return v
+
+
+def _state(row: dict, key: str = "capture_state", *, default: str = "unknown") -> str:
+    value = row.get(key, default)
+    if value not in CAPTURE_STATES:
+        raise _bad(f"{key} must be one of {', '.join(CAPTURE_STATES)}")
+    return value
+
+
+def _repository_state(row: dict, *, account: bool = False) -> str:
+    captured = row.get("captured", True if account else None)
+    if captured is not None and type(captured) is not bool and not account:
+        raise _bad("organization.captured must be a boolean or null")
+    complete = (account or captured is True) and isinstance(row.get("repositories"), list)
+    state = _state(row, default="complete" if complete else "unknown")
+    return "uncaptured" if captured is False else state
 
 
 def validate(snap) -> dict:
@@ -253,7 +322,8 @@ def validate(snap) -> dict:
         if not isinstance(orgs, list) or not all(isinstance(o, str) and LOGIN_RE.match(o) for o in orgs):
             raise _bad(f"enterprise {e['slug']}: organizations must be logins")
         ents.append({"slug": e["slug"], "name": " ".join(str(e.get("name") or e["slug"]).split()),
-                     "role": e.get("role") if e.get("role") in ROLES else None, "organizations": list(orgs)})
+                     "role": e.get("role") if e.get("role") in ROLES else None, "organizations": list(orgs),
+                     "capture_state": _state(e, default="complete" if isinstance(e.get("organizations"), list) else "unknown")})
     orgs = []
     seen = set()
     for o in snap.get("organizations") or []:
@@ -264,7 +334,7 @@ def validate(snap) -> dict:
         seen.add(o["login"].lower())
         orgs.append({"login": o["login"], "name": " ".join(str(o.get("name") or "").split()),
                      "member": bool(o.get("member", True)), "role": o.get("role") if o.get("role") in ROLES else None,
-                     "captured": bool(o.get("captured", True)),
+                     "captured": o.get("captured"), "capture_state": _repository_state(o),
                      "repositories": _clean_repos(o.get("repositories") or [], o["login"]),
                      "not_public": _count(o.get("not_public"), o["login"])})
     return {"schema": SCHEMA, "std": snap.get("std") or STANDARD, "captured": captured,
@@ -273,6 +343,9 @@ def validate(snap) -> dict:
                                                    for k in ("name", "company", "location", "website")}},
             "repositories": _clean_repos(snap.get("repositories") or [], "account"),
             "not_public": _count(snap.get("not_public"), "account"),
+            "capture_state": _repository_state(snap, account=True),
+            **{f"{key}_state": _state(snap, f"{key}_state", default="complete" if isinstance(snap.get(key), list) else "unknown")
+               for key in ("organizations", "enterprises")},
             "enterprises": sorted(ents, key=lambda e: (e["name"].casefold(), e["slug"])), "organizations": orgs,
             "notes": [n for n in snap.get("notes") or [] if isinstance(n, str)]}
 
@@ -352,9 +425,9 @@ def build(snap: dict, brand, *, resolver=None, flags: dict | None = None, allow_
     labels = cfg["labels"]
     logs: list[str] = list(snap.get("notes") or [])
     login = snap["account"]["login"]
-    r.check_owner(login)  # an excluded or HOLD account refuses (exit 2)
+    _capture_owner(r, login, allow_t3)
     counts = {"public": 0, "named": 0, "withheld": 0, "hidden": 0, "not_public": 0, "organizations": 0,
-              "enterprises": 0, "omitted_orgs": 0}
+              "enterprises": 0, "omitted_orgs": 0, "unknown_not_public": 0}
     languages: dict[str, int] = {}
 
     def gate_repos(owner: str, repos: list[dict], held: bool) -> list[dict]:
@@ -382,15 +455,29 @@ def build(snap: dict, brand, *, resolver=None, flags: dict | None = None, allow_
             out.append({**rp, "full_name": full, "url": f"https://github.com/{full}"})
         return out
 
-    def notes_for(named: list, public: int, not_public: int, held: bool, captured: bool) -> list[str]:
+    def notes_for(named: list, public: int | None, not_public: int | None, held: bool, state: str) -> list[str]:
         if held:
             return ["held"]
-        if not captured:
-            return ["uncaptured"]
-        out = ["private"] if not_public and private == "note" else []
-        if not named and not public and not out:
+        out = [state] if state != "complete" else []
+        if not_public and private == "note":
+            out.append("private")
+        if not named and public == 0 and not out and not_public is not None:
             out.append("empty")
+        if not_public is None:
+            out.append("unknown_private")
         return out
+
+    def repository_facts(source: dict, owner: str, held: bool) -> dict:
+        state = source["capture_state"]
+        repos = source["repositories"] if state in ("complete", "partial") else []
+        named = gate_repos(owner, repos, held)
+        count = source["not_public"] if state in ("complete", "partial") else None
+        counts["not_public"] += count or 0
+        counts["unknown_not_public"] += count is None
+        public = len(repos) if state == "complete" else None
+        return {"repos": named, "public": public, "not_public": count, "held": held,
+                "capture_state": state, "captured": None if state == "unknown" else state != "uncaptured",
+                "notes": notes_for(named, public, count, held, state)}
 
     def org_node(o: dict) -> dict | None:
         lg = o["login"]
@@ -419,15 +506,12 @@ def build(snap: dict, brand, *, resolver=None, flags: dict | None = None, allow_
         name = (row.get("display_name") if row.get("known") else None) or o["name"] or lg
         eyebrow, short = _eyebrow(style, row, neutral)
         mark = brand.asset(row.get("mark")) if row.get("known") and row.get("mark") else None
-        named = gate_repos(lg, o["repositories"], held)
-        counts["not_public"] += o["not_public"]
         counts["organizations"] += 1
         return {"kind": "org", "login": lg, "name": name, "eyebrow": eyebrow, "eyebrow_short": short, "sub": f"@{lg}",
                 "role": o["role"], "member": o["member"], "style": style, "neutral": neutral, "family": family,
                 "mark": mark if mark and mark.is_file() else None, "initials": _initials(name), "url": f"https://github.com/{lg}",
                 "flagship": bool(row.get("flagship")), "tier": _tier_rank(row) if row.get("known") else 9,
-                "repos": named, "public": len(o["repositories"]), "not_public": o["not_public"], "held": held,
-                "notes": notes_for(named, len(o["repositories"]), o["not_public"], held, o["captured"])}
+                **repository_facts(o, lg, held)}
 
     # -- the account --------------------------------------------------------------------------------
     row = brand.org(login)
@@ -456,14 +540,10 @@ def build(snap: dict, brand, *, resolver=None, flags: dict | None = None, allow_
                "initials": _initials(name), "url": f"https://github.com/{login}"}
 
     # -- personal repositories ----------------------------------------------------------------------
-    p_named = gate_repos(login, snap["repositories"], False)
-    counts["not_public"] += snap["not_public"]
     personal = {"kind": "personal", "login": login, "name": labels["personal_title"], "eyebrow": labels["personal"],
                 "eyebrow_short": labels["personal"], "sub": f"@{login}", "role": None, "style": acct_style,
                 "neutral": False, "family": acct_family, "mark": account["mark"], "initials": account["initials"],
-                "url": account["url"], "repos": p_named, "public": len(snap["repositories"]),
-                "not_public": snap["not_public"], "held": False,
-                "notes": notes_for(p_named, len(snap["repositories"]), snap["not_public"], False, True)}
+                "url": account["url"], **repository_facts(snap, login, False)}
 
     # -- organizations and enterprises ----------------------------------------------------------------
     fam_order = {f: i for i, f in enumerate(brand.raw.get("families") or {})}
@@ -480,8 +560,12 @@ def build(snap: dict, brand, *, resolver=None, flags: dict | None = None, allow_
         nodes = []
         for lg in e["organizations"]:
             o = by_login.get(lg.lower())
-            if o is None or lg.lower() in placed:
+            if lg.lower() in placed:
                 continue
+            if o is None:
+                o = {"login": lg, "name": "", "member": False, "role": None, "repositories": [],
+                     "capture_state": "uncaptured", "not_public": None}
+                logs.append(f"org-uncaptured:{lg}")
             placed.add(lg.lower())
             n = org_node(o)
             if n:
@@ -491,6 +575,7 @@ def build(snap: dict, brand, *, resolver=None, flags: dict | None = None, allow_
         enterprises.append({"kind": "enterprise", "slug": e["slug"], "name": e["name"], "eyebrow": labels["enterprise"],
                             "eyebrow_short": labels["enterprise"], "sub": f"enterprises/{e['slug']}", "role": e["role"],
                             "style": est, "url": f"https://github.com/enterprises/{e['slug']}",
+                            "capture_state": e["capture_state"],
                             "orgs": sorted(nodes, key=order)})
     standalone = [n for o in snap["organizations"] if o["login"].lower() not in placed for n in [org_node(o)] if n]
     standalone.sort(key=order)
@@ -505,9 +590,22 @@ def build(snap: dict, brand, *, resolver=None, flags: dict | None = None, allow_
         parts.append(f"{counts['enterprises']} enterprise" + ("s" if counts["enterprises"] != 1 else ""))
     parts.append(f"{n_orgs} organization" + ("s" if n_orgs != 1 else ""))
     desc = (f"{', '.join(parts[:-1])} and {parts[-1]}" if len(parts) > 1 else parts[0]) + ", each with its public repositories"
+    from .chart import note_text
+    coverage = [f"{n['login']}: {note_text(n['capture_state'], labels)}"
+                for n in [personal, *standalone, *[o for e in enterprises for o in e["orgs"]]]
+                if n["capture_state"] != "complete"]
+    coverage += [f"{key}: {note_text(snap[f'{key}_state'], labels)}" for key in ("organizations", "enterprises")
+                 if snap[f"{key}_state"] != "complete"]
+    coverage += [f"{e['slug']} organizations: {note_text(e['capture_state'], labels)}" for e in enterprises
+                 if e["capture_state"] != "complete"]
+    if coverage:
+        desc += ". " + "; ".join(coverage)
+    if counts["unknown_not_public"]:
+        desc += ". Some private or internal repository counts are unknown"
     model = {"account": account, "personal": personal, "enterprises": enterprises, "orgs": standalone, "counts": counts,
              "roles": roles, "legend_languages": legend or ["default"], "title": title, "desc": desc,
-             "captured": snap["captured"], "viewer": snap.get("viewer")}
+             "captured": snap["captured"], "viewer": snap.get("viewer"), "coverage": coverage,
+             **{f"{key}_state": snap[f"{key}_state"] for key in ("organizations", "enterprises")}}
     return model, sorted(set(logs))
 
 
@@ -557,6 +655,9 @@ def markdown(model: dict, files: dict) -> str:
         facts.append(f"{c['hidden']} forks or archived repositories are hidden from this render")
     if c["omitted_orgs"]:
         facts.append(f"{c['omitted_orgs']} organizations are outside this map (excluded, awaiting sign-off or merged)")
+    facts += model.get("coverage", [])
+    if c.get("unknown_not_public"):
+        facts.append("some private or internal repository counts are unknown; shown counts include only captured data")
     out += ["<sub>" + ". ".join(facts) + f". Captured {model['captured']}. Mermaid source: "
             f"<a href=\"{files['mmd']}\">{files['mmd']}</a>.</sub>", ""]
     out += ["<details>", "<summary>Every repository in this map</summary>", ""]
@@ -579,8 +680,13 @@ def markdown(model: dict, files: dict) -> str:
         extra = []
         if node.get("held"):
             extra.append("on hold: its repositories are not named")
+        if node.get("capture_state", "complete") != "complete":
+            from .chart import note_text
+            extra.append(note_text(node["capture_state"], {}))
         if node["not_public"]:
             extra.append(f"{node['not_public']} private or internal, not named")
+        elif node["not_public"] is None:
+            extra.append("private or internal repository count unknown")
         if not node["repos"] and not extra:
             extra.append("no public repositories" if not node["public"] else "no repositories shown")
         if extra:
@@ -629,18 +735,70 @@ def register(sub) -> None:
                    help="render: also render NAME.mermaid.png from the Mermaid source with mermaid-cli (optional; "
                         "browser output, not byte-deterministic)")
     s.add_argument("--mmdc-config", metavar="FILE", help="render: puppeteer config JSON passed to mmdc -p")
-    s.add_argument("--registry", help="render: registry/estate.yaml for the org resolver and the leak check (read only)")
+    s.add_argument("--registry", help="capture/render: registry/estate.yaml for the org resolver and leak check (read only)")
     s.add_argument("--decisions", help="render: decisions/decisions.json (exposure flags keep repositories unnamed)")
     for flag, what in (("--approved", "decisions/approved.tsv"), ("--approved-yaml", "decisions/APPROVED_ACTIONS.yaml"),
                        ("--actions", "decisions/estate-actions.json")):
-        s.add_argument(flag, help=f"render: {what} for the org resolver (default: the bundle's)")
+        s.add_argument(flag, help=f"capture/render: {what} for the org resolver (default: the bundle's)")
     s.add_argument("--allow-t3", action="store_true", default=argparse.SUPPRESS, help="T3 orgs after co-owner sign-off")
     s.set_defaults(func=cmd_account_chart)
 
 
-def _write(path: Path, data: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(data)
+def _inputs(args, brand) -> list[Path]:
+    """Protect named inputs and the same default policy/config files the shared loaders read."""
+    from . import signoff
+    from .config import LOCK
+    from .resolver import estate_root
+    paths = [brand.path, LOCK, signoff.record_file()]
+    if getattr(args, "mmdc", None):
+        paths.append(shutil.which(args.mmdc) or args.mmdc)
+    paths += [getattr(args, key, None) for key in ("snapshot", "avatar", "mmdc_config", "registry", "decisions",
+                                                 "approved", "approved_yaml", "actions", "t3_signoff_file")]
+    root = estate_root()
+    if root:
+        paths += [root / name for name in ("registry/estate.yaml", "decisions/decisions.json", "decisions/approved.tsv",
+                                           "decisions/APPROVED_ACTIONS.yaml", "decisions/estate-actions.json")]
+    return [Path(p) for p in paths if p is not None]
+
+
+def _preflight(paths, inputs=()) -> dict:
+    """Inspect every lexical ancestor before resolving aliases; never follow an output link to write."""
+    states, resolved = {}, []
+    try:
+        sources = [p.resolve() for p in inputs]
+    except RuntimeError as exc:
+        raise ShowcaseError("account-chart input path cannot be resolved", log="account-chart:path") from exc
+    for path in paths:
+        absolute = path.absolute()
+        for parent in reversed(absolute.parents):
+            try:
+                info = parent.lstat()
+            except FileNotFoundError:
+                continue
+            if not stat.S_ISDIR(info.st_mode):
+                raise ShowcaseError("account-chart output ancestors must be real directories", log="account-chart:path")
+        try:
+            info = absolute.lstat()
+        except FileNotFoundError:
+            info = None
+        if info is not None and (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1):
+            raise ShowcaseError("account-chart outputs must be unlinked regular files", log="account-chart:path")
+        target = absolute.resolve()
+        for other in [*sources, *resolved]:
+            if target == other or (target.exists() and other.exists() and target.samefile(other)):
+                raise ShowcaseError("account-chart outputs must be distinct from inputs and each other",
+                                    log="account-chart:path")
+        resolved.append(target)
+        states[path] = (info.st_dev, info.st_ino, info.st_mode, info.st_size, info.st_mtime_ns,
+                        info.st_ctime_ns, info.st_nlink) if info else None
+    return states
+
+
+def _publish(outputs, inputs, states) -> None:
+    from .formatting import write_formatted_outputs
+    if _preflight(states, inputs) != states:
+        raise ShowcaseError("account-chart output changed during generation", log="account-chart:path")
+    write_formatted_outputs(outputs)
 
 
 def cmd_account_chart(args):
@@ -650,8 +808,15 @@ def cmd_account_chart(args):
     if args.action == "capture":
         if not args.out:
             raise ShowcaseError("account-chart capture needs --out FILE", log="usage")
-        snap = capture(args.login)
-        _write(Path(args.out), snapshot_text(snap).encode("utf-8"))
+        from .config import load_brand, t3_signed_off
+        from .resolver import Resolver
+        brand = load_brand(getattr(args, "config", None))
+        inputs = _inputs(args, brand)
+        path = Path(args.out)
+        states = _preflight([path], inputs)
+        resolver = Resolver.from_paths(brand, args.registry, args.approved, args.approved_yaml, args.actions)
+        snap = capture(args.login, resolver=resolver, allow_t3=t3_signed_off())
+        _publish([(path, snapshot_text(snap).encode("utf-8"))], inputs, states)
         n = sum(len(o["repositories"]) for o in snap["organizations"]) + len(snap["repositories"])
         return {"command": "account-chart", "action": "capture", "owner": snap["account"]["login"], "result": "ok",
                 "out": args.out, "counts": {"organizations": len(snap["organizations"]),
@@ -674,20 +839,29 @@ def render(args):
     if not chart.W_MIN <= args.width <= chart.W_MAX:
         raise ShowcaseError(f"--width must be {chart.W_MIN}-{chart.W_MAX} px", log="usage")
     brand = load_brand(getattr(args, "config", None))
+    out_dir = Path(args.out_dir)
+    files = {"mmd": f"{args.name}.mmd", "svg": f"{args.name}.svg", "md": f"{args.name}.md"}
+    if not args.no_png:
+        files["png"] = f"{args.name}.png"
+    if args.mmdc:
+        files["mermaid"] = f"{args.name}.mermaid.png"
+    inputs = _inputs(args, brand)
+    states = _preflight([out_dir / name for name in files.values()], inputs)
     snap = load_snapshot(args.snapshot)
     resolver = Resolver.from_paths(brand, args.registry, args.approved, args.approved_yaml, args.actions)
     flags = load_flags(args.decisions or _default_decisions())
     model, logs = build(snap, brand, resolver=resolver, flags=flags, allow_t3=t3_signed_off(), hide=tuple(args.hide),
                         private=args.private)
+    nodes = [model["account"], model["personal"], *model["orgs"],
+             *[o for e in model["enterprises"] for o in e["orgs"]]]
+    inputs += [n["mark"] for n in nodes if n.get("mark")]
+    inputs += [brand.font_file(key) for key in brand.raw["fonts"]]
+    _preflight(states, inputs)
     if args.avatar and not Path(args.avatar).is_file():
         raise ShowcaseError(f"--avatar {args.avatar} is not a file", log="usage")
     fonts = Fonts(brand)
     laid = chart.layout(model, brand, fonts, width=args.width, avatar=args.avatar)
     svg = chart.svg(laid, fonts)
-    out_dir = Path(args.out_dir)
-    files = {"mmd": f"{args.name}.mmd", "svg": f"{args.name}.svg", "md": f"{args.name}.md"}
-    if not args.no_png:
-        files["png"] = f"{args.name}.png"
     lint = svglint.lint_bytes("chart", svg.encode("utf-8"), str(out_dir / files["svg"]))
     mmd, minfo = chart.mermaid(model, brand)
     md = markdown(model, files)
@@ -696,7 +870,8 @@ def render(args):
     if minfo["edges"] + minfo["invisible_links"] > 500:
         logs.append(f"mermaid-edges:{minfo['edges'] + minfo['invisible_links']}")  # over Mermaid's default maxEdges
     res = {"command": "account-chart", "action": "render", "owner": model["account"]["login"], "result": "ok",
-           "counts": model["counts"], "size": {"width": laid.w, "height": laid.h}, "lint": lint, "mermaid": minfo}
+           "counts": model["counts"], "size": {"width": laid.w, "height": laid.h}, "lint": lint, "mermaid": minfo,
+           "coverage": model["coverage"]}
     if lint["result"] != "PASS":
         return {**res, "result": "fail", "logs": sorted(set(logs))}, CHECK_FAILED
     if resolver.registry:  # defence in depth: the snapshot names public repositories only; check against the estate too
@@ -712,20 +887,26 @@ def render(args):
             return {**res, "result": "fail", "leaks": hits, "logs": sorted(set(logs))}, CHECK_FAILED
     outputs = []
     for key, data in (("mmd", mmd.encode("utf-8")), ("svg", svg.encode("utf-8")), ("md", md.encode("utf-8"))):
-        _write(out_dir / files[key], data)
-        outputs.append(str(out_dir / files[key]))
+        outputs.append((out_dir / files[key], data))
     if not args.no_png:
         scale = chart.png_scale(laid, args.scale)
         if scale != args.scale:
             logs.append(f"png-scale:{scale}")
         img = chart.png_image(laid, fonts, scale)
-        _write(out_dir / files["png"], png_bytes(img))
+        outputs.append((out_dir / files["png"], png_bytes(img)))
         res["size"]["png"] = [img.width, img.height]
-        outputs.append(str(out_dir / files["png"]))
     if args.mmdc:
-        outputs += _mmdc(args, out_dir, files["mmd"], f"{args.name}.mermaid.png", chart.canvas_colour(model["account"]["style"]),
-                         args.scale, logs)
-    res["outputs"] = outputs
+        with tempfile.TemporaryDirectory(prefix="account-chart-render-") as directory:
+            staging = Path(directory)
+            (staging / files["mmd"]).write_text(mmd, encoding="utf-8")
+            rendered = _mmdc(args, staging, files["mmd"], files["mermaid"],
+                             chart.canvas_colour(model["account"]["style"]), args.scale, logs)
+            if rendered:
+                staged = staging / files["mermaid"]
+                _preflight([staged])
+                outputs.append((out_dir / files["mermaid"], staged.read_bytes()))
+    _publish(outputs, inputs, states)
+    res["outputs"] = [str(path) for path, _ in outputs]
     res["logs"] = sorted(set(logs))
     return res, OK
 
@@ -736,7 +917,6 @@ def _mmdc(args, out_dir: Path, src: str, dest: str, background: str, scale: int,
     if not exe:
         logs.append("needs-input:mmdc")
         return []
-    import tempfile
     with tempfile.TemporaryDirectory(prefix="account-chart-mmdc-") as tmp:
         # natural size: without this mmdc fits the diagram to an 800 px page, which is not a high-definition picture
         conf = Path(tmp) / "mermaid.json"
