@@ -144,6 +144,8 @@ directory and remote artwork URLs remain authored artwork. Moving a G or H hero 
 on both sides, including mixed line endings and blank separators. If joining those
 spans would merge line endings, the command returns `needs-input:intro-order` before
 writing; put the managed hero on separate blank lines before retrying.
+Source mapping distinguishes the file's encoding BOM from an authored U+FEFF prefix;
+both that prefix and text immediately beside a managed hero stay intact.
 Images inside HTML comments do not count as authored heroes or badges; the README
 still needs its applicable intro or an actionable missing-input result.
 Personal scaffolding retains the authored body's blank separators, including

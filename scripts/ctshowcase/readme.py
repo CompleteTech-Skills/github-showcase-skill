@@ -1579,9 +1579,9 @@ def header_only(ctx: RepoContext, text: str, *, already_normalized: bool = False
     return license_block(ctx, refreshed if retain_personal_banner else reorder_lead(ctx, refreshed))
 
 
-def _source_offset_mapper(original: str):
-    """Map offsets in normalize_text(original) to exact decoded source offsets."""
-    bom = int(original.startswith(BOM))
+def _source_offset_mapper(original: str, *, strip_bom: bool = True):
+    """Map normalized offsets, excluding an encoding BOM only when the caller removed it."""
+    bom = int(strip_bom and original.startswith(BOM))
     dropped = [m.start() - bom - count
                for count, m in enumerate(re.finditer(r"\r\n", original))]
 
@@ -1592,7 +1592,11 @@ def _source_offset_mapper(original: str):
 
 def _replace_blocks_in_source(original: str, normalized: str, sub) -> str:
     """Splice blocks into their source spans, leaving all other bytes in place."""
-    source_offset = _source_offset_mapper(original)
+    source_view = normalize_line_endings(original)
+    removed_bom = source_view != normalized and source_view.startswith(BOM) and source_view[1:] == normalized
+    if source_view != normalized and not removed_bom:
+        raise NeedsInput("intro-order", "Cannot establish exact authored source spans for the personal intro refresh.")
+    source_offset = _source_offset_mapper(original, strip_bom=removed_bom)
     out, pos = [], 0
     for match in find_blocks(MARK, normalized):
         replacement = sub(match)
@@ -2139,7 +2143,8 @@ def restore_line_endings(raw: str, before: str, after: str, *,
     if source_spans:
         generated = restore_line_endings(raw, before, after)
         old_offset = _source_offset_mapper(raw)
-        new_offset = _source_offset_mapper(generated)
+        # Generated text has no encoding BOM; any leading U+FEFF is authored content.
+        new_offset = _source_offset_mapper(generated, strip_bom=False)
         out, pos = [], 0
         for a, b, c, d in source_spans:
             if not (0 <= pos <= a < b <= len(after) and 0 <= c < d <= len(before)

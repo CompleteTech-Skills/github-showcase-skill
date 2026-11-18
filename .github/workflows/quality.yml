@@ -10,7 +10,8 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # This job runs the same complete CLI regression suite before the quality validator.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
         with:
