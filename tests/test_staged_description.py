@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from conftest import meta_dict, run_cli
+from ctshowcase.tagline import payload as tagline_payload
 from ctshowcase.readme import tagline_body
 from ctshowcase.staged import SOCIAL_STAGING, prepare, record_output, tagline_drift, tagline_forms
 from ctshowcase.errors import NeedsInput
@@ -57,11 +58,11 @@ def test_drift_forms_come_from_tagline_body(make_ctx):
     """The accepted forms are exactly what readme.tagline_body writes, for the detected and every other variant."""
     ctx = make_ctx(description="Current sentence.")
     forms = tagline_forms(ctx)
-    assert tagline_body(ctx) in forms
+    assert tagline_payload(tagline_body(ctx)) in forms
     for variant in "ABCDEFGHIJ":
         other = make_ctx(description="Current sentence.")
         other.det = dict(other.det, variant=variant)
-        assert tagline_body(other) in forms
+        assert tagline_payload(tagline_body(other)) in forms
         assert not tagline_drift(ctx, TAG.format(tagline_body(other)))
     assert forms == {"**Current sentence.**", '<p align="center"><b>Current sentence.</b></p>'}
     assert tagline_drift(ctx, TAG.format("<b>Current sentence.</b>"))  # readme would rewrite this form
@@ -79,7 +80,7 @@ def test_empty_live_description_keeps_authored_tagline_without_drift(make_ctx):
 
 
 def test_legacy_tagline_provenance_does_not_claim_horizontal_whitespace_edits(make_ctx, tmp_path):
-    from ctshowcase.readme import _replaceable_tagline
+    from ctshowcase.readme import _owned_tagline
     from ctshowcase.staged import recorded_tagline, tagline_digest
 
     ctx = make_ctx(repo_dir=tmp_path, description="New public description.")
@@ -89,16 +90,19 @@ def test_legacy_tagline_provenance_does_not_claim_horizontal_whitespace_edits(ma
     images.mkdir(parents=True)
     record = {"tagline_sha256": tagline_digest(original),
               "description_sha256": tagline_digest(original_description)}
-    (images / ".showcase.json").write_text(json.dumps({"outputs": {"README.md": record}}), encoding="utf-8")
+    sidecar = images / ".showcase.json"
+    sidecar.write_text(json.dumps({"outputs": {"README.md": record}}), encoding="utf-8")
 
     assert recorded_tagline(ctx, f"\n{original}\n")
     assert not recorded_tagline(ctx, "    " + original)
     assert not recorded_tagline(ctx, original + "  ")
-    ctx.format_root = tmp_path
     reflowed = "**Old generated\ndescription.**"
-    assert _replaceable_tagline(ctx, reflowed, original)
-    assert not _replaceable_tagline(ctx, "    " + reflowed, original)
-    assert not _replaceable_tagline(ctx, reflowed + "  ", original)
+    assert not _owned_tagline(ctx, reflowed, TAG.format(reflowed))
+    record["tagline_sha256"] = tagline_digest(reflowed)
+    sidecar.write_text(json.dumps({"outputs": {"README.md": record}}), encoding="utf-8")
+    assert _owned_tagline(ctx, reflowed, TAG.format(reflowed))
+    for edited in ("    " + reflowed, reflowed + "  ", reflowed + "\u00a0"):
+        assert not _owned_tagline(ctx, edited, TAG.format(edited))
 
 
 @pytest.mark.parametrize("edited", ["    **Route support requests.**", "**Route support requests.**  "])
@@ -169,6 +173,30 @@ def test_cli_doctor_empty_live_description_is_not_drift(tmp_path):
     assert "description-drift:readme" not in report["logs"], report
 
 
+def test_doctor_accepts_pre_stage_verified_soft_wrap_without_sidecar(tmp_path):
+    from ctshowcase.tagline import generated
+
+    description = "Run the Northwind triage agent."
+    capture = tmp_path / "meta.json"
+    target = tmp_path / "repo"
+    target.mkdir()
+    readme = target / "README.md"
+    receipt = generated("**Run the Northwind\ntriage agent.**")
+
+    def doctor(body, live):
+        readme.write_text("# Support Triage Agent\n\n" + TAG.format(body), encoding="utf-8")
+        capture.write_text(json.dumps(meta_dict(description=live)), encoding="utf-8")
+        result = run_cli("--meta", capture, "--repo-dir", target, "doctor", "--format", "json")
+        return json.loads(result.stdout)
+
+    matching = doctor(receipt, description)
+    assert matching["cells"]["R2"] == "pass"
+    assert "description-drift:readme" not in matching["logs"]
+    assert "description-drift:readme" in doctor(receipt, "Run the Northwind support agent.")["logs"]
+    assert "description-drift:readme" in doctor(receipt.replace("\ntriage", "\n    triage"), description)["logs"]
+    assert not (target / "docs/images/.showcase.json").exists()
+
+
 def test_cli_doctor_reports_verified_staged_tagline_against_empty_live_description(tmp_path):
     capture = tmp_path / "meta.json"
     capture.write_text(json.dumps(meta_dict(description="")), encoding="utf-8")
@@ -192,6 +220,31 @@ def test_cli_doctor_reports_verified_staged_tagline_against_empty_live_descripti
                       encoding="utf-8")
     report = json.loads(run_cli(*common, "doctor", "--format", "json").stdout)
     assert "description-drift:readme" not in report["logs"]
+
+
+@pytest.mark.parametrize("stale_proof", [False, True])
+def test_staging_matching_authored_tagline_does_not_claim_ownership(tmp_path, stale_proof):
+    from ctshowcase.tagline import generated as managed_tagline
+
+    capture = tmp_path / "meta.json"
+    capture.write_text(json.dumps(meta_dict(description="Captured sentence.")), encoding="utf-8")
+    checkout = tmp_path / "repo"
+    checkout.mkdir()
+    readme = checkout / "README.md"
+    proposal = "An authored sentence."
+    authored = f"**{proposal}**"
+    if stale_proof:
+        old = "**Previous generated sentence.**"
+        authored = managed_tagline(old).replace(old, authored)
+    raw = ("# Synthetic documentation\n\n" + TAG.format(authored)).encode()
+    readme.write_bytes(raw)
+
+    result = run_cli("--meta", capture, "--repo-dir", checkout, "readme", "--mode", "header",
+                     "--write", "--description", proposal)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert readme.read_bytes() == raw
+    assert not (checkout / "docs" / "images" / ".showcase.json").exists()
 
 
 @pytest.mark.parametrize("variant", ["G", "H"])
@@ -1449,11 +1502,14 @@ def test_reflowed_taglines_record_exact_bodies_and_follow_the_live_capture(tmp_p
     from ctshowcase import readme
     from ctshowcase.staged import tagline_blocks, tagline_digest
 
+    from ctshowcase.tagline import generated as managed_tagline
+
     checkout = tmp_path / "repo"
     checkout.mkdir()
     path = checkout / "README.md"
-    path.write_text("# Synthetic documentation\n\n" + readme.wrap("tagline", "**Old.**") + "\n\n"
-                    "## Details\n\n" + readme.wrap("tagline", "**Another old.**") + "\n", encoding="utf-8")
+    path.write_text("# Synthetic documentation\n\n" + readme.wrap("tagline", managed_tagline("**Old.**"))
+                    + "\n\n## Details\n\n" + readme.wrap("tagline", managed_tagline("**Another old.**"))
+                    + "\n", encoding="utf-8")
     meta_path = tmp_path / "metadata.json"
     meta = meta_dict(description="")
     proposed = "Route synthetic support requests across multiple teams and keep queue ownership visible."
@@ -1468,9 +1524,11 @@ def test_reflowed_taglines_record_exact_bodies_and_follow_the_live_capture(tmp_p
         parts, offset = [], 0
         blocks = [block for block in readme.find_blocks(readme.MARK, source) if block.group(1) == "tagline"]
         for index, block in enumerate(blocks):
-            words = block.group(2).split(" ")
+            proof, _, body = block.group(2).partition("\n")
+            words = body.split(" ")
             boundary = 4 + index
-            parts.extend((source[offset:block.start(2)], " ".join(words[:boundary]), "\n", " ".join(words[boundary:])))
+            parts.extend((source[offset:block.start(2)], proof, "\n", " ".join(words[:boundary]), "\n",
+                          " ".join(words[boundary:])))
             offset = block.end(2)
         return "".join([*parts, source[offset:]])
 

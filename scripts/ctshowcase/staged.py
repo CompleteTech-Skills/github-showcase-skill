@@ -366,21 +366,34 @@ def tagline_forms(ctx) -> set[str]:
     Callers must pass a non-empty description: tagline_body logs needs-input:description otherwise.
     """
     from .readme import tagline_body
+    from .tagline import visible
 
     forms = set()
     for variant in "ABCDEFGHIJ":
         proxy = copy.copy(ctx)
         proxy.det = dict(ctx.det, variant=variant)
-        forms.add(tagline_body(proxy).strip())
+        stored = tagline_body(proxy)
+        forms.add((visible(stored) or stored).strip())
     return forms
 
 
-def tagline_blocks(text: str) -> list[str]:
+def _stored_taglines(text: str) -> list[str]:
     from .mdcode import find_blocks
     from .readme import MARK, normalize_text
 
     source = normalize_text(text)
-    return [m.group(2).strip("\n") for m in find_blocks(MARK, source) if m.group(1) == "tagline"]
+    return [m.group(2) for m in find_blocks(MARK, source) if m.group(1) == "tagline"]
+
+
+def _visible_tagline(body: str, *, owned_only: bool = False) -> str:
+    from .tagline import visible
+
+    return (visible(body) or ("" if owned_only else body)).strip("\n")
+
+
+def tagline_blocks(text: str, *, owned_only: bool = False) -> list[str]:
+    """Visible taglines in source order, with empty slots for unproven bodies when requested."""
+    return [_visible_tagline(body, owned_only=owned_only) for body in _stored_taglines(text)]
 
 
 def tagline_digest(body: str) -> str:
@@ -443,13 +456,17 @@ def tagline_drift(ctx, text: str, path: Path | None = None) -> bool:
     examples are ignored. With an empty live description, authored taglines are preserved. A managed tagline matching
     its recorded staged digest demonstrates drift even against an empty About.
     """
-    blocks = tagline_blocks(text)
-    if not blocks:
+    from .tagline import matches_description, payload
+
+    stored = _stored_taglines(text)
+    if not stored:
         return False
     captured = str(ctx.meta.get("description") or "")
     if not captured.strip():
-        return _matches_staged_readme(ctx, blocks, path, _readme_record(ctx, path))
-    different = set(blocks).difference(tagline_forms(ctx))
+        return _matches_staged_readme(ctx, [_visible_tagline(body) for body in stored], path, _readme_record(ctx, path))
+    forms = tagline_forms(ctx)
+    different = {_visible_tagline(body) for body in stored
+                 if not (payload(body) is not None and matches_description(body, captured))}.difference(forms)
     if not different:
         return False
     # Formatter output can reflow a generated tagline. The recorded digest

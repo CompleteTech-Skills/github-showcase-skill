@@ -278,7 +278,12 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
     # tagline == description
     desc = (ctx.meta.get("description") or "").strip()
     if desc and not preserve:
-        if f"**{desc}**" not in plain and f"<b>{desc}</b>" not in plain:
+        from .tagline import matches_description
+        taglines = [m.group(2) for m in mdcode.find_blocks(MARK, text) if m.group(1) == "tagline"]
+        # Retain unmarked header compatibility, but a live block is authoritative.
+        compliant = (all(matches_description(body, desc) for body in taglines) if taglines
+                     else f"**{desc}**" in plain or f"<b>{desc}</b>" in plain)
+        if not compliant:
             fails.append("R2 bold tagline must equal the GitHub description")
     elif not desc:
         warns.append("tagline not checked (no description in meta)")

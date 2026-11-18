@@ -1543,13 +1543,16 @@ def _fence_spans(text: str) -> tuple[tuple[int, int], ...]:
 
 
 @functools.lru_cache(maxsize=16)
-def _outside_code(text: str, mask_inline: bool = True, *, mask_autolinks: bool = True) -> str:
+def _outside_code(text: str, mask_inline: bool = True, *, mask_autolinks: bool = True,
+                  collapse_comments: bool = False, mask_html: bool = False) -> str:
     """Mask Markdown code, comments and autolinks without reading literal attribute backticks as code.
     Constructs are taken left to right, and inline code is looked for again after every HTML tag or comment, so a
     backtick inside an attribute or comment is literal and the next real code span still opens (CommonMark).
     `mask_inline=False` still lets inline code win precedence but leaves its characters readable (reference labels).
     Set `mask_autolinks=False` to retain autolink text for link inventories.
-    The result has the same length (and newline positions) as `text`."""
+    Set `mask_html=True` for Markdown-only scanning that also excludes HTML blocks and tag tokens.
+    By default this preserves source offsets. Set `collapse_comments=True` for a semantic projection
+    where each comment contributes one space at its start and retains its line endings."""
     text = _source_view(text)
     fences = _fence_spans(text)
     definitions = _definition_spans(text)  # decided before inline code: a definition destination's backtick is literal
@@ -1557,12 +1560,13 @@ def _outside_code(text: str, mask_inline: bool = True, *, mask_autolinks: bool =
     html_spans = html_block_spans(text)  # raw HTML blocks: tags there are never escaped by a backslash
     indexed_comments = _comment_matches(text, html_spans)
     out, pos = list(text), 0
+    comments = []
     tag = comment = raw_html = inline = dest = autolink = None
 
-    def blank(a, b):
+    def blank(a, b, replacement=" "):
         for i in range(a, b):
             if out[i] not in "\r\n":
-                out[i] = " "
+                out[i] = replacement
 
     def next_inline(start):
         while True:
@@ -1623,11 +1627,28 @@ def _outside_code(text: str, mask_inline: bool = True, *, mask_autolinks: bool =
             pos = code[1]
         elif nxt is not None:
             if nxt is comment:
-                blank(*nxt.span())
+                if collapse_comments:
+                    comments.append(nxt.span())
+                else:
+                    blank(*nxt.span())
+            elif mask_html:
+                # Use a non-whitespace marker so a tag cannot create a valid
+                # Markdown destination by becoming optional leading whitespace.
+                blank(*nxt.span(), replacement="\x00")
             pos = nxt.end()
         else:
             break
-    return "".join(out)
+    if mask_html:
+        for start, end in html_spans:
+            blank(start, end)
+    if not comments:
+        return "".join(out)
+    parts, pos = [], 0
+    for start, end in comments:
+        parts.extend(("".join(out[pos:start]), " ", "".join(_LINE_END.findall(text[start:end]))))
+        pos = end
+    parts.append("".join(out[pos:]))
+    return "".join(parts)
 
 
 _BLANK_LINE_AT = re.compile(_NL + rf"[ \t\x00]*(?:{_NL}|\Z)")  # a newline that starts a blank line (or ends the text)
@@ -2392,6 +2413,22 @@ def _raw_marker_text_spans(source, blocks, tags, inline_literals):
         index = bisect.bisect_left(closing, (end, -1))
         covered = min(block[1], closing[index][0]) if index < len(closing) else block[1]
         yield end, covered
+
+
+def live_html_tags(text: str):
+    """Yield opening HTML tokens outside code, raw text, and literal Markdown destinations or labels."""
+    source = _source_view(text)
+    visible = _outside_code(source, mask_autolinks=False)
+    tokens = _HTMLTokens(visible, source)
+    raw = tuple(_raw_marker_text_spans(source, html_block_spans(source), tokens.tags, _accepted_inline(source)[3]))
+    literals = (raw, _definition_spans(source), _link_literal_spans(source), _reference_label_spans(source))
+    images = [(start, end) for _, _, start, end in _markdown_images(visible, source)]
+    for start, end in tokens.tags:
+        image = _span_at(images, start)
+        if (image is not None and end <= image[1]) or any(_span_at(spans, start) is not None for spans in literals):
+            continue
+        if match := HTML_OPEN_TAG.fullmatch(tokens.text, start, end):
+            yield match
 
 
 def _marker_comment_starts(source, blocks, literal_spans) -> set[int]:

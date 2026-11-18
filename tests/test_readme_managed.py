@@ -1,4 +1,5 @@
 """Regression coverage for generated taglines and repository-managed READMEs."""
+import hashlib
 import json
 
 import pytest
@@ -20,6 +21,12 @@ Run the workflow from the project directory.
 """
 
 
+def receipt(body):
+    # Independent fixture construction, not the production receipt writer.
+    digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
+    return f"<!-- showcase:tagline:generated sha256={digest} -->\n{body}"
+
+
 def write_meta(path, description):
     path.write_text(json.dumps(meta_dict(description=description)), encoding="utf-8")
 
@@ -34,8 +41,8 @@ def test_default_write_refreshes_generated_tagline(tmp_path):
     assert result.returncode == 0, result.stderr
     path = checkout / "README.md"
     before = path.read_text(encoding="utf-8").replace(
-        readme.wrap("tagline", f"**{OLD}**"),
-        readme.wrap("tagline", f"**{OLD}**") + f"\n\n**{OLD}**",
+        readme.wrap("tagline", receipt(f"**{OLD}**")),
+        readme.wrap("tagline", receipt(f"**{OLD}**")) + f"\n\n**{OLD}**",
     )
     path.write_text(before, encoding="utf-8")
     write_meta(meta, NEW)
@@ -43,24 +50,25 @@ def test_default_write_refreshes_generated_tagline(tmp_path):
     assert result.returncode == 0, result.stdout
     assert json.loads(result.stdout)["mode"] == "upgrade"
     after = path.read_text(encoding="utf-8")
-    assert readme.wrap("tagline", f"**{NEW}**") in after
+    assert readme.wrap("tagline", receipt(f"**{NEW}**")) in after
     assert after.count(f"**{OLD}**") == 1
 
 
 def test_generated_replacement_cannot_count_as_authored_line():
-    before = readme.wrap("tagline", f"**{OLD}**") + f"\n**{NEW}**\n"
-    after = readme.wrap("tagline", f"**{NEW}**")
+    before = readme.wrap("tagline", receipt(f"**{OLD}**")) + f"\n**{NEW}**\n"
+    after = readme.wrap("tagline", receipt(f"**{NEW}**"))
     assert f"lost line: **{NEW}**" in readme.preservation(before, after, [])
 
 
 @pytest.mark.parametrize("ending", ["\n", "\r\n", "\r"])
 @pytest.mark.parametrize("tagline_first", [False, True])
 def test_tagline_refresh_keeps_badge_offsets_and_authored_lines(ending, tagline_first):
-    tagline = readme.wrap("tagline", f"**{OLD}**")
+    tagline = readme.wrap("tagline", receipt(f"**{OLD}**"))
     badges = readme.wrap("badges", "[![Authored badge](badge.svg)](guide.md)")
     blocks = (tagline, badges) if tagline_first else (badges, tagline)
     before = ("\n".join(blocks) + f"\n**{NEW}**\nKeep this authored line.\n").replace("\n", ending)
-    after = before.replace(f"**{OLD}**", f"**{NEW}**", 1)
+    after = before.replace(receipt(f"**{OLD}**").replace("\n", ending),
+                           receipt(f"**{NEW}**").replace("\n", ending), 1)
     assert readme.preservation(before, after, []) == []
     assert "lost line: Keep this authored line." in readme.preservation(
         before, after.replace(f"Keep this authored line.{ending}", ""), [],
@@ -92,7 +100,7 @@ def test_default_write_refreshes_tagline_before_badges(tmp_path, ending):
     assert result.returncode == 0, result.stdout
     assert "readme-shrink" not in json.loads(result.stdout)["logs"]
     after = path.read_bytes().decode("utf-8")
-    assert readme.wrap("tagline", f"**{NEW}**").replace("\n", ending) in after
+    assert readme.wrap("tagline", receipt(f"**{NEW}**")).replace("\n", ending) in after
     assert after.count(f"**{NEW}**") == 2
     assert f"Keep this authored line.{ending}" in after
     assert after == after.replace("\r\n", "\n").replace("\r", "\n").replace("\n", ending)
@@ -208,4 +216,5 @@ def test_single_generated_tagline_unit_still_refreshes(make_ctx, variant, templa
     ctx = make_ctx(description=NEW)
     ctx.det["variant"] = variant
     old = template.format("Keep API v2.0 & use *care* when migrating.")
-    assert readme.tagline_body(ctx, old) == template.format(NEW)
+    assert readme.tagline_body(ctx, receipt(old)) == receipt(template.format(NEW))
+    assert readme.tagline_body(ctx, old) == old  # identical legacy shape is not ownership
