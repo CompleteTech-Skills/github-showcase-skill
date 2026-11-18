@@ -111,6 +111,25 @@ def _sidecars(ctx, paths, *, adjacent: bool) -> set[Path]:
             for directory, _, _ in _output_slots(ctx, path, adjacent=adjacent)}
 
 
+def _existing_sidecar(sidecar: Path) -> dict:
+    """An absent group can start fresh; an unreadable group cannot lose ownership."""
+    try:
+        sidecar.lstat()
+    except FileNotFoundError:
+        return {}
+    except OSError:
+        raise ShowcaseError("existing showcase provenance is unreadable; restore it before rendering",
+                            log="staged-description:provenance") from None
+    data = fp.read_sidecar(sidecar.parent)
+    outputs = data.get("outputs")
+    # Keep legacy sparse records supported, but match the Action's minimum
+    # provenance contract rather than turning an invalid group into an empty one.
+    if not isinstance(outputs, dict) or any(not isinstance(record, dict) for record in outputs.values()):
+        raise ShowcaseError("existing showcase provenance is unreadable or invalid; restore it before rendering",
+                            log="staged-description:provenance")
+    return data
+
+
 def _aliases(left: Path, right: Path) -> bool:
     return left == right or (left.exists() and right.exists() and left.samefile(right))
 
@@ -248,6 +267,8 @@ def check_outputs(ctx, *paths: Path, auxiliary: tuple[Path, ...] = (), adjacent:
         if any(_aliases(resolved, other) for other in real_paths):
             raise ShowcaseError("render output paths must be distinct", log="staged-description:path")
         real_paths.append(resolved)
+    for sidecar in sidecars:
+        _existing_sidecar(sidecar)
 
 
 @contextmanager
@@ -282,7 +303,7 @@ def plan_sidecars(ctx, *entries: tuple[Path, dict, bool], adjacent: bool = False
             sidecar = directory / fp.SIDECAR
             data = planned.get(sidecar)
             if data is None:
-                data = fp.read_sidecar(directory)
+                data = _existing_sidecar(sidecar)
             previous = fp.output_records(data).get(name)
             slots.append((sidecar, name, summarize, data, previous))
         if not always and info is None and all(previous is None for _, _, _, _, previous in slots):

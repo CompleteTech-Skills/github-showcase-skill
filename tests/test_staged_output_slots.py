@@ -3,11 +3,13 @@
 import json
 import os
 import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
 import action_prepare
-from conftest import meta_dict, run_cli
+from conftest import ROOT, meta_dict, run_bash, run_cli
 from ctshowcase import fingerprint as fp, staged
 
 
@@ -227,3 +229,121 @@ def test_exempt_staged_social_report_preserves_existing_adjacent_provenance(chec
     assert result.returncode == 2, result.stdout + result.stderr
     assert "staged-description:path" in json.loads(result.stdout)["logs"]
     assert sidecar.read_bytes() == before
+
+
+@pytest.mark.requires_bash
+@pytest.mark.parametrize("invalid", [
+    b'{"outputs":', b'\xff', b'[]', b'{}', b'{"outputs":[]}', b'{"outputs":{"card.svg":null}}',
+    json.dumps({"fingerprint": "a" * 64}).encode("utf-8"),
+])
+def test_invalid_provenance_blocks_partial_live_refresh_and_local_action_commit(checkout, invalid):
+    repo, _, _ = checkout
+    capture = repo.parent / "meta.json"
+
+    def git(*args, check=True):
+        return subprocess.run(["git", *args], cwd=repo, capture_output=True, check=check)
+
+    git("-c", "user.name=Synthetic", "-c", "user.email=fixture@example.invalid",
+        "commit", "--allow-empty", "-qm", "base")
+    initial_head = git("rev-parse", "HEAD").stdout
+    initial_index = (repo / ".git/index").read_bytes()
+    args = ("--meta", capture, "--repo-dir", repo, "--format", "json")
+    banner = run_cli(*args, "banner", "--allow-few-chips")
+    assert banner.returncode == 0, banner.stdout + banner.stderr
+    proposal = run_cli(*args, "card", "--description", "Route unpublished synthetic requests.")
+    assert proposal.returncode == 0, proposal.stdout + proposal.stderr
+    images = repo / "docs/images"
+    card = images / "card.svg"
+    proposed = fp.read_sidecar(images)["outputs"][card.name]
+    assert proposed["staged_description"]["text"] == "Route unpublished synthetic requests."
+    original_card, original_banner = card.read_bytes(), (images / "banner.png").read_bytes()
+    sidecar = images / fp.SIDECAR
+    sidecar.write_bytes(invalid)
+
+    refresh = run_cli(*args, "banner", "--allow-few-chips")
+    assert refresh.returncode == 2, refresh.stdout + refresh.stderr
+    assert "staged-description:provenance" in json.loads(refresh.stdout)["logs"]
+    assert sidecar.read_bytes() == invalid
+    assert card.read_bytes() == original_card
+    assert (images / "banner.png").read_bytes() == original_banner
+    assert fp.file_record(card)["sha256"] == proposed["sha256"]
+    assert capture.read_text(encoding="utf-8") == json.dumps(meta_dict())
+
+    # This executes the real Action helper against synthetic local Git state.
+    # DRY_RUN permits a local commit, so an unchanged HEAD proves it was blocked.
+    env = {**os.environ, "GITHUB_ACTION_PATH": str(ROOT), "SHOWCASE_DRY_RUN": "1",
+           "PATH": str(Path(sys.executable).parent) + os.pathsep + os.environ.get("PATH", "")}
+    action = run_bash('bash "$GITHUB_ACTION_PATH/scripts/action_commit.sh" "Synthetic refresh" fail '
+                      '"$GITHUB_ACTION_PATH/scripts/action_prepare.py"', cwd=repo, env=env)
+    assert action.returncode == 0, action.stdout + action.stderr
+    assert "commit skipped while unpublished staged output" in action.stdout
+    assert "would push" not in action.stdout
+    assert git("rev-parse", "HEAD").stdout == initial_head
+    assert (repo / ".git/index").read_bytes() == initial_index
+    assert git("cat-file", "-e", "HEAD:docs/images/card.svg", check=False).returncode != 0
+    assert sidecar.read_bytes() == invalid
+    assert card.read_bytes() == original_card
+
+
+@pytest.mark.parametrize("in_checkout", [False, True])
+@pytest.mark.parametrize("proposal", [False, True])
+def test_invalid_alternate_provenance_blocks_render_before_creating_outputs(checkout, in_checkout, proposal):
+    repo, out, card = checkout
+    directory, _ = sidecar_slot(repo, out, not in_checkout)
+    directory.mkdir(parents=True, exist_ok=True)
+    sidecar = directory / fp.SIDECAR
+    sidecar.write_bytes(b'{"outputs":{"untouched.svg":[]}}')
+    original = sidecar.read_bytes()
+
+    result = card(*(("--description", "Route another synthetic draft.") if proposal else ()),
+                  in_checkout=in_checkout)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "existing showcase provenance is unreadable or invalid" in result.stderr
+    assert sidecar.read_bytes() == original
+    assert not out.exists()
+    other, _ = sidecar_slot(repo, out, in_checkout)
+    assert not (other / fp.SIDECAR).exists()
+
+
+def test_record_output_rejects_invalid_provenance_without_replacing_it(checkout, make_ctx):
+    repo, out, _ = checkout
+    sidecar = repo / "docs/images" / fp.SIDECAR
+    sidecar.parent.mkdir(parents=True)
+    sidecar.write_bytes(b'{"outputs":')
+    with pytest.raises(staged.ShowcaseError, match="existing showcase provenance"):
+        staged.record_output(make_ctx(repo_dir=repo), out, {"sha256": "a" * 64}, always=True)
+    assert sidecar.read_bytes() == b'{"outputs":'
+    assert not out.exists()
+
+
+def test_legacy_output_records_inherit_top_level_fingerprint_during_cli_refresh(checkout, monkeypatch):
+    repo, _, _ = checkout
+    capture = repo.parent / "meta.json"
+    args = ("--meta", capture, "--repo-dir", repo)
+    initial = run_cli(*args, "banner", "--allow-few-chips")
+    assert initial.returncode == 0, initial.stdout + initial.stderr
+    images = repo / "docs/images"
+    sidecar = images / fp.SIDECAR
+    legacy = fp.read_sidecar(images)
+    # The pre-staging writer always emitted an outputs map. Its records used
+    # the group's top-level fingerprint rather than per-output fingerprints.
+    legacy_banner = legacy["outputs"]["banner.png"]
+    legacy_banner.pop("fingerprint")
+    sidecar.write_text(fp.sidecar_text(legacy), encoding="utf-8")
+    monkeypatch.chdir(repo)
+    assert not action_prepare.has_staged_outputs()
+
+    proposal = run_cli(*args, "card", "--description", "Route an unpublished synthetic draft.")
+    assert proposal.returncode == 0, proposal.stdout + proposal.stderr
+    proposed = fp.read_sidecar(images)
+    assert proposed["fingerprint"] == legacy["fingerprint"]
+    assert proposed["outputs"]["banner.png"] == {"fingerprint": legacy["fingerprint"], **legacy_banner}
+    assert proposed["outputs"]["card.svg"]["staged_description"]["text"] == "Route an unpublished synthetic draft."
+    assert action_prepare.has_staged_outputs()
+
+    live = run_cli(*args, "card")
+    assert live.returncode == 0, live.stdout + live.stderr
+    refreshed = fp.read_sidecar(images)
+    assert refreshed["outputs"]["banner.png"] == proposed["outputs"]["banner.png"]
+    assert "staged_description" not in refreshed["outputs"]["card.svg"]
+    assert not action_prepare.has_staged_outputs()

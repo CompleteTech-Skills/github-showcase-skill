@@ -1543,12 +1543,12 @@ def _fence_spans(text: str) -> tuple[tuple[int, int], ...]:
 
 
 @functools.lru_cache(maxsize=16)
-def _outside_code(text: str, mask_inline: bool = True) -> str:
+def _outside_code(text: str, mask_inline: bool = True, *, mask_autolinks: bool = True) -> str:
     """Mask Markdown code, comments and autolinks without reading literal attribute backticks as code.
     Constructs are taken left to right, and inline code is looked for again after every HTML tag or comment, so a
     backtick inside an attribute or comment is literal and the next real code span still opens (CommonMark).
     `mask_inline=False` still lets inline code win precedence but leaves its characters readable (reference labels).
-    Autolink contents stay masked; label validity and matching always read the original source.
+    Set `mask_autolinks=False` to retain autolink text for link inventories.
     The result has the same length (and newline positions) as `text`."""
     text = _source_view(text)
     fences = _fence_spans(text)
@@ -1618,7 +1618,7 @@ def _outside_code(text: str, mask_inline: bool = True) -> str:
         elif dest and all(dest[0] < other for other in [c[0] for c in (code,) if c] + [m.start() for m in found]):
             pos = dest[1]
         elif code and (nxt is None or code[0] <= nxt.start()):
-            if mask_inline or code is fence or code is autolink:
+            if code is fence or (mask_autolinks if code is autolink else mask_inline):
                 blank(*code)
             pos = code[1]
         elif nxt is not None:

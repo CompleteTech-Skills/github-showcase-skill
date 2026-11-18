@@ -39,6 +39,9 @@ The default live PNG and JPEG destinations and existing images at the standard
 social-preview dimensions also have this protection for older jobs.
 An ordinary render replaces the record for each refreshed output with its current
 hash and no staged description, while leaving untouched output records intact.
+An existing unreadable or invalid sidecar blocks rendering before any artifact is
+written (`staged-description:provenance`). Restore the sidecar from a verified
+state before retrying; a missing sidecar remains supported for a new output group.
 Card PNG previews have their own records. Banner and card records retain the
 captured repository ID when available. The sidecar's top-level inputs and
 fingerprint describe the latest live canonical banner or card artifact. Each
@@ -46,7 +49,8 @@ staged record is written before the associated artifact, so a partial render
 remains guarded against automatic publication. Before skipping generation,
 the Action checks the selected banner and card for current records and matching
 artifact hashes in a sidecar with per-output fingerprints. It also checks any existing README record when
-README refresh is enabled. Older sidecars use the top-level fingerprint.
+README refresh is enabled. Older sidecars retain an `outputs` map and use the
+top-level fingerprint for records without their own fingerprint.
 Canonical art with a stable exemption can cache that decision when no artifact
 is present. Other selected art without a record is rechecked on the next run.
 
