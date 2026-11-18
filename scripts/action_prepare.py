@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import signal
 import stat
 import subprocess
 import sys
@@ -188,6 +189,10 @@ def _has_commit_hooks() -> bool:
         config.check_returncode()
     events = {record.partition(b"\n")[2] for record in config.stdout.split(b"\0")}
     return any(name.encode("ascii") in events for name in COMMIT_HOOKS)
+
+
+def _exit_for_signal(signum, _frame):
+    raise SystemExit(128 + signum)
 
 
 def _stop_ref_update(transaction: subprocess.Popen) -> None:
@@ -396,6 +401,7 @@ if __name__ == "__main__":
         print("true" if has_staged_outputs() else "false")
         sys.exit(0)
     if len(sys.argv) >= 7 and sys.argv[1] == "commit-index" and sys.argv[2] in ("keep-icon", "icon-removal"):
+        signal.signal(signal.SIGTERM, _exit_for_signal)
         result = prepare_commit_index(Path(sys.argv[3]), Path(sys.argv[4]), sys.argv[5], sys.argv[6], sys.argv[7:],
                                       allow_icon_removal=sys.argv[2] == "icon-removal")
         print(result)

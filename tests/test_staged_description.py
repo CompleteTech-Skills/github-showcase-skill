@@ -129,6 +129,34 @@ def test_doctor_preserves_horizontal_whitespace_when_matching_tagline_proof(tmp_
     assert not drift("", edited)
 
 
+def test_text_managed_readme_preview_labels_its_staged_description(tmp_path):
+    repo = tmp_path / "repo"
+    config = repo / ".github" / "showcase.yml"
+    config.parent.mkdir(parents=True)
+    config.write_text("readme:\n  managed: true\n", encoding="utf-8")
+    readme = repo / "README.md"
+    before = b"# Authored README\r\n"
+    readme.write_bytes(before)
+    capture = tmp_path / "capture.json"
+    live = "Run the Northwind triage agent."
+    capture.write_text(json.dumps(meta_dict(description=live)), encoding="utf-8")
+    proposal = "Route staged support."
+
+    result = run_cli("--meta", capture, "--repo-dir", repo, "--format", "text",
+                     "readme", "--description", proposal)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"**{proposal}**" in result.stdout
+    label = next(line for line in result.stderr.splitlines() if line.startswith("staged-description: "))
+    assert json.loads(label.removeprefix("staged-description: ")) == {
+        "text": proposal,
+        "sha256": hashlib.sha256(proposal.encode()).hexdigest(),
+        "live_description_sha256": hashlib.sha256(live.encode()).hexdigest(),
+    }
+    assert readme.read_bytes() == before
+    assert not (repo / "docs").exists()
+
+
 def test_cli_doctor_empty_live_description_is_not_drift(tmp_path):
     capture = tmp_path / "meta.json"
     target = tmp_path / "repo"
@@ -1187,7 +1215,7 @@ def test_action_leaves_an_in_progress_merge_untouched(tmp_path):
 @pytest.mark.requires_bash
 @pytest.mark.parametrize("concurrent_change", [
     "head", "index", "branch", "late-branch", "late-detached", "locked-branch", "ref-failure",
-    "ref-failure-no-space", "ref-failure-restore-error", "install-interrupted",
+    "ref-failure-no-space", "ref-failure-restore-error", "install-interrupted", "install-terminated",
 ])
 def test_action_handles_concurrent_git_changes_during_commit(tmp_path, concurrent_change):
     import os
@@ -1195,6 +1223,9 @@ def test_action_handles_concurrent_git_changes_during_commit(tmp_path, concurren
     import subprocess
 
     from conftest import ROOT, run_bash
+
+    if concurrent_change == "install-terminated" and os.name != "posix":
+        pytest.skip("POSIX SIGTERM delivery required")
 
     def git(*args):
         return subprocess.run(["git", *args], cwd=tmp_path, capture_output=True, text=True, check=True).stdout.strip()
@@ -1221,6 +1252,7 @@ def test_action_handles_concurrent_git_changes_during_commit(tmp_path, concurren
 import errno
 import os
 import runpy
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -1284,9 +1316,11 @@ def fail_rollback_rename(source, destination):
     if ref_failed and change == "ref-failure-restore-error" and Path(destination).name == "index":
         raise OSError(errno.EACCES, "synthetic index restore failure")
     original_replace(source, destination)
-    if change == "install-interrupted" and Path(source).name.startswith("showcase-index.") \
-            and Path(destination).name == "index":
-        raise KeyboardInterrupt
+    if Path(source).name.startswith("showcase-index.") and Path(destination).name == "index":
+        if change == "install-interrupted":
+            raise KeyboardInterrupt
+        if change == "install-terminated":
+            os.kill(os.getpid(), signal.SIGTERM)
 
 
 subprocess.Popen = ObserveRefUpdate
@@ -1326,8 +1360,11 @@ bash "$GITHUB_ACTION_PATH/scripts/action_commit.sh" "Synthetic" fail "$GITHUB_AC
         assert stat.S_IMODE(index.stat().st_mode) == original_mode
         assert git("diff", "--cached", "--name-only") == ""
         return
-    if concurrent_change == "install-interrupted":
-        assert result.returncode != 0 and "KeyboardInterrupt" in result.stderr
+    if concurrent_change in ("install-interrupted", "install-terminated"):
+        if concurrent_change == "install-terminated":
+            assert result.returncode == 143, result.stdout + result.stderr
+        else:
+            assert result.returncode != 0 and "KeyboardInterrupt" in result.stderr
         assert "would push" not in result.stdout
         assert git("rev-parse", "HEAD") == initial
         assert index.read_bytes() == original

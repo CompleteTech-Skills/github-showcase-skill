@@ -605,6 +605,8 @@ def cmd_readme(args):
                 print(f"readme: needs-input:readme-managed ({reason})", file=sys.stderr)
                 if not args.write:
                     print(proposed)
+                if getattr(ctx, "staged_description", None) is not None:
+                    sys.stderr.write(f"staged-description: {json.dumps(ctx.staged_description, ensure_ascii=False)}\n")
             return None, NEEDS_INPUT if args.write else OK
         return base("readme", ctx, result="needs-input", written=False, reason=reason,
                     proposed_header=proposed), NEEDS_INPUT if args.write else OK
