@@ -1,5 +1,6 @@
 """Reconcile provenance across checkout-aware and metadata-only renderers."""
 
+import hashlib
 import json
 import os
 import subprocess
@@ -163,6 +164,14 @@ def test_adjacent_art_keeps_root_readme_draft_in_shared_sidecar(checkout, monkey
     images = repo / "docs/images"
     root_record = fp.read_sidecar(images)["outputs"]["README.md"]
     original = root_readme.read_bytes()
+    body = original.decode().split("<!-- showcase:tagline:start -->\n", 1)[1].split(
+        "\n<!-- showcase:tagline:end -->", 1)[0]
+    receipt, payload = body.split("\n", 1)
+    assert payload == "**Route a synthetic draft.**"
+    assert receipt == f"<!-- showcase:tagline:generated sha256={hashlib.sha256(payload.encode()).hexdigest()} -->"
+    assert root_record["tagline_sha256"] == hashlib.sha256(body.encode()).hexdigest()
+    assert root_record["sha256"] == hashlib.sha256(original).hexdigest()
+    assert root_record["bytes"] == len(original)
     monkeypatch.chdir(repo)
 
     nested_output = images / "README.md"

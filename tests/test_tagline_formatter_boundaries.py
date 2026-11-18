@@ -115,7 +115,19 @@ def test_cli_scaffold_formatter_boundary_reflow_is_owned_and_r2_compliant(
                 else f'<p align="center"><b>{DESCRIPTION}</b></p>')
     assert assert_receipt(body) == expected
     assert tagline.payload(body) == expected
-    assert not (repo / "docs/images/.showcase.json").exists()
+    sidecar = repo / "docs/images/.showcase.json"
+    if variant == "C":
+        record = json.loads(sidecar.read_text(encoding="utf-8"))["outputs"]["README.md"]
+        assert record["sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
+        assert record["bytes"] == len(path.read_bytes())
+        assert record["tagline_sha256"] == hashlib.sha256(normalize(body).encode("utf-8")).hexdigest()
+        assert record["description_sha256"] == hashlib.sha256(DESCRIPTION.encode("utf-8")).hexdigest()
+        assert "staged_description" not in record
+        # Remove only this synthetic fixture's provenance to retain the
+        # independent proof that a fresh process derives ownership from text.
+        sidecar.unlink()
+    else:
+        assert not sidecar.exists()
     report = lint_report(repo, meta)
 
     # Ownership must survive in a fresh CLI process with no formatter or

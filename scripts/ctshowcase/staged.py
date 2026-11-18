@@ -10,6 +10,7 @@ from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 from . import fingerprint as fp
+from . import tagline as taglinemod
 from .errors import NeedsInput, ShowcaseError
 
 SOCIAL_STAGING = ".showcase-staging"
@@ -366,38 +367,27 @@ def tagline_forms(ctx) -> set[str]:
     Callers must pass a non-empty description: tagline_body logs needs-input:description otherwise.
     """
     from .readme import tagline_body
-    from .tagline import visible
 
     forms = set()
     for variant in "ABCDEFGHIJ":
         proxy = copy.copy(ctx)
         proxy.det = dict(ctx.det, variant=variant)
-        stored = tagline_body(proxy)
-        forms.add((visible(stored) or stored).strip())
+        forms.add(taglinemod.normalize(tagline_body(proxy)))
     return forms
 
 
-def _stored_taglines(text: str) -> list[str]:
+def tagline_blocks(text: str) -> list[str]:
     from .mdcode import find_blocks
-    from .readme import MARK, normalize_text
+    from .readme import MARK
 
-    source = normalize_text(text)
+    # The parser removes its single marker separator. Remaining whitespace,
+    # including payload boundary LFs, belongs to the receipt.
+    source = taglinemod.normalize(text)
     return [m.group(2) for m in find_blocks(MARK, source) if m.group(1) == "tagline"]
 
 
-def _visible_tagline(body: str, *, owned_only: bool = False) -> str:
-    from .tagline import visible
-
-    return (visible(body) or ("" if owned_only else body)).strip("\n")
-
-
-def tagline_blocks(text: str, *, owned_only: bool = False) -> list[str]:
-    """Visible taglines in source order, with empty slots for unproven bodies when requested."""
-    return [_visible_tagline(body, owned_only=owned_only) for body in _stored_taglines(text)]
-
-
 def tagline_digest(body: str) -> str:
-    return hashlib.sha256(body.encode("utf-8")).hexdigest()
+    return hashlib.sha256(taglinemod.normalize(body).encode("utf-8")).hexdigest()
 
 
 def _readme_record(ctx, path: Path | None) -> dict:
@@ -416,15 +406,39 @@ def _recorded_tagline_digests(record: dict) -> set[str]:
     return digests
 
 
+def _provenance_body(body: str) -> str | None:
+    """Exact receipt evidence, or the historical unmarked separator convention.
+
+    Old sidecars omitted outer LF separators. Keep that compatibility only for
+    unmarked bodies: neither a malformed receipt nor a changed payload may be
+    repaired by trimming before verification.
+    """
+    body = taglinemod.normalize(body)
+    if taglinemod.marked(body):
+        return body if taglinemod.payload(body) is not None else None
+    return body.strip("\n")
+
+
+def _legacy_matches_description(body: str, description: str) -> bool:
+    """Check old formatter provenance without granting replacement ownership.
+
+    This is used only after matching an unmarked body's historical digest and
+    source-description provenance. The receipt matcher supplies its soft-wrap
+    semantics, including rejection of paragraphs and hard breaks. The temporary
+    receipt is never persisted or returned as evidence of ownership.
+    """
+    return (not taglinemod.marked(body)
+            and taglinemod.matches_description(taglinemod.generated(body.strip("\n")), description))
+
+
 def recorded_tagline(ctx, body: str) -> bool:
-    """Recognize an exact formatter-produced body with description provenance."""
+    """Recognize recorded output provenance only; never replacement ownership."""
     checkout = ctx.repo_dir
     if checkout is None:
         return False
     record = _readme_record(ctx, checkout / "README.md")
-    # Formatter-added separator lines are harmless, but indentation and trailing
-    # spaces can change Markdown and must never be inferred from a legacy digest.
-    if tagline_digest(body.strip("\r\n")) not in _recorded_tagline_digests(record):
+    evidence = _provenance_body(body)
+    if evidence is None or tagline_digest(evidence) not in _recorded_tagline_digests(record):
         return False
     proposal = record.get("staged_description")
     if isinstance(proposal, dict):
@@ -437,42 +451,45 @@ def recorded_tagline(ctx, body: str) -> bool:
 def _matches_staged_readme(ctx, blocks: list[str], path: Path | None, record: dict) -> bool:
     info = record.get("staged_description")
     proposal = info.get("text") if isinstance(info, dict) else None
-    if not isinstance(proposal, str) or not proposal.strip():
+    if (not isinstance(proposal, str) or not proposal.strip()
+            or info.get("sha256") != tagline_digest(proposal)):
         return False
     digests = _recorded_tagline_digests(record)
     if digests:
-        return any(tagline_digest(block) in digests for block in blocks)
+        return any(tagline_digest(evidence) in digests for block in blocks
+                   if (evidence := _provenance_body(block)) is not None)
     if path is None or record.get("sha256") != fp.file_record(path)["sha256"]:
         return False
-    staged = copy.copy(ctx)
-    staged.meta = dict(ctx.meta, description=proposal)
-    return bool(tagline_forms(staged).intersection(blocks))
+    # Older records used only a whole-file digest. The file must still be exact,
+    # and receipt verification must happen on the actual body before semantics.
+    return any(taglinemod.matches_description(block, proposal)
+               or _legacy_matches_description(block, proposal) for block in blocks)
 
 
 def tagline_drift(ctx, text: str, path: Path | None = None) -> bool:
-    """True when a managed tagline block differs from what `readme` would write for the live description.
+    """Compare actual managed bodies with live About, separately from ownership.
 
-    Only the managed tagline block is compared, never a matching sentence elsewhere in the README, and fenced code
-    examples are ignored. With an empty live description, authored taglines are preserved. A managed tagline matching
-    its recorded staged digest demonstrates drift even against an empty About.
+    Fenced examples are ignored. An empty About reports drift only when an
+    unchanged body proves a recorded staged render; unrelated README edits do
+    not invalidate that body proof. Sidecar evidence never authorizes a write.
     """
-    from .tagline import matches_description, payload
-
-    stored = _stored_taglines(text)
-    if not stored:
+    blocks = tagline_blocks(text)
+    if not blocks:
         return False
     captured = str(ctx.meta.get("description") or "")
     if not captured.strip():
-        return _matches_staged_readme(ctx, [_visible_tagline(body) for body in stored], path, _readme_record(ctx, path))
-    forms = tagline_forms(ctx)
-    different = {_visible_tagline(body) for body in stored
-                 if not (payload(body) is not None and matches_description(body, captured))}.difference(forms)
+        return _matches_staged_readme(ctx, blocks, path, _readme_record(ctx, path))
+    different = [block for block in blocks if not taglinemod.matches_description(block, captured)]
     if not different:
         return False
-    # Formatter output can reflow a generated tagline. The recorded digest
-    # applies only to the description that produced that formatter input.
+    # Receipt-bearing bodies already had their semantic check. A matching
+    # sidecar must never hide invalid receipts, hard breaks or paragraphs.
+    if any(taglinemod.marked(block) for block in different):
+        return True
     record = _readme_record(ctx, path)
     staged = record.get("staged_description")
     rendered_description = staged.get("sha256") if isinstance(staged, dict) else record.get("description_sha256")
+    digests = _recorded_tagline_digests(record)
     return (rendered_description != tagline_digest(captured.strip())
-            or not {tagline_digest(block) for block in different}.issubset(_recorded_tagline_digests(record)))
+            or any(tagline_digest(block.strip("\n")) not in digests
+                   or not _legacy_matches_description(block, captured) for block in different))

@@ -437,22 +437,12 @@ def inherited_tagline(ctx: RepoContext, body: str, text: str) -> bool:
     return value in known
 
 
-def _owned_tagline(ctx: RepoContext | None, body: str, text: str) -> bool:
-    if taglinemod.payload(body) is not None:
-        return True
-    if ctx is None or taglinemod.marked(body):
-        return False
-    from .staged import recorded_tagline
-
-    return inherited_tagline(ctx, body, text) or recorded_tagline(ctx, body)
-
-
 def tagline_body(ctx: RepoContext, existing: str | None = None, text: str = "") -> str:
-    """Refresh verified generated content; preserve ambiguous legacy or edited text."""
+    """Render captured or staged text only into verified generated content."""
     staged = getattr(ctx, "staged_description", None)
     desc = (staged["text"] if staged else ctx.meta.get("description") or "").strip()
     if desc:
-        if existing and existing.strip() and not _owned_tagline(ctx, existing, text):
+        if existing and existing.strip() and taglinemod.payload(existing) is None:
             return existing
         payload = f'<p align="center"><b>{desc}</b></p>' if ctx.det["variant"] == "F" else f"**{desc}**"
         return taglinemod.generated(payload)
@@ -1689,12 +1679,12 @@ def preservation(before: str, after: str, removed: list[str], *, ctx: RepoContex
     old_taglines = [m for m in find_blocks(MARK, before) if m.group(1) == "tagline"]
     new_taglines = [m for m in find_blocks(MARK, after) if m.group(1) == "tagline"]
     replace_tagline = (len(old_taglines) == len(new_taglines) == 1
-                       and _owned_tagline(ctx, old_taglines[0].group(2), before)
+                       and taglinemod.payload(old_taglines[0].group(2)) is not None
                        and taglinemod.payload(new_taglines[0].group(2)) is not None)
     remaining_taglines = Counter(normalize_line_endings(m.group(2)) for m in new_taglines)
     for block in old_taglines:
         body = normalize_line_endings(block.group(2))
-        if not body.strip() or (replace_tagline and _owned_tagline(ctx, body, before)):
+        if not body.strip() or taglinemod.payload(body) is not None:
             continue
         if remaining_taglines[body]:
             remaining_taglines[body] -= 1

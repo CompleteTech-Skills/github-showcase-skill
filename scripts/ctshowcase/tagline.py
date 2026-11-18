@@ -38,12 +38,6 @@ def payload(body: str) -> str | None:
     return match.group(2)
 
 
-def visible(body: str) -> str | None:
-    """Read the verified body without outer blank lines added by a formatter."""
-    verified = payload(body)
-    return verified.strip("\n") if verified is not None else None
-
-
 def inherited_payload(body: str) -> str | None:
     """Preserve exact legacy whitespace, and never launder an invalid receipt."""
     verified = payload(body)

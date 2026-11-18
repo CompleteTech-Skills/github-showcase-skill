@@ -1,16 +1,34 @@
 """Explicit staged-description provenance and drift, using synthetic public metadata."""
 import hashlib
 import json
+import re
 from pathlib import Path
 
 import pytest
 
 from conftest import meta_dict, run_cli
-from ctshowcase.tagline import payload as tagline_payload
 from ctshowcase.readme import tagline_body
 from ctshowcase.staged import SOCIAL_STAGING, prepare, record_output, tagline_drift, tagline_forms
 from ctshowcase.errors import NeedsInput
 from ctshowcase.fingerprint import read_sidecar
+
+
+def receipted(payload):
+    """Build fixture evidence independently of the implementation under test."""
+    normalized = payload.replace("\r\n", "\n").replace("\r", "\n")
+    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    return f"<!-- showcase:tagline:generated sha256={digest} -->\n{payload}"
+
+
+def exact_tagline_bodies(source):
+    source = source.replace("\r\n", "\n").replace("\r", "\n")
+    return re.findall(r"<!-- showcase:tagline:start -->\n(.*?)\n<!-- showcase:tagline:end -->", source, re.S)
+
+
+def assert_receipt(body):
+    receipt, payload = body.split("\n", 1)
+    assert receipt == receipted(payload).split("\n", 1)[0]
+    return payload
 
 
 def test_prepare_does_not_change_capture():
@@ -58,13 +76,18 @@ def test_drift_forms_come_from_tagline_body(make_ctx):
     """The accepted forms are exactly what readme.tagline_body writes, for the detected and every other variant."""
     ctx = make_ctx(description="Current sentence.")
     forms = tagline_forms(ctx)
-    assert tagline_payload(tagline_body(ctx)) in forms
+    assert tagline_body(ctx) in forms
     for variant in "ABCDEFGHIJ":
         other = make_ctx(description="Current sentence.")
         other.det = dict(other.det, variant=variant)
-        assert tagline_payload(tagline_body(other)) in forms
+        assert tagline_body(other) in forms
         assert not tagline_drift(ctx, TAG.format(tagline_body(other)))
-    assert forms == {"**Current sentence.**", '<p align="center"><b>Current sentence.</b></p>'}
+    assert forms == {receipted("**Current sentence.**"),
+                     receipted('<p align="center"><b>Current sentence.</b></p>')}
+    # Exact legacy forms remain R2-compatible without gaining replacement ownership.
+    for legacy in ("**Current sentence.**", '<p align="center"><b>Current sentence.</b></p>'):
+        assert not tagline_drift(ctx, TAG.format(legacy))
+        assert tagline_body(ctx, legacy) == legacy
     assert tagline_drift(ctx, TAG.format("<b>Current sentence.</b>"))  # readme would rewrite this form
     assert tagline_drift(ctx, TAG.format(""))  # an emptied block no longer carries the live description
 
@@ -80,7 +103,6 @@ def test_empty_live_description_keeps_authored_tagline_without_drift(make_ctx):
 
 
 def test_legacy_tagline_provenance_does_not_claim_horizontal_whitespace_edits(make_ctx, tmp_path):
-    from ctshowcase.readme import _owned_tagline
     from ctshowcase.staged import recorded_tagline, tagline_digest
 
     ctx = make_ctx(repo_dir=tmp_path, description="New public description.")
@@ -97,12 +119,24 @@ def test_legacy_tagline_provenance_does_not_claim_horizontal_whitespace_edits(ma
     assert not recorded_tagline(ctx, "    " + original)
     assert not recorded_tagline(ctx, original + "  ")
     reflowed = "**Old generated\ndescription.**"
-    assert not _owned_tagline(ctx, reflowed, TAG.format(reflowed))
+    for authored in (original, "\n" + original + "\n", "    " + original, original + "  ",
+                     reflowed, "    " + reflowed, reflowed + "  "):
+        assert tagline_body(ctx, authored, TAG.format(authored)) == authored
+    generated = receipted(original)
+    assert tagline_body(ctx, generated, TAG.format(generated)) == receipted("**New public description.**")
+    edited = generated.replace(original_description, "Owner-edited description.")
+    assert tagline_body(ctx, edited, TAG.format(edited)) == edited
+
+    # Legacy formatter records remain useful provenance, never replacement
+    # authority. Preserve the reflowed text even with an exact matching record.
+    assert not recorded_tagline(ctx, reflowed)
     record["tagline_sha256"] = tagline_digest(reflowed)
     sidecar.write_text(json.dumps({"outputs": {"README.md": record}}), encoding="utf-8")
-    assert _owned_tagline(ctx, reflowed, TAG.format(reflowed))
-    for edited in ("    " + reflowed, reflowed + "  ", reflowed + "\u00a0"):
-        assert not _owned_tagline(ctx, edited, TAG.format(edited))
+    assert recorded_tagline(ctx, reflowed)
+    assert tagline_body(ctx, reflowed, TAG.format(reflowed)) == reflowed
+    for changed in ("    " + reflowed, reflowed + "  ", reflowed + "\u00a0"):
+        assert not recorded_tagline(ctx, changed)
+        assert tagline_body(ctx, changed, TAG.format(changed)) == changed
 
 
 @pytest.mark.parametrize("edited", ["    **Route support requests.**", "**Route support requests.**  "])
@@ -978,7 +1012,7 @@ def test_stale_live_readme_plan_cannot_clear_concurrent_staged_provenance(tmp_pa
     from contextlib import contextmanager
 
     import showcase
-    from ctshowcase import readme, staged
+    from ctshowcase import staged
 
     capture = tmp_path / "capture.json"
     capture.write_text(json.dumps(meta_dict()), encoding="utf-8")
@@ -991,7 +1025,10 @@ def test_stale_live_readme_plan_cannot_clear_concurrent_staged_provenance(tmp_pa
     live = path.read_bytes()
     proposal = make_ctx(repo_dir=target)
     proposal.meta, proposal.staged_description = prepare(proposal.meta, "Unpublished draft.")
-    staged_text = live.decode().replace("Run the Northwind triage agent.", "Unpublished draft.").encode()
+    staged_body = receipted("**Unpublished draft.**")
+    live_body = receipted("**Run the Northwind triage agent.**")
+    assert live_body in live.decode()
+    staged_text = live.decode().replace(live_body, staged_body).encode()
     original_lock = staged.lock_outputs
 
     @contextmanager
@@ -1000,7 +1037,7 @@ def test_stale_live_readme_plan_cannot_clear_concurrent_staged_provenance(tmp_pa
             path.write_bytes(staged_text)
             fp_hash = hashlib.sha256(staged_text).hexdigest()
             record_output(proposal, path, {"sha256": fp_hash,
-                                           "tagline_sha256": staged.tagline_digest(readme.tagline_body(proposal).strip())})
+                                           "tagline_sha256": hashlib.sha256(staged_body.encode()).hexdigest()})
         with original_lock(ctx, *paths):
             yield
 
@@ -1496,20 +1533,20 @@ def test_sidecar_lock_is_shared_across_process_temp_directories(tmp_path):
         assert entered.exists()
 
 
-def test_reflowed_taglines_record_exact_bodies_and_follow_the_live_capture(tmp_path, monkeypatch):
+@pytest.mark.parametrize("generated", [True, False], ids=["receipted-generated", "authored-legacy"])
+def test_reflowed_taglines_record_exact_bodies_and_follow_the_live_capture(tmp_path, monkeypatch, generated):
     import action_prepare
     import showcase
     from ctshowcase import readme
-    from ctshowcase.staged import tagline_blocks, tagline_digest
-
-    from ctshowcase.tagline import generated as managed_tagline
+    from ctshowcase.staged import tagline_blocks
 
     checkout = tmp_path / "repo"
     checkout.mkdir()
     path = checkout / "README.md"
-    path.write_text("# Synthetic documentation\n\n" + readme.wrap("tagline", managed_tagline("**Old.**"))
-                    + "\n\n## Details\n\n" + readme.wrap("tagline", managed_tagline("**Another old.**"))
-                    + "\n", encoding="utf-8")
+    original_bodies = ["**Old.**", "**Another old.**"]
+    bodies = [receipted(body) for body in original_bodies] if generated else original_bodies
+    path.write_text("# Synthetic documentation\n\n" + readme.wrap("tagline", bodies[0]) + "\n\n"
+                    "## Details\n\n" + readme.wrap("tagline", bodies[1]) + "\n", encoding="utf-8")
     meta_path = tmp_path / "metadata.json"
     meta = meta_dict(description="")
     proposed = "Route synthetic support requests across multiple teams and keep queue ownership visible."
@@ -1519,16 +1556,21 @@ def test_reflowed_taglines_record_exact_bodies_and_follow_the_live_capture(tmp_p
         meta_path.write_text(json.dumps(meta), encoding="utf-8")
 
     def reflow(root, target, source):
+        """Formatter double: preserve receipt bytes and reflow generated payloads only."""
         if target != path:
             return source
         parts, offset = [], 0
         blocks = [block for block in readme.find_blocks(readme.MARK, source) if block.group(1) == "tagline"]
         for index, block in enumerate(blocks):
-            proof, _, body = block.group(2).partition("\n")
-            words = body.split(" ")
+            body = block.group(2)
+            if not body.startswith("<!-- showcase:tagline:generated sha256="):
+                continue
+            receipt, payload = body.split("\n", 1)
+            assert_receipt(body)
+            words = payload.split(" ")
             boundary = 4 + index
-            parts.extend((source[offset:block.start(2)], proof, "\n", " ".join(words[:boundary]), "\n",
-                          " ".join(words[boundary:])))
+            parts.extend((source[offset:block.start(2)], receipt, "\n\n", " ".join(words[:boundary]),
+                          "\n", " ".join(words[boundary:]), "\n"))
             offset = block.end(2)
         return "".join([*parts, source[offset:]])
 
@@ -1545,9 +1587,33 @@ def test_reflowed_taglines_record_exact_bodies_and_follow_the_live_capture(tmp_p
             "--variant", "A", "--write", "--format-generated"]
     capture("")
     assert showcase.main([*args, "--description", proposed]) == 0
-    expected = {tagline_digest(body) for body in tagline_blocks(path.read_text(encoding="utf-8"))}
+    rendered = path.read_text(encoding="utf-8")
+    if not generated:
+        # These are the original unreceipted fixtures. Neither staged text nor
+        # formatter availability makes them generated or authorizes adoption.
+        assert exact_tagline_bodies(rendered) == original_bodies
+        assert proposed not in rendered
+        assert not (checkout / "docs/images/.showcase.json").exists()
+        assert not action_prepare.has_staged_outputs()
+        assert not drift()
+        capture(proposed)
+        assert showcase.main(args) == 0
+        assert exact_tagline_bodies(path.read_text(encoding="utf-8")) == original_bodies
+        assert not (checkout / "docs/images/.showcase.json").exists()
+        assert drift()
+        return
+    exact_bodies = exact_tagline_bodies(rendered)
+    assert tagline_blocks(rendered) == exact_bodies
+    for body in exact_bodies:
+        payload = assert_receipt(body)
+        assert payload.startswith("\n") and payload.endswith("\n")
+        assert payload.strip("\n").replace("\n", " ") == f"**{proposed}**"
+    expected = {hashlib.sha256(body.encode()).hexdigest() for body in exact_bodies}
     assert len(expected) == 2
     assert set(recorded()["tagline_sha256s"]) == expected
+    assert recorded()["tagline_sha256"] in expected
+    assert recorded()["sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
+    assert recorded()["bytes"] == len(path.read_bytes())
     assert recorded()["staged_description"]["text"] == proposed
     assert action_prepare.has_staged_outputs()
     assert drift()
@@ -1568,7 +1634,7 @@ def test_reflowed_taglines_record_exact_bodies_and_follow_the_live_capture(tmp_p
     (checkout / "docs/images/.showcase.json").unlink()
     assert showcase.main(args) == 0
     assert not drift()
-    assert recorded()["description_sha256"] == tagline_digest(live)
+    assert recorded()["description_sha256"] == hashlib.sha256(live.encode()).hexdigest()
     capture(f"  {live}  ")
     assert not drift()
     edited = path.read_text(encoding="utf-8").replace("owner.**", "maintainer.**", 1)

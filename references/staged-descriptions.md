@@ -19,10 +19,17 @@ only the card does not claim the banner was refreshed. For explicit output paths
 outside the target checkout, the sidecar is placed beside that output; metadata-only
 rendering uses that location too. README dry runs report the proposal without
 writing a sidecar. `readme --write` records the proposal when the resulting
-README has a managed tagline with that text, including an already-current tagline.
-With `--format-generated`, provenance ties the digest of each reflowed generated
-tagline to its source description. Doctor uses the same proof for wrapped text,
-and a live refresh clears the staged record for the refreshed tagline.
+README has a verified generated tagline with that text, including an already-current
+tagline. A matching sentence or legacy sidecar does not authorize replacement of
+authored text. Generated taglines carry a receipt over the exact payload after
+normalizing only transport line endings. Edited or malformed receipts remain
+authored, and a sidecar cannot restore their ownership.
+With `--format-generated`, provenance records each final managed body, including
+its resealed receipt and payload boundary blank lines, against the source
+description. Doctor verifies the actual receipt before interpreting soft wraps;
+it does not trim or reconstruct a receipt to make it valid. Exact legacy sidecar
+records remain usable for drift checks without granting replacement ownership.
+A live refresh clears the staged record only for the refreshed output.
 Explicit report and change-record destinations must stay outside the files the
 Action commits. The capture, output and provenance destinations must be distinct.
 Staged social previews default to `assets/.showcase-staging/social-preview.png`.

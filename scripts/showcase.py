@@ -676,18 +676,16 @@ def cmd_readme(args):
     from ctshowcase.staged import (
         check_outputs, lock_outputs, plan_sidecars, protected_auxiliary, record_output, tagline_blocks, tagline_digest,
     )
-    from ctshowcase.tagline import visible as visible_tagline
 
     staged = getattr(ctx, "staged_description", None) is not None
     captured_description = str(ctx.meta.get("description") or "")
-    tagline = ((visible_tagline(readme.tagline_body(ctx)) or "").strip()
-               if args.write and (staged or captured_description.strip()) else "")
+    tagline = readme.tagline_body(ctx).strip() if args.write and (staged or captured_description.strip()) else ""
     # Identify generated blocks before the formatter can reflow their Markdown.
-    planned_taglines = tagline_blocks(after, owned_only=True) if tagline else []
+    planned_taglines = tagline_blocks(after) if tagline else []
     tagline_indices = [index for index, body in enumerate(planned_taglines) if body == tagline]
     if staged and tagline:
         untracked = after.count(tagline) - len(tagline_indices)
-        if untracked > 0 and untracked > before.count(tagline) - tagline_blocks(before, owned_only=True).count(tagline):
+        if untracked > 0 and untracked > before.count(tagline) - tagline_blocks(before).count(tagline):
             raise ShowcaseError("generated staged tagline is outside a provable README block",
                                 log="staged-description:provenance", code=CHECK_FAILED)
     if args.format_generated:
@@ -769,8 +767,7 @@ def cmd_readme(args):
             outputs.append((path, rendered_readme))
             if contrib_new is not None:
                 outputs.append((contrib_path, contrib_new.encode("utf-8")))
-        rendered_taglines = (tagline_blocks(after, owned_only=True)
-                             if tagline_indices and args.format_generated else planned_taglines)
+        rendered_taglines = tagline_blocks(after) if tagline_indices and args.format_generated else planned_taglines
         if len(rendered_taglines) != len(planned_taglines):
             raise ShowcaseError("formatter changed the README tagline markers", log="formatter-content",
                                 code=CHECK_FAILED)
