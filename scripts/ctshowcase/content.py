@@ -249,8 +249,6 @@ def markdown_files(tree: Tree, readme: str | None) -> list[str]:
 # =====================================================================================================
 # Markdown scanning
 # =====================================================================================================
-FENCE = re.compile(r"^ {0,3}(`{3,}(?=[^`\n]*$)|~{3,})")  # CommonMark: no backtick in a ``` info string
-INLINE_CODE = re.compile(r"(`+)(?:.+?)\1")
 ATX = re.compile(r"^ {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$")
 SETEXT = re.compile(r"^ {0,3}(=+|-+)[ \t]*$")
 MD_LINK = re.compile(r"(!?)\[((?:[^\[\]\n]|\[[^\[\]\n]*\])*)\]\(\s*(<[^>\n]*>|[^\s()]*(?:\([^\s()]*\)[^\s()]*)*)"
@@ -265,35 +263,23 @@ IMG_EXT = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".avif", ".bmp", ".
 
 
 def scan_lines(text: str) -> list[tuple[int, str | None, str | None]]:
-    """(line number, text without HTML comments, the same with inline code blanked); both None inside a code fence."""
-    out, fence, comment = [], None, False
-    for n, raw in enumerate(text.replace("\r\n", "\n").split("\n"), 1):
-        m = FENCE.match(raw)
-        if fence:
-            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) and not raw.strip().strip(fence[0]):
-                fence = None
+    """Return line numbers and comment-free projections for headings and links."""
+    from .mdcode import _outside_code, code_block_spans
+
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    visible = _outside_code(text, mask_inline=False, mask_autolinks=False).split("\n")
+    masked = _outside_code(text, mask_autolinks=False).split("\n")
+    blocks = iter(code_block_spans(text))
+    block = next(blocks, None)
+    out, offset = [], 0
+    for n, (line, safe) in enumerate(zip(visible, masked), 1):
+        while block and offset >= block[1]:
+            block = next(blocks, None)
+        if block and block[0] <= offset < block[1]:
             out.append((n, None, None))
-            continue
-        if m and not comment:
-            fence = m.group(1)
-            out.append((n, None, None))
-            continue
-        line, rest = "", raw
-        while rest:
-            if comment:
-                end = rest.find("-->")
-                if end < 0:
-                    rest = ""
-                    break
-                rest, comment = rest[end + 3:], False
-                continue
-            start = rest.find("<!--")
-            if start < 0:
-                line += rest
-                break
-            line += rest[:start] + " "
-            rest, comment = rest[start + 4:], True
-        out.append((n, line, INLINE_CODE.sub(lambda mm: " " * len(mm.group(0)), line)))
+        else:
+            out.append((n, line, safe))
+        offset += len(line) + 1
     return out
 
 
