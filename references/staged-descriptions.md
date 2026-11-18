@@ -54,7 +54,8 @@ Card PNG previews have their own records. Banner and card records retain the
 captured repository ID when available. The sidecar's top-level inputs and
 fingerprint describe the latest live canonical banner or card artifact. Each
 staged record is written before the associated artifact, so a partial render
-remains guarded against automatic publication. Before skipping generation,
+remains guarded against automatic publication. When a write fails, outputs
+whose bytes stayed unchanged keep their previous records. Before skipping generation,
 the Action checks the selected banner and card for current records and matching
 artifact hashes in a sidecar with per-output fingerprints. It also checks any existing README record when
 README refresh is enabled. Older sidecars retain an `outputs` map and use the
@@ -82,3 +83,5 @@ unrelated index changes. Local
 writes to each output group share a sidecar lock. The Action holds that lock
 while staging and validating its index snapshot. A partial live refresh
 preserves unrelated staged records and cannot authorize their publication.
+After a live render is skipped, foreign-art cleanup removes only an artifact
+with its own provenance whose bytes and record still match the initial check.

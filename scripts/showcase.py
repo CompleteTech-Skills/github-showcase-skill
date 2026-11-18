@@ -19,6 +19,7 @@ import json
 import os
 import re
 import sys
+from contextlib import nullcontext
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -275,19 +276,20 @@ def write_artifact(ctx, path: Path, data: bytes) -> None:
 # ---------------------------------------------------------------------------------------------------
 def write_rendered_art(ctx, *artifacts: tuple[Path, bytes, dict], summarize_art: bool = True) -> None:
     from ctshowcase.fingerprint import bytes_record
-    from ctshowcase.staged import check_outputs, lock_outputs, record_output
+    from ctshowcase.staged import check_outputs, lock_outputs, record_output, record_staged_writes
 
     staged = getattr(ctx, "staged_description", None) is not None
     paths = tuple(path for path, _, _ in artifacts)
     adjacent = not summarize_art
     with lock_outputs(ctx, *paths, adjacent=adjacent):
         check_outputs(ctx, *paths, adjacent=adjacent)
+        guard = nullcontext()
         if staged:
-            # Record every proposal before changing any artifact. A partial write remains guarded by the Action.
-            for path, data, details in artifacts:
-                record_output(ctx, path, bytes_record(data, **details), adjacent=adjacent)
-        for path, data, _ in artifacts:
-            write_artifact(ctx, path, data)
+            records = [(path, bytes_record(data, **details), False) for path, data, details in artifacts]
+            guard = record_staged_writes(ctx, *records, adjacent=adjacent)
+        with guard:
+            for path, data, _ in artifacts:
+                write_artifact(ctx, path, data)
         if not staged:
             for path, data, details in artifacts:
                 record = bytes_record(data, **details)
@@ -674,7 +676,8 @@ def cmd_readme(args):
                             logs=ctx.logs + ["readme-shrink"]), CHECK_FAILED
     from ctshowcase.fingerprint import bytes_record, has_staged_outputs
     from ctshowcase.staged import (
-        check_outputs, lock_outputs, plan_sidecars, protected_auxiliary, record_output, tagline_blocks, tagline_digest,
+        check_outputs, lock_outputs, plan_sidecars, protected_auxiliary, record_output, record_staged_writes,
+        tagline_blocks, tagline_digest,
     )
 
     staged = getattr(ctx, "staged_description", None) is not None
@@ -784,23 +787,24 @@ def cmd_readme(args):
         destinations = [target for target, _ in outputs]
         if matched_taglines and path not in destinations:
             destinations.append(path)
+        snapshots = {path: original_readme}
+        if contrib_new is not None:
+            snapshots[contrib_path] = original_contrib
         output_locks = lock_outputs(ctx, path, *destinations, auxiliary=report) if report else lock_outputs(
             ctx, path, *destinations)
         with output_locks:
             check_outputs(ctx, *destinations, auxiliary=report,
                           format_root=getattr(ctx, "format_root", None))
             if not args.format_generated:
-                current = path.read_bytes() if path.is_file() else None
-                if current != original_readme:
-                    raise ShowcaseError("README changed while the refresh was being prepared", log="readme-source-changed",
-                                        code=CHECK_FAILED)
+                for target, original in snapshots.items():
+                    current = target.read_bytes() if target.is_file() else None
+                    if current != original:
+                        raise ShowcaseError(f"{target.name} changed while the refresh was being prepared",
+                                            log="readme-source-changed", code=CHECK_FAILED)
             if args.format_generated:
                 from ctshowcase.formatting import write_formatted_outputs
                 from ctshowcase.output_lock import output_lock
                 ensure_distinct_outputs(*(target for target, _ in outputs), *((capture,) if capture else ()))
-                snapshots = {path: original_readme}
-                if contrib_new is not None:
-                    snapshots[contrib_path] = original_contrib
                 for target, original in snapshots.items():
                     target_relative(ctx.format_root, target)
                     current = target.read_bytes() if target.is_file() else None
@@ -835,13 +839,16 @@ def cmd_readme(args):
                     write_formatted_outputs(output_group, repo_root=ctx.format_root, snapshots=snapshots,
                                             private=staged, private_metadata=private_metadata, append_output=append_output)
             else:
+                guard = nullcontext()
                 if staged and matched_taglines:
-                    record_output(ctx, path, bytes_record(rendered_readme, **tagline_record))
-                for target, data in outputs:
-                    if target == contrib_path and not staged:
-                        target.write_text(contrib_new, encoding="utf-8")
-                    else:
-                        write_artifact(ctx, target, data)
+                    record = (path, bytes_record(rendered_readme, **tagline_record), False)
+                    guard = record_staged_writes(ctx, record)
+                with guard:
+                    for target, data in outputs:
+                        if target == contrib_path and not staged:
+                            target.write_text(contrib_new, encoding="utf-8")
+                        else:
+                            write_artifact(ctx, target, data)
                 if not staged and matched_taglines:
                     record_output(ctx, path, bytes_record(rendered_readme))
     if change_records and not (args.format_generated and args.write):

@@ -358,6 +358,71 @@ def record_output(ctx, path: Path, record: dict, *, always: bool = False,
     return next(iter(planned), None)
 
 
+def _contents(path: Path) -> bytes | None:
+    try:
+        return path.read_bytes()
+    except FileNotFoundError:
+        return None
+
+
+@contextmanager
+def record_staged_writes(ctx, *entries: tuple[Path, dict, bool], adjacent: bool = False):
+    """Guard plain staged writes and restore old evidence for outputs left untouched."""
+    planned = plan_sidecars(ctx, *entries, adjacent=adjacent)
+    originals = {}
+    artifacts = {sidecar: {} for sidecar in planned}
+    contents = {path: _contents(path) for path, _, _ in entries}
+    for path in contents:
+        for directory, name, _ in _output_slots(ctx, path, adjacent=adjacent):
+            sidecar = directory / fp.SIDECAR
+            if sidecar in artifacts:
+                artifacts[sidecar][name] = path
+    for sidecar in planned:
+        before = _contents(sidecar)
+        mode = stat.S_IMODE(sidecar.stat().st_mode) if before is not None else None
+        originals[sidecar] = (before, mode, _existing_sidecar(sidecar))
+
+    published = {}
+    try:
+        for sidecar, data in planned.items():
+            payload = fp.sidecar_text(data).encode("utf-8")
+            fp.replace_bytes(sidecar, payload, private=True, preserve_mode=False)
+            published[sidecar] = payload
+        yield
+    except BaseException:
+        unchanged = set()
+        for path, original in contents.items():
+            try:
+                if _contents(path) == original:
+                    unchanged.add(path)
+            except OSError:
+                continue  # retain the proposed evidence if the output cannot be checked
+        for sidecar, payload in published.items():
+            paths = artifacts[sidecar]
+            restored = {name for name, path in paths.items() if path in unchanged}
+            if not restored or _contents(sidecar) != payload:
+                continue
+            before, mode, original = originals[sidecar]
+            if len(restored) == len(paths):
+                if before is None:
+                    sidecar.unlink()
+                else:
+                    fp.replace_bytes(sidecar, before, private=True)
+                    sidecar.chmod(mode)
+                continue
+            current = planned[sidecar]
+            old_outputs = fp.output_records(original)
+            outputs = dict(fp.output_records(current))
+            for name in restored:
+                if name in old_outputs:
+                    outputs[name] = old_outputs[name]
+                else:
+                    outputs.pop(name, None)
+            fp.replace_bytes(sidecar, fp.sidecar_text(dict(current, outputs=outputs)).encode("utf-8"),
+                             private=True, preserve_mode=False)
+        raise
+
+
 def tagline_forms(ctx) -> set[str]:
     """Every tagline block body `readme` writes for the live description, across all variants.
 

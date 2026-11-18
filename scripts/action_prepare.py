@@ -362,6 +362,9 @@ def _drop_key(name: str, data: dict) -> str | None:
     artifact = file_record(path) if path.is_file() else None
     if artifact is not None and record is not None and "sha256" in record and record["sha256"] != artifact["sha256"]:
         return None
+    if record is not None:
+        # An unrelated render may materialize the legacy inherited fingerprint.
+        record = {"fingerprint": data.get("fingerprint"), **record}
     identity = [name, artifact, record]
     return hashlib.sha256(canonical(identity).encode("utf-8")).hexdigest()
 
@@ -369,6 +372,8 @@ def _drop_key(name: str, data: dict) -> str | None:
 def foreign_key(full_name: str, name: str) -> str | None:
     with sidecar_lock(SIDECAR):
         data = _sidecar()
+        if name not in output_records(data):
+            return None  # sibling or template summary provenance cannot identify an unrecorded file
         return _drop_key(name, data) if foreign(full_name, name, data=data) else None
 
 

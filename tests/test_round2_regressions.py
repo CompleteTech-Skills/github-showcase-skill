@@ -217,19 +217,23 @@ def test_action_prepare_foreign_and_drop(tmp_path):
 
 
 @pytest.mark.parametrize("change", ["unrelated-record", "replaced-file", "live-record", "staged-record",
-                                    "already-staged", "already-edited"])
+                                    "already-staged", "already-edited", "unrecorded"])
 def test_action_removes_only_the_observed_foreign_artifact(tmp_path, change):
+    from ctshowcase.fingerprint import update_sidecar
+
     images = tmp_path / "docs/images"
     images.mkdir(parents=True)
     path = images / "banner.png"
     sidecar = images / ".showcase.json"
     data = {"inputs": {"owner": "Northwind-Trading", "repo": "template", "type": "template"},
-            "outputs": {"banner.png": {}, "card.svg": {}}}
+            "fingerprint": "b" * 64, "outputs": {"banner.png": {}, "card.svg": {}}}
     staged = {"staged_description": {"text": "A proposed sentence."}}
     if change == "already-staged":
         data["outputs"]["banner.png"] = staged
     elif change == "already-edited":
         data["outputs"]["banner.png"] = {"sha256": "a" * 64}
+    elif change == "unrecorded":
+        del data["outputs"]["banner.png"]
     sidecar.write_text(json.dumps(data), encoding="utf-8")
     path.write_bytes(b"copied image")
     helper = [sys.executable, str(ROOT / "scripts/action_prepare.py")]
@@ -239,6 +243,10 @@ def test_action_removes_only_the_observed_foreign_artifact(tmp_path, change):
         return result.stdout.strip()
 
     key = command("foreign-key", "Northwind-Trading/project", path.name)
+    if change == "unrecorded":
+        assert not key
+        assert path.read_bytes() == b"copied image" and json.loads(sidecar.read_bytes()) == data
+        return
     if change in ("already-staged", "already-edited"):
         assert not key
         command("drop", path.name)
@@ -247,8 +255,9 @@ def test_action_removes_only_the_observed_foreign_artifact(tmp_path, change):
     assert len(key) == 64
     if change == "unrelated-record":
         # A different artifact can finish rendering and update summary metadata.
-        data["inputs"]["type"] = "workspace"
-        data["outputs"]["card.svg"] = {"description_sha256": "a" * 64}
+        data = update_sidecar(data, {"owner": "Northwind-Trading", "repo": "project", "type": "workspace"},
+                              "c" * 64, "card.svg", {"description_sha256": "a" * 64})
+        assert data["outputs"]["banner.png"]["fingerprint"] == "b" * 64
     elif change == "replaced-file":
         path.write_bytes(b"current image")
     elif change == "live-record":

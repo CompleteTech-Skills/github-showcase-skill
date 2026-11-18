@@ -744,13 +744,19 @@ def test_staged_readme_only_uses_proposal_for_tagline(tmp_path):
     assert "staged_description" not in read_sidecar(target / "docs/images")["outputs"]["README.md"]
 
 
-def test_staged_render_marks_output_before_writing_bytes(make_ctx, monkeypatch, tmp_path):
+@pytest.mark.parametrize("prior_preview", [False, True], ids=["new-preview", "previous-proposal"])
+def test_staged_render_marks_output_before_writing_bytes(make_ctx, monkeypatch, tmp_path, prior_preview):
     from showcase import write_rendered_art
 
     ctx = make_ctx(repo_dir=tmp_path)
-    ctx.meta, ctx.staged_description = prepare(ctx.meta, "Unpublished support process.")
     art = tmp_path / "docs/images/card.svg"
     png = tmp_path / "docs/images/card.png"
+    previous_record = None
+    if prior_preview:
+        ctx.meta, ctx.staged_description = prepare(ctx.meta, "Earlier preview proposal.")
+        write_rendered_art(ctx, (png, b"earlier PNG", {}))
+        previous_record = read_sidecar(art.parent)["outputs"][png.name]
+    ctx.meta, ctx.staged_description = prepare(ctx.meta, "Unpublished support process.")
 
     def fail_preview(_ctx, path, data):
         if path == png:
@@ -765,6 +771,40 @@ def test_staged_render_marks_output_before_writing_bytes(make_ctx, monkeypatch, 
     sidecar = read_sidecar(art.parent)
     assert "inputs" not in sidecar
     assert sidecar["outputs"]["card.svg"]["staged_description"]["text"] == "Unpublished support process."
+    if prior_preview:
+        assert png.read_bytes() == b"earlier PNG"
+        assert sidecar["outputs"][png.name] == previous_record
+    else:
+        assert png.name not in sidecar["outputs"]
+
+
+def test_failed_staged_readme_replacement_keeps_earlier_proposal(tmp_path, monkeypatch, capsys):
+    import showcase
+
+    capture = tmp_path / "capture.json"
+    capture.write_text(json.dumps(meta_dict(description="")), encoding="utf-8")
+    readme_path = tmp_path / "README.md"
+    sidecar = tmp_path / "docs/images/.showcase.json"
+    common = ["--meta", str(capture), "--repo-dir", str(tmp_path), "readme", "--write", "--description"]
+    assert showcase.main([*common, "First proposal for the public example.", "--mode", "scaffold"]) == 0
+    prior = (readme_path.read_bytes(), sidecar.read_bytes())
+    prior_mode = sidecar.stat().st_mode
+    real_replace = showcase.write_artifact
+
+    def fail_readme(ctx, target, data):
+        if target == readme_path:
+            assert b"Later proposal" in sidecar.read_bytes()
+            raise PermissionError("synthetic failed README write")
+        return real_replace(ctx, target, data)
+
+    monkeypatch.setattr(showcase, "write_artifact", fail_readme)
+    assert showcase.main([*common, "Later proposal for the public example.", "--mode", "header"]) == 2
+    report = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert "synthetic failed README write" in report["error"]
+    assert (readme_path.read_bytes(), sidecar.read_bytes()) == prior
+    assert sidecar.stat().st_mode == prior_mode
+    result = run_cli("--meta", capture, "--repo-dir", tmp_path, "doctor", "--format", "json")
+    assert "description-drift:readme" in json.loads(result.stdout)["logs"]
 
 
 def test_cli_fingerprint_checks_the_selected_canonical_art(tmp_path):
@@ -1045,6 +1085,41 @@ def test_stale_live_readme_plan_cannot_clear_concurrent_staged_provenance(tmp_pa
     assert showcase.main([*common, "--mode", "header", "--write"]) == 1
     assert path.read_bytes() == staged_text
     assert "staged_description" in read_sidecar(target / "docs/images")["outputs"]["README.md"]
+
+
+def test_staged_bootstrap_preserves_changed_contributing_source(tmp_path, monkeypatch, capsys):
+    import showcase
+    from ctshowcase import readme
+    from ctshowcase.intake import TEMPLATE_REPO
+
+    capture = tmp_path / "capture.json"
+    capture.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    root = tmp_path / "repo"
+    root.mkdir()
+    readme_path = root / "README.md"
+    original = ("# Template\n\n" + readme.pristine_block("## Usage\n\nTemplate body.") + "\n").encode()
+    readme_path.write_bytes(original)
+    contributing = root / "CONTRIBUTING.md"
+    owner = TEMPLATE_REPO.split("/", 1)[0]
+    prior = f"See https://github.com/{owner}/.github/blob/main/CONTRIBUTING.md.\n".encode()
+    contributing.write_bytes(prior)
+    authored = prior + b"A new local contribution note.\r\n"
+    rewrite = readme.bootstrap_contributing
+
+    def save_while_planning(ctx, source):
+        replacement = rewrite(ctx, source)
+        assert replacement != source
+        contributing.write_bytes(authored)
+        return replacement
+
+    monkeypatch.setattr(readme, "bootstrap_contributing", save_while_planning)
+    result = showcase.main(["--meta", str(capture), "--repo-dir", str(root), "--format", "json", "readme",
+                            "--bootstrap", "--write", "--description", "An unpublished description."])
+    assert result == 1
+    assert "readme-source-changed" in capsys.readouterr().out
+    assert readme_path.read_bytes() == original
+    assert contributing.read_bytes() == authored
+    assert not (root / "docs/images/.showcase.json").exists()
 
 
 def test_staged_noop_readme_records_exact_existing_crlf_bytes(tmp_path):
