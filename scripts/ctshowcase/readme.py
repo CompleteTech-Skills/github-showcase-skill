@@ -6,7 +6,8 @@ those blocks. Content is never invented (§1.5 rule 2) and never lost (§7.1 res
 from __future__ import annotations
 
 import re
-from collections import Counter
+from bisect import bisect_right
+from collections import Counter, defaultdict, deque
 from pathlib import Path
 from urllib.parse import quote
 
@@ -14,19 +15,33 @@ from . import footer as footermod
 from .context import RepoContext
 from .detect import required_sections, standard
 from .errors import ConfigError, NeedsInput
-from .mdcode import code_spans, find_blocks, masked  # noqa: F401  (code_spans: re-exported for callers)
+from .mdcode import MANAGED_BLOCK_PATTERN, after_line_end, code_block_spans, code_spans, find_blocks, masked  # noqa: F401  (code_spans: re-exported for callers)
 
-MARK = re.compile(r"<!-- showcase:([a-z-]+):start -->\n?(.*?)\n?<!-- showcase:\1:end -->", re.S)
+MARK = MANAGED_BLOCK_PATTERN
 EMOJI = re.compile("[\U0001F000-\U0001FAFF☀-➿⬀-⯿️‍]")
 SHIELDS = "https://img.shields.io/badge/"
+GENERATED_BADGES = re.compile(r"<!-- showcase:badges:generated sha256=([0-9a-f]{64})"
+                              r"(?: replaces=([0-9a-f]{64}))? -->(?:\r\n|\r|\n)(.*)", re.S)
 BOM = "\ufeff"
+
+
+def normalize_line_endings(text: str) -> str:
+    return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
 def normalize_text(text: str) -> str:
     """README text as the tools read it: LF line endings, no leading UTF-8 byte order mark (a BOM would hide the H1
     from every `^#` match)."""
-    text = text.replace("\r\n", "\n")
+    text = normalize_line_endings(text)
     return text[1:] if text.startswith(BOM) else text
+
+
+def source_lines(text: str) -> list[str]:
+    """Split only at Markdown line endings, keeping other source characters."""
+    lines = normalize_line_endings(text).split("\n")
+    if not lines[-1]:
+        lines.pop()
+    return lines
 
 
 def start(b):
@@ -98,7 +113,7 @@ def split_sections(text: str) -> tuple[str, list[tuple[str, str]]]:
     """(preamble, [(heading text, body)]) split at H2 outside code fences."""
     pre, sections, cur_h, buf = [], [], None, []
     fence = None
-    for line in text.splitlines():
+    for line in source_lines(text):
         m = re.match(r"^(```+|~~~+)", line)
         if m:
             fence = None if fence and line.startswith(fence) else (fence or m.group(1))
@@ -214,8 +229,10 @@ def badges(ctx: RepoContext) -> list[tuple[str, str, str | None]]:
         topics = set(ctx.meta.get("topics") or [])
         rt = [n for t, n in (("claude-skill", "Claude"), ("codex-skill", "Codex")) if t in topics] or ["Claude", "Codex"]
         out.append(("Agent skill", f"{SHIELDS}agent%20skill-{shield(' | '.join(rt))}-{b['brand']}", None))
-    elif ctx.det.get("category"):
-        out.append((f"Type {ctx.det['category']}", f"{SHIELDS}type-{shield(ctx.det['category'])}-{b['brand']}{extra}", None))
+    else:
+        category = standard("types")["types"][ctx.det["type"]].get("badge_category", ctx.det.get("category"))
+        if category:
+            out.append((f"Type {category}", f"{SHIELDS}type-{shield(category)}-{b['brand']}{extra}", None))
     lic, dual = license_facts(ctx)
     if dual:
         out.append(("AGPL-3.0 or commercial license", f"{SHIELDS}license-{shield('AGPL-3.0 | commercial')}-{b['neutral']}",
@@ -265,6 +282,133 @@ def badges_html(ctx) -> str:
     return '<p align="center">\n' + "\n".join(parts) + "\n</p>"
 
 
+def _eol_normalized(body: str) -> str:
+    """Line endings unified to LF and only the surrounding newline separators removed; spaces and tabs are kept
+    because they are significant (an indented row is Markdown code, not the inherited template)."""
+    return body.replace("\r\n", "\n").replace("\r", "\n").strip("\n")
+
+
+def _legacy_badge_body(brand, body: str, style: dict | None = None, *, ci_matches=None) -> bool:
+    return (legacy_profile_badges(brand, body, style, ci_matches=ci_matches)
+            or _eol_normalized(body) in template_badge_bodies(brand))
+
+
+def _legacy_ci_matches(ctx, owner: str, repo: str) -> bool:
+    if ctx.same_repo(f"{owner}/{repo}"):
+        return True
+    # A personal profile repository can have the former account's spelling.
+    return (repo.casefold() == owner.casefold() and ctx.same_owner(owner)
+            and ctx.same_owner(ctx.owner, ctx.repo))
+
+
+def badge_body(ctx: RepoContext, existing: str | None = None) -> str:
+    """Refresh owned rows; a missing or changed digest makes a J block authored."""
+    if ctx.det["variant"] != "J":
+        return badges_html(ctx) if ctx.det["variant"] == "F" else badges_md(ctx)
+    is_legacy = _legacy_badge_body(ctx.brand, existing or "", ctx.style,
+                                  ci_matches=lambda owner, repo: _legacy_ci_matches(ctx, owner, repo))
+    has_license_row = "![License " in (existing or "") or "![AGPL-3.0 or commercial license]" in (existing or "")
+    metadata_license = ctx.meta.get("license")
+    license_unknown = metadata_license is None or (
+        isinstance(metadata_license, str) and metadata_license.upper() in ("", "NOASSERTION", "OTHER")
+    )
+    if is_legacy and has_license_row and ctx.public and license_unknown:
+        return existing  # missing metadata cannot disprove an authored license claim
+    if existing and existing.strip(" \t\r\n") and not generated_badges(existing) and not is_legacy:
+        return existing
+    body = badges_md(ctx)
+    previous = GENERATED_BADGES.fullmatch(existing or "")
+    # Record the exact prior body for the preservation check to independently verify.
+    replaced_digest = badge_sha(existing) if is_legacy else previous.group(2) if previous else None
+    replaces = f" replaces={replaced_digest}" if replaced_digest else ""
+    return f"<!-- showcase:badges:generated sha256={badge_sha(body)}{replaces} -->\n{body}"
+
+
+def template_badge_body(brand) -> str:
+    """The exact inherited type row from the repository template, independent of body state."""
+    category = standard("types")["types"]["template"]["category"]
+    return f"![Type {category}]({SHIELDS}type-{shield(category)}-{brand.raw['badges']['brand']})"
+
+
+def template_badge_bodies(brand) -> tuple[str, str]:
+    """The inherited type row in its remote form and its exact `--badges local` equivalent."""
+    category = standard("types")["types"]["template"]["category"]
+    slug = re.sub(r"[^a-z0-9]+", "-", f"type-{category}".lower()).strip("-")
+    return template_badge_body(brand), f"![Type {category}](docs/images/badges/{slug}.svg)"
+
+
+def legacy_profile_badges(brand, body: str, style: dict | None = None, *, ci_matches=None) -> bool:
+    """Recognize the old generator's ordered language/license/CI rows without today's metadata.
+
+    A type row, custom markup, altered alt/URL pair or duplicate kind makes the block authored.
+    Both historical remote and local badge paths are accepted.
+    """
+    lines = _eol_normalized(body).split("\n")
+    if not 1 <= len(lines) <= 3:
+        return False
+    kinds = []
+    colors = dict(brand.raw["badges"])
+    family = {k: (style or {}).get(f"badge_{k}") for k in ("brand", "accent")}
+    for line in lines:
+        linked = line.startswith("[![")
+        if not (linked or line.startswith("![")) or not line.endswith(")"):
+            return False
+        alt, marker, target = line[3 if linked else 2:-1].partition("](")
+        if not marker or not alt or "]" in alt or not target:
+            return False
+        if linked:
+            # The legacy generator uses this exact separator. Scan once from
+            # the right to preserve the preceding URL without regex backtracking.
+            url, delimiter, link = target.rpartition(")](")
+            if not delimiter or not url or not link:
+                return False
+        else:
+            url, link = target, None
+        suffixes = ["", "?labelColor=1E1E1E"]
+        expected_link = None
+        if alt.startswith("License ") and alt[8:]:
+            kind, label, message, color = 1, "license", alt[8:], colors["neutral"]
+        elif alt == "AGPL-3.0 or commercial license":
+            kind, label, message, color = 1, "license", "AGPL-3.0 | commercial", colors["neutral"]
+            expected_link = "LICENSING.md"
+            suffixes = [""]
+        elif alt.startswith("Language ") and alt[9:]:
+            kind, label, message, color = 0, "language", alt[9:], colors["accent"]
+        elif re.fullmatch(r"Python \d+\.\d+\+", alt):
+            kind, label, message, color = 0, "python", alt[7:], colors["accent"]
+            suffixes = ["?logo=python&logoColor=white"]
+        elif re.fullmatch(r"Node \d+\+", alt):
+            kind, label, message, color = 0, "node", alt[5:], colors["accent"]
+            suffixes = ["?logo=nodedotjs&logoColor=white"]
+        elif alt in ("CI", "Tests"):
+            ci = re.fullmatch(r"https://github\.com/([A-Za-z0-9-]+)/(\.github|[A-Za-z0-9-]+)/actions/workflows/([^/?#]+\.ya?ml)/badge\.svg", url)
+            if (not ci or link != url.removesuffix("/badge.svg") or ci_matches is None
+                    or not ci_matches(ci.group(1), ci.group(2))):
+                return False
+            name = ci.group(3)
+            expected = "Tests" if "test" in name else "CI" if "ci" in name else None
+            if alt != expected:
+                return False
+            kinds.append(2)
+            continue
+        else:
+            return False
+        shades = {color, family["accent"]} - {None} if kind == 0 else {color}  # a family palette recolours the language row
+        urls = {f"{SHIELDS}{label}-{shield(message)}-{c}{suffix}" for suffix in suffixes for c in shades}
+        slug = re.sub(r"[^a-z0-9]+", "-", f"{label}-{message}".lower()).strip("-")
+        urls.add(f"docs/images/badges/{slug}.svg")
+        if url not in urls or link != expected_link:
+            return False
+        kinds.append(kind)
+    return kinds == sorted(set(kinds))
+
+
+def generated_badges(body: str) -> bool:
+    """The digest proves that the generated badge rows have not been edited."""
+    match = GENERATED_BADGES.fullmatch(body)
+    return bool(match and match.group(1) == badge_sha(match.group(3)))
+
+
 def nav_first(ctx: RepoContext) -> bool:
     """§7.1 order: hero banner, then the nav line (review q57 `nav` default); brand.yaml `readme.nav_first` restores
     the nav-first order only if the user answers "Nav line first"."""
@@ -302,16 +446,16 @@ def tagline_body(ctx: RepoContext, existing: str | None = None, text: str = "") 
 
 
 def header(ctx: RepoContext, keep_banner: str | None = None, title: str | None = None,
-           tagline: str | None = None) -> str:
+           tagline: str | None = None, existing_badges: str | None = None) -> str:
     """The §7.2 header. `tagline` is the tagline block body a caller already decided with tagline_body() (the body it
     carries over from the header it replaces); None writes the description's tagline, or an empty block."""
     tag = wrap("tagline", tagline_body(ctx) if tagline is None else tagline)
     banner = keep_banner if keep_banner is not None else wrap("banner", banner_html(ctx))
     if ctx.det["variant"] == "F":
-        parts = [*lead(ctx, banner, wrap("nav", nav_line(ctx))), wrap("badges", badges_html(ctx)), tag, "---"]
+        parts = [*lead(ctx, banner, wrap("nav", nav_line(ctx))), wrap("badges", badge_body(ctx, existing_badges)), tag, "---"]
         return "\n\n".join(p for p in parts if p)
     parts = [*lead(ctx, banner, wrap("nav", nav_line(ctx))), '<div align="center">', f"# {title or product_name(ctx)}",
-             wrap("badges", badges_md(ctx)), tag, "</div>", "---"]
+             wrap("badges", badge_body(ctx, existing_badges)), tag, "</div>", "---"]
     return "\n\n".join(p for p in parts if p)
 
 
@@ -445,7 +589,7 @@ def scaffold(ctx: RepoContext, existing: str = "") -> str:
     co = callout(ctx)
     if co:
         parts.append(co)
-    keep = [ln for ln in existing.splitlines() if ln.strip() and not ln.startswith("# ")]
+    keep = [ln for ln in source_lines(existing) if ln.strip(" \t") and not ln.startswith("# ")]
     for h2, req in order:
         if h2 in ("License", "Licensing"):
             continue
@@ -516,7 +660,13 @@ def fork_callout(ctx: RepoContext) -> str | None:
             "The upstream README follows unchanged; the upstream license applies.")
 
 
-BANNER_BLOCK = re.compile(re.escape(start("banner")) + r".*?" + re.escape(end("banner")) + r"\n*", re.S)
+def leading_banner_block(text: str) -> re.Match | None:
+    """Return the paired banner with no authored content preceding it."""
+    first = next(iter(find_blocks(MARK, text)), None)
+    if (first is not None and first.group(1) == "banner" and not text[:first.start()].strip()
+            and _block_on_separate_lines(text, first)):
+        return first
+    return None
 
 
 def callout_only(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
@@ -536,10 +686,10 @@ def callout_only(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
         ctx.log("needs-input:fork-variant (q27 full treatment: pass readme --variant for the §5.4 variant)")
     body = text
     lead_banner = ""
-    m = BANNER_BLOCK.match(text.lstrip("\n"))
-    if m:  # our banner block is already on top (a re-run): keep it, look for the callout under it
-        body = text.lstrip("\n")[m.end():]
-    first = next((ln for ln in body.splitlines() if ln.strip()), "")
+    leading = leading_banner_block(text)
+    if leading:  # our banner block is already on top (a re-run): keep it, look for the callout below
+        body = text[leading.end():].lstrip("\n")
+    first = next((ln for ln in source_lines(body) if ln.strip()), "")
     out = body
     if not first.lstrip().startswith(">"):
         if ctx.det["variant"] == "G":
@@ -551,8 +701,8 @@ def callout_only(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
             out = co + "\n\n" + body.lstrip("\n")
     if ctx.art_status()["banner"] is None:
         lead_banner = wrap("banner", banner_html(ctx)) + "\n\n"  # decision 13: the hero banner opens G and H too
-    elif m:
-        lead_banner = text.lstrip("\n")[:m.end()].rstrip("\n") + "\n\n"
+    elif leading:
+        lead_banner = leading.group(0) + "\n\n"
     out = lead_banner + out.lstrip("\n")
     removed: list[str] = []
     if footer_wanted(ctx):
@@ -562,7 +712,7 @@ def callout_only(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
             for fm in find_blocks(MARK, out):
                 if fm.group(1) == "footer" and is_footer_copy(fm.group(2), ctx.brand):
                     kept.append(out[pos:fm.start()])
-                    removed += [ln for ln in fm.group(2).splitlines() if ln.strip()]
+                    removed += [ln for ln in source_lines(fm.group(2)) if ln.strip()]
                     had_footer = True
                     pos = fm.end()
             out = "".join(kept) + out[pos:]
@@ -574,7 +724,7 @@ def callout_only(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
             out = out.rstrip("\n") + "\n\n" + footermod.block(ctx.brand) + "\n"
             # Report only the removed footer lines that the replacement footer does not carry again (multiset
             # difference), so a re-emitted line never counts as lost content in the preservation check.
-            kept = Counter(ln.strip() for ln in footermod.block(ctx.brand).splitlines() if ln.strip())
+            kept = Counter(ln.strip() for ln in source_lines(footermod.block(ctx.brand)) if ln.strip())
             rest = []
             for ln in removed:
                 if kept[ln.strip()] > 0:
@@ -803,7 +953,7 @@ def is_footer_copy(block: str, brand, loose_src: bool = False, own_site: bool = 
                        for parts in urls)
         return alt_ok
 
-    for line in block.splitlines():
+    for line in source_lines(block):
         if not line.strip():
             continue
         if not all(tag_ok(m) for m in FOOTER_TAG.finditer(line)):
@@ -827,7 +977,7 @@ def drop_old_footer(text: str, brand, loose_src: bool = False, own_site: bool = 
     tail = body[m.start():]
     if not tail.rstrip().endswith(f"</{m.group(1)}>") or not is_footer_like(tail, brand) or not is_footer_copy(tail, brand, loose_src, own_site):
         return text, []
-    return body[:m.start()].rstrip() + "\n", [ln for ln in tail.splitlines() if ln.strip()]
+    return body[:m.start()].rstrip() + "\n", [ln for ln in source_lines(tail) if ln.strip()]
 
 
 def _unreemitted(lines: list[str], kept: Counter) -> list[str]:
@@ -845,13 +995,29 @@ def _unreemitted(lines: list[str], kept: Counter) -> list[str]:
     return out
 
 
-def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
+def _block_on_separate_lines(text: str, block: re.Match) -> bool:
+    starts_line = block.start() == 0 or text[block.start() - 1] == "\n"
+    ends_line = text[block.end():block.end() + 1] in ("", "\n")
+    return starts_line and ends_line
+
+
+def _badge_blocks_need_in_place_refresh(text: str, markers: list[re.Match]) -> bool:
+    badges = [m for m in markers if m.group(1) == "badges"]
+    return len(badges) > 1 or any(
+        not _block_on_separate_lines(text, m) or m.group(0) != wrap("badges", m.group(2)) for m in badges
+    )
+
+
+def upgrade(ctx: RepoContext, text: str, *, already_normalized: bool = False) -> tuple[str, list[str]]:
     """Return (new text, header lines removed). Raises nothing; callers run the shrink checks."""
+    if not already_normalized:
+        text = normalize_text(text)
     variant = ctx.det["variant"]
     rv = standard("readme-variants")
     if variant in ("G", "H"):
-        return callout_only(ctx, normalize_text(text))
-    text = normalize_text(text)
+        return callout_only(ctx, text)
+    if variant == "J" and _badge_blocks_need_in_place_refresh(text, find_blocks(MARK, text)):
+        return header_only(ctx, text, already_normalized=True), []
     body, blocks = _strip_markers(text)
     want_footer = footer_wanted(ctx)
     removed: list[str] = []
@@ -860,11 +1026,11 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
     # never-drop-a-line guard, so only the old lines it does not carry again are reported as removed.
     kept: Counter = Counter()
     if want_footer:
-        kept = Counter(ln.strip() for ln in footermod.block(ctx.brand).splitlines() if ln.strip())
+        kept = Counter(ln.strip() for ln in source_lines(footermod.block(ctx.brand)) if ln.strip())
     if want_footer and blocks.get("footer") and is_footer_copy(blocks["footer"], ctx.brand):
         # A configured publication-path change replaces only our recognized footer, not authored credits or partner
         # images inside a similarly named block.
-        for ln in blocks["footer"].splitlines():
+        for ln in source_lines(blocks["footer"]):
             if ln.strip():
                 if kept[ln.strip()] > 0:
                     kept[ln.strip()] -= 1
@@ -877,23 +1043,28 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
     preserve = ctx.repo in (ctx.org.get("readme_preserve") or []) or len(text.encode()) > 15000
     pre, sections = split_sections(body)
     keep_pre: list[str] = []
-    lines = pre.splitlines()
+    lines = source_lines(pre)
     if _leading_banner(pre) and (ctx.tier == "T2" or preserve):
         preserve = True
         # q57 `pres`: the hero goes above the README's own banner (kept directly under it), or nothing is added
         ctx.log("exempt:preserve-banner" if ctx.preserve_unchanged() else "preserve-banner:kept-below-hero")
     desc = (ctx.meta.get("description") or "").strip()
     old_tag = blocks.get("tagline")
-    if preserve and old_tag is not None:
+    if preserve and (old_tag is not None or (variant == "J" and "badges" in blocks)):
         # additive only, so the tagline block stays where it is, its body decided by the header rule (tagline_body)
-        tag = tagline_body(ctx, old_tag, text)
-        if old_tag.strip() and not tag:  # an inherited tagline, emptied on purpose (not a lost line)
-            removed += [ln for ln in old_tag.splitlines() if ln.strip()]
-        body, _ = _strip_markers(text, keep={"tagline": tag})
+        keep = {}
+        if old_tag is not None:
+            tag = tagline_body(ctx, old_tag, text)
+            if old_tag.strip() and not tag:  # an inherited tagline, emptied on purpose (not a lost line)
+                removed += [ln for ln in source_lines(old_tag) if ln.strip()]
+            keep["tagline"] = tag
+        if variant == "J" and "badges" in blocks:
+            keep["badges"] = badge_body(ctx, blocks["badges"])
+        body, _ = _strip_markers(text, keep=keep)
         if want_footer:
             body, _ = drop_old_footer(body, ctx.brand, own_site=True)  # its lines are already in `removed`
         pre, sections = split_sections(body)
-        lines = pre.splitlines()
+        lines = source_lines(pre)
     # an unmarked bold line opening the preamble is an old tagline. With a description it is replaced; without one it
     # is carried into an empty tagline block (header rule), and a second one stays as authored text: never erased
     carry: list[str] = []
@@ -951,7 +1122,7 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
                 (removed if (x is unit[0] or x is unit[-1] or is_header_line(x)) else keep_pre).append(x)
         else:
             keep_pre.extend(unit)
-    intro = "\n".join(keep_pre).strip()
+    intro = "\n".join(keep_pre).strip(" \t\n")
     # sections: renames, mapping, Notes demotion, License last
     renames = rv["renames"]
     section_rows = required_sections(ctx.det, meta=ctx.meta)
@@ -975,7 +1146,8 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
             if variant == "D" and name.lower() == "status" and "Findings" not in placed:
                 placed["Findings"] = b.strip("\n")
                 continue
-            notes.append(f"### {clean}\n{b.rstrip()}" if b.strip() else f"### {clean}")
+            content = b.rstrip(" \t\n")
+            notes.append(f"### {clean}\n{content}" if content else f"### {clean}")
     out = []
     if preserve:
         # §7.0 preserve list: additive only. The hero banner block goes on top (q57 `pres` default, "Banner above the
@@ -988,7 +1160,8 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
         if intro:
             out.append(intro)
         for h, b in sections:
-            out.append(f"## {h}\n{b.rstrip()}" if b.strip() else f"## {h}")
+            content = b.rstrip(" \t\n")
+            out.append(f"## {h}\n{content}" if content else f"## {h}")
         if not any(h.strip().lower() in ("license", "licensing", "licence") for h, _ in sections):
             lic = license_section(ctx)
             if lic:
@@ -1004,8 +1177,8 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
         if old_tag and old_tag.strip() and not new_tag:
             # an inherited tagline is emptied (header mode does the same): its lines are dropped on purpose, so the
             # never-delete check must not report them as lost
-            removed += [ln for ln in old_tag.splitlines() if ln.strip()]
-        out.append(header(ctx, tagline=new_tag))
+            removed += [ln for ln in source_lines(old_tag) if ln.strip()]
+        out.append(header(ctx, tagline=new_tag, existing_badges=blocks.get("badges")))
         co = callout(ctx)
         if co and co not in intro:
             out.append(co)
@@ -1018,7 +1191,8 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
         if h in ("License", "Licensing"):
             continue
         if h in placed:
-            out.append(f"## {h}\n\n{placed[h].strip()}" if placed[h].strip() else f"## {h}")
+            content = placed[h].strip(" \t\n")
+            out.append(f"## {h}\n\n{content}" if content else f"## {h}")
         elif req == "R" and not preserve:
             body = section_facts(ctx, h)
             if body:
@@ -1029,7 +1203,8 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
         nb = "\n\n".join(x for x in ([existing_notes] if existing_notes else []) + notes)
         out.append(f"## Notes\n\n{nb}")
     if license_body:
-        out.append(f"## {license_body[0]}\n\n{license_body[1].strip()}")
+        content = license_body[1].strip(" \t\n")
+        out.append(f"## {license_body[0]}\n\n{content}")
     else:
         lic = license_section(ctx)
         if lic:
@@ -1042,18 +1217,25 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
     return "\n\n".join(x for x in out if x) + "\n", removed
 
 
-def header_only(ctx: RepoContext, text: str) -> str:
+def header_only(ctx: RepoContext, text: str, *, already_normalized: bool = False) -> str:
     """Replace only existing marker blocks (what the Action runs)."""
-    text = normalize_text(text)
+    if not already_normalized:
+        text = normalize_text(text)
     desc = (ctx.meta.get("description") or "").strip()
     gen = {"nav": nav_line(ctx), "banner": banner_html(ctx), "footer": footermod.markup(ctx.brand)}
     if ctx.repo_dir is not None and not (ctx.repo_dir / "docs" / "images" / "banner.png").is_file():
         gen["banner"] = ""  # no image yet (for example no description): an empty block, never a broken image
         ctx.log("needs-input:banner")
-    gen["badges"] = badges_html(ctx) if ctx.det["variant"] == "F" else badges_md(ctx)
+    # Preserve the existing preflight for other variants, even without a badge block.
+    # Variant J must inspect its block first because authored badges are not generated.
+    if ctx.det["variant"] != "J":
+        gen["badges"] = badge_body(ctx)
 
     def sub(m):
         b, body = m.group(1), m.group(2)
+        if b == "badges" and ctx.det["variant"] == "J":
+            fresh = badge_body(ctx, body)
+            return m.group(0) if fresh == body else wrap(b, fresh)
         if b == "checklist":
             if re.search(r"- \[ \]", body):
                 return m.group(0)
@@ -1087,22 +1269,31 @@ def _sub_blocks(text: str, sub) -> str:
     return _seam(out, text[pos:]) if pos else text
 
 
-LEAD_PAIR = re.compile(r"\A(\s*)(" + re.escape(start("nav")) + r".*?" + re.escape(end("nav")) + r")(\s*)(" +
-                       re.escape(start("banner")) + r".*?" + re.escape(end("banner")) + r")", re.S)
-LEAD_PAIR_REV = re.compile(r"\A(\s*)(" + re.escape(start("banner")) + r".*?" + re.escape(end("banner")) + r")(\s*)(" +
-                           re.escape(start("nav")) + r".*?" + re.escape(end("nav")) + r")", re.S)
-
-
 def reorder_lead(ctx: RepoContext, text: str) -> str:
-    """Swap a README's leading nav and banner marker blocks into the configured §7.1 order (q57 `nav`), so READMEs
-    written before the order changed follow it on the next header refresh. Only the two adjacent top blocks move."""
-    pat = LEAD_PAIR_REV if nav_first(ctx) else LEAD_PAIR
-    return pat.sub(lambda m: m.group(1) + m.group(4) + m.group(3) + m.group(2), text, count=1)
+    """Swap adjacent, genuinely managed leading blocks into the configured §7.1 order."""
+    blocks = find_blocks(MARK, text)
+    if len(blocks) < 2:
+        return text
+    first, second = blocks[:2]
+    reverse = ("banner", "nav") if nav_first(ctx) else ("nav", "banner")
+    if (first.group(1), second.group(1)) != reverse:
+        return text
+    prefix = text[:first.start()]
+    seam = text[first.end():second.start()]
+    if prefix.strip(" \t\n") or seam.strip(" \t\n"):
+        return text
+    return prefix + second.group(0) + seam + first.group(0) + text[second.end():]
 
 
 LICENSE_MARK = "<!-- showcase:license -->"
 LICENSE_BODY_START = "<!-- showcase:license:body:start -->"
 LICENSE_BODY_END = "<!-- showcase:license:body:end -->"
+LICENSE_MARKERS = re.compile("|".join(map(re.escape, (LICENSE_MARK, LICENSE_BODY_START, LICENSE_BODY_END))))
+_LICENSE_BODY = re.compile(
+    re.escape(LICENSE_MARK) + r"\n<!-- showcase:license:sha256=([0-9a-f]{64}) -->\n"
+    + re.escape(LICENSE_BODY_START) + r"\n(.*?)\n" + re.escape(LICENSE_BODY_END),
+    re.S,
+)
 
 
 def license_sha(body: str) -> str:
@@ -1116,22 +1307,32 @@ def managed_license(body: str) -> str:
             f"{LICENSE_BODY_START}\n{body}\n{LICENSE_BODY_END}")
 
 
+def _owned_license_match(text: str, markers: list[re.Match]) -> re.Match | None:
+    if [match.group() for match in markers] != [LICENSE_MARK, LICENSE_BODY_START, LICENSE_BODY_END]:
+        return None
+    match = _LICENSE_BODY.match(text, markers[0].start())
+    if match and match.end() == markers[-1].end() and license_sha(match.group(2)) == match.group(1):
+        return match
+    return None
+
+
+def generated_license(text: str) -> bool:
+    source = normalize_line_endings(text)
+    return _owned_license_match(source, find_blocks(LICENSE_MARKERS, source)) is not None
+
+
 def license_block(ctx: RepoContext, text: str) -> str:
     """Refresh only an unambiguously bounded body with a matching digest."""
-    visible = masked(text)
-    i = visible.find(LICENSE_MARK)
-    if i < 0:
+    markers = find_blocks(LICENSE_MARKERS, text)
+    if [match.group() for match in markers] != [LICENSE_MARK, LICENSE_BODY_START, LICENSE_BODY_END]:
         return text
-    if any(visible.count(marker) != 1 for marker in (LICENSE_MARK, LICENSE_BODY_START, LICENSE_BODY_END)):
-        return text
+    i = markers[0].start()
     lic = license_section(ctx)
     if not lic or any(code in ctx.logs for code in ("needs-input:license-policy", "needs-input:license-file",
                                                     "needs-input:licensing-file")):
         return text
-    pattern = (re.escape(LICENSE_MARK) + r"\n<!-- showcase:license:sha256=([0-9a-f]{64}) -->\n" +
-               re.escape(LICENSE_BODY_START) + r"\n(.*?)\n" + re.escape(LICENSE_BODY_END))
-    m = re.compile(pattern, re.S).match(text, i)
-    if not m or license_sha(m.group(2)) != m.group(1):
+    m = _owned_license_match(text, markers)
+    if m is None:
         return text
     text = text[:i] + managed_license(lic[1]) + text[m.end():]
     h = re.search(r"(?m)^## (?:License|Licensing|Licence)[ \t]*\n(\n?)\Z", text[:i])
@@ -1140,12 +1341,19 @@ def license_block(ctx: RepoContext, text: str) -> str:
 
 TEMPLATE_H1 = "CompleteTech Repo Template"
 PRISTINE = re.compile(r"<!-- showcase:template-body:pristine(?: sha256=([0-9a-f]{64}))? -->(?:\r\n|\r|\n)?")
-TEMPLATE_BODY = re.compile(re.escape(start("template-body")) + r"\n?(.*?)\n?" + re.escape(end("template-body")), re.S)
 
 
 def body_sha(body: str) -> str:
     import hashlib
-    return hashlib.sha256(body.replace("\r\n", "\n").replace("\r", "\n").strip().encode("utf-8")).hexdigest()
+    return hashlib.sha256(normalize_line_endings(body).encode("utf-8")).hexdigest()
+
+
+def badge_sha(body: str) -> str:
+    """Digest of generated badge rows. Preserves Markdown-significant leading and trailing whitespace on rows
+    (four leading spaces make an indented code block) and normalises only line endings and the marker's
+    separator newlines."""
+    import hashlib
+    return hashlib.sha256(normalize_line_endings(body).strip("\n").encode("utf-8")).hexdigest()
 
 
 def pristine_block(body: str) -> str:
@@ -1153,57 +1361,119 @@ def pristine_block(body: str) -> str:
     return wrap("template-body", f"<!-- showcase:template-body:pristine sha256={body_sha(body)} -->\n{body}")
 
 
+def _template_block(text: str) -> re.Match | None:
+    return next((block for block in find_blocks(MARK, text) if block.group(1) == "template-body"), None)
+
+
+def _pristine_marker(text: str, block: re.Match) -> re.Match | None:
+    expected_start = after_line_end(text, block.start() + len(start("template-body")))
+    return next((marker for marker in find_blocks(PRISTINE, text)
+                 if marker.start() == expected_start and marker.end() <= block.end(2) + 1), None)
+
+
 def bootstrap_state(text: str) -> str:
-    """'pristine' (the block is byte-for-byte what was generated), 'edited' (a marker without a matching hash: a person
-    wrote in the block) or 'none' (no marker: the README is the repository's own)."""
-    found = find_blocks(TEMPLATE_BODY, normalize_text(text))
-    if not found:
+    """Return the ownership state of the first genuine template-body block."""
+    text = normalize_text(text)
+    block = _template_block(text)
+    if block is None or (marker := _pristine_marker(text, block)) is None:
         return "none"
-    m = found[0]
-    pm = PRISTINE.search(m.group(1))
-    if not pm:
-        return "none"
-    rest = PRISTINE.sub("", m.group(1), count=1)
-    return "pristine" if pm.group(1) and pm.group(1) == body_sha(rest) else "edited"
+    body = text[marker.end():block.end(2)]
+    return "pristine" if marker.group(1) and marker.group(1) == body_sha(body) else "edited"
+
+
+def reseal_formatted_badges(ctx: RepoContext, text: str, before: list[re.Match], after: list[re.Match]) -> str | None:
+    """Reseal generated badges and reject formatter changes that claim authored badges."""
+    def legacy(body: str) -> bool:
+        return _legacy_badge_body(ctx.brand, body, ctx.style,
+                                  ci_matches=lambda owner, repo: _legacy_ci_matches(ctx, owner, repo))
+
+    parts = []
+    offset = 0
+    for original, formatted in zip(before, after, strict=True):
+        if original.group(1) != "badges":
+            continue
+        original_body, formatted_body = original.group(2), formatted.group(2)
+        marker = GENERATED_BADGES.fullmatch(original_body)
+        if marker is None or marker.group(1) != badge_sha(marker.group(3)):
+            if generated_badges(formatted_body):
+                return None
+            if original_body != formatted_body and legacy(formatted_body) and not legacy(original_body):
+                return None
+            continue
+        candidate = GENERATED_BADGES.fullmatch(formatted_body)
+        if candidate is None or candidate.group(1, 2) != marker.group(1, 2):
+            return None
+        start, end = candidate.span(1)
+        body_start = formatted.start(2)
+        parts.extend((text[offset:body_start + start], badge_sha(candidate.group(3))))
+        offset = body_start + end
+    parts.append(text[offset:])
+    return "".join(parts)
 
 
 def reseal_pristine(text: str) -> str | None:
     """Refresh the existing digest after an approved transformation of a pristine body."""
-    blocks = find_blocks(TEMPLATE_BODY, text)
-    if not blocks:
+    block = _template_block(text)
+    if block is None or (marker := _pristine_marker(text, block)) is None or not marker.group(1):
         return None
-    tb = blocks[0]
-    body = tb.group(1)
-    marker = PRISTINE.search(body)
-    if not marker or not marker.group(1):
-        return None
-    digest = body_sha(PRISTINE.sub("", body, count=1))
-    start, end = marker.span(1)
-    return text[:tb.start(1) + start] + digest + text[tb.start(1) + end:]
+    body_end = block.end() - len(end("template-body"))
+    if text[body_end - 2:body_end] == "\r\n":
+        body_end -= 2
+    elif text[body_end - 1:body_end] in ("\r", "\n"):
+        body_end -= 1
+    body = text[marker.end():body_end]
+    digest_start, digest_end = marker.span(1)
+    return text[:digest_start] + body_sha(body) + text[digest_end:]
 
 
 def drop_pristine(text: str) -> str:
-    """`text` without the pristine marker of the first template-body block outside code; a marker shown as an example
-    (inline or fenced code) stays byte-identical."""
-    found = find_blocks(TEMPLATE_BODY, text)
-    if not found:
+    """Remove only a genuine ownership marker inside the first template body."""
+    block = _template_block(text)
+    if block is None or (marker := _pristine_marker(text, block)) is None:
         return text
-    tb = found[0]
-    return text[:tb.start(1)] + PRISTINE.sub("", tb.group(1), count=1) + text[tb.end(1):]
+    return text[:marker.start()] + text[marker.end():]
 
 
-def _header_region(text: str) -> re.Match | None:
-    """From the top of the README to the rule after the tagline block (the §7.2 header)."""
-    return re.match(r"\A.*?" + re.escape(end("tagline")) + r"\n(?:.*?\n)??---\n", text, re.S)
+_HEADER_RULE = re.compile(r"\n+(?:</div>\n+)?---\n")
+_HEADER_LAYOUT = re.compile(r'(?:<div align="center">\n+)?(?:# ([^\n]+)\n+)?(?:</div>\n+)?---\n')
 
 
-def bootstrap(ctx: RepoContext, text: str) -> str:
+def _header_region(text: str) -> tuple[int, list[re.Match], str | None] | None:
+    """Identify a rebuildable header using live blocks and exact generated structure."""
+    blocks = []
+    seen = set()
+    parts = []
+    offset = 0
+    for block in find_blocks(MARK, text):
+        name = block.group(1)
+        if name not in {"banner", "nav", "badges", "tagline"} or name in seen:
+            return None
+        if not _block_on_separate_lines(text, block):
+            return None
+        seen.add(name)
+        blocks.append(block)
+        parts.append(text[offset:block.start()])
+        offset = block.end()
+        if name == "tagline":
+            rule = _HEADER_RULE.match(text, offset)
+            if rule is None:
+                return None
+            parts.append(rule.group())
+            layout = _HEADER_LAYOUT.fullmatch("".join(parts).lstrip("\n"))
+            if layout is not None:
+                return rule.end(), blocks, layout.group(1)
+            return None
+    return None
+
+
+def bootstrap(ctx: RepoContext, text: str, *, already_normalized: bool = False) -> str:
     """Fill a README that still carries a generated (pristine) template body: the README variant's sections from
     repository facts, the variant's header (Variant F has no H1) and the license section. A pristine body is
     regenerated on later runs too, so a repository typed `workspace` on its creation commit is re-bootstrapped once
     its code (or `type:` in .github/showcase.yml) gives the real type. Any human edit inside the block changes its
     hash, and from then on the block is the repository's own: never overwritten (callers drop the marker)."""
-    text = normalize_text(text)
+    if not already_normalized:
+        text = normalize_text(text)
     if ctx.meta.get("is_template") or bootstrap_state(text) != "pristine":
         return text
     variant = ctx.det["variant"]
@@ -1219,20 +1489,24 @@ def bootstrap(ctx: RepoContext, text: str) -> str:
             secs.append(f"## {h2}\n\n<!-- needs-input: {variant}:{h2} -- write from repository facts only -->")
             ctx.log(f"needs-input:{variant}:{h2}")
     new = pristine_block("\n\n".join(secs))
-    tb = find_blocks(TEMPLATE_BODY, text)[0]  # bootstrap_state found it outside code
+    tb = _template_block(text)
+    assert tb is not None  # bootstrap_state verified the template body
     text = text[:tb.start()] + new + text[tb.end():]
     # the header: rebuilt for this variant unless a person retitled the README
-    hm = _header_region(text)
-    if hm:
-        h1 = re.search(r"(?m)^# (.+)$", hm.group(0))
+    region = _header_region(text)
+    if region is not None:
+        header_end, markers, old_title = region
         auto = cased_title(ctx.repo, ctx.meta.get("description") or "")
-        if not h1 or h1.group(1).strip() in (TEMPLATE_H1, auto, slug_title(ctx.repo)):
-            # the tagline block carries over (tagline_body), so a line the owner wrote survives the rebuild and only an
-            # inherited one is emptied, exactly as header_only decides it
-            old = next((m.group(2) for m in find_blocks(MARK, hm.group(0)) if m.group(1) == "tagline"), None)
-            new_header = header(ctx, title=auto, tagline=tagline_body(ctx, old, text))
-            text = new_header + "\n\n" + text[hm.end():].lstrip("\n")
-    return header_only(ctx, text)
+        if old_title is None or old_title.strip() in (TEMPLATE_H1, auto, slug_title(ctx.repo)):
+            # Carry an authored tagline forward under the same rule as an in-place refresh.
+            if variant == "J" and _badge_blocks_need_in_place_refresh(text, markers):
+                return header_only(ctx, text, already_normalized=True)
+            blocks = {marker.group(1): marker.group(2) for marker in markers}
+            old = blocks["tagline"]
+            new_header = header(ctx, title=auto, tagline=tagline_body(ctx, old, text),
+                                existing_badges=blocks.get("badges"))
+            text = new_header + "\n\n" + text[header_end:].lstrip("\n")
+    return header_only(ctx, text, already_normalized=True)
 
 
 def bootstrap_contributing(ctx: RepoContext, text: str) -> str:
@@ -1258,13 +1532,61 @@ def nonws(s: str) -> int:
     return len(re.sub(r"\s", "", s))
 
 
-def preservation(before: str, after: str, removed: list[str]) -> list[str]:
+def preservation(before: str, after: str, removed: list[str], *, ctx: RepoContext | None = None) -> list[str]:
     """Every original non-header line survives (heading lines may be renamed); size drop <= 10%."""
+    # A digest in the output is only a claim. Exempt at most one prior block
+    # per claim and independently verify that the prior rows are strict legacy.
+    prior_blocks = [m for m in find_blocks(MARK, before) if m.group(1) == "badges"]
+    prior_badges = Counter(m.group(2) for m in prior_blocks)
+    current_blocks = [m for m in find_blocks(MARK, after) if m.group(1) == "badges"]
+    current_badges = Counter(m.group(2) for m in current_blocks)
+    replacements = Counter()
+    for body, count in (current_badges - prior_badges).items():
+        if generated_badges(body):
+            match = GENERATED_BADGES.fullmatch(body)
+            if match.group(2):
+                replacements[match.group(2)] += count
+    brand = ctx.brand if ctx else None
+    style = ctx.style if ctx else None
+    retained = Counter(m.group(0) for m in current_blocks)
+
+    def ci_matches(owner, repo):
+        return ctx is not None and _legacy_ci_matches(ctx, owner, repo)
     problems = []
-    b_lines = Counter(ln.strip() for ln in before.splitlines() if ln.strip() and not ln.strip().startswith("<!-- showcase:"))
+
+    def omit_owned_badges(m):
+        nonlocal brand
+        body = m.group(2)
+        if generated_badges(body):
+            return wrap("badges", "")
+        if retained[m.group(0)]:
+            retained[m.group(0)] -= 1
+            return m.group(0)
+        digest = badge_sha(body)
+        if replacements[digest]:
+            if brand is None:
+                from .config import load_brand
+                brand = load_brand(prefer_lock=True)
+            if _legacy_badge_body(brand, body, style, ci_matches=ci_matches):
+                replacements[digest] -= 1
+                return wrap("badges", "")
+        authored = body.strip(" \t\r\n")
+        if authored and (ctx is None or ctx.det["variant"] == "J"):
+            problems.append(f"lost badge block: {authored[:60]}")
+        return m.group(0)
+
+    comparison = []
+    offset = 0
+    for block in prior_blocks:
+        comparison.extend((before[offset:block.start()], omit_owned_badges(block)))
+        offset = block.end()
+    comparison.append(before[offset:])
+    before = "".join(comparison)
+    before_lines = (line.strip(" \t") for line in source_lines(before))
+    b_lines = Counter(line for line in before_lines if line and not line.startswith("<!-- showcase:"))
     for r in removed:
-        b_lines[r.strip()] -= 1
-    a_lines = Counter(ln.strip() for ln in after.splitlines() if ln.strip())
+        b_lines[r.strip(" \t")] -= 1
+    a_lines = Counter(line.strip(" \t") for line in source_lines(after) if line.strip(" \t"))
     for ln, n in b_lines.items():
         if n <= 0:
             continue
@@ -1282,3 +1604,154 @@ def read_text(path: Path) -> str:
     """A README's text without a leading byte order mark ('' when missing)."""
     text = path.read_text(encoding="utf-8") if path.is_file() else ""
     return text[1:] if text.startswith(BOM) else text
+
+
+_LINE_END = re.compile(r"\r\n|\r|\n")
+
+
+def _line_sections(text: str, lines: list[str]) -> list[str | None]:
+    """Identify the H2 section owning each line, excluding literal code headings."""
+    blocks = iter(code_block_spans(text)) if re.search(r"(?m)^## (?!#)", text) else iter(())
+    block = next(blocks, None)
+    section = None
+    offset = 0
+    names = []
+    for line in lines:
+        while block is not None and block[1] <= offset:
+            block = next(blocks, None)
+        if line.startswith("## ") and line[3:4] != "#" and (block is None or offset < block[0]):
+            section = line[3:].strip()
+        names.append(section)
+        offset += len(line) + 1
+    return names
+
+
+def _managed_line_matches(before: str, after: str, old: list[str], new: list[str]) -> dict[int, int]:
+    """Pair unchanged managed blocks before matching individual repeated lines."""
+    originals = defaultdict(deque)
+    old_offsets = [0, *(ending.end() for ending in re.finditer("\n", before))]
+    new_offsets = [0, *(ending.end() for ending in re.finditer("\n", after))]
+    for block in find_blocks(MARK, before):
+        originals[block.group(0)].append(block.start())
+    matched = {}
+    used = set()
+    for block in find_blocks(MARK, after):
+        if not (origins := originals.get(block.group(0))):
+            continue
+        old_start = bisect_right(old_offsets, origins.popleft()) - 1
+        start_line = bisect_right(new_offsets, block.start()) - 1
+        end_line = min(bisect_right(new_offsets, block.end()), len(new) - 1)
+        for new_index in range(start_line, end_line):
+            old_index = old_start + new_index - start_line
+            if (old_index < len(old) - 1 and old[old_index] == new[new_index]
+                    and old_index not in used and new_index not in matched):
+                matched[new_index] = old_index
+                used.add(old_index)
+    return matched
+
+
+def restore_line_endings(raw: str, before: str, after: str) -> str:
+    """`after` with the authored line endings of `raw` restored (#160).
+
+    `read_text` decodes with universal newlines, so `before` holds one LF for
+    every CRLF, lone CR or LF in `raw` (the file's own text).
+    Each line `after` keeps unchanged from `before` takes its original
+    ending back; a new or edited line takes the README's most common ending.
+    An LF-only README is returned unchanged.
+    """
+    endings = _LINE_END.findall(raw)
+    if not endings or all(e == "\n" for e in endings):
+        return after
+    counts = Counter(endings)
+    common = counts.most_common(1)[0][0]
+    if len(counts) == 1:
+        return after.replace("\n", common)
+    old, new = before.split("\n"), after.split("\n")
+    # One ending follows every line but the last; the last line has none.
+    if len(old) != len(endings) + 1:
+        return after.replace("\n", common)  # not a universal-newline view of raw: keep the style only
+    # Keep the unchanged edges anchored. Match the remaining equal lines
+    # by occurrence, including lines moved during section reordering.
+    old_count, new_count = len(old) - 1, len(new) - 1
+    old_sections, new_sections = _line_sections(before, old), _line_sections(after, new)
+    anchored = _managed_line_matches(before, after, old, new)
+    used = set(anchored.values())
+
+    def matches_edge(old_index, new_index):
+        if (old[old_index], old_sections[old_index]) != (new[new_index], new_sections[new_index]):
+            return False
+        matched = anchored.get(new_index)
+        return matched == old_index if matched is not None else old_index not in used
+
+    head = 0
+    while head < min(old_count, new_count) and matches_edge(head, head):
+        head += 1
+    tail = 0
+    while tail < min(old_count, new_count) - head:
+        if not matches_edge(old_count - 1 - tail, new_count - 1 - tail):
+            break
+        tail += 1
+    old_middle = range(head, old_count - tail)
+    new_middle = range(head, new_count - tail)
+
+    def unique_context(lines, indexes, offsets, sections):
+        keys = {}
+        for i in indexes:
+            if sections is not None and sections[i] is None:
+                continue
+            key = (sections[i] if sections is not None else None,
+                   *(lines[i + offset] if i + offset >= 0 else None for offset in offsets))
+            keys[key] = i if key not in keys else None
+        return keys
+
+    def match_context(old_scope, new_scope):
+        for offsets in ((-1, 0, 1), (-1, 0), (0, 1)):
+            old_keys = unique_context(old, old_middle, offsets, old_scope)
+            for key, new_index in unique_context(new, new_middle, offsets, new_scope).items():
+                old_index = old_keys.get(key)
+                if new_index is not None and old_index is not None and new_index not in anchored and old_index not in used:
+                    anchored[new_index] = old_index
+                    used.add(old_index)
+
+    # Pair repeated authored lines with their named section before allowing
+    # matches across sections. Adjacent context still distinguishes repeats
+    # within a section. Each pass visits each line at most once.
+    if any(old_sections) and any(new_sections):
+        match_context(old_sections, new_sections)
+        section_rows = defaultdict(deque)
+        for i in old_middle:
+            if i not in used and old_sections[i] is not None:
+                section_rows[(old_sections[i], old[i])].append(i)
+        for i in new_middle:
+            if i in anchored or new_sections[i] is None:
+                continue
+            if associated := section_rows.get((new_sections[i], new[i])):
+                anchored[i] = associated.popleft()
+                used.add(anchored[i])
+    match_context(None, None)
+
+    remaining = defaultdict(deque)
+    for i in old_middle:
+        if i not in used:
+            remaining[old[i]].append(endings[i])
+    out_ends = endings[:head]
+    from_source = [True] * head
+    for i in new_middle:
+        if i in anchored:
+            out_ends.append(endings[anchored[i]])
+            from_source.append(True)
+        elif source := remaining.get(new[i]):
+            out_ends.append(source.popleft())
+            from_source.append(True)
+        else:
+            out_ends.append(common)
+            from_source.append(False)
+    out_ends.extend(endings[old_count - tail:])
+    from_source.extend([True] * tail)
+    # CR and an adjacent LF would be read back as one CRLF. Use CRLF for a
+    # newly rendered line first, preserving the ending of a retained line.
+    for i in range(1, len(out_ends)):
+        if not new[i] and out_ends[i - 1] == "\r" and out_ends[i] == "\n":
+            target = i - 1 if from_source[i] and not from_source[i - 1] else i
+            out_ends[target] = "\r\n"
+    return "".join(line + end for line, end in zip(new, out_ends)) + new[-1]
