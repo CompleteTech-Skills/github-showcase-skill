@@ -1330,3 +1330,39 @@ def test_staged_card_rejects_output_outside_an_aliased_checkout(tmp_path, explic
     assert result.returncode == 2, result.stdout + result.stderr
     assert "staged-description:path" in json.loads(result.stdout)["logs"]
     assert list(external.iterdir()) == []
+
+
+@pytest.mark.parametrize("separator", ["\n", "\r", "\r\n", "\v", "\f", "\x1c", "\x1d", "\x1e", "\x85", "\u2028", "\u2029"])
+def test_staged_description_rejects_interior_line_separators(separator):
+    with pytest.raises(NeedsInput, match="one non-empty line"):
+        prepare(meta_dict(), f"First synthetic line.{separator}~~~{separator}Second synthetic line.")
+
+
+def test_unicode_line_separator_cannot_write_staged_readme(tmp_path):
+    checkout = tmp_path / "repo"
+    checkout.mkdir()
+    meta = tmp_path / "capture.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    result = run_cli("--meta", meta, "--repo-dir", checkout, "--format", "json", "readme", "--mode", "scaffold",
+                     "--variant", "A", "--write", "--description", "First.\u2028~~~\u2028Still private.")
+    assert result.returncode == 4, result.stdout + result.stderr
+    assert "needs-input:description" in json.loads(result.stdout)["logs"]
+    assert not (checkout / "README.md").exists()
+    assert not (checkout / "docs/images/.showcase.json").exists()
+
+
+def test_untrackable_staged_tagline_refuses_before_writing_checkout(tmp_path, monkeypatch, capsys):
+    import showcase
+    from ctshowcase import readme
+
+    checkout = tmp_path / "repo"
+    checkout.mkdir()
+    meta = tmp_path / "capture.json"
+    meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
+    monkeypatch.setattr(readme, "scaffold", lambda ctx, text: "# Synthetic\n\n" + readme.tagline_body(ctx) + "\n")
+    args = ["--meta", str(meta), "--repo-dir", str(checkout), "readme", "--mode", "scaffold",
+            "--variant", "A", "--write", "--description", "Route a synthetic request."]
+    assert showcase.main(args) == 1
+    assert "staged-description:provenance" in json.loads(capsys.readouterr().out)["logs"]
+    assert not (checkout / "README.md").exists()
+    assert not (checkout / "docs/images/.showcase.json").exists()

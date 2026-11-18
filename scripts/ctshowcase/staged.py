@@ -19,7 +19,7 @@ def prepare(meta: dict, description: str | None) -> tuple[dict, dict | None]:
     if description is None:
         return meta, None
     text = description.strip()
-    if not text or "\n" in text or "\r" in text:
+    if not text or len(text.splitlines()) != 1:
         raise NeedsInput("description", "--description needs one non-empty line")
     if re.search(r"<!--\s*showcase:", text, re.I):
         raise NeedsInput("description", "--description may not contain managed README markers")

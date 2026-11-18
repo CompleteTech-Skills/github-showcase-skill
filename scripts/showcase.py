@@ -649,6 +649,11 @@ def cmd_readme(args):
     # Identify generated blocks before the formatter can reflow their Markdown.
     planned_taglines = tagline_blocks(after) if tagline else []
     tagline_indices = [index for index, body in enumerate(planned_taglines) if body == tagline]
+    if staged and tagline:
+        untracked = after.count(tagline) - len(tagline_indices)
+        if untracked > 0 and untracked > before.count(tagline) - tagline_blocks(before).count(tagline):
+            raise ShowcaseError("generated staged tagline is outside a provable README block",
+                                log="staged-description:provenance", code=CHECK_FAILED)
     if args.format_generated:
         from ctshowcase.formatting import format_text, markdown_source_style
         encoding_bom = "\ufeff" if raw_readme.startswith("\ufeff") else ""
