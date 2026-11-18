@@ -185,7 +185,7 @@ def _gh(path: str, paginate: bool = False, raw: bool = False):
     if raw:
         cmd[2:2] = ["-H", "Accept: application/vnd.github.raw"]
     try:
-        p = subprocess.run(cmd, capture_output=True, encoding="utf-8", timeout=60)
+        p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", timeout=60)
     except UnicodeDecodeError:
         return None  # an unreadable response is unavailable evidence
     except (OSError, subprocess.SubprocessError) as exc:
