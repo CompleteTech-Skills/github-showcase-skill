@@ -25,13 +25,21 @@ def test_personal_owner_alias_uses_intro_instead_of_banner(tmp_path, monkeypatch
     assert banner.returncode == 0, banner.stdout + banner.stderr
     assert json.loads(banner.stdout)["result"] == "exempt"
     assert "exempt:profile-readme" in banner.stdout
-    assert not (tmp_path / "docs").exists()
+    docs = tmp_path / "docs"
+    sidecar = docs / "images" / ".showcase.json"
+    assert not (docs / "images" / "banner.png").exists()
+    # Staged-description support can cache the live banner exemption without drawing it.
+    before_docs = docs.exists(), set(docs.rglob("*"))
+    before_sidecar = sidecar.read_bytes() if sidecar.is_file() else None
+    if before_sidecar is not None:
+        assert json.loads(before_sidecar)["outputs"]["banner.png"]["exempt"] == "exempt:profile-readme"
 
     readme_args = ("readme", "--mode", "scaffold", "--badges", "local", "--write")
     readme = run_cli(*args, *readme_args)
     assert readme.returncode == 4 and "needs-input:intro" in readme.stdout, readme.stdout + readme.stderr
     assert not (tmp_path / "README.md").exists()
-    assert not (tmp_path / "docs").exists()
+    assert (docs.exists(), set(docs.rglob("*"))) == before_docs
+    assert (sidecar.read_bytes() if sidecar.is_file() else None) == before_sidecar
 
     intro = run_cli("--config", config, "intro", "--profile", owner, "--static",
                     "--out", tmp_path / "assets" / "intro.svg")
