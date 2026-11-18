@@ -2368,7 +2368,9 @@ def tagline_reflow_key(body: str) -> str:
     opaque.extend(_HTMLTokens(masked(body), body).tags)
     # Two-space or backslash hard breaks, paragraph breaks, and indented code
     # cannot be equated with ordinary wrapping.
-    opaque.extend(m.span() for m in re.finditer(r"(?: {2,}|\\)\n|\n[ \t]*\n|(?m:^[ ]{4,}[^ \t\n])", body))
+    # Try a space run only at its first byte. Retrying the greedy hard-break
+    # alternative at every space makes newline-free metadata quadratic.
+    opaque.extend(m.span() for m in re.finditer(r"(?:(?<! ) {2,}|\\)\n|\n[ \t]*\n|(?m:^[ ]{4,}[^ \t\n])", body))
     parts = []
     cursor = 0
     for start, end in sorted(opaque):
