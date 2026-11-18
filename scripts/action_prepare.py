@@ -201,7 +201,7 @@ def _stop_ref_update(transaction: subprocess.Popen) -> None:
 
 
 def _update_head(ref: str, parent: str, commit: str, subject: str,
-                 index: Path, snapshot: Path, recover_index: Callable[[], None]) -> bool:
+                 index: Path, snapshot: Path, recover_index: Callable[[subprocess.Popen], None]) -> bool:
     """Hold Git's HEAD lock from the symbolic-ref check through index installation."""
     command = ["git", "update-ref", "-m", f"commit: {subject}", "--stdin"]
     # A dereferencing update of HEAD locks both HEAD and its current branch.
@@ -227,15 +227,14 @@ def _update_head(ref: str, parent: str, commit: str, subject: str,
                 return False
             # Keep index.lock present while installing the checked index. If
             # Git fails to commit, restore the former index under the same lock.
-            os.replace(snapshot, index)
             try:
+                os.replace(snapshot, index)
                 transaction.communicate(b"commit\n", timeout=30)
                 if transaction.returncode:
                     errors.seek(0)
                     raise RuntimeError(f"Could not commit the Git ref update: {errors.read().strip()}")
             except BaseException:
-                _stop_ref_update(transaction)
-                recover_index()
+                recover_index(transaction)
                 raise
             return True
         finally:
@@ -312,13 +311,14 @@ def prepare_commit_index(index: Path, snapshot: Path, ref: str, message: str, pa
             lock.chmod(original_mode)
             snapshot.chmod(original_mode)
 
-        def recover_index() -> None:
+        def recover_index(transaction: subprocess.Popen) -> None:
             nonlocal release_lock
             # Consuming the lock releases it. If the outcome cannot be verified
             # or restoration fails, preserve it for recovery.
             release_lock = False
             try:
-                if _ref_oid(ref) == commit:
+                _stop_ref_update(transaction)
+                if snapshot.exists() or _ref_oid(ref) == commit:
                     release_lock = True
                 elif original is None:
                     index.unlink()

@@ -1187,7 +1187,7 @@ def test_action_leaves_an_in_progress_merge_untouched(tmp_path):
 @pytest.mark.requires_bash
 @pytest.mark.parametrize("concurrent_change", [
     "head", "index", "branch", "late-branch", "late-detached", "locked-branch", "ref-failure",
-    "ref-failure-no-space", "ref-failure-restore-error",
+    "ref-failure-no-space", "ref-failure-restore-error", "install-interrupted",
 ])
 def test_action_handles_concurrent_git_changes_during_commit(tmp_path, concurrent_change):
     import os
@@ -1283,7 +1283,10 @@ def fail_rollback_write(path, content):
 def fail_rollback_rename(source, destination):
     if ref_failed and change == "ref-failure-restore-error" and Path(destination).name == "index":
         raise OSError(errno.EACCES, "synthetic index restore failure")
-    return original_replace(source, destination)
+    original_replace(source, destination)
+    if change == "install-interrupted" and Path(source).name.startswith("showcase-index.") \
+            and Path(destination).name == "index":
+        raise KeyboardInterrupt
 
 
 subprocess.Popen = ObserveRefUpdate
@@ -1322,6 +1325,13 @@ bash "$GITHUB_ACTION_PATH/scripts/action_commit.sh" "Synthetic" fail "$GITHUB_AC
         assert git("show", "HEAD:README.md") == "live README"
         assert stat.S_IMODE(index.stat().st_mode) == original_mode
         assert git("diff", "--cached", "--name-only") == ""
+        return
+    if concurrent_change == "install-interrupted":
+        assert result.returncode != 0 and "KeyboardInterrupt" in result.stderr
+        assert "would push" not in result.stdout
+        assert git("rev-parse", "HEAD") == initial
+        assert index.read_bytes() == original
+        assert stat.S_IMODE(index.stat().st_mode) == original_mode
         return
     if concurrent_change.startswith("ref-failure"):
         assert result.returncode != 0, result.stdout + result.stderr
