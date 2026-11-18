@@ -2154,15 +2154,17 @@ def _quote_continuation_view(text: str) -> str:
     return "".join(chars) if chars is not None else text
 
 
-def _inline_image_target(text: str, start: int) -> tuple[str, int] | None:
+def _inline_image_target(text: str, start: int, *, literal: list[tuple[str, str | None]] | None = None) -> tuple[str, int] | None:
     """Read a Markdown destination and optional title after its opening parenthesis. Destination nesting deeper than
-    32 parentheses is no link (CommonMark's limit), which bounds each call and keeps the opener pass linear."""
+    32 parentheses is no link (CommonMark's limit), which bounds each call and keeps the opener pass linear.
+    Optionally collect the literal destination and title of a successfully parsed link."""
     text = _source_view(text)
     global _DEST_STEPS
     original = text
     region = _span_at(_layout(text)[0], start)
     text = _quote_continuation_view(text)
     pos = start + 1
+    title_bounds = None
     while pos < len(text) and text[pos] in _LINK_SPACE:
         _DEST_STEPS += 1
         pos += 1
@@ -2226,6 +2228,7 @@ def _inline_image_target(text: str, start: int) -> tuple[str, int] | None:
                 return None
         if _blank_between(text, pos, ends[at]) or _crosses_block(original, pos, ends[at], _fence_spans(original)):
             return None  # (c) a title may span soft line breaks, never a paragraph or block boundary (heading, list, fence)
+        title_bounds = (pos, ends[at])
         title_close = pos = ends[at] + 1
         while pos < len(text) and text[pos] in _LINK_SPACE:
             _DEST_STEPS += 1
@@ -2236,6 +2239,9 @@ def _inline_image_target(text: str, start: int) -> tuple[str, int] | None:
         return None
     if region is None or pos >= region[1]:
         return None  # destination whitespace cannot join separate Markdown blocks either
+    if literal is not None:
+        title = original[slice(*title_bounds)] if title_bounds is not None else None
+        literal.append((target, title))
     return _destination_value(target), pos + 1
 
 
@@ -2359,6 +2365,104 @@ def _image_entries(text: str, document: str) -> list[tuple[str, str, bool]]:
 
 def _images(text: str, document: str) -> list[tuple[str, str]]:
     return [(alt, source) for alt, source, _ in _image_entries(text, document)]
+
+
+_TAGLINE_PRE_OPEN = re.compile(rf"<(code|pre|listing)(?={HTML_SPACE}|/?>)", re.I | re.A)
+_TAGLINE_PRE_CLOSE = re.compile(rf"</(code|pre|listing){HTML_SPACE}*>", re.I | re.A)
+
+
+def _tagline_preformatted_spans(body, tokens, raw, link_literals):
+    """Preserve preformatted text between real tags, even within a paragraph."""
+    starts = []
+    for start, end in tokens:
+        if _span_at(raw, start) is not None or _span_at(link_literals, start) is not None:
+            continue
+        if match := _TAGLINE_PRE_OPEN.match(body, start, end):
+            starts.append((match[1].lower(), end))
+        elif starts and (match := _TAGLINE_PRE_CLOSE.fullmatch(body, start, end)):
+            if match[1].lower() == starts[-1][0]:
+                _, opening_end = starts.pop()
+                if not starts:
+                    yield opening_end, start
+    if starts:
+        yield starts[0][1], len(body)
+
+
+def tagline_reflow_key(body: str, *, markdown: bool = False) -> tuple[tuple[str, str | tuple[str, str | None]], ...]:
+    """Normalize prose wrapping outside syntax with meaningful source whitespace."""
+    body = body.replace("\r\n", "\n").replace("\r", "\n")
+    # Analyze actual paragraph or HTML context before projecting the payload.
+    # Markdown backticks inside the HTML wrapper cannot hide a real HTML tag.
+    opening, closing = ("**", "**") if markdown else ("<p><b>", "</b></p>")
+    first, last = len(opening), len(opening) + len(body)
+    body = opening + body + closing
+    link_literals = _link_literal_spans(body)
+    blocks = html_block_spans(body)
+    tags = _HTMLTokens(masked(body), body).tags
+    raw = preformatted = ()
+    if tags:
+        raw = tuple(_raw_marker_text_spans(body, blocks, tags, _accepted_inline(body)[3]))
+        preformatted = tuple(_tagline_preformatted_spans(body, tags, raw, link_literals))
+    # The outer HTML block supplies lexical context. Its ordinary prose still
+    # soft-wraps, while nested literal tags and later raw blocks stay opaque.
+    literal_blocks = blocks if markdown else tuple(span for span in blocks if span[0] >= first)
+    opaque = [*inline_code_spans(body), *code_block_spans(body), *link_literals, *literal_blocks, *tags, *raw, *preformatted]
+    links = []
+    if markdown and link_literals:
+        # Compare destination and title separately. Flattening their source
+        # can make an empty target with a title look like a URL containing quotes.
+        for start, end in link_literals:
+            if first <= start < end <= last and all(_span_at(spans, start) is None for spans in (blocks, raw, preformatted)):
+                literal = []
+                if _inline_image_target(body, start, literal=literal) is not None:
+                    links.append((start, end, literal[0]))
+    # Two-space or backslash hard breaks, paragraph breaks, and indented code
+    # cannot be equated with ordinary wrapping.
+    # Try each run only at its first byte for bounded work. An unescaped
+    # backslash makes a hard break only at the end of an odd-length run.
+    # A hard break and following blank line share a newline. Record both, so
+    # the first match cannot hide the rest of a paragraph separator.
+    opaque.extend(m.span() for m in re.finditer(r"(?:(?<! ) {2,}|(?<!\\)(?:\\\\)*\\)\n", body))
+    opaque.extend(m.span() for m in re.finditer(r"\n(?:[ \t]*\n)+", body))
+    ranges: list[tuple[int, int]] = []
+    for start, end in sorted(opaque):
+        start, end = max(start, first), min(end, last)
+        if end <= start:
+            continue
+        if ranges and start <= ranges[-1][1]:
+            previous_start, previous_end = ranges[-1]
+            ranges[-1] = (previous_start, max(previous_end, end))
+        else:
+            ranges.append((start, end))
+
+    # Keep segment identity. An invalidated link target can become prose and
+    # normalize to the same characters as the previous literal destination.
+    parts = []
+    cursor = first
+    link_index = 0
+    for start, end in ranges:
+        prose = re.sub(r"[ \t\n]+", " ", body[cursor:start])
+        if cursor == first:
+            prose = prose.lstrip(" ")
+        if prose:
+            parts.append(("prose", prose))
+        literal_start = start
+        while link_index < len(links) and links[link_index][0] < end:
+            link_start, link_end, target_and_title = links[link_index]
+            if literal_start < link_start:
+                parts.append(("literal", body[literal_start:link_start]))
+            parts.append(("link", target_and_title))
+            literal_start = link_end
+            link_index += 1
+        if literal_start < end:
+            parts.append(("literal", body[literal_start:end]))
+        cursor = end
+    prose = re.sub(r"[ \t\n]+", " ", body[cursor:last]).rstrip(" ")
+    if cursor == first:
+        prose = prose.lstrip(" ")
+    if prose:
+        parts.append(("prose", prose))
+    return tuple(parts)
 
 
 def find_inline_code(text: str, start: int = 0) -> tuple[int, int] | None:

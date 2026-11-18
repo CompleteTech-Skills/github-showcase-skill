@@ -122,6 +122,33 @@ def test_meta_reads_payload_and_rejects_edited_receipt(tmp_path):
     assert metadata._tagline_of(capture(source.replace(OLD, NEW))) is None
 
 
+@pytest.mark.parametrize("local_matches_source", [False, True], ids=["authored", "inherited"])
+def test_projected_template_capture_is_not_inheritance_evidence(tmp_path, monkeypatch, local_matches_source):
+    path, capture_path, argv = generated_checkout(tmp_path)
+    visible = f"**{OLD}**"
+    source_payload = f" \t\n{visible}\n\t"
+    digest = hashlib.sha256(source_payload.encode()).hexdigest()
+    stamped = f"<!-- showcase:tagline:generated sha256={digest} -->\n{source_payload}"
+    content = base64.b64encode(readme.wrap("tagline", stamped).encode()).decode()
+    snapshot = {
+        "repos/Northwind-Trading-Co/project": meta_dict(
+            repo="project", description="", template_repository={"full_name": "Northwind-Trading-Co/template"}),
+        "repos/Northwind-Trading-Co/template/readme": {"path": "README.md", "content": content},
+    }
+    monkeypatch.setattr(metadata, "_gh", lambda path, **kwargs: snapshot.get(path))
+    captured = metadata.normalize(metadata.from_gh("Northwind-Trading-Co/project"))
+    assert captured["template_taglines"] == [visible]
+    assert captured["template_tagline_sources"] == [source_payload]
+    capture_path.write_text(json.dumps(captured), encoding="utf-8")
+
+    local = stamped if local_matches_source else visible
+    original = path.read_text(encoding="utf-8")
+    path.write_text(original.replace(body(original), local), encoding="utf-8")
+    result = run_cli(*argv, "--mode", "header")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert body(path.read_text(encoding="utf-8")) == ("" if local_matches_source else local)
+
+
 def test_lint_checks_live_block_not_matching_sentence_elsewhere(tmp_path):
     path, meta, _ = generated_checkout(tmp_path)
     path.write_text(path.read_text(encoding="utf-8") + f"\n**{NEW}**\n", encoding="utf-8")
@@ -144,13 +171,15 @@ def test_mock_formatter_reflow_is_resealed_then_real_cli_refreshes(tmp_path, mon
     cli = formatter_cli("tagline_reflow_cli")
 
     def synthetic_reflow(root, target, value):
-        return value.replace("previous workflow", "previous\nworkflow")
+        return value.replace(f"\n**{OLD}**", f"\n\n**{OLD}**").replace("previous workflow", "previous\nworkflow")
 
     monkeypatch.setattr("ctshowcase.formatting.format_text", synthetic_reflow)
     assert cli.main(list(map(str, (*argv, "--mode", "header", "--format-generated")))) == 0
     formatted = path.read_text(encoding="utf-8")
-    assert "previous\nworkflow" in verify(body(formatted))
+    assert verify(body(formatted)).startswith("\n**Run the previous\nworkflow")
     assert tagline.matches_description(body(formatted), OLD)
+    capture = {"content": base64.b64encode(formatted.encode()).decode()}
+    assert metadata._tagline_of(capture) == "**Run the previous\nworkflow for teams.**"
     metadata_file(meta, NEW)
     result = run_cli(*argv, "--mode", "header")
     assert result.returncode == 0, result.stdout + result.stderr
@@ -175,4 +204,70 @@ def test_mock_formatter_cannot_restore_edited_receipt(tmp_path, monkeypatch, end
     monkeypatch.setattr("ctshowcase.formatting.format_text", synthetic_trim)
     assert cli.main(list(map(str, (*argv, "--mode", "header", "--format-generated", "--records", records)))) == 1
     assert path.read_bytes() == authored_bytes
+    assert not records.exists()
+
+
+@pytest.mark.parametrize("left,right", [(" ", ""), ("", " "), ("\n", ""), ("", "\n")])
+def test_cli_r2_requires_bold_delimiters_even_with_verified_receipt(tmp_path, left, right):
+    path, meta, _ = generated_checkout(tmp_path)
+    source = path.read_text(encoding="utf-8")
+
+    def r2_fails():
+        result = run_cli("--meta", meta, "--repo-dir", path.parent, "lint", "readme", path, "--variant", "A")
+        return any(fail.startswith("R2 ") for fail in json.loads(result.stdout)["fails"])
+
+    assert not r2_fails()
+    still_verified = tagline.generated(f"**{left}{OLD}{right}**")
+    path.write_text(source.replace(body(source), still_verified), encoding="utf-8")
+    assert verify(body(path.read_text(encoding="utf-8"))) == f"**{left}{OLD}{right}**"
+    assert r2_fails()
+
+
+@pytest.mark.parametrize("interrupt", ["# queue owners.", "- proceed.", "> read notes.", "1. start here."])
+def test_cli_r2_rejects_a_block_interrupting_the_verified_bold_tagline(tmp_path, interrupt):
+    description = f"Return to setup.    {interrupt}"
+    path, meta, _ = generated_checkout(tmp_path, description=description)
+    source = path.read_text(encoding="utf-8")
+    old = body(source)
+    args = ("--meta", meta, "--repo-dir", path.parent, "lint", "readme", path, "--variant", "A")
+
+    def r2_fails():
+        result = run_cli(*args)
+        return any(fail.startswith("R2 ") for fail in json.loads(result.stdout)["fails"])
+
+    assert not r2_fails()
+    split = f"**Return to setup.\n{interrupt}**"
+    path.write_text(source.replace(old, tagline.generated(split)), encoding="utf-8")
+    assert r2_fails()
+
+    old_receipt = old.partition("\n")[0]
+    assert tagline.reseal(old, f"{old_receipt}\n{split}") is None
+
+
+def test_verified_wrapping_does_not_ignore_whitespace_inside_html_attributes(tmp_path):
+    expected = "See <span data-note='one two'>the guide</span>."
+    path, meta, _ = generated_checkout(tmp_path, description=expected)
+    original = path.read_text(encoding="utf-8")
+    args = ("--meta", meta, "--repo-dir", path.parent, "lint", "readme", path, "--variant", "A")
+    control = run_cli(*args)
+    assert not any(fail.startswith("R2 ") for fail in json.loads(control.stdout)["fails"])
+    changed = tagline.generated("**See <span data-note='one\ntwo'>the guide</span>.**")
+    path.write_text(original.replace(body(original), changed), encoding="utf-8")
+    assert not tagline.matches_description(changed, expected)
+    edited = run_cli(*args)
+    assert any(fail.startswith("R2 ") for fail in json.loads(edited.stdout)["fails"])
+
+
+def test_mock_formatter_cannot_reseal_changed_inline_code(tmp_path, monkeypatch):
+    path, _, argv = generated_checkout(tmp_path, description="Print `one two` exactly.")
+    original = path.read_bytes()
+    cli = formatter_cli("tagline_changed_code_formatter_cli")
+    records = path.parent / "records.jsonl"
+
+    def changed_code(root, target, value):
+        return value.replace("`one two`", "`one  two`") if target == path else value
+
+    monkeypatch.setattr("ctshowcase.formatting.format_text", changed_code)
+    assert cli.main(list(map(str, (*argv, "--mode", "header", "--format-generated", "--records", records)))) == 1
+    assert path.read_bytes() == original
     assert not records.exists()

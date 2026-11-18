@@ -151,9 +151,11 @@ def test_cli_scaffold_formatter_boundary_reflow_is_owned_and_r2_compliant(
 
 @ENDINGS
 @pytest.mark.parametrize("sidecar", [False, True], ids=["no-sidecar", "unrelated-sidecar"])
-def test_verified_outer_blank_lines_and_soft_wraps_match_without_sidecar_authority(tmp_path, ending, sidecar):
+@pytest.mark.parametrize("blank", ["", " \t"], ids=["empty", "space-tab"])
+def test_verified_outer_blank_lines_and_soft_wraps_match_without_sidecar_authority(tmp_path, ending, sidecar, blank):
     repo, meta = target(tmp_path)
-    payload = "\n**Compare synthetic\nNorthwind values offline.**\n"
+    visible = "**Compare synthetic\nNorthwind values offline.**"
+    payload = f"{blank}\n{visible}\n{blank}"
     body = receipt(payload).replace("\n", ending)
     write_source(repo, normalize(body), ending)
     if sidecar:
@@ -163,6 +165,11 @@ def test_verified_outer_blank_lines_and_soft_wraps_match_without_sidecar_authori
                                     "outputs": {}}), encoding="utf-8")
     assert assert_receipt(body) == payload
     assert tagline.payload(body) == payload
+    assert tagline.visible(body) == visible
+    assert tagline.inherited_payload(body) == payload
+    original = receipt(f"**{DESCRIPTION}**")
+    stamp = original.split("\n", 1)[0]
+    assert tagline.reseal(original, f"{stamp}\n{payload}") == receipt(payload)
     report = lint_report(repo, meta)
     assert R2 not in report["fails"], report
     assert tagline.matches_description(body, DESCRIPTION)
@@ -226,3 +233,149 @@ def test_verified_receipt_does_not_allow_nonblank_outer_whitespace(payload):
     assert assert_receipt(body) == payload
     assert tagline.payload(body) == payload
     assert not tagline.matches_description(body, DESCRIPTION)
+
+
+@pytest.mark.parametrize("element", ["pre", "textarea"])
+def test_verified_tagline_keeps_preformatted_html_whitespace(tmp_path, element):
+    repo, meta = target(tmp_path)
+    description = f"Examine <{element}>one  two</{element}> now."
+    changed = description.replace("one  two", "one\ntwo")
+    write_meta(meta, description)
+    write_source(repo, receipt(f"**{description}**"), "\n")
+    assert R2 not in lint_report(repo, meta)["fails"]
+    write_source(repo, receipt(f"**{changed}**"), "\n")
+    assert R2 in lint_report(repo, meta)["fails"]
+
+    for wrapper in ("**{}**", '<p align="center"><b>{}</b></p>'):
+        original = receipt(wrapper.format(description))
+        stamp = original.split("\n", 1)[0]
+        assert tagline.matches_description(original, description)
+        assert not tagline.matches_description(receipt(wrapper.format(changed)), description)
+        assert tagline.reseal(original, f"{stamp}\n{wrapper.format(changed)}") is None
+
+
+@pytest.mark.parametrize("hard_break", ["  ", "\\"], ids=["two-space", "backslash"])
+@pytest.mark.parametrize("paragraph", ["\n", " \t\n", "\n\n"], ids=["empty", "space-tab", "multiple"])
+def test_centered_tagline_retains_paragraph_after_hard_break(hard_break, paragraph):
+    description = f"Compare synthetic{hard_break}\n{paragraph}Northwind values offline."
+    changed = f"Compare synthetic{hard_break}\n Northwind values offline."
+    wrapper = '<p align="center"><b>{}</b></p>'
+    original = receipt(wrapper.format(description))
+    stamp = original.split("\n", 1)[0]
+    assert tagline.matches_description(original, description)
+    assert not tagline.matches_description(original, changed)
+    assert tagline.reseal(original, f"{stamp}\n{wrapper.format(changed)}") is None
+
+
+@pytest.mark.parametrize("edge", ["open", "close"])
+def test_centered_tagline_rejects_blank_wrapper_lines(edge):
+    description = "Follow *the instructions* today."
+    original_payload = f'<p align="center"><b>{description}</b></p>'
+    original = receipt(original_payload)
+    stamp = original.split("\n", 1)[0]
+    before, after = ('center">', "<b>") if edge == "open" else ("</b>", "</p>")
+    control = original_payload.replace(before + after, before + "\n  " + after)
+    changed = original_payload.replace(before + after, before + "\n \t\n" + after)
+    assert tagline.matches_description(receipt(control), description)
+    assert tagline.reseal(original, f"{stamp}\n{control}") == receipt(control)
+    assert not tagline.matches_description(receipt(changed), description)
+    assert tagline.reseal(original, f"{stamp}\n{changed}") is None
+
+
+@pytest.mark.parametrize("slashes", [1, 2, 3, 4])
+def test_tagline_wrap_preserves_backslash_hard_break_parity(slashes):
+    prefix = "Inspect " + "\\" * slashes
+    description = prefix + " a reproducible comparison."
+    original = receipt(f"**{description}**")
+    stamp = original.split("\n", 1)[0]
+    wrapped = f"**{prefix}\na reproducible comparison.**"
+    assert tagline.matches_description(receipt(wrapped), description) is (slashes % 2 == 0)
+    assert tagline.reseal(original, f"{stamp}\n{wrapped}") == (receipt(wrapped) if slashes % 2 == 0 else None)
+
+
+@pytest.mark.parametrize("title", ["'Keep two  spaces'", "(Keep two  spaces)", '"Keep two  spaces"'])
+def test_markdown_tagline_can_requote_a_link_title_without_editing_it(title):
+    original_text = f"Inspect [the guide]( <docs/guide.md>   {title} ) before publishing."
+    updated_text = 'Inspect [the guide](docs/guide.md "Keep two  spaces")\nbefore publishing.'
+    original = receipt(f"**{original_text}**")
+    updated = f"**{updated_text}**"
+    stamp = original.split("\n", 1)[0]
+    assert tagline.matches_description(receipt(updated), original_text)
+    assert tagline.reseal(original, f"{stamp}\n{updated}") == receipt(updated)
+    edited_title = updated.replace("two  spaces", "two\nspaces")
+    assert not tagline.matches_description(receipt(edited_title), original_text)
+    assert tagline.reseal(original, f"{stamp}\n{edited_title}") is None
+
+    html = '<p align="center"><b>{}</b></p>'
+    assert not tagline.matches_description(receipt(html.format(updated_text)), original_text)
+
+
+def test_a_literal_link_destination_cannot_be_reclassified_as_wrapped_prose(tmp_path):
+    repo, meta = target(tmp_path)
+    description = "See [guide](<docs/one two.md>) offline."
+    changed = description.replace("one two", "one\ntwo")
+    write_meta(meta, description)
+    original = receipt(f"**{description}**")
+    edited = f"**{changed}**"
+    stamp = original.split("\n", 1)[0]
+    write_source(repo, original, "\n")
+    assert R2 not in lint_report(repo, meta)["fails"]
+    write_source(repo, receipt(edited), "\n")
+    assert R2 in lint_report(repo, meta)["fails"]
+    assert tagline.reseal(original, f"{stamp}\n{edited}") is None
+
+
+def test_tagline_wrap_keeps_an_opening_inline_tag_in_its_markdown_context(tmp_path):
+    repo, meta = target(tmp_path)
+    description = "<span> word here</span>"
+    original = receipt(f"**{description}**")
+    stamp = original.split("\n", 1)[0]
+    wrapped = "**<span>\nword here</span>**"
+    write_meta(meta, description)
+    write_source(repo, receipt(wrapped), "\n")
+    assert R2 not in lint_report(repo, meta)["fails"]
+    assert tagline.reseal(original, f"{stamp}\n{wrapped}") == receipt(wrapped)
+
+
+def test_indented_paragraph_continuation_is_not_an_indented_code_block():
+    description = "Read the published guide together."
+    original = receipt(f"**{description}**")
+    stamp = original.split("\n", 1)[0]
+    wrapped = "**Read the published\n    guide together.**"
+    separated = wrapped.replace("\n", "\n\n")
+    assert tagline.matches_description(receipt(wrapped), description)
+    assert tagline.reseal(original, f"{stamp}\n{wrapped}") == receipt(wrapped)
+    assert not tagline.matches_description(receipt(separated), description)
+
+
+@pytest.mark.parametrize("before,after", [
+    ('<> "details"', ' "details"'),
+    ('<docs/guide "details">', 'docs/guide "details"'),
+])
+def test_a_link_title_cannot_be_equated_with_part_of_the_target(before, after):
+    description = f"Read [guide]({before})."
+    original = receipt(f"**{description}**")
+    stamp = original.split("\n", 1)[0]
+    changed = f"**Read [guide]({after}).**"
+    assert tagline.matches_description(original, description)
+    assert not tagline.matches_description(receipt(changed), description)
+    assert tagline.reseal(original, f"{stamp}\n{changed}") is None
+
+
+@pytest.mark.parametrize("description", [
+    "Inspect `<span title='start` one  two'>text</span>.",
+    "Inspect <code>one  two</code>.",
+])
+@pytest.mark.parametrize("replacement", [" ", "\n"], ids=["space", "newline"])
+def test_centered_raw_html_keeps_literal_attribute_and_code_space(tmp_path, description, replacement):
+    repo, meta = target(tmp_path)
+    wrapper = '<p align="center"><b>{}</b></p>'
+    original = receipt(wrapper.format(description))
+    changed = wrapper.format(description.replace("one  two", f"one{replacement}two"))
+    stamp = original.split("\n", 1)[0]
+    write_meta(meta, description)
+    write_source(repo, original, "\n")
+    assert R2 not in lint_report(repo, meta)["fails"]
+    write_source(repo, receipt(changed), "\n")
+    assert R2 in lint_report(repo, meta)["fails"]
+    assert tagline.reseal(original, f"{stamp}\n{changed}") is None

@@ -421,6 +421,11 @@ def lead(ctx: RepoContext, banner: str, nav: str) -> list[str]:
     return [nav, banner] if nav_first(ctx) else [banner, nav]
 
 
+def _template_tagline_sources(ctx: RepoContext) -> list[str]:
+    sources = ctx.meta.get("template_tagline_sources", ctx.meta.get("template_taglines")) or []
+    return [item for item in sources if isinstance(item, str) and item.strip()]
+
+
 def inherited_tagline(ctx: RepoContext, body: str, text: str) -> bool:
     """Only exact captured template payloads prove inheritance.
 
@@ -432,8 +437,7 @@ def inherited_tagline(ctx: RepoContext, body: str, text: str) -> bool:
     value = taglinemod.inherited_payload(body)
     if value is None:
         return False
-    known = [taglinemod.inherited_payload(x) for x in ctx.meta.get("template_taglines") or []
-             if isinstance(x, str) and x.strip()]
+    known = [taglinemod.inherited_payload(item) for item in _template_tagline_sources(ctx)]
     return value in known
 
 
@@ -1081,8 +1085,7 @@ def upgrade(ctx: RepoContext, text: str, *, already_normalized: bool = False) ->
     carry: list[str] = []
     # the pristine-body fallback alone would decide the tagline block (no known template taglines): a bare bold line
     # the template cannot have written must not be moved into a block that later runs would empty
-    fallback_only = (not ctx.meta.get("is_template") and not [x for x in ctx.meta.get("template_taglines") or []
-                                                               if isinstance(x, str) and x.strip()]
+    fallback_only = (not ctx.meta.get("is_template") and not _template_tagline_sources(ctx)
                      and bootstrap_state(text) == "pristine")
 
     def is_header_line(ln: str) -> bool:

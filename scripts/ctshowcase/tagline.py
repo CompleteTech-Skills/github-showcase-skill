@@ -38,37 +38,60 @@ def payload(body: str) -> str | None:
     return match.group(2)
 
 
+def _visible_payload(value: str) -> str:
+    lines = value.split("\n")
+    start, end = 0, len(lines)
+    while start < end and not lines[start].strip(" \t"):
+        start += 1
+    while start < end and not lines[end - 1].strip(" \t"):
+        end -= 1
+    return "\n".join(lines[start:end])
+
+
+def visible(body: str) -> str | None:
+    """Read the verified body without outer blank lines added by a formatter."""
+    verified = payload(body)
+    return _visible_payload(verified) if verified is not None else None
+
+
 def inherited_payload(body: str) -> str | None:
-    """Preserve exact legacy whitespace, and never launder an invalid receipt."""
+    """Return exact inheritance evidence, retaining verified separator whitespace."""
     verified = payload(body)
     return verified if verified is not None else None if marked(body) else normalize(body)
 
 
+def _rendered_unit(value: str) -> tuple[str, str] | None:
+    if value.startswith("**") and value.endswith("**"):
+        from .mdcode import inline_regions
+
+        inner = value[2:-2]
+        if (inner and not (inner[0].isspace() or inner[-1].isspace())
+                and inline_regions(value) == ((0, len(value)),)):
+            return "markdown", inner
+        return None
+    # One wrapper newline stays inside the HTML block; a blank line can end it
+    # and expose the remaining text to Markdown parsing.
+    margin = r"[ \t]*(?:\n[ \t]*)?"
+    match = re.fullmatch(rf'<p align="center">{margin}<b>(.*?)</b>{margin}</p>', value, re.S)
+    return ("html", match.group(1)) if match is not None else None
+
+
 def matches_description(body: str, description: str) -> bool:
     """R2 is separate from ownership; only verified payloads may use soft wraps."""
-    verified = payload(body)
+    verified = visible(body)
     if verified is None and marked(body):
         return False
-    # Formatters may separate the paragraph from surrounding comments. Only
-    # after exact verification may those outer blank lines be ignored for R2;
-    # the receipt digest and replacement ownership still cover every byte.
-    value = normalize(body) if verified is None else verified.strip("\n")
+    value = normalize(body) if verified is None else verified
     description = description.strip()
-    if value == f"**{description}**" or value == f'<p align="center"><b>{description}</b></p>':
-        return True
     if verified is None:
+        return value in (f"**{description}**", f'<p align="center"><b>{description}</b></p>')
+    from .mdcode import tagline_reflow_key
+
+    unit = _rendered_unit(value)
+    if unit is None:
         return False
-    if value.startswith("**") and value.endswith("**"):
-        content = value[2:-2]
-    else:
-        match = re.fullmatch(r'<p align="center">[ \t\n]*<b>(.*?)</b>[ \t\n]*</p>', value, re.S)
-        if match is None:
-            return False
-        content = match.group(1)
-    # Soft wrapping is presentation, but blank paragraphs and hard breaks are not.
-    if re.search(r"\n[ \t]*\n|(?: {2}|\\)\n", content):
-        return False
-    return re.sub(r"[ \t]*\n[ \t]*", " ", content) == description
+    markdown = unit[0] == "markdown"
+    return tagline_reflow_key(unit[1], markdown=markdown) == tagline_reflow_key(description, markdown=markdown)
 
 
 def reseal(original: str, formatted: str) -> str | None:
@@ -85,6 +108,16 @@ def reseal(original: str, formatted: str) -> str | None:
     after = RECEIPT.fullmatch(normalize(formatted))
     if after is None or after.group(1) != before.group(1) or marked(after.group(2)):
         return None
+    if before.group(2) != after.group(2):
+        from .mdcode import tagline_reflow_key
+
+        old_unit = _rendered_unit(_visible_payload(before.group(2)))
+        new_unit = _rendered_unit(_visible_payload(after.group(2)))
+        if old_unit is None or new_unit is None or old_unit[0] != new_unit[0]:
+            return None
+        markdown = old_unit[0] == "markdown"
+        if tagline_reflow_key(old_unit[1], markdown=markdown) != tagline_reflow_key(new_unit[1], markdown=markdown):
+            return None
     # Replace only the digest in the original transport representation.
     start = formatted.index("sha256=") + len("sha256=")
     return formatted[:start] + digest(after.group(2)) + formatted[start + 64:]
