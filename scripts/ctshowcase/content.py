@@ -36,6 +36,7 @@ from pathlib import Path, PurePosixPath
 from . import ROOT, STANDARD, __version__, estate_candidates
 from .config import load_yaml_text
 from .errors import CHECK_FAILED, OK, ArtFail, NeedsInput, Refused, ShowcaseError
+from .mdcode import HTML_SPACE
 from .resolver import Resolver
 
 # the estate hand-off tree when the skill lives inside it (or is its installed copy); optional everywhere
@@ -257,7 +258,7 @@ MD_LINK = re.compile(r"(!?)\[((?:[^\[\]\n]|\[[^\[\]\n]*\])*)\]\(\s*(<[^>\n\x00]*
 REF_DEF = re.compile(r"^ {0,3}\[([^\]\n\x00]+)\]:\s*(<[^>\n\x00]*>|[^\s\x00]+)(?=\s|$)")
 HTML_LINK_TAGS = frozenset(("a", "img", "source", "link", "video", "audio", "image", "use"))
 ANCHOR_ATTR = re.compile(r"""<[a-z][^>]*?(?<![\w-])(?:name|id)\s*=\s*["']([^"']+)["']""", re.I)
-HTML_HEADING = re.compile(r"<h([1-6])\b[^>]*>(.*?)</h\1>", re.I | re.S)
+HTML_HEADING = re.compile(rf"<(/?)(h[1-6])(?={HTML_SPACE}|/|>)", re.I)
 BARE_URL = re.compile(r"https?://[^\s<>()\[\]\"'`\x00]+")
 IMG_EXT = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".avif", ".bmp", ".ico")
 
@@ -309,23 +310,74 @@ def github_slug(text: str) -> str:
     return "".join(out)
 
 
+def _html_heading_titles(text: str, starts: list[int]) -> dict[int, str]:
+    """Pair real HTML heading tags on the same physical line."""
+    from .mdcode import HTML_COMMENT, find_blocks, live_html_tags
+
+    if not HTML_HEADING.search(text):
+        return {}
+    comments = find_blocks(HTML_COMMENT, text)
+    comment_starts = [comment.start() for comment in comments]
+
+    def title_part(start: int, end: int) -> str:
+        # Keep the original document's lexical context. Detached HTML text may
+        # resemble Markdown indentation or fences without being Markdown code.
+        parts = []
+        index = bisect.bisect_left(comment_starts, start)
+        while index < len(comments) and comments[index].start() < end:
+            comment = comments[index]
+            parts.extend((text[start:comment.start()], " "))
+            start = comment.end()
+            index += 1
+        parts.append(text[start:end])
+        return "".join(parts)
+
+    titles = {}
+    opened = {}
+    tokens = list(live_html_tags(text, include_closing=True))
+    for index, tag in enumerate(tokens):
+        name = HTML_HEADING.match(tag.group(0))
+        if name is None:
+            continue
+        line = bisect.bisect_right(starts, tag.start())
+        key = (line, name.group(2).lower())
+        if not name.group(1):
+            opened.setdefault(key, index)
+        elif (opening := opened.pop(key, None)) is not None and line not in titles:
+            parts = []
+            start = tokens[opening].end()
+            for nested in tokens[opening + 1:index]:
+                parts.append(title_part(start, nested.start()))
+                start = nested.end()
+            parts.append(title_part(start, tag.start()))
+            titles[line] = "".join(parts)
+    return titles
+
+
 def headings(text: str) -> list[dict]:
     """Markdown headings in order with their GitHub anchors (duplicates get -1, -2 ...)."""
+    from .mdcode import html_block_spans
+
+    text = text.removeprefix("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
+    starts = [0] + [m.end() for m in re.finditer("\n", text)]
+    html_lines = {line for start, end in html_block_spans(text)
+                  for line in range(bisect.bisect_right(starts, start), bisect.bisect_right(starts, end - 1) + 1)}
+    html_titles = _html_heading_titles(text, starts)
     rows, seen = [], {}
     lines = scan_lines(text)
     para = re.compile(r"^\s*([#<>|*+\-!\[]|\d+[.)]\s)")
     for i, (n, t, _) in enumerate(lines):
         if t is None:
             continue
-        m = ATX.match(t)
         title = None
-        if m:
-            title = m.group(2) or ""
-        elif i + 1 < len(lines) and lines[i + 1][1] is not None and SETEXT.match(lines[i + 1][1] or "") \
-                and t.strip() and not para.match(t):
-            title = t.strip()
-        elif HTML_HEADING.search(t):
-            title = HTML_HEADING.search(t).group(2)
+        if n not in html_lines:
+            if m := ATX.match(t):
+                title = m.group(2) or ""
+            elif (i + 1 < len(lines) and n + 1 not in html_lines and SETEXT.match(lines[i + 1][1] or "")
+                  and t.strip() and not para.match(t)):
+                title = t.strip()
+        if title is None:
+            title = html_titles.get(n)
         if title is None:
             continue
         base = github_slug(plain_heading(title))

@@ -19,7 +19,7 @@ from .detect import required_sections, standard
 from .errors import ArtFail, ConfigError, NeedsInput
 from .mdcode import (  # noqa: F401  (code_spans: re-exported for callers)
     MANAGED_BLOCK_PATTERN, _image_entries, after_line_end, code_block_spans, code_spans, find_blocks, html_block_spans,
-    masked,
+    masked, top_level_heading_spans,
 )
 
 MARK = MANAGED_BLOCK_PATTERN
@@ -804,9 +804,12 @@ def _heading_view(text: str) -> str:
 
 
 def personal_header_end(text: str) -> int:
-    """End of the opening area before the first visible section heading."""
-    section = re.search(r"(?m)^ {0,3}#{2,6}(?:[ \t]+|$)", _heading_view(text))
-    return section.start() if section is not None else len(text)
+    """End of the opening area, allowing an existing initial H1 title."""
+    headings = iter(top_level_heading_spans(text))
+    section = next(headings, None)
+    if section is not None and section[2] == 1:
+        section = next(headings, None)
+    return section[0] if section is not None else len(text)
 
 
 def callout_only(ctx: RepoContext, text: str, *, retain_personal_banner: bool = False) -> tuple[str, list[str]]:

@@ -484,19 +484,23 @@ class _DefinitionProgress:
 
 @functools.lru_cache(maxsize=16)
 def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, int], ...], tuple[int, ...],
-                                tuple[tuple[int, int], ...], tuple[tuple[int, int], ...], dict[int, int]]:
-    """(inline regions, fenced spans, continuation starts, raw HTML spans, indented spans). An inline region is a stretch in which
+                                tuple[tuple[int, int], ...], tuple[tuple[int, int], ...], dict[int, int],
+                                tuple[tuple[int, int, int], ...]]:
+    """(inline regions, fenced spans, continuation starts, raw HTML spans, indented spans, prefixes, headings).
+    An inline region is a stretch in which
     one inline code span can live: a paragraph, a heading line, an HTML block start line or one table cell. A
     continuation start is the source offset of a line that continues an open paragraph or table (not the first line of
     a block, not a heading, not a line inside a fence). An HTML block span runs from its first line to just past its
-    last line, excluding a terminating blank line or the line that ended its container. The final tuple records
-    indented code blocks, which cannot interrupt a paragraph and are never inline regions."""
+    last line, excluding a terminating blank line or the line that ended its container. Indented code blocks cannot
+    interrupt a paragraph and are never inline regions. Heading entries are (start, end, level) for top-level ATX and
+    Setext headings, using these same block decisions rather than scanning a masked projection again."""
     text = _source_view(text)
     WORK['layout_builds'] += 1
     regions: list[tuple[int, int]] = []
     fences: list[tuple[int, int]] = []
     html_blocks: list[tuple[int, int]] = []
     indented_blocks: list[tuple[int, int]] = []
+    headings: list[tuple[int, int, int]] = []
     indented = None  # (source start, ordered container ancestors)
     hstart = 0
     conts: set[int] = set()
@@ -665,6 +669,8 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
                 seg, table = [], True
                 continue
             elif matched and _SETEXT.match(para_content):
+                if not para_path:
+                    headings.append((seg[0][0], pos, 1 if para_content.lstrip(" ").startswith("=") else 2))
                 flush(seg)
                 seg = []
                 continue
@@ -697,8 +703,10 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
         opener = FENCE_OPEN.match(crest)
         if opener:
             fence, fstart = (opener.group(1), path), at
-        elif _ATX_HEADING.match(crest):
+        elif heading := _ATX_HEADING.match(crest):
             regions.append((at, pos))
+            if not path:
+                headings.append((at, pos, len(heading.group().strip())))
         elif (kind := _html_block(crest)) is not None:
             # raw HTML: no inline region, so a backtick on these lines never pairs and the block's images stay visible
             hstart = at
@@ -718,12 +726,18 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
         html_blocks.append((hstart, len(text)))
     if indented is not None:
         indented_blocks.append((indented[0], len(text)))
-    return tuple(regions), tuple(fences), tuple(sorted(conts)), tuple(html_blocks), tuple(indented_blocks), prefixes
+    return (tuple(regions), tuple(fences), tuple(sorted(conts)), tuple(html_blocks), tuple(indented_blocks),
+            prefixes, tuple(headings))
 
 
 def inline_regions(text: str) -> tuple[tuple[int, int], ...]:
     """Canonical, source-aligned blocks in which one inline construct may live."""
     return _layout(text)[0]
+
+
+def top_level_heading_spans(text: str) -> tuple[tuple[int, int, int], ...]:
+    """Source-aligned (start, end, level) for visible top-level ATX and Setext headings."""
+    return _layout(text)[6]
 
 
 @functools.lru_cache(maxsize=16)
@@ -2416,8 +2430,8 @@ def _raw_marker_text_spans(source, blocks, tags, inline_literals):
         yield end, covered
 
 
-def live_html_tags(text: str):
-    """Yield opening HTML tokens outside code, raw text, and literal Markdown destinations or labels."""
+def live_html_tags(text: str, *, include_closing: bool = False):
+    """Yield real HTML tags outside code, raw text, and literal destinations or labels."""
     source = _source_view(text)
     visible = _outside_code(source, mask_autolinks=False)
     tokens = _HTMLTokens(visible, source)
@@ -2429,6 +2443,8 @@ def live_html_tags(text: str):
         if (image is not None and end <= image[1]) or any(_span_at(spans, start) is not None for spans in literals):
             continue
         if match := HTML_OPEN_TAG.fullmatch(tokens.text, start, end):
+            yield match
+        elif include_closing and (match := _HTML_CLOSE_TAG.fullmatch(tokens.text, start, end)):
             yield match
 
 

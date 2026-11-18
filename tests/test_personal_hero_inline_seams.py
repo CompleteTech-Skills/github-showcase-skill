@@ -118,6 +118,19 @@ def test_preceding_badge_and_inline_seam_refuse_atomically(
 
 
 @pytest.mark.parametrize("variant", ["G", "H"])
+@pytest.mark.parametrize("ending", ENDINGS)
+@pytest.mark.parametrize("section", [b"## Notes", b"# Notes"], ids=["H2-section", "second-H1"])
+def test_body_section_inline_hero_refuses_atomically(tmp_path, applicable_intro, variant, ending, section):
+    prefix, hero, suffix = source_parts(ending, "both")
+    title = b"# Synthetic profile" + ending * 2
+    prefix = prefix.replace(title, title + section + ending * 2, 1)
+    meta = fixture_repo(tmp_path, prefix + hero + suffix, applicable_intro)
+    before = snapshot(tmp_path)
+    result = upgrade(tmp_path, meta, variant)
+    assert_atomic_refusal(result, tmp_path, before, "needs-input:intro-order")
+
+
+@pytest.mark.parametrize("variant", ["G", "H"])
 @pytest.mark.parametrize("has_intro", [False, True], ids=["missing-intro", "applicable-intro"])
 def test_modified_authored_hero_with_inline_seams_is_not_adopted(
         tmp_path, applicable_intro, variant, has_intro):
