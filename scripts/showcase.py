@@ -699,7 +699,9 @@ def cmd_readme(args):
         destinations = [target for target, _ in outputs]
         if record_tagline and path not in destinations:
             destinations.append(path)
-        with lock_outputs(ctx, path, *destinations, auxiliary=report):
+        output_locks = lock_outputs(ctx, path, *destinations, auxiliary=report) if report else lock_outputs(
+            ctx, path, *destinations)
+        with output_locks:
             check_outputs(ctx, *destinations, auxiliary=report,
                           format_root=getattr(ctx, "format_root", None))
             if not args.format_generated:
