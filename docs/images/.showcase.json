@@ -1,6 +1,6 @@
 {
- "config_sha256": "24572db73fb6863211524708c723c7fcb158784d9f986db78853702384f4c692",
- "fingerprint": "48ee84a747297158075fbd356d4388506470a827c2bfc3eeaba781aba49209ec",
+ "config_sha256": "190506a620d63253bb66e6c7ed476d26a2b401f5be546a3a1a4b7d42320fed37",
+ "fingerprint": "181527fd661ff78f97f8f837945391ef99334e362ef2dcc33f340cdf1b3815f3",
  "inputs": {
   "description": "Generate CompleteTech LLC GitHub banners, cards, icons and READMEs, with repository checks and metadata plans.",
   "icon_sha256": "a1bbf17b8f066ec7e8442a323d4b1a21656a8f8788a1e54ece6f83e76dde7bf5",
@@ -59,7 +59,7 @@
      "text": "Offline"
     }
    ],
-   "fingerprint": "48ee84a747297158075fbd356d4388506470a827c2bfc3eeaba781aba49209ec",
+   "fingerprint": "181527fd661ff78f97f8f837945391ef99334e362ef2dcc33f340cdf1b3815f3",
    "icon_source": "repo",
    "px": [
     2560,
@@ -71,9 +71,30 @@
   },
   "card.svg": {
    "bytes": 27727,
-   "fingerprint": "48ee84a747297158075fbd356d4388506470a827c2bfc3eeaba781aba49209ec",
+   "fingerprint": "181527fd661ff78f97f8f837945391ef99334e362ef2dcc33f340cdf1b3815f3",
    "repository_id": 1433830462,
    "sha256": "c44a9db0388202a334a2cf032cb8d27c562aa3bd4aee726d0351671d36d1b092"
+  }
+ },
+ "provenance": {
+  "fingerprint": "181527fd661ff78f97f8f837945391ef99334e362ef2dcc33f340cdf1b3815f3",
+  "first_run_at": "2026-11-18T21:14:16Z",
+  "last_changed_at": "2026-11-18T21:14:16Z",
+  "last_run_at": "2026-11-18T21:14:16Z",
+  "publisher": "CompleteTech LLC",
+  "run_count": 1,
+  "skill": "github-showcase-skill",
+  "skill_url": "https://github.com/CompleteTech-Skills/github-showcase-skill",
+  "skill_version": "1.0.0",
+  "standard": "ct-std-v1",
+  "surfaces": [
+   "README.md",
+   "banner.png",
+   "card.svg"
+  ],
+  "target": {
+   "id": "CompleteTech-Skills/github-showcase-skill",
+   "kind": "repo"
   }
  },
  "schema": 1,
