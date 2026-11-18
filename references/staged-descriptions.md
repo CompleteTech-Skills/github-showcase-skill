@@ -85,3 +85,5 @@ while staging and validating its index snapshot. A partial live refresh
 preserves unrelated staged records and cannot authorize their publication.
 After a live render is skipped, foreign-art cleanup removes only an artifact
 with its own provenance whose bytes and record still match the initial check.
+The Action leaves a renderer's abandoned write scratch out of grouped commits.
+Recover or remove that scratch manually before retrying the Action in the same checkout.

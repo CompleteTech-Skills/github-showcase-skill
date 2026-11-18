@@ -34,7 +34,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from ctshowcase.config import canonical  # noqa: E402
 from ctshowcase.fingerprint import (  # noqa: E402
-    ART_NAMES, file_record, output_records, read_sidecar, replace_bytes, sidecar_lock,
+    ART_NAMES, WRITE_SCRATCH_PREFIX, file_record, output_records, read_sidecar, replace_bytes, sidecar_lock,
 )
 
 IMAGES = Path("docs/images")
@@ -111,6 +111,8 @@ def _has_staged_provenance(data) -> bool:
 
 def has_staged_outputs() -> bool:
     # The grouped commit includes nested art and the two root Markdown files.
+    if next(IMAGES.rglob(f"{WRITE_SCRATCH_PREFIX}*"), None) is not None:
+        return True  # a stopped writer may have left unpublished bytes before installing its sidecar
     candidates = {SIDECAR, Path(SIDECAR.name), *IMAGES.rglob(SIDECAR.name)}
     return any(_has_staged_provenance(read_sidecar(path.parent)) for path in candidates
                if path.exists() or path.is_symlink())
@@ -132,10 +134,13 @@ def has_staged_index(*, allow_icon_removal: bool = False, snapshot: str | None =
         return True  # the bare git commit would include these pre-existing staged changes
     result = subprocess.run(["git", "ls-files", "--stage", "-z", "--", IMAGES.as_posix(), SIDECAR.name],
                             check=True, capture_output=True, timeout=30, env=env)
+    scratch = os.fsencode(WRITE_SCRATCH_PREFIX)
     for item in result.stdout.split(b"\0"):
         if not item:
             continue
         stat_info, path = item.split(b"\t", 1)
+        if any(component.startswith(scratch) for component in path.split(b"/")):
+            return True
         if path.rsplit(b"/", 1)[-1] != os.fsencode(SIDECAR.name):
             continue
         _, blob, stage = stat_info.split()

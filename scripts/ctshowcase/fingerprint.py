@@ -16,6 +16,7 @@ from . import STANDARD, __version__
 from .config import LOCK, canonical
 
 SIDECAR = ".showcase.json"
+WRITE_SCRATCH_PREFIX = ".showcase-write-"
 ART_RECORDS = {"banner": "banner.png", "card": "card.svg"}
 ART_NAMES = frozenset(ART_RECORDS.values())
 ART_EXEMPTIONS = ("exempt:no-card", "exempt:profile-readme", "exempt:placeholder-org")
@@ -187,7 +188,7 @@ def replace_bytes(path: Path, data: bytes, *, private: bool = False, preserve_mo
         fd = os.open(path, os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0))
         os.close(fd)
 
-    with TemporaryDirectory(dir=path.parent) as directory:
+    with TemporaryDirectory(dir=path.parent, prefix=WRITE_SCRATCH_PREFIX) as directory:
         source = Path(directory) / path.name
         source.write_bytes(data)
         if existing is not None and regular and preserve_mode:

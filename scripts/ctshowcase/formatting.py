@@ -13,6 +13,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from .errors import CHECK_FAILED, NeedsInput, ShowcaseError
+from .fingerprint import WRITE_SCRATCH_PREFIX
 
 VALIDATOR_NAME = re.compile(r"(?:^|[:_-])(check|contracts|lint|test|typecheck|validate|format|verify)(?:$|[:_-])", re.I)
 SCRIPT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9:_-]*")
@@ -219,7 +220,7 @@ def write_formatted_outputs(outputs: list[tuple[Path, bytes]], *,
             if append and initial is not None and initial[-1] != 1:
                 raise ShowcaseError("formatted output cannot replace a hard-linked records queue", log="formatter-output")
             path.parent.mkdir(parents=True, exist_ok=True)
-            working = Path(scratch.enter_context(tempfile.TemporaryDirectory(dir=path.parent)))
+            working = Path(scratch.enter_context(tempfile.TemporaryDirectory(dir=path.parent, prefix=WRITE_SCRATCH_PREFIX)))
             replacement = working / "output"
             backup = working / "original"
             previous = None

@@ -100,3 +100,49 @@ def test_grouped_action_refuses_an_unrelated_gitlink_hidden_by_diff_config(tmp_p
     assert _git(repo, "rev-parse", "HEAD").strip() == parent
     assert index.read_bytes() == before
     assert readme.read_text(encoding="utf-8") == "# Updated showcase\n"
+
+
+def test_grouped_action_refuses_abandoned_write_scratch(tmp_path, monkeypatch):
+    import action_prepare
+    from ctshowcase.fingerprint import WRITE_SCRATCH_PREFIX
+
+    repo = tmp_path / "repo"
+    _template_copy(repo)
+    monkeypatch.chdir(repo)
+    parent = _git(repo, "rev-parse", "HEAD")
+    index = repo / ".git/index"
+    before = index.read_bytes()
+    interrupted = """
+import os
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from ctshowcase.formatting import write_formatted_outputs
+
+write_bytes = Path.write_bytes
+def stop_during_preparation(path, contents):
+    write_bytes(path, contents)
+    if path.name == "output":
+        os._exit(17)
+
+Path.write_bytes = stop_during_preparation
+write_formatted_outputs([(Path("docs/images/.showcase.json"), b"An unfinished staged write")], private=True)
+"""
+    render = subprocess.run([sys.executable, "-c", interrupted, str(ROOT / "scripts")], cwd=repo)
+    assert render.returncode == 17
+    scratch, = list((repo / "docs/images").glob(f"{WRITE_SCRATCH_PREFIX}*/output"))
+    assert action_prepare.has_staged_outputs()
+
+    result = run_bash('bash "$1" Synthetic fail "$2"', str(ROOT / "scripts/action_commit.sh"),
+                      str(ROOT / "scripts/action_prepare.py"), cwd=repo, env=ENV)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "commit skipped" in result.stdout
+    assert _git(repo, "rev-parse", "HEAD") == parent and index.read_bytes() == before
+    assert scratch.read_bytes() == b"An unfinished staged write"
+
+    _git(repo, "add", "--", str(scratch))
+    scratch.unlink()
+    (scratch.parent / "original").unlink()
+    scratch.parent.rmdir()
+    assert not action_prepare.has_staged_outputs()
+    assert action_prepare.has_staged_index()
