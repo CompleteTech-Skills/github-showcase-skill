@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import shutil
 import stat
@@ -87,7 +86,7 @@ def _paged(run, name: str, path: tuple, **variables) -> tuple[dict, list | None,
         try:
             data = run(name, **variables, after=after)
         except Refused:
-            raise  # consent is a gate, never a failed network read that can be rendered as partial success
+            raise  # consent and response identity are gates, not partial network failures
         except ShowcaseError:
             return first or {}, nodes if first is not None else None, "partial" if first is not None else "failed"
         first = data if first is None else first
@@ -196,12 +195,34 @@ def capture(login: str | None = None, run=None, today: str | None = None, *, bra
         raise NeedsInput("gh", "gh is not signed in (gh auth status)")
     login = (login or viewer).strip()
     _check_capture_owner(resolver, login, allow_t3)
-    is_viewer = login.lower() == viewer.lower()
+    is_viewer = resolver.same(login, viewer)
     # Recheck before every page as well: a changed/withdrawn consent record does not authorize another read.
     def guarded(name, **variables):
         owner = variables.get("org") or variables.get("login") or login
         _check_capture_owner(resolver, owner, allow_t3)
-        return run(name, **variables)
+        data = run(name, **variables)
+        # Repository queries request login on every page. Discovery queries currently omit source identity;
+        # preserve that protocol, but validate an identity whenever supplied before accumulating any nodes.
+        entity, field, expected, required = {
+            "account_user": ("user", "login", variables.get("login"), True),
+            "account_org": ("organization", "login", variables.get("org"), True),
+            "account_orgs": ("user", "login", variables.get("login"), False),
+            "account_enterprises": ("viewer", "login", viewer, False),
+            "account_enterprise_orgs": ("enterprise", "slug", variables.get("slug"), False),
+        }[name]
+        source = _dig(data, (entity,))
+        if isinstance(source, dict) and (required or field in source):
+            actual = source.get(field)
+            pattern = SLUG_RE if field == "slug" else LOGIN_RE
+            if (not isinstance(actual, str) or not pattern.fullmatch(actual)
+                    or not (actual.casefold() == expected.casefold() if field == "slug"
+                            else resolver.same(expected, actual))):
+                # Never echo an untrusted returned identity or payload; refuse the whole capture before publishing.
+                raise Refused("capture response identity does not match the requested source",
+                              log="usage:capture-identity")
+            if field == "login":
+                _check_capture_owner(resolver, actual, allow_t3)
+        return data
 
     first, nodes, repo_status = _paged(guarded, "account_user", ("user", "repositories"), login=login)
     user = first.get("user")
@@ -370,24 +391,28 @@ def validate(snap) -> dict:
         if o["login"].lower() in seen:
             raise _bad(f"organization {o['login']} is listed twice")
         seen.add(o["login"].lower())
+        status = _capture_state(o, o["login"])
+        repos = _clean_repos(o.get("repositories") or [], o["login"])
+        not_public = _count(o.get("not_public"), o["login"])
+        observed = status in ("complete", "partial")
         orgs.append({"login": o["login"], "name": " ".join(str(o.get("name") or "").split()),
                      "member": bool(o.get("member", True)), "role": o.get("role") if o.get("role") in ROLES else None,
-                     "captured": _capture_state(o, o["login"]) == "complete",
-                     "capture_status": _capture_state(o, o["login"]),
-                     "repositories": _clean_repos(o.get("repositories") or [], o["login"]),
-                     "not_public": _count(o.get("not_public"), o["login"])})
+                     "captured": status == "complete", "capture_status": status,
+                     "repositories": repos if observed else [], "not_public": not_public if observed else None})
     coverage = snap.get("coverage") or {}
     if not isinstance(coverage, dict) or any(v not in CAPTURE_STATES for v in coverage.values()):
         raise _bad("coverage must map connections to capture states")
     coverage = {key: coverage.get(key, "complete") for key in ("repositories", "organizations", "enterprises")}
     if "enterprises:viewer-only" in (snap.get("notes") or []):
         coverage["enterprises"] = "uncaptured"
+    repos = _clean_repos(snap.get("repositories") or [], "account")
+    not_public = _count(snap.get("not_public"), "account")
+    observed = coverage["repositories"] in ("complete", "partial")
     return {"schema": SCHEMA, "std": snap.get("std") or STANDARD, "captured": captured, "coverage": coverage,
             "viewer": snap.get("viewer") if isinstance(snap.get("viewer"), str) else None,
             "account": {"login": acct["login"], **{k: " ".join(str(acct.get(k) or "").split())
                                                    for k in ("name", "company", "location", "website")}},
-            "repositories": _clean_repos(snap.get("repositories") or [], "account"),
-            "not_public": _count(snap.get("not_public"), "account"),
+            "repositories": repos if observed else [], "not_public": not_public if observed else None,
             "enterprises": sorted(ents, key=lambda e: (e["name"].casefold(), e["slug"])), "organizations": orgs,
             "notes": [n for n in snap.get("notes") or [] if isinstance(n, str)]}
 
@@ -534,19 +559,22 @@ def build(snap: dict, brand, *, resolver=None, flags: dict | None = None, allow_
         name = (row.get("display_name") if row.get("known") else None) or o["name"] or lg
         eyebrow, short = _eyebrow(style, row, neutral)
         mark = brand.asset(row.get("mark")) if row.get("known") and row.get("mark") else None
-        named = gate_repos(lg, o["repositories"], held)
-        counts["not_public"] += o["not_public"]
+        status = _capture_state(o, lg)
+        observed = status in ("complete", "partial")
+        repos = o["repositories"] if observed else []
+        not_public = o["not_public"] if observed else None
+        named = gate_repos(lg, repos, held)
+        counts["not_public"] += not_public or 0
         counts["organizations"] += 1
-        status = o.get("capture_status", "complete" if o["captured"] else "uncaptured")
         if status != "complete":
             counts["incomplete_orgs"] += 1
         return {"kind": "org", "login": lg, "name": name, "eyebrow": eyebrow, "eyebrow_short": short, "sub": f"@{lg}",
                 "role": o["role"], "member": o["member"], "style": style, "neutral": neutral, "family": family,
                 "mark": mark if mark and mark.is_file() else None, "initials": _initials(name), "url": f"https://github.com/{lg}",
                 "flagship": bool(row.get("flagship")), "tier": _tier_rank(row) if row.get("known") else 9,
-                "repos": named, "public": len(o["repositories"]), "not_public": o["not_public"], "held": held,
+                "repos": named, "public": len(repos) if observed else None, "not_public": not_public, "held": held,
                 "capture_status": status,
-                "notes": notes_for(named, len(o["repositories"]), o["not_public"], held, status)}
+                "notes": notes_for(named, len(repos), not_public, held, status)}
 
     # -- the account --------------------------------------------------------------------------------
     row = brand.org(login)
@@ -575,16 +603,19 @@ def build(snap: dict, brand, *, resolver=None, flags: dict | None = None, allow_
                "initials": _initials(name), "url": f"https://github.com/{login}"}
 
     # -- personal repositories ----------------------------------------------------------------------
-    p_named = gate_repos(login, snap["repositories"], False)
-    counts["not_public"] += snap["not_public"]
     coverage = snap.get("coverage") or {}
     personal_status = coverage.get("repositories", "complete")
+    observed = personal_status in ("complete", "partial")
+    repos = snap["repositories"] if observed else []
+    not_public = snap["not_public"] if observed else None
+    p_named = gate_repos(login, repos, False)
+    counts["not_public"] += not_public or 0
     personal = {"kind": "personal", "login": login, "name": labels["personal_title"], "eyebrow": labels["personal"],
                 "eyebrow_short": labels["personal"], "sub": f"@{login}", "role": None, "style": acct_style,
                 "neutral": False, "family": acct_family, "mark": account["mark"], "initials": account["initials"],
-                "url": account["url"], "repos": p_named, "public": len(snap["repositories"]),
-                "not_public": snap["not_public"], "held": False, "capture_status": personal_status,
-                "notes": notes_for(p_named, len(snap["repositories"]), snap["not_public"], False, personal_status)}
+                "url": account["url"], "repos": p_named, "public": len(repos) if observed else None,
+                "not_public": not_public, "held": False, "capture_status": personal_status,
+                "notes": notes_for(p_named, len(repos), not_public, False, personal_status)}
 
     # -- organizations and enterprises ----------------------------------------------------------------
     fam_order = {f: i for i, f in enumerate(brand.raw.get("families") or {})}
@@ -812,7 +843,7 @@ def _sources(args, brand, model: dict | None = None) -> list[Path]:
     return [Path(path) for path in paths if path is not None]
 
 
-def _check_outputs(paths: list[Path], sources: list[Path] = ()) -> None:
+def _check_outputs(paths: list[Path], sources: list[Path] = ()) -> dict:
     """Preflight the entire graph without creating directories or truncating any file.
 
     Check lexical ancestors before resolving aliases: resolving first would conceal a symlink or junction.
@@ -821,7 +852,7 @@ def _check_outputs(paths: list[Path], sources: list[Path] = ()) -> None:
     def fail(path, reason):
         raise ShowcaseError(f"unsafe account-chart output {path}: {reason}", log="usage:account-chart-path")
 
-    resolved = []
+    resolved, states = [], {}
     for path in paths:
         absolute = path.absolute()
         for index, component in enumerate([absolute, *absolute.parents]):
@@ -838,6 +869,9 @@ def _check_outputs(paths: list[Path], sources: list[Path] = ()) -> None:
                     fail(path, "destination ancestor is not a directory")
             elif not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
                 fail(path, "destination is not an unlinked regular file")
+            if not index:
+                states[path] = (info.st_dev, info.st_ino, info.st_mode, info.st_size, info.st_mtime_ns,
+                                info.st_ctime_ns, info.st_nlink)
         try:
             real = absolute.resolve()
             for other in [*resolved, *sources]:
@@ -846,27 +880,16 @@ def _check_outputs(paths: list[Path], sources: list[Path] = ()) -> None:
         except (OSError, RuntimeError) as exc:
             fail(path, str(exc))
         resolved.append(real)
+        states.setdefault(path, None)
+    return states
 
 
-def _write_outputs(outputs: dict[Path, bytes], sources: list[Path]) -> None:
-    """Stage complete bytes only after the whole graph passes, then replace leaves without following them."""
-    paths = list(outputs)
-    _check_outputs(paths, sources)
-    staged = []
-    try:
-        for path, data in outputs.items():
-            path.parent.mkdir(parents=True, exist_ok=True)
-            fd, name = tempfile.mkstemp(prefix=".account-chart-", dir=path.parent)
-            tmp = Path(name)
-            staged.append((tmp, path))
-            with os.fdopen(fd, "wb") as stream:
-                stream.write(data)
-        _check_outputs(paths, sources)
-        for tmp, path in staged:
-            os.replace(tmp, path)
-    finally:
-        for tmp, _ in staged:
-            tmp.unlink(missing_ok=True)
+def _write_outputs(outputs: dict[Path, bytes], sources: list[Path], states: dict) -> None:
+    """Recheck pre-generation destinations, then use the shared publisher's staging and rollback."""
+    from .formatting import write_formatted_outputs
+    if _check_outputs(list(states), sources) != states:
+        raise ShowcaseError("account-chart output changed during generation", log="usage:account-chart-path")
+    write_formatted_outputs(list(outputs.items()))
 
 
 def cmd_account_chart(args):
@@ -881,11 +904,11 @@ def cmd_account_chart(args):
         from .resolver import Resolver
         brand = load_brand(getattr(args, "config", None))
         sources = _sources(args, brand)
-        _check_outputs([Path(args.out)], sources)  # even a refused capture destination causes no network reads
+        states = _check_outputs([Path(args.out)], sources)  # a refused destination causes no network reads
         resolver = Resolver.from_paths(brand, args.registry, args.approved, args.approved_yaml, args.actions)
         snap = capture(args.login, brand=brand, resolver=resolver, allow_t3=t3_signed_off(),
                        flags=load_flags(args.decisions or _default_decisions()))
-        _write_outputs({Path(args.out): snapshot_text(snap).encode("utf-8")}, sources)
+        _write_outputs({Path(args.out): snapshot_text(snap).encode("utf-8")}, sources, states)
         n = sum(len(o["repositories"]) for o in snap["organizations"]) + len(snap["repositories"])
         return {"command": "account-chart", "action": "capture", "owner": snap["account"]["login"], "result": "ok",
                 "out": args.out, "counts": {"organizations": len(snap["organizations"]),
@@ -916,7 +939,7 @@ def render(args):
         planned.append(out_dir / f"{args.name}.mermaid.png")
     brand = load_brand(getattr(args, "config", None))
     sources = _sources(args, brand)
-    _check_outputs(planned, sources)
+    states = _check_outputs(planned, sources)
     snap = load_snapshot(args.snapshot)
     resolver = Resolver.from_paths(brand, args.registry, args.approved, args.approved_yaml, args.actions)
     flags = load_flags(args.decisions or _default_decisions())
@@ -963,7 +986,7 @@ def render(args):
     if args.mmdc:
         # The optional browser writes into an isolated directory, never into an authored destination.
         with tempfile.TemporaryDirectory(prefix="account-chart-mmdc-stage-") as tmp:
-            staging = Path(tmp)
+            staging = Path(tmp).resolve()  # internal scratch only: TMPDIR may be a platform-managed symlink
             (staging / files["mmd"]).write_text(mmd, encoding="utf-8")
             dest = f"{args.name}.mermaid.png"
             made = _mmdc(args, staging, files["mmd"], dest, chart.canvas_colour(model["account"]["style"]),
@@ -971,8 +994,7 @@ def render(args):
             if made:
                 _check_outputs([staging / dest], [staging / files["mmd"]])
                 outputs[out_dir / dest] = (staging / dest).read_bytes()
-    _check_outputs(planned, sources)
-    _write_outputs(outputs, sources)
+    _write_outputs(outputs, sources, states)
     res["outputs"] = [str(path) for path in outputs]
     res["logs"] = sorted(set(logs))
     return res, OK
