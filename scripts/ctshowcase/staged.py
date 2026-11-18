@@ -31,8 +31,8 @@ def prepare(meta: dict, description: str | None) -> tuple[dict, dict | None]:
 
 
 def check_social_path(path: Path, *, staged: bool, job: bool, checkout: Path | None = None) -> None:
-    in_staging = SOCIAL_STAGING in map(str.casefold, path.absolute().parent.parts)
-    resolves_to_staging = SOCIAL_STAGING in map(str.casefold, path.resolve().parent.parts)
+    in_staging = _in_social_staging(Path(os.path.abspath(path)), checkout)
+    resolves_to_staging = _in_social_staging(path.resolve(), checkout)
     if staged and not (in_staging and resolves_to_staging):
         raise ShowcaseError(f"a staged social preview needs an output inside {SOCIAL_STAGING}",
                             log="staged-description:path")
@@ -67,6 +67,18 @@ def _inferred_checkout(path: Path) -> Path | None:
     images = next((parent for parent in path.parents
                    if parent.name == "images" and parent.parent.name == "docs"), None)
     return images.parent.parent if images else None
+
+
+def _in_social_staging(path: Path, checkout: Path | None) -> bool:
+    """A surrounding directory name does not reserve output inside a checkout."""
+    roots = [_inferred_checkout(path)]
+    if checkout is not None:
+        roots.extend((Path(os.path.abspath(checkout)), checkout.resolve()))
+    parent = path.parent
+    scope = max((root for root in roots if root is not None and parent.is_relative_to(root)),
+                key=lambda root: len(root.parts), default=None)
+    relative = parent.relative_to(scope) if scope is not None else parent
+    return SOCIAL_STAGING in map(str.casefold, relative.parts)
 
 
 def _adjacent_name(path: Path, root: Path | None) -> str:
@@ -172,7 +184,7 @@ def check_auxiliary(capture: Path | None, checkout: Path | None, *paths: Path) -
             raise ShowcaseError("staged reports must not replace showcase provenance", log="staged-description:path")
         if path.is_symlink() or (path.exists() and (not path.is_file() or path.stat().st_nlink > 1)):
             raise ShowcaseError("staged reports must use an unlinked regular file", log="staged-description:path")
-        if _live_social_output(path):
+        if _live_social_output(path, checkout):
             raise ShowcaseError("staged reports must not replace a live social preview", log="staged-description:path")
         if path.is_file():
             with path.open("rb") as stream:
@@ -195,9 +207,9 @@ def _marked_live_social(record: object) -> bool:
     return isinstance(record, dict) and record.get("live_social_preview") is True
 
 
-def _live_social_output(path: Path) -> bool:
+def _live_social_output(path: Path, checkout: Path | None) -> bool:
     resolved = path.resolve()
-    if SOCIAL_STAGING in map(str.casefold, resolved.parent.parts):
+    if _in_social_staging(resolved, checkout):
         return False
     if resolved.name.casefold() in {"social-preview.png", "social-preview.jpg"}:
         return True
@@ -249,7 +261,7 @@ def check_outputs(ctx, *paths: Path, auxiliary: tuple[Path, ...] = (), adjacent:
         for path in (*paths, *sidecars):
             if path.is_symlink() or (path.exists() and not path.is_file()):
                 raise ShowcaseError("staged output must be a regular file", log="staged-description:path")
-        if any(_live_social_output(path) or any(
+        if any(_live_social_output(path, ctx.repo_dir) or any(
             _marked_live_social(fp.output_records(fp.read_sidecar(directory)).get(name))
             for directory, name, _ in _output_slots(ctx, path, adjacent=adjacent)
             if directory != path.resolve().parent

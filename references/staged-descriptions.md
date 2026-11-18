@@ -27,7 +27,8 @@ Explicit report and change-record destinations must stay outside the files the
 Action commits. The capture, output and provenance destinations must be distinct.
 Staged social previews default to `assets/.showcase-staging/social-preview.png`.
 An explicit staged path uses a `.showcase-staging` directory outside the
-files the Action commits.
+files the Action commits. A checkout's parent directory name does not reserve
+its ordinary live preview paths.
 A preview's sidecar stays beside the private image outside the canonical Action
 artifact group. Reports preserve existing PNG and JPEG files, as well as paths
 reserved by a queued live preview. On POSIX, staged provenance, reports and

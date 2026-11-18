@@ -2,6 +2,7 @@
 import json
 import os
 import stat
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -93,3 +94,38 @@ def test_readme_staged_records_and_provenance_restrict_existing_permissions(tmp_
     assert stat.S_IMODE(sidecar.stat().st_mode) == stat.S_IMODE(records.stat().st_mode) == 0o600
     assert json.loads(sidecar.read_text(encoding="utf-8"))["outputs"]["README.md"]["staged_description"]
     assert "A synthetic private proposal." in json.loads(records.read_text(encoding="utf-8"))["after"]
+
+
+@pytest.mark.parametrize("metadata_only", [False, True])
+def test_staging_named_checkout_ancestor_does_not_reserve_live_social_output(tmp_path, metadata_only):
+    capture = tmp_path / "capture.json"
+    capture.write_text(json.dumps(meta_dict(description="Run the synthetic support queue.")), encoding="utf-8")
+    checkout = tmp_path / ".showcase-staging" / "checkout"
+    checkout.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(checkout)], check=True)
+    flags = ("--no-repo-dir",) if metadata_only else ("--repo-dir", checkout)
+    common = ("--meta", capture, *flags, "--format", "json", "content", "social")
+    live_path = checkout / "assets" / "social-preview.png"
+    jobs = tmp_path / "jobs.jsonl"
+
+    live = run_cli(*common, "--out", live_path, "--job", "--jobs", jobs)
+    assert live.returncode == 0, live.stdout + live.stderr
+    live_bytes = live_path.read_bytes()
+    job_bytes = jobs.read_bytes()
+    assert json.loads(job_bytes)["kind"] == "browser"
+    live_sidecar = live_path.parent / ".showcase.json"
+    provenance = live_sidecar.read_bytes()
+
+    proposal = ("--description", "A synthetic private proposal.")
+    refused = run_cli(*common, *proposal, "--out", live_path)
+    assert refused.returncode == 2 and "staged-description:path" in refused.stdout
+    assert live_path.read_bytes() == live_bytes
+    assert live_sidecar.read_bytes() == provenance
+
+    private = checkout / "assets" / ".showcase-staging" / "social-preview.png"
+    staged = run_cli(*common, *proposal, "--out", private)
+    assert staged.returncode == 0, staged.stdout + staged.stderr
+    assert private.is_file() and private.read_bytes() != live_bytes
+    blocked = run_cli(*common, "--out", private, "--job", "--jobs", jobs)
+    assert blocked.returncode == 2 and "staged-description:upload" in blocked.stdout
+    assert jobs.read_bytes() == job_bytes
