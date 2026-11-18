@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from . import STANDARD
+from .output_lock import output_lock
 
 
 def record(owner: str, repo: str, kind: str, target: str, before, after, rule: str) -> dict:
@@ -22,14 +23,19 @@ def record(owner: str, repo: str, kind: str, target: str, before, after, rule: s
     return rec
 
 
+def json_lines(recs: list[dict]) -> str:
+    """Serialize signed change records or writer jobs in the queue format."""
+    from .signoff import stamp
+    stamp(recs)  # jobs and change records of a signed-off T3 owner carry signoff_id
+    return "".join(json.dumps(record, sort_keys=True, ensure_ascii=False) + "\n" for record in recs)
+
+
 def append(path: str | Path | None, recs: list[dict]) -> None:
     """Append JSON lines (change records or scripts/writer.py jobs) to PATH, creating its directory."""
     if not path or not recs:
         return
-    from .signoff import stamp
-    stamp(recs)  # jobs and change records of a signed-off T3 owner carry signoff_id
     p = Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    with p.open("a", encoding="utf-8") as fh:
-        for r in recs:
-            fh.write(json.dumps(r, sort_keys=True, ensure_ascii=False) + "\n")
+    with output_lock(p):
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with p.open("a", encoding="utf-8") as fh:
+            fh.write(json_lines(recs))

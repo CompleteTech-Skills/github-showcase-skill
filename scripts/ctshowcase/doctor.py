@@ -175,7 +175,8 @@ def row(ctx: RepoContext) -> dict:
         if re.search(r"<!-- showcase:checklist:start -->.*- \[ \].*<!-- showcase:checklist:end -->",
                      (rd / "README.md").read_text(encoding="utf-8"), re.S):
             logs.append("checklist: open")
-    row = {"repo": f"{ctx.owner}/{ctx.repo}", "type": ctx.det["type"], "variant": ctx.det["variant"], "cells": cells,
+    from .formatting import discover
+    row = {"tooling": discover(rd), "repo": f"{ctx.owner}/{ctx.repo}", "type": ctx.det["type"], "variant": ctx.det["variant"], "cells": cells,
            "done": "yes" if done else "no", **completion(cells), "logs": sorted(set(logs + ctx.logs))}
     from . import signoff
     rec = None
