@@ -83,6 +83,8 @@ Run every command **from inside the target repository's checkout**, with the ski
 | 8 | `doctor --header` | One coverage row with `skill_complete` for locally generated surfaces and `owner_pending` listing unresolved owner-controlled cells. `--allow-unmeasured` is accepted for CLI consistency; it does not relax the checks on existing outputs. `done` only when every applicable cell is `pass`, `warn`, `incomplete` or `n/a`, and the banner has two to four chips. |
 | 9 | `contact-sheet` | A human (or an independent verifier) views the set on both GitHub page colours before rollout. Pass PNGs: `card --png`, `org-tile --png` previews, or install the optional `resvg_py` (`requirements-preview.txt`) so SVG inputs (the intro's static frame) render too; otherwise an SVG input exits 2. |
 
+**Staged descriptions.** `banner`, `card`, `content social` and `readme` accept `--description TEXT` to render a proposed sentence without editing the captured metadata or GitHub. Each reports `staged-description`; written outputs record the text and hashes per output in `docs/images/.showcase.json` (beside external outputs and private social previews). `doctor` fails R2 and logs `description-drift:readme` when the managed tagline differs from the captured live description. See [staged descriptions](references/staged-descriptions.md) for dry runs and provenance.
+
 **Who applies GitHub changes.** Under the estate orchestrator, every proposal (description, topics, labels, README) goes to its single writer queue as change records. Used standalone, with no orchestrator: show the user the `--gh` command lines (or the `argv` of `labels --plan`) and the README diff; the user runs them after approving that repository's changes. The skill itself never runs a write.
 
 **Install.** System Python on Ubuntu 24.04, Debian 12 and Homebrew refuses `pip install` ("externally managed environment"). Use a virtual environment (or `uv`):
@@ -186,16 +188,17 @@ labels --emit-yml
 labels --plan [--references] [--records FILE] [--gh] [--jobs FILE] [--allow-hold]
 banner [--out docs/images/banner.png] [--scale 2] [--icon PATH] [--subtitle TEXT]
        [--key-chip TEXT]... [--chip TEXT]... [--category TEXT] [--allow-unmeasured] [--allow-hold]
-       [--allow-few-chips] [--png-budget 300000] [--format-generated]
+       [--allow-few-chips] [--png-budget 300000] [--description TEXT] [--format-generated]
 card [--out docs/images/card.svg] [--png PATH] [--icon PATH] [--allow-unmeasured] [--allow-hold]
-     [--key-chip TEXT]... [--chip TEXT]... [--format-generated]
+     [--description TEXT] [--key-chip TEXT]... [--chip TEXT]... [--format-generated]
 org-banner --org OWNER --out PATH [--illustration PATH]
 org-tile --org OWNER [--avatar PATH] [--illustration PATH] [--out PATH] [--png PATH]
 intro (--profile CompleteDotTech | --org OWNER) [--name TEXT] [--eyebrow TEXT] [--tagline TEXT]
       [--chip key:TEXT] [--chip attr:TEXT]... [--mark PATH] [--height 320|360] [--static] [--out assets/intro.svg]
 footer [--check README.md [--online]] [--org OWNER] [--raw]
 readme [--mode auto|scaffold|upgrade|header] [--variant auto|A|B|C|D|E|F|G|H|I|J]
-       [--write] [--diff] [--records FILE] [--bootstrap | --no-regroup] [--format-generated]
+       [--write] [--diff] [--records FILE] [--bootstrap | --no-regroup] [--description TEXT]
+       [--format-generated]
 lint svg --kind intro|card|tile|plate|divider FILE...
 lint readme [README.md] [--variant auto]
 lint banner [docs/images/banner.png]
@@ -233,7 +236,7 @@ project copy-plan --target ORG|@me [--role org|template|estate] [--source OWNER/
 project readme --capture FILE --owner OWNER [--out FILE]
 project estate-plan [--copied FILE] [--user-id ID] [--source OWNER/N] [--jobs FILE]
 content social [--out PATH] [--title TEXT] [--icon PATH] [--job] [--allow-unmeasured] [--allow-hold]
-    [--key-chip TEXT]... [--chip TEXT]...
+    [--description TEXT] [--key-chip TEXT]... [--chip TEXT]...
 content icon prompt|normalize|check [--option A|B] [--glyph FILE] [--art-direction FILE] [--in PNG]
     [--ground auto|transparent|keep] [--ground-tolerance DE (0 to 12)] [--seed N] [--out PATH] [--preview PATH]
     [--strict] [--min-contrast RATIO] [--ocr]
@@ -247,7 +250,7 @@ content sidebar --facts FILE [--packages FILE]... [--current FILE] [--repo OWNER
 
 | Command | What it does | Writes |
 |---|---|---|
-| `meta` | Normalizes repository metadata from read-only `gh api` GETs and adds the detected type, variant and family. Stdlib only. A `--meta` file keeps every key a later check reads ([references/meta.schema.json](references/meta.schema.json)): `has_pages`, `size`, `template_repository` (the full_name GitHub records for a repository generated from a template) and `template_taglines` (that template's README tagline when the repository was generated and today, read by `--from-gh`), the About sidebar counts (`releases`, `deployments`, `packages`, `environments`), and the R10 evidence `uses_custom_og_image` (the captured GraphQL `usesCustomOpenGraphImage` is mapped to it; only a boolean counts, and two spellings that disagree leave R10 `unknown`). `--from-gh` makes no GraphQL call, so add the flag from the social preview job's read-only check. | `--out` |
+| `meta` | Normalizes repository metadata from read-only `gh api` GETs and adds the detected type, variant and family. Stdlib only. A `--meta` file keeps every key a later check reads ([references/meta.schema.json](references/meta.schema.json)): `has_pages`, `size`, `template_repository` (the full_name GitHub records for a repository generated from a template) and `template_taglines` (visible template README taglines from creation and today) and `template_tagline_sources` (exact payloads for inheritance checks, captured by `--from-gh`), the About sidebar counts (`releases`, `deployments`, `packages`, `environments`), and the R10 evidence `uses_custom_og_image` (the captured GraphQL `usesCustomOpenGraphImage` is mapped to it; only a boolean counts, and two spellings that disagree leave R10 `unknown`). `--from-gh` makes no GraphQL call, so add the flag from the social preview job's read-only check. | `--out` |
 | `fingerprint` | Hashes description, topics, visibility, license, language, icon, override file, skill version and brand config; reports `changed` against `docs/images/.showcase.json`. Stdlib only. | `$GITHUB_OUTPUT` with `--github-output` |
 | `config` | Validates `references/brand.yaml` against its schema and checks the stdlib lock copy; `--write-lock` regenerates `references/brand.lock.json` after an edit. | `references/brand.lock.json` with `--write-lock` |
 | `brand` | Scaffolds explicit local family and organization rows, validates palette contrast and schema, and preserves existing owner policies. Dry run by default; see [brand onboarding](references/brand-onboarding.md). A new palette stays unmeasured and supplies no approval or legal wording. | Selected config and adjacent lock, optional copied mark, only with `--write` |

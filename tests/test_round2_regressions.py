@@ -4,6 +4,7 @@ import json
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 from PIL import Image
@@ -216,10 +217,115 @@ def test_action_prepare_foreign_and_drop(tmp_path):
     assert not (img / "banner.png").exists() and list(side["outputs"]) == ["card.svg"]
 
 
+@pytest.mark.parametrize("change", ["unrelated-record", "replaced-file", "live-record", "staged-record",
+                                    "already-staged", "already-edited", "unrecorded"])
+def test_action_removes_only_the_observed_foreign_artifact(tmp_path, change):
+    from ctshowcase.fingerprint import update_sidecar
+
+    images = tmp_path / "docs/images"
+    images.mkdir(parents=True)
+    path = images / "banner.png"
+    sidecar = images / ".showcase.json"
+    data = {"inputs": {"owner": "Northwind-Trading", "repo": "template", "type": "template"},
+            "fingerprint": "b" * 64, "outputs": {"banner.png": {}, "card.svg": {}}}
+    staged = {"staged_description": {"text": "A proposed sentence."}}
+    if change == "already-staged":
+        data["outputs"]["banner.png"] = staged
+    elif change == "already-edited":
+        data["outputs"]["banner.png"] = {"sha256": "a" * 64}
+    elif change == "unrecorded":
+        del data["outputs"]["banner.png"]
+    sidecar.write_text(json.dumps(data), encoding="utf-8")
+    path.write_bytes(b"copied image")
+    helper = [sys.executable, str(ROOT / "scripts/action_prepare.py")]
+
+    def command(*args):
+        result = subprocess.run([*helper, *args], cwd=tmp_path, check=True, capture_output=True, text=True)
+        return result.stdout.strip()
+
+    key = command("foreign-key", "Northwind-Trading/project", path.name)
+    if change == "unrecorded":
+        assert not key
+        assert path.read_bytes() == b"copied image" and json.loads(sidecar.read_bytes()) == data
+        return
+    if change in ("already-staged", "already-edited"):
+        assert not key
+        command("drop", path.name)
+        assert path.read_bytes() == b"copied image" and json.loads(sidecar.read_bytes()) == data
+        return
+    assert len(key) == 64
+    if change == "unrelated-record":
+        # A different artifact can finish rendering and update summary metadata.
+        data = update_sidecar(data, {"owner": "Northwind-Trading", "repo": "project", "type": "workspace"},
+                              "c" * 64, "card.svg", {"description_sha256": "a" * 64})
+        assert data["outputs"]["banner.png"]["fingerprint"] == "b" * 64
+    elif change == "replaced-file":
+        path.write_bytes(b"current image")
+    elif change == "live-record":
+        data["outputs"]["banner.png"] = {"repository_id": "42"}
+    else:
+        data["outputs"]["banner.png"] = staged
+    sidecar.write_text(json.dumps(data), encoding="utf-8")
+    before = (path.read_bytes(), sidecar.read_bytes())
+
+    dropped = command("drop", path.name, key)
+    if change == "unrelated-record":
+        assert dropped == "true" and not path.exists()
+        assert json.loads(sidecar.read_bytes())["outputs"] == {"card.svg": data["outputs"]["card.svg"]}
+    else:
+        assert dropped == "false"
+        assert (path.read_bytes(), sidecar.read_bytes()) == before
+
+
 def test_action_treats_exempt_like_a_skip():
     s = (ROOT / "action.yml").read_text()
     assert '"$result" = "exempt"' in s and "--allow-few-chips" in s and "allow-unmeasured" in s
     assert "GITHUB_STEP_SUMMARY" in (ROOT / "scripts" / "action_prepare.py").read_text()
+
+
+@pytest.mark.parametrize("restore_fails", [False, True])
+def test_action_keeps_foreign_artifact_after_sidecar_write_failure(tmp_path, monkeypatch, restore_fails):
+    import action_prepare
+
+    images = tmp_path / "docs/images"
+    images.mkdir(parents=True)
+    path = images / "banner.png"
+    sidecar = images / ".showcase.json"
+    content = {"inputs": {"owner": "Northwind-Trading", "repo": "template", "type": "template"},
+               "outputs": {"banner.png": {}, "card.svg": {}}}
+    sidecar.write_text(json.dumps(content), encoding="utf-8")
+    path.write_bytes(b"copied banner")
+    inode = path.stat().st_ino
+    previous = sidecar.read_bytes()
+    monkeypatch.chdir(tmp_path)
+    key = action_prepare.foreign_key("Northwind-Trading/project", path.name)
+    assert key
+
+    def fail_sidecar(*args, **kwargs):
+        raise OSError("synthetic sidecar replacement failure")
+
+    monkeypatch.setattr(action_prepare, "replace_bytes", fail_sidecar)
+    if restore_fails:
+        real_replace = Path.replace
+
+        def fail_artifact_restore(source, target):
+            if source.parent.name.startswith(".showcase-cleanup-"):
+                raise OSError("synthetic artifact restoration failure")
+            return real_replace(source, target)
+
+        monkeypatch.setattr(Path, "replace", fail_artifact_restore)
+        with pytest.raises(RuntimeError, match="original remains at"):
+            action_prepare.drop(path.name, key)
+        assert not path.exists()
+        recovered, = list((tmp_path / "docs").glob(".showcase-cleanup-*/banner.png"))
+        assert recovered.read_bytes() == b"copied banner" and recovered.stat().st_ino == inode
+        assert list(images.iterdir()) == [sidecar]
+    else:
+        with pytest.raises(OSError, match="synthetic sidecar replacement failure"):
+            action_prepare.drop(path.name, key)
+        assert path.read_bytes() == b"copied banner" and path.stat().st_ino == inode
+        assert not list(images.parent.glob(".showcase-cleanup-*"))
+    assert sidecar.read_bytes() == previous
 
 
 # -- 16 and visual -------------------------------------------------------------------------------------------------

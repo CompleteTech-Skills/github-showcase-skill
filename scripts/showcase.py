@@ -15,11 +15,11 @@ from __future__ import annotations
 
 import argparse
 import difflib
-import hashlib
 import json
 import os
 import re
 import sys
+from contextlib import nullcontext
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -45,7 +45,7 @@ def emit(args, obj: dict) -> None:
         if obj.get("owner"):
             head += f" ({obj['owner']}" + (f"/{obj['repo']})" if obj.get("repo") else ")")
         print(head)
-        for k in ("out", "outputs", "text", "proposed", "logs"):
+        for k in ("out", "outputs", "text", "proposed", "logs", "staged_description"):
             if obj.get(k):
                 print(f"  {k}: {obj[k]}")
         return
@@ -125,11 +125,18 @@ def context(args, b=None, *, for_coverage=False):
     b = b or brand(args)
     rd = repo_dir(args)
     meta = merged(args.meta, str(rd) if rd else None)
-    ctx = RepoContext(b, meta, rd, type_override=getattr(args, "type_override", None), for_coverage=for_coverage,
+    from ctshowcase.staged import prepare
+    proposal_meta, staged = prepare(meta, getattr(args, "description", None))
+    ctx = RepoContext(b, meta if args.command == "readme" else proposal_meta, rd,
+                      type_override=getattr(args, "type_override", None), for_coverage=for_coverage,
                       metadata_path=args.meta)
-    if getattr(args, "format_generated", False):
+    if staged is not None or getattr(args, "format_generated", False):
         ctx.meta_path = Path(args.meta).resolve() if args.meta else None
+    if getattr(args, "format_generated", False):
         ctx.format_root = rd.resolve() if rd else None
+    if staged is not None:
+        ctx.staged_description = staged
+        ctx.log("staged-description")
     return ctx
 
 
@@ -140,6 +147,8 @@ def base(cmd, ctx=None, **kw) -> dict:
     d.update(kw)
     if ctx is not None:
         d.setdefault("logs", ctx.logs)
+        if getattr(ctx, "staged_description", None) is not None:
+            d.setdefault("staged_description", ctx.staged_description)
     d.setdefault("logs", [])
     return d
 
@@ -167,31 +176,31 @@ def gate_watching(ctx, allow_hold=False, remedy=HOLD_REMEDY) -> None:
         raise ShowcaseError(f"{ctx.owner}/{ctx.repo} is in the watching org but is not a fork: {remedy}", log=why)
 
 
-def _sidecar_path(out: Path) -> Path | None:
-    from ctshowcase.fingerprint import SIDECAR
-
-    return out.parent / SIDECAR if out.parent.name == "images" and out.parent.parent.name == "docs" else None
-
-
-def _sidecar_text(ctx, out: Path, record: dict) -> str:
-    from ctshowcase import fingerprint as fp
-
-    # The immutable ID distinguishes a rename or transfer from art copied into a different repository.
-    repo_id = ctx.meta.get("id")
-    if isinstance(repo_id, int) and not isinstance(repo_id, bool):
-        record = dict(record, repository_id=repo_id)
-    metadata_path = getattr(getattr(ctx, "facts", None), "metadata_path", None)
-    inputs = fp.inputs(ctx.meta, ctx.repo_dir, same_owner=lambda a, b: ctx.brand.resolver().same(a, b),
-                       metadata_path=metadata_path)
-    return fp.sidecar_text(out.parent, inputs, ctx.brand.sha256, out.name, record)
-
-
 def maybe_sidecar(ctx, out: Path, record: dict) -> None:
-    from ctshowcase.output_lock import output_lock
+    from ctshowcase.staged import record_output
 
-    if (sidecar := _sidecar_path(out)) is not None:
-        with output_lock(sidecar):
-            sidecar.write_text(_sidecar_text(ctx, out, record), encoding="utf-8")
+    record_output(ctx, out, record, always=out.parent.name == "images" and out.parent.parent.name == "docs")
+
+
+def record_art_exemption(ctx, kind: str, out: str | None, reason: str) -> None:
+    from ctshowcase.fingerprint import ART_EXEMPTIONS, ART_RECORDS, output_records, read_sidecar
+    from ctshowcase.staged import lock_outputs, record_output
+
+    if (ctx.repo_dir is None or getattr(ctx, "staged_description", None) is not None
+            or ctx.style.get("hold") or ctx.watching_status() == "hold:watching-non-fork"
+            or reason not in ART_EXEMPTIONS):
+        return
+    root = ctx.repo_dir.resolve()
+    canonical = root / "docs" / "images" / ART_RECORDS[kind]
+    if not canonical.parent.resolve().is_relative_to(root) or (out is not None and Path(out).resolve() != canonical):
+        return
+    with lock_outputs(ctx, canonical):
+        if not canonical.parent.resolve().is_relative_to(root) or canonical.exists() or canonical.is_symlink():
+            return
+        previous = output_records(read_sidecar(canonical.parent)).get(canonical.name)
+        if isinstance(previous, dict) and "staged_description" in previous:
+            return
+        record_output(ctx, canonical, {"exempt": reason}, always=True)
 
 
 def ensure_distinct_outputs(*destinations: Path) -> None:
@@ -201,42 +210,51 @@ def ensure_distinct_outputs(*destinations: Path) -> None:
                 raise ShowcaseError("output paths must be distinct", log="usage")
 
 
-def write_art(ctx, out: Path, data: bytes, *, format_generated: bool, preview=None, **extra) -> None:
-    """Prepare the optional preview and formatted sidecar before writing any art outputs."""
-    from ctshowcase.formatting import format_text, same_json, target_relative, write_formatted_outputs
-    from ctshowcase.output_lock import output_lock
+def _sidecar_text(ctx, path: Path, data: dict) -> str:
+    from ctshowcase.fingerprint import sidecar_text
+    from ctshowcase.formatting import format_text, same_json
 
-    sidecar = _sidecar_path(out)
-    destinations = [out] + ([sidecar] if sidecar else []) + ([preview[0]] if preview else [])
+    summary = sidecar_text(data)
+    formatted = format_text(ctx.repo_dir, path, summary)
+    if not same_json(summary, formatted):
+        raise ShowcaseError("formatter changed the art sidecar data", log="formatter-content")
+    return formatted
+
+
+def write_art(ctx, out: Path, data: bytes, *, format_generated: bool, preview=None, **extra) -> None:
+    from ctshowcase.fingerprint import bytes_record, has_staged_outputs
+    from ctshowcase.formatting import target_relative, write_formatted_outputs
+    from ctshowcase.staged import check_outputs, lock_outputs, plan_sidecars
+
+    artifacts = [(out, data, extra)]
+    if preview is not None:
+        artifacts.append((*preview, {}))
+    paths = [path for path, _, _ in artifacts]
+    if not format_generated:
+        check_outputs(ctx, *paths)
+        write_rendered_art(ctx, *artifacts)
+        return
+    root = getattr(ctx, "format_root", None) or (ctx.repo_dir.resolve() if ctx.repo_dir else None)
+    for path in paths:
+        target_relative(root, path)
     capture = getattr(ctx, "meta_path", None)
-    ensure_distinct_outputs(*destinations, *([capture] if capture else []))
-    if format_generated:
-        root = getattr(ctx, "format_root", None) or (ctx.repo_dir.resolve() if ctx.repo_dir else None)
-        target_relative(root, out)
-        if sidecar is not None:
-            target_relative(root, sidecar)
-    record = {"sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data), **extra}
-    with output_lock(sidecar):
-        summary = _sidecar_text(ctx, out, record) if sidecar is not None else None
-        if sidecar is not None and summary is not None and format_generated:
-            formatted = format_text(ctx.repo_dir, sidecar, summary)
-            if not same_json(summary, formatted):
-                raise ShowcaseError("formatter changed the art sidecar data", log="formatter-content")
-            summary = formatted
-        outputs = [(out, data)]
-        if preview:
-            outputs.append(preview)
-        if sidecar is not None and summary is not None:
-            outputs.append((sidecar, summary.encode("utf-8")))
-        if format_generated:
-            target_relative(root, out)
-            if sidecar is not None:
-                target_relative(root, sidecar)
-            ensure_distinct_outputs(*destinations, *([capture] if capture else []))
-            write_formatted_outputs(outputs, repo_root=root)
-        else:
-            for destination, content in outputs:
-                write_bytes(destination, content)
+    ensure_distinct_outputs(*paths, *((capture,) if capture else ()))
+    with lock_outputs(ctx, *paths):
+        check_outputs(ctx, *paths, format_root=root)
+        records = [(path, bytes_record(content, **details),
+                    path.parent.name == "images" and path.parent.parent.name == "docs")
+                   for path, content, details in artifacts]
+        planned = plan_sidecars(ctx, *records)
+        if capture is not None:
+            ensure_distinct_outputs(capture, *planned)
+        provenance = [(path, _sidecar_text(ctx, path, summary).encode("utf-8")) for path, summary in planned.items()]
+        for path in planned:
+            target_relative(root, path)
+        private_metadata = {path for path, summary in planned.items() if has_staged_outputs(summary)}
+        artifacts_to_write = [(path, content) for path, content, _ in artifacts]
+        staged = getattr(ctx, "staged_description", None) is not None
+        outputs = provenance + artifacts_to_write if staged else artifacts_to_write + provenance
+        write_formatted_outputs(outputs, repo_root=root, private=staged, private_metadata=private_metadata)
 
 
 def write_bytes(path: Path, data: bytes) -> None:
@@ -244,9 +262,43 @@ def write_bytes(path: Path, data: bytes) -> None:
     path.write_bytes(data)
 
 
+
+def write_artifact(ctx, path: Path, data: bytes) -> None:
+    if getattr(ctx, "staged_description", None) is not None:
+        from ctshowcase.fingerprint import replace_bytes
+        replace_bytes(path, data, private=True)
+    else:
+        write_bytes(path, data)
+
+
 # ---------------------------------------------------------------------------------------------------
 # generators
 # ---------------------------------------------------------------------------------------------------
+def write_rendered_art(ctx, *artifacts: tuple[Path, bytes, dict], summarize_art: bool = True) -> None:
+    from ctshowcase.fingerprint import bytes_record
+    from ctshowcase.staged import check_outputs, lock_outputs, record_output, record_staged_writes
+
+    staged = getattr(ctx, "staged_description", None) is not None
+    paths = tuple(path for path, _, _ in artifacts)
+    adjacent = not summarize_art
+    with lock_outputs(ctx, *paths, adjacent=adjacent):
+        check_outputs(ctx, *paths, adjacent=adjacent)
+        guard = nullcontext()
+        if staged:
+            records = [(path, bytes_record(data, **details), False) for path, data, details in artifacts]
+            guard = record_staged_writes(ctx, *records, adjacent=adjacent)
+        with guard:
+            for path, data, _ in artifacts:
+                write_artifact(ctx, path, data)
+        if not staged:
+            for path, data, details in artifacts:
+                record = bytes_record(data, **details)
+                if summarize_art:
+                    maybe_sidecar(ctx, path, record)
+                else:
+                    record_output(ctx, path, record, always=True, adjacent=adjacent)
+
+
 def cmd_banner(args):
     from ctshowcase import banner
     from ctshowcase.typeset import Fonts
@@ -254,6 +306,7 @@ def cmd_banner(args):
     gate_owner(ctx, args.allow_hold)
     why = ctx.art_status()["banner"]
     if why and why.startswith("exempt"):
+        record_art_exemption(ctx, "banner", args.out, why)
         return base("banner", ctx, result="exempt", logs=[why]), OK
     gate_watching(ctx, args.allow_hold)
     ctx.require_measured(args.allow_unmeasured)
@@ -283,6 +336,7 @@ def cmd_card(args):
     gate_owner(ctx, args.allow_hold)
     why = ctx.art_status()["card"]
     if why and why.startswith("exempt"):
+        record_art_exemption(ctx, "card", args.out, why)
         return base("card", ctx, result="exempt", logs=[why]), OK
     gate_watching(ctx, args.allow_hold)
     ctx.require_measured(args.allow_unmeasured)
@@ -310,6 +364,7 @@ def cmd_card(args):
 
 def cmd_social(args):
     from ctshowcase import social
+    from ctshowcase.staged import SOCIAL_STAGING, check_outputs, check_social_path
     from ctshowcase.typeset import Fonts
     ctx = context(args)
     # R10 (ctx.social_applicable) includes backups and the personal-profile capstone: render whatever adopt uploads,
@@ -318,14 +373,22 @@ def cmd_social(args):
             (ctx.det["type"] in ("backup", "github-profile") and not ctx.social_applicable()):
         return base("social-preview", ctx, result="exempt", logs=["exempt:no-social-preview"]), OK
     ctx.require_measured(args.allow_unmeasured)
+    staged = getattr(ctx, "staged_description", None) is not None
+    job = getattr(args, "job", False)
+    default_path = f"assets/{SOCIAL_STAGING}/social-preview.png" if staged else "assets/social-preview.png"
+    out = Path(args.out) if args.out else default_out(args, default_path)
+    check_social_path(out, staged=staged, job=job, checkout=ctx.repo_dir)
     r = getattr(args, "_content_resolver", None)  # set by `content social` from its --registry/--approved* flags
     data, fmt, info = social.social_render(ctx, Fonts(ctx.brand), args.title, args.icon,
                                            login=r.canonical(ctx.owner) if r else None,
                                            keys=args.key_chip or None, attrs=args.chip or None)
-    out = Path(args.out) if args.out else default_out(args, "assets/social-preview.png")
     if fmt == "jpg":
         out = out.with_suffix(".jpg")
-    write_bytes(out, data)
+        check_social_path(out, staged=staged, job=job, checkout=ctx.repo_dir)
+    report = getattr(args, "report", None)
+    check_outputs(ctx, out, auxiliary=(Path(report),) if staged and report else (), adjacent=True)
+    details = {} if staged else {"live_social_preview": True}
+    write_rendered_art(ctx, (out, data, details), summarize_art=False)
     res = base("social-preview", ctx, result="ok", out=str(out), bytes=len(data), format=fmt, **info)
     if args.command == "social-preview":  # the hidden, deprecated top-level alias of `content social`
         res["logs"] = list(res["logs"]) + ["deprecated:social-preview (use content social)"]
@@ -562,6 +625,8 @@ def cmd_readme(args):
                 print(f"readme: needs-input:readme-managed ({reason})", file=sys.stderr)
                 if not args.write and proposed is not None:
                     print(proposed)
+                if getattr(ctx, "staged_description", None) is not None:
+                    sys.stderr.write(f"staged-description: {json.dumps(ctx.staged_description, ensure_ascii=False)}\n")
             return None, NEEDS_INPUT if args.write else OK
         return base("readme", ctx, result="needs-input", written=False, reason=reason,
                     proposed_header=proposed), NEEDS_INPUT if args.write else OK
@@ -628,6 +693,23 @@ def cmd_readme(args):
             if problems:
                 return base("readme", ctx, result="fail", mode=mode, problems=problems[:20],
                             logs=ctx.logs + ["readme-shrink"]), CHECK_FAILED
+    from ctshowcase.fingerprint import bytes_record, has_staged_outputs
+    from ctshowcase.staged import (
+        check_outputs, lock_outputs, plan_sidecars, protected_auxiliary, record_output, record_staged_writes,
+        tagline_blocks, tagline_digest,
+    )
+
+    staged = getattr(ctx, "staged_description", None) is not None
+    captured_description = str(ctx.meta.get("description") or "")
+    tagline = readme.tagline_body(ctx).strip() if args.write and (staged or captured_description.strip()) else ""
+    # Identify generated blocks before the formatter can reflow their Markdown.
+    planned_taglines = tagline_blocks(after) if tagline else []
+    tagline_indices = [index for index, body in enumerate(planned_taglines) if body == tagline]
+    if staged and tagline:
+        untracked = after.count(tagline) - len(tagline_indices)
+        if untracked > 0 and untracked > before.count(tagline) - tagline_blocks(before).count(tagline):
+            raise ShowcaseError("generated staged tagline is outside a provable README block",
+                                log="staged-description:provenance", code=CHECK_FAILED)
     if args.format_generated:
         from ctshowcase.formatting import format_text, markdown_source_style
         encoding_bom = "\ufeff" if raw.startswith("\ufeff") else ""
@@ -685,6 +767,8 @@ def cmd_readme(args):
                                         code=CHECK_FAILED)
                 drawing = formatted
             badge_outputs[rel] = drawing.encode("utf-8")
+    report = (Path(args.records),) if staged and args.records and changed else ()
+    capture = getattr(ctx, "meta_path", None)
     change_records = []
     intro_path = rd / readme.hero_path(ctx) if personal else None
     if args.records and changed:
@@ -692,68 +776,124 @@ def cmd_readme(args):
                                              f"§7 variant {ctx.det['variant']} ({mode})"))
         if intro_path is not None:
             ensure_distinct_outputs(Path(args.records), intro_path)
-    if args.no_regroup and change_records:
-        capture = (Path(args.meta),) if args.meta else ()
-        ensure_distinct_outputs(Path(args.records), path, rd / "docs/images/.showcase.json",
-                                *(rd / rel for rel in badge_outputs), *capture)
+    if args.no_regroup and change_records and not staged:
+        metadata_path = ctx.facts.metadata_path
+        ensure_distinct_outputs(Path(args.records), path, rd / ".showcase.json", rd / "docs/images/.showcase.json",
+                                *(rd / rel for rel in badge_outputs), *((metadata_path,) if metadata_path else ()))
     if args.format_generated and change_records:
-        capture = getattr(ctx, "meta_path", None)
         ensure_distinct_outputs(Path(args.records), path, contrib_path, *(rd / rel for rel in badge_outputs),
-                                *([capture] if capture else []))
+                                *((capture,) if capture else ()))
     if args.write:
         if badge_outputs or (changed and contrib_new is not None):
             ensure_distinct_outputs(path, contrib_path, *(rd / rel for rel in badge_outputs))
-        outputs = [(rd / rel, data) for rel, data in badge_outputs.items()]
+        outputs = [(rd / rel, content) for rel, content in badge_outputs.items()]
+        rendered_readme = restored.encode("utf-8")
         if changed:
-            outputs.append((path, restored.encode("utf-8")))
+            outputs.append((path, rendered_readme))
             if contrib_new is not None:
                 outputs.append((contrib_path, contrib_new.encode("utf-8")))
         if intro_path is not None:
             for target, _ in outputs:
                 ensure_distinct_outputs(target, intro_path)
-        if args.format_generated:
-            from ctshowcase.formatting import write_formatted_outputs
-            from ctshowcase.output_lock import output_lock
-            capture = getattr(ctx, "meta_path", None)
-            ensure_distinct_outputs(*(target for target, _ in outputs), *([capture] if capture else []))
-            snapshots = [(path, original_readme)]
-            if contrib_new is not None:
-                snapshots.append((contrib_path, original_contrib))
-            for target, original in snapshots:
-                target_relative(rd, target)
-                current = target.read_bytes() if target.is_file() else None
-                if current != original:
-                    raise ShowcaseError("README inputs changed during formatting", log="formatter-source-changed",
-                                        code=CHECK_FAILED)
-            for target, _ in outputs:
-                target_relative(rd, target)
-            record_path = Path(args.records) if change_records else None
-            append_output = None
-            if record_path is not None:
-                encoded = records.json_lines(change_records).replace("\n", os.linesep).encode("utf-8")
-                append_output = (record_path, encoded)
-            with output_lock(record_path):
+        rendered_taglines = tagline_blocks(after) if tagline_indices and args.format_generated else planned_taglines
+        if len(rendered_taglines) != len(planned_taglines):
+            raise ShowcaseError("formatter changed the README tagline markers", log="formatter-content",
+                                code=CHECK_FAILED)
+        matched_taglines = [rendered_taglines[index] for index in tagline_indices]
+        reflowed = any(body != tagline for body in matched_taglines)
+        tagline_record = {}
+        if matched_taglines and (staged or reflowed):
+            digests = sorted({tagline_digest(body) for body in matched_taglines})
+            tagline_record["tagline_sha256"] = digests[0]
+            if len(digests) > 1:
+                tagline_record["tagline_sha256s"] = digests
+            if not staged:
+                tagline_record["description_sha256"] = tagline_digest(captured_description.strip())
+        destinations = [target for target, _ in outputs]
+        if matched_taglines and path not in destinations:
+            destinations.append(path)
+        snapshots = {path: original_readme}
+        if contrib_new is not None:
+            snapshots[contrib_path] = original_contrib
+        output_locks = lock_outputs(ctx, path, *destinations, auxiliary=report) if report else lock_outputs(
+            ctx, path, *destinations)
+        with output_locks:
+            check_outputs(ctx, *destinations, auxiliary=report,
+                          format_root=getattr(ctx, "format_root", None))
+            if not args.format_generated:
+                for target, original in snapshots.items():
+                    current = target.read_bytes() if target.is_file() else None
+                    if current != original:
+                        raise ShowcaseError(f"{target.name} changed while the refresh was being prepared",
+                                            log="readme-source-changed", code=CHECK_FAILED)
+            if args.format_generated:
+                from ctshowcase.formatting import write_formatted_outputs
+                from ctshowcase.output_lock import output_lock
+                ensure_distinct_outputs(*(target for target, _ in outputs), *((capture,) if capture else ()))
+                for target, original in snapshots.items():
+                    target_relative(ctx.format_root, target)
+                    current = target.read_bytes() if target.is_file() else None
+                    if current != original:
+                        raise ShowcaseError("README inputs changed during formatting", log="formatter-source-changed",
+                                            code=CHECK_FAILED)
+                planned = (
+                    plan_sidecars(ctx, (path, bytes_record(rendered_readme, **tagline_record), reflowed))
+                    if matched_taglines else {}
+                )
+                if capture is not None:
+                    ensure_distinct_outputs(capture, *planned)
+                for sidecar in planned:
+                    target_relative(ctx.format_root, sidecar)
+                provenance = [(target, _sidecar_text(ctx, target, data).encode("utf-8")) for target, data in planned.items()]
+                private_metadata = {target for target, data in planned.items() if has_staged_outputs(data)}
+                output_group = provenance + outputs if staged else outputs + provenance
+                record_path = Path(args.records) if change_records else None
+                append_output = None
                 if record_path is not None:
-                    ensure_distinct_outputs(record_path, path, contrib_path, *(rd / rel for rel in badge_outputs),
-                                            *([capture] if capture else []))
-                    if intro_path is not None:
-                        ensure_distinct_outputs(record_path, intro_path)
-                write_formatted_outputs(outputs, repo_root=ctx.format_root, snapshots=dict(snapshots),
-                                        append_output=append_output)
-        else:
-            for target, data in outputs:
-                if target == contrib_path:
-                    contrib_path.write_text(contrib_new, encoding="utf-8")
-                else:
-                    write_bytes(target, data)
+                    ensure_distinct_outputs(record_path, *(target for target, _ in output_group))
+                    encoded = records.json_lines(change_records).replace("\n", os.linesep).encode("utf-8")
+                    append_output = (record_path, encoded)
+                    if staged:
+                        private_metadata.add(record_path)
+                with output_lock(record_path):
+                    if record_path is not None:
+                        if staged:
+                            check_outputs(ctx, *destinations, auxiliary=report)
+                        ensure_distinct_outputs(record_path, path, contrib_path, *(target for target, _ in provenance),
+                                                *(rd / rel for rel in badge_outputs), *((capture,) if capture else ()))
+                        if intro_path is not None:
+                            ensure_distinct_outputs(record_path, intro_path)
+                    write_formatted_outputs(output_group, repo_root=ctx.format_root, snapshots=snapshots,
+                                            private=staged, private_metadata=private_metadata, append_output=append_output)
+            else:
+                guard = nullcontext()
+                if staged and matched_taglines:
+                    record = (path, bytes_record(rendered_readme, **tagline_record), False)
+                    guard = record_staged_writes(ctx, record)
+                with guard:
+                    for target, data in outputs:
+                        if target == contrib_path and not staged:
+                            target.write_text(contrib_new, encoding="utf-8")
+                        else:
+                            write_artifact(ctx, target, data)
+                if not staged and matched_taglines:
+                    record_output(ctx, path, bytes_record(rendered_readme))
     if change_records and not (args.format_generated and args.write):
-        records.append(args.records, change_records)
+        if staged and not args.write:
+            check_outputs(ctx, path, auxiliary=report)
+        if staged:
+            with protected_auxiliary(capture, ctx.repo_dir, Path(args.records)):
+                records.append(args.records, change_records, private=True)
+        else:
+            records.append(args.records, change_records)
     res = base("readme", ctx, result="changed" if changed else "unchanged", mode="bootstrap" if args.bootstrap else mode,
                variant=ctx.det["variant"], written=bool(args.write and changed),
                heading_moves=[] if args.no_regroup else readme.heading_moves(before, after, ctx.det["variant"]))
     if args.diff or not args.write:
         diff = readme_diff(raw, restored)
         if args.format == "text":
+            if getattr(ctx, "staged_description", None) is not None:
+                sys.stderr.write(f"staged-description: {json.dumps(ctx.staged_description, ensure_ascii=False)}\n")
             for move in res["heading_moves"]:
                 if move.get("ambiguous"):
                     sys.stdout.write(f"Heading: {move['heading']} (ambiguous duplicate; "
@@ -984,8 +1124,12 @@ def cmd_fingerprint(args):
     b = brand(args, prefer_lock=True) if args.config else None
     inp = fp.inputs(m, rd, same_owner=b.resolver().same if b else None, metadata_path=args.meta)
     f = fp.fingerprint(inp, fp.config_sha256(b))
-    old = fp.read_sidecar(out_dir).get("fingerprint")
-    changed = f != old
+    selected = None
+    if args.outputs is not None or args.readme is not None:
+        selected = {fp.ART_RECORDS[kind] for kind in (args.outputs or "").split(",") if kind in fp.ART_RECORDS}
+        if args.readme in ("header", "bootstrap"):
+            selected.add("README.md")
+    changed = fp.outputs_changed(fp.read_sidecar(out_dir), f, selected, out_dir=out_dir)
     if args.github_output and os.environ.get("GITHUB_OUTPUT"):
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
             fh.write(f"changed={'true' if changed else 'false'}\nfingerprint={f}\n")
@@ -1337,6 +1481,7 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--png-budget", type=int, default=300_000)
     s.add_argument("--allow-few-chips", action="store_true",
                    help="render with fewer than 2 chips (result incomplete, needs-input:banner-chips) instead of exit 4")
+    s.add_argument("--description", help="render a staged description; log and record it without changing GitHub")
     s.add_argument("--format-generated", action="store_true",
                    help="format the shared JSON sidecar with the target's pinned local Prettier")
     s.set_defaults(func=cmd_banner)
@@ -1347,6 +1492,7 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--icon")
     s.add_argument("--allow-unmeasured", action="store_true")
     s.add_argument("--allow-hold", action="store_true")
+    s.add_argument("--description", help="render a staged description; log and record it without changing GitHub")
     s.add_argument("--key-chip", action="append", default=[])
     s.add_argument("--chip", action="append", default=[])
     s.add_argument("--format-generated", action="store_true", help="format SVG with the target's pinned local Prettier")
@@ -1360,6 +1506,7 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--icon")
     s.add_argument("--allow-unmeasured", action="store_true")
     s.add_argument("--allow-hold", action="store_true")
+    s.add_argument("--description", help="render a staged description; log and record it without changing GitHub")
     s.add_argument("--key-chip", action="append", default=[])
     s.add_argument("--chip", action="append", default=[])
     s.set_defaults(func=cmd_social)
@@ -1411,6 +1558,7 @@ def parser() -> argparse.ArgumentParser:
                    help="refresh existing marker blocks in place and preserve all surrounding bytes")
     s.add_argument("--badges", choices=("shields", "local"), default="shields",
                    help="local renders badges offline to docs/images/badges/*.svg (profile READMEs)")
+    s.add_argument("--description", help="render a staged description; log and record it without changing GitHub")
     s.add_argument("--format-generated", action="store_true", help="format generated text with the target's pinned local Prettier")
     s.set_defaults(func=cmd_readme)
 
@@ -1456,6 +1604,8 @@ def parser() -> argparse.ArgumentParser:
     s = sub.add_parser("fingerprint", help="input fingerprint vs docs/images/.showcase.json")
     s.add_argument("--out-dir", default="docs/images")
     s.add_argument("--github-output", action="store_true")
+    s.add_argument("--outputs", help="restrict the check to selected Action art surfaces (comma-separated banner,card)")
+    s.add_argument("--readme", help="include README provenance for Action modes header and bootstrap")
     s.set_defaults(func=cmd_fingerprint)
 
     s = sub.add_parser("fonts", help="verify or fetch the pinned OFL fonts")

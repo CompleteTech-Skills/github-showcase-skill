@@ -105,6 +105,18 @@ def test_another_recorded_repository_id_is_foreign(tmp_path):
     assert out == "true" and not icon.exists()
 
 
+def test_non_art_repository_ids_do_not_mark_art_as_foreign(tmp_path):
+    repo, icon = _sidecar_repo(tmp_path)
+    sidecar = repo / "docs/images/.showcase.json"
+    data = json.loads(sidecar.read_text(encoding="utf-8"))
+    data["outputs"].update({"README.md": {"repository_id": 4242},
+                            "assets/.showcase-staging/social-preview.png": {"repository_id": 4242},
+                            "./banner.png": {"repository_id": 4242}})
+    sidecar.write_text(json.dumps(data), encoding="utf-8")
+    out, _ = _foreign(repo, "Northwind-Trading-Co/northwind-renamed", GITHUB_REPOSITORY_ID="9999")
+    assert out == "false" and icon.is_file()
+
+
 def test_template_sidecar_is_foreign_and_its_icon_removed(tmp_path):
     repo, icon = _sidecar_repo(tmp_path, repo="northwind-repo-template", type="template")
     out, _ = _foreign(repo, "Northwind-Trading-Co/northwind-new-agent")

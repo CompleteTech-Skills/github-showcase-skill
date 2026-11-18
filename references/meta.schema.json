@@ -64,7 +64,14 @@
       "items": {
         "type": "string"
       },
-      "description": "the taglines this repository may have inherited: the template README's tagline when this repository was generated and today"
+      "description": "visible template README taglines from the time the repository was generated and today"
+    },
+    "template_tagline_sources": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "exact template tagline payloads for inheritance checks, including verified separator whitespace"
     },
     "default_branch": {
       "type": [
