@@ -9,6 +9,7 @@ START, END = "<!-- showcase:footer:start -->", "<!-- showcase:footer:end -->"
 # Additive maintenance credit never overrides decision 18: the footer remains last,
 # byte-identical, and the only <picture>.
 CREDIT_START, CREDIT_END = "<!-- showcase:credit:start -->", "<!-- showcase:credit:end -->"
+CREDIT_DELIMITER = re.compile(r"<!-- showcase:credit:(?:start|end) -->")
 GENERATED_BY = re.compile(r"<!-- generated-by: ([a-z0-9-]+) v=([0-9A-Za-z.+-]+) std=([0-9A-Za-z.-]+) -->")
 
 
@@ -72,6 +73,27 @@ def block(brand) -> str:
     """Append the credit, then the unchanged final footer; configs without attribution get only the footer."""
     credit = credit_block(brand)
     return (f"{credit}\n\n" if credit else "") + footer_block(brand)
+
+
+def credit_structure_valid(text: str) -> bool:
+    """Allow no live credit delimiters, or exactly one complete, unnested pair.
+
+    The shared Markdown projection excludes documented code and literal data.
+    Complete-block searches alone miss dangling delimiters and can hide an
+    earlier opener when a later opener has the same name.
+    """
+    from .mdcode import MANAGED_BLOCK_PATTERN, find_blocks
+
+    delimiters = find_blocks(CREDIT_DELIMITER, text)
+    if not delimiters:
+        return True
+    credits = [block for block in find_blocks(MANAGED_BLOCK_PATTERN, text)
+               if block.group(1) == "credit"]
+    return (len(delimiters) == 2 and len(credits) == 1
+            and delimiters[0].group(0) == CREDIT_START
+            and delimiters[1].group(0) == CREDIT_END
+            and credits[0].start() == delimiters[0].start()
+            and credits[0].end() == delimiters[1].end())
 
 
 def split_credit(text: str, brand=None) -> tuple[str, str | None]:
@@ -167,6 +189,8 @@ def check(brand, readme_text: str) -> tuple[str, list[str]]:
     """pass | fail:missing | fail:not-last | fail:drift (any byte difference) | fail:duplicate (an old footer-like
     block, centred with "Built by" and complete.tech, kept outside code before the decision 18 one) |
     fail:credit-missing | fail:credit-drift. The credit directly precedes the unchanged final footer."""
+    if attribution(brand) is not None and not credit_structure_valid(readme_text):
+        return "fail:credit-drift", []
     rest, credit = split_credit(readme_text, brand)
     st, logs = _check_footer_impl(brand, rest)
     if st != "pass" or attribution(brand) is None:

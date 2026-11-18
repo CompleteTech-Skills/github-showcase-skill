@@ -5,6 +5,7 @@ from conftest import meta_dict
 from ctshowcase import footer, readme
 from ctshowcase.context import RepoContext
 from ctshowcase.meta import normalize
+from test_credit_identity_boundary import configured_credit, identity_sections
 
 CREDIT = ('<sub>Built by <a href="https://www.complete.tech">CompleteTech LLC</a> · Innovation at Every Integration'
           "</sub>")
@@ -60,6 +61,13 @@ def test_compliant_footer_adds_no_removed_lines_and_a_lost_br_still_fails(brand,
     after, removed = readme.upgrade(ctx, before)
     footer_lines = {ln.strip() for ln in footer.markup(brand).splitlines() if ln.strip()}
     assert not [ln for ln in removed if ln.strip() in footer_lines]  # header lines may be reported, footer lines not
-    lost = after.replace("<br>\n</p>\n\n<!-- showcase:footer", "</p>\n\n<!-- showcase:footer", 1)
+    assert readme.preservation(before, after, removed) == []
+    _, exact_footer = identity_sections(after, brand.raw)
+    exact_tail = configured_credit(brand.raw) + "\n\n" + exact_footer
+    assert after.count(AUTHORED) == 1
+    authored_br = after.index(AUTHORED) + AUTHORED.index("<br>\n")
+    lost = after.replace(AUTHORED, AUTHORED.replace("<br>\n", "", 1), 1)
     assert lost != after
+    assert lost == after[:authored_br] + after[authored_br + len("<br>\n"):]
+    assert after.endswith(exact_tail) and lost.endswith(exact_tail)
     assert any("<br>" in p for p in readme.preservation(before, lost, removed))

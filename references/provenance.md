@@ -101,7 +101,9 @@ credit when attribution is configured.
 Ownership requires the entire configured credit, with only equivalent HTML
 formatting and an older version allowed. Another generator, extra authored text,
 different links or ambiguous inline seams are not owned; generation refuses
-before any write. An old footer without credit gains it on refresh. A proven
+before any write. Missing, nested or duplicate live credit delimiters also refuse
+without changing authored bytes; examples inside code or literal data are inert.
+An old footer without credit gains it on refresh. A proven
 post-footer credit from the original proposal moves before the footer on a normal
 header refresh; `--no-regroup` refuses that order change.
 

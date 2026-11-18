@@ -1072,6 +1072,9 @@ def drop_own_credit(text: str, brand=None, *,
 def guard_credit_ownership(brand, text: str) -> None:
     """Refuse before generation when credit-shaped content is authored or has ambiguous seams."""
     source = normalize_text(text)
+    if not footermod.credit_structure_valid(source):
+        raise NeedsInput("credit-ownership", "Preserve the incomplete or duplicate credit markers; "
+                         "resolve their ownership before regenerating.")
     for block in find_blocks(MARK, source):
         if (block.group(1) == "credit" and (not is_own_credit(block.group(2), brand)
                 or not _block_on_separate_lines(source, block))):
