@@ -2415,6 +2415,22 @@ def _raw_marker_text_spans(source, blocks, tags, inline_literals):
         yield end, covered
 
 
+def live_html_tags(text: str):
+    """Yield opening HTML tokens outside code, raw text, and literal Markdown destinations or labels."""
+    source = _source_view(text)
+    visible = _outside_code(source, mask_autolinks=False)
+    tokens = _HTMLTokens(visible, source)
+    raw = tuple(_raw_marker_text_spans(source, html_block_spans(source), tokens.tags, _accepted_inline(source)[3]))
+    literals = (raw, _definition_spans(source), _link_literal_spans(source), _reference_label_spans(source))
+    images = [(start, end) for _, _, start, end in _markdown_images(visible, source)]
+    for start, end in tokens.tags:
+        image = _span_at(images, start)
+        if (image is not None and end <= image[1]) or any(_span_at(spans, start) is not None for spans in literals):
+            continue
+        if match := HTML_OPEN_TAG.fullmatch(tokens.text, start, end):
+            yield match
+
+
 def _marker_comment_starts(source, blocks, literal_spans) -> set[int]:
     """Only the first live opener owns an HTML comment; nested-looking openers are literal."""
     _, comments = _comment_matches(source, blocks)

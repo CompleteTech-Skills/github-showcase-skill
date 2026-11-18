@@ -199,3 +199,37 @@ def test_cli_images_excludes_reference_definitions_in_raw_html(tmp_path, ending)
         "docs/images/html.png", "docs/images/real.png", "docs/images/reference.png",
         "docs/images/visible.png",
     }
+
+
+@pytest.mark.parametrize("ending", ["\n", "\r\n", "\r"])
+def test_image_and_link_reports_use_live_html_attributes_and_no_masked_destinations(tmp_path, ending):
+    text = (
+        '# Synthetic documentation\n\n'
+        'Intro <span title="example <img src=\'docs/images/inline-example.png\'>">Text</span>.\n\n'
+        '<span title="example on the next line\n<img src=\'docs/images/multiline-example.png\'>">Text</span>\n\n'
+        '<img title="example src=\'docs/images/title-example.png\'" src="docs/images/real.png">\n\n'
+        '<source\n srcset="docs/images/source.png 1x, docs/images/retina.png 2x">\n\n'
+        '[Malformed]: <span>.png\n\n'
+        '[Also malformed]: <span></span> docs/images/pretend.png\n\n'
+        '[Valid]: <docs/images/reference.png>\n\n'
+        'Example: `<img src="docs/images/code-example.png">`.\n\n'
+        '[Guide](guide.md "Example: <img src=\'docs/images/title-code.png\'>")\n\n'
+        '<script>\nconst example = "<img src=\'docs/images/raw-text.png\'>";\n</script>\n'
+    )
+    source = text.replace("\n", ending).encode()
+    readme = tmp_path / "README.md"
+    readme.write_bytes(source)
+    targets = {"docs/images/real.png": 8, "docs/images/source.png": 10, "docs/images/reference.png": 17}
+
+    links = run_cli("--repo-dir", tmp_path, "content", "links", "README.md")
+    assert links.returncode == 0, links.stdout + links.stderr
+    assert {row["target"]: row["line"] for row in json.loads(links.stdout)["findings"]} == {
+        **targets, "guide.md": 21,
+    }
+
+    images = run_cli("--repo-dir", tmp_path, "content", "images", "README.md")
+    assert images.returncode == 1, images.stdout + images.stderr
+    assert {row["path"]: row["referenced_from"] for row in json.loads(images.stdout)["images"]} == {
+        target: [f"README.md:{line}"] for target, line in targets.items()
+    }
+    assert readme.read_bytes() == source

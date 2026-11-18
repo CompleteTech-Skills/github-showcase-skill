@@ -254,9 +254,8 @@ ATX = re.compile(r"^ {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$")
 SETEXT = re.compile(r"^ {0,3}(=+|-+)[ \t]*$")
 MD_LINK = re.compile(r"(!?)\[((?:[^\[\]\n]|\[[^\[\]\n]*\])*)\]\(\s*(<[^>\n\x00]*>|[^\s()\x00]*(?:\([^\s()\x00]*\)[^\s()\x00]*)*)"
                      r"(?:\s+(?:\"[^\"\n]*\"|'[^'\n]*'|\([^)\n]*\)))?\s*\)")
-REF_DEF = re.compile(r"^ {0,3}\[([^\]\n]+)\]:\s*(<[^>\n]*>|\S+)")
-HTML_TAG = re.compile(r"<(a|img|source|link|video|audio|image|use)\b([^>]*)>", re.I)
-ATTR = re.compile(r"""(?<![\w-])(href|src|srcset|alt|xlink:href|name|id)\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))""", re.I)
+REF_DEF = re.compile(r"^ {0,3}\[([^\]\n\x00]+)\]:\s*(<[^>\n\x00]*>|[^\s\x00]+)(?=\s|$)")
+HTML_LINK_TAGS = frozenset(("a", "img", "source", "link", "video", "audio", "image", "use"))
 ANCHOR_ATTR = re.compile(r"""<[a-z][^>]*?(?<![\w-])(?:name|id)\s*=\s*["']([^"']+)["']""", re.I)
 HTML_HEADING = re.compile(r"<h([1-6])\b[^>]*>(.*?)</h\1>", re.I | re.S)
 BARE_URL = re.compile(r"https?://[^\s<>()\[\]\"'`\x00]+")
@@ -348,16 +347,10 @@ def anchors(text: str) -> set[str]:
     return out
 
 
-def _attrs(s: str) -> dict:
-    return {m.group(1).lower(): next(g for g in (m.group(3), m.group(4), m.group(5)) if g is not None)
-            for m in ATTR.finditer(s)}
-
-
-def _reference_comment_lines(text: str) -> set[int]:
+def _reference_comment_lines(text: str, starts: list[int]) -> set[int]:
     """Original comment blocks whose semantic trailing definitions remain visible."""
     from .mdcode import html_block_spans
 
-    starts = [0] + [m.end() for m in re.finditer("\n", text)]
     comments = set()
     for start, end in html_block_spans(text):
         # Containers precede the actual HTML opener. Use the shared block boundaries rather than reparsing
@@ -368,10 +361,34 @@ def _reference_comment_lines(text: str) -> set[int]:
     return comments
 
 
+def _html_references(text: str, starts: list[int]) -> dict[int, list[dict]]:
+    """Read attributes on complete shared HTML tokens, including tags split over lines."""
+    from .mdcode import HTML_ATTR, live_html_tags
+
+    by_line: dict[int, list[dict]] = {}
+    for match in live_html_tags(text):
+        if (tag := match.group(1).lower()) not in HTML_LINK_TAGS:
+            continue
+        attrs = {name.lower(): value[1:-1] if value[:1] in ("'", '"') else value
+                 for name, value in HTML_ATTR.findall(match.group(2))}
+        line = bisect.bisect_right(starts, match.start())
+        for key in ("href", "src", "xlink:href", "srcset"):
+            if target := attrs.get(key):
+                if key == "srcset":
+                    target = target.split(",")[0].strip().split(" ")[0]
+                by_line.setdefault(line, []).append(
+                    {"line": line, "target": target, "image": tag in ("img", "source", "image") or key == "src",
+                     "alt": attrs.get("alt"), "syntax": f"html-{tag}"}
+                )
+    return by_line
+
+
 def extract_links(text: str) -> list[dict]:
     """Every link and image target outside code: inline, reference definitions, HTML and bare URLs."""
     text = text.replace("\r\n", "\n").replace("\r", "\n")
-    reference_comments = _reference_comment_lines(text)
+    starts = [0] + [m.end() for m in re.finditer("\n", text)]
+    reference_comments = _reference_comment_lines(text, starts)
+    html_references = _html_references(text, starts)
     found = []
     for n, markdown, masked in scan_lines(text, markdown_only=True):
         if not masked:
@@ -392,14 +409,7 @@ def extract_links(text: str) -> list[dict]:
             found.append({"line": n, "target": m.group(2).strip("<>"), "image": False, "alt": m.group(1),
                           "syntax": "reference"})
             spans.append((m.start(), m.end()))
-        for m in HTML_TAG.finditer(masked):
-            tag, a = m.group(1).lower(), _attrs(m.group(2))
-            for key in ("href", "src", "xlink:href", "srcset"):
-                if key in a and a[key]:
-                    target = a[key].split(",")[0].strip().split(" ")[0] if key == "srcset" else a[key]
-                    found.append({"line": n, "target": target, "image": tag in ("img", "source", "image") or key == "src",
-                                  "alt": a.get("alt"), "syntax": f"html-{tag}"})
-            spans.append((m.start(), m.end()))
+        found.extend(html_references.get(n, ()))
         rest = list(markdown)
         for a, b in spans:
             rest[a:b] = " " * (b - a)
