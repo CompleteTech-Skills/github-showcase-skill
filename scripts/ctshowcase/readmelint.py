@@ -195,8 +195,8 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
         rest = (text[banner.end():] if banner else text).lstrip()
         if personal:
             unchanged = ctx.preserve_unchanged() and preserved(ctx, text)
-            opening = banner.group(2) if banner else text[:personal_header_end(text)]
-            fails.extend(_personal_hero_failures(opening, hero, unchanged, readme=path))
+            opening = banner.span(2) if banner else (0, personal_header_end(text))
+            fails.extend(_personal_hero_failures(text, hero, unchanged, readme=path, opening=opening))
         elif not banner and ctx.art_status()["banner"] is None:
             fails.append(f"D13 variant {variant} must open with the hero banner block")
         first = rest.splitlines()[0] if rest.strip() else ""
@@ -368,8 +368,12 @@ def _has_personal_hero(text: str, hero: str) -> bool:
     return any(_is_personal_hero(image, hero) for image in _image_entries(_outside_code(text), text))
 
 
-def _personal_hero_failures(text: str, hero: str, unchanged: bool, *, readme: Path | None = None) -> list[str]:
+def _personal_hero_failures(text: str, hero: str, unchanged: bool, *, readme: Path | None = None,
+                            opening: tuple[int, int] | None = None) -> list[str]:
     image_view = _outside_code(text)
+    if opening is not None:
+        start, end = opening
+        image_view = " " * start + image_view[start:end]
     parsed = _image_entries(image_view, text, source_order=True)
     failures = []
     if not unchanged:

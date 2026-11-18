@@ -454,18 +454,37 @@ def test_personal_refresh_validates_intro_and_preserves_the_authored_marker_seam
 
 
 @pytest.mark.parametrize("variant", ["G", "H"])
-def test_personal_callout_refuses_multiple_owned_heroes_before_writes(tmp_path, variant):
+@pytest.mark.parametrize("mode,authored", [("upgrade", False), ("header", False), ("scaffold", False), ("upgrade", True)])
+def test_personal_callout_refuses_multiple_marked_heroes_before_writes(tmp_path, intro_bytes, variant, mode, authored):
     meta = metadata(tmp_path)
+    put_intro(tmp_path, intro_bytes)
+    second = LEGACY_HERO.replace('width="100%"', 'width="840"') if authored else LEGACY_HERO
     source = ("> [!NOTE]\n> Synthetic callout.\n\n" + LEGACY_HERO + "# Profile\n\n"
-              + LEGACY_HERO + "Authored notes.\n").encode("utf-8")
+              + second + "Authored notes.\n").encode("utf-8")
     path = tmp_path / "README.md"
     path.write_bytes(source)
     records = tmp_path / "records.jsonl"
     result = run_cli("--meta", meta, "--repo-dir", tmp_path, "--format", "json", "readme",
-                     "--mode", "upgrade", "--variant", variant, "--records", records, "--write")
+                     "--mode", mode, "--variant", variant, "--records", records, "--write")
     assert result.returncode == 4 and "needs-input:intro" in result.stdout, result.stdout + result.stderr
     assert path.read_bytes() == source
     assert not records.exists()
+
+
+def test_full_personal_upgrade_preserves_authored_prose_naming_the_legacy_banner(tmp_path, intro_bytes):
+    meta = metadata(tmp_path)
+    put_intro(tmp_path, intro_bytes)
+    path = tmp_path / "README.md"
+    authored = b"The old docs/images/banner.png is retired.  \r\n"
+    source = (LEGACY_HERO.replace("\n", "\r\n").encode("utf-8") + b"# Synthetic profile\r\n\r\n" + authored
+              + b"\r\n## Notes\n\nKeep these notes.\n")
+    path.write_bytes(source)
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--mode", "upgrade", "--variant", "J", "--write")
+    assert result.returncode == 0, result.stdout + result.stderr
+    refreshed = path.read_bytes()
+    assert authored in refreshed
+    assert b'src="assets/intro.svg"' in refreshed
+    assert b'src="docs/images/banner.png"' not in refreshed
 
 
 @pytest.mark.parametrize("variant", ["G", "H"])

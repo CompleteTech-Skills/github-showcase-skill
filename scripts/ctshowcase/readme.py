@@ -679,11 +679,14 @@ def callout(ctx) -> str | None:
 # Modes
 # ------------------------------------------------------------------------------------------------
 def scaffold(ctx: RepoContext, existing: str = "") -> str:
+    variant = ctx.det["variant"]
     if existing and personal_profile(ctx):
         normalized = normalize_text(existing)
-        if _personal_has_authored_hero(ctx, normalized, find_blocks(MARK, normalized)):
+        markers = find_blocks(MARK, normalized)
+        if variant in ("G", "H"):
+            _personal_banner_blocks(markers, retain=False)
+        if _personal_has_authored_hero(ctx, normalized, markers):
             return header_only(ctx, existing, preserve_structure=True)
-    variant = ctx.det["variant"]
     order = required_sections(ctx.det, meta=ctx.meta)
     parts = [header(ctx)]
     co = callout(ctx)
@@ -812,6 +815,13 @@ def personal_header_end(text: str) -> int:
     return section[0] if section is not None else len(text)
 
 
+def _personal_banner_blocks(markers: list[re.Match], *, retain: bool) -> list[re.Match]:
+    banners = [block for block in markers if block.group(1) == "banner"]
+    if not retain and len(banners) > 1:
+        raise NeedsInput("intro", "Keep one managed personal hero block before refreshing the intro.")
+    return banners
+
+
 def callout_only(ctx: RepoContext, text: str, *, retain_personal_banner: bool = False) -> tuple[str, list[str]]:
     """Variants G and H (§7.4): the hero banner block, then the callout (unless one is already there), then the body
     unchanged, then the decision 18 footer. Nothing else changes. Watching-org forks never reach here (`readme`
@@ -833,9 +843,7 @@ def callout_only(ctx: RepoContext, text: str, *, retain_personal_banner: bool = 
     personal = personal_intro_applies(ctx)
     banner_gap = "\n\n"
     replaced_hero: list[str] = []
-    banners = [block for block in find_blocks(MARK, text) if block.group(1) == "banner"] if personal else []
-    if not retain_personal_banner and len(banners) > 1:
-        raise NeedsInput("intro", "Keep one managed personal hero block before refreshing the intro.")
+    banners = _personal_banner_blocks(find_blocks(MARK, text), retain=retain_personal_banner) if personal else []
     if (not retain_personal_banner and not leading and len(banners) == 1
             and personal_generated_hero(ctx, banners[0].group(2))):
         banner = banners[0]
@@ -1263,10 +1271,10 @@ def upgrade(ctx: RepoContext, text: str, *, already_normalized: bool = False) ->
                      and bootstrap_state(text) == "pristine")
 
     def is_header_line(ln: str) -> bool:
-        if HEADER_LINE.match(ln) or "docs/images/banner.png" in ln:
-            return not personal or not any(_badge_or_logo(source, personal=True)
-                                           for _, source, _ in _image_entries(masked(ln), ln))
-        return False
+        if not personal:
+            return bool(HEADER_LINE.match(ln) or "docs/images/banner.png" in ln)
+        return bool(HEADER_LINE.match(ln)) and not any(_badge_or_logo(source, personal=True)
+                                                      for _, source, _ in _image_entries(masked(ln), ln))
 
     # group the preamble into units: centred HTML blocks and <picture> blocks are classified as a whole
     units: list[list[str]] = []
@@ -1310,7 +1318,8 @@ def upgrade(ctx: RepoContext, text: str, *, already_normalized: bool = False) ->
                 (removed if (x is unit[0] or x is unit[-1] or is_header_line(x)) else keep_pre).append(x)
         else:
             keep_pre.extend(unit)
-    intro = "\n".join(keep_pre).strip(" \t\n")
+    trim = "\n" if personal else " \t\n"
+    intro = "\n".join(keep_pre).strip(trim)
     # sections: renames, mapping, Notes demotion, License last
     renames = rv["renames"]
     section_rows = required_sections(ctx.det, meta=ctx.meta)
@@ -1381,7 +1390,7 @@ def upgrade(ctx: RepoContext, text: str, *, already_normalized: bool = False) ->
         if h in ("License", "Licensing"):
             continue
         if h in placed:
-            content = placed[h].strip(" \t\n")
+            content = placed[h].strip(trim)
             out.append(f"## {h}\n\n{content}" if content else f"## {h}")
         elif req == "R" and not preserve:
             body = section_facts(ctx, h)
@@ -1414,10 +1423,13 @@ def header_only(ctx: RepoContext, text: str, *, already_normalized: bool = False
     if not already_normalized:
         text = normalize_text(text)
     personal = personal_profile(ctx)
-    if personal and not preserve_structure and not retain_personal_banner:
+    if personal and not retain_personal_banner:
         markers = find_blocks(MARK, text)
-        preserve_structure = (_personal_has_authored_hero(ctx, text, markers)
-                              or any(m.group(1) == "banner" and not _block_on_separate_lines(text, m) for m in markers))
+        if ctx.det["variant"] in ("G", "H"):
+            _personal_banner_blocks(markers, retain=False)
+        if not preserve_structure:
+            preserve_structure = (_personal_has_authored_hero(ctx, text, markers)
+                                  or any(m.group(1) == "banner" and not _block_on_separate_lines(text, m) for m in markers))
     gen = {"nav": nav_line(ctx), "footer": footermod.markup(ctx.brand)}
     if not personal:
         gen["banner"] = banner_html(ctx)
@@ -1724,6 +1736,8 @@ def bootstrap(ctx: RepoContext, text: str, *, already_normalized: bool = False) 
     if ctx.meta.get("is_template") or bootstrap_state(text) != "pristine":
         return text
     variant = ctx.det["variant"]
+    if variant in ("G", "H") and personal_profile(ctx):
+        _personal_banner_blocks(find_blocks(MARK, text), retain=False)
     order = required_sections(ctx.det, meta=ctx.meta)
     secs = []
     for h2, req in order:

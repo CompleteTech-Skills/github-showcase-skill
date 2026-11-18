@@ -148,3 +148,17 @@ def test_literal_setext_and_thematic_break_allow_in_place_refresh(tmp_path, appl
     assert b'src="assets/intro.svg"' in hero.group(), updated
     assert updated[:hero.start()] == prefix and updated[hero.end():] == suffix
     assert not [failure for failure in lint_failures(tmp_path, meta, "G") if failure.startswith("D13 ")]
+
+
+def test_hero_lint_resolves_opening_badge_defined_below_the_first_section(tmp_path, applicable_intro):
+    prefix = CALLOUT + b"# Profile\n\n"
+    badge = b"![Build status][build]\n\n"
+    hero = b'<img src="assets/intro.svg" alt="Personal intro">\n\n'
+    body = b"## Notes\n\n[build]: docs/images/badges/authored.svg\n"
+    path = tmp_path / "README.md"
+    meta = fixture_repo(tmp_path, prefix + badge + hero + body, applicable_intro)
+    failures = lint_failures(tmp_path, meta, "G")
+    assert any(failure.startswith("D13 the hero must be the first image") for failure in failures), failures
+
+    path.write_bytes(prefix + hero + badge + body)
+    assert not [failure for failure in lint_failures(tmp_path, meta, "G") if failure.startswith("D13 ")]
