@@ -515,7 +515,9 @@ def test_ledger_location_and_contents(tmp_path):
     assert set(data) == {"completed_runs", "fresh_runs", "star"}  # no target names, nothing else
 
 
-def test_only_a_successful_stamp_counts(brand, checkout):
+def test_only_a_successful_stamp_counts(brand, checkout, monkeypatch):
+    for var in ("CI", "GITHUB_ACTIONS"):  # an operator's shell: in CI nothing counts (asserted elsewhere)
+        monkeypatch.delenv(var, raising=False)
     d = os.environ["SHOWCASE_STATE_DIR"]
     run_cli("--meta", META, "--repo-dir", checkout, "provenance", "check", SLUG, "--offline")
     run_cli("--meta", META, "--repo-dir", checkout, "doctor")
