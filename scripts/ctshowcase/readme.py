@@ -449,7 +449,7 @@ def _replaceable_tagline(ctx: RepoContext | None, body: str, expected: str) -> b
     # A repeated formatted render can recover missing provenance for the same
     # generated text. A soft wrap alone does not establish ownership.
     lines = body.split("\n")
-    if len(lines) < 2 or any(not line.strip() or line.endswith(("  ", "\\")) for line in lines):
+    if len(lines) < 2 or any(not line or line != line.strip() or line.endswith("\\") for line in lines):
         return False
     joined = " ".join(line.strip() for line in lines)
     if expected.startswith('<p align="center"><b>'):

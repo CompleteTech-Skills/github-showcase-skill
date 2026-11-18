@@ -397,7 +397,9 @@ def recorded_tagline(ctx, body: str) -> bool:
     if checkout is None:
         return False
     record = _readme_record(ctx, checkout / "README.md")
-    if tagline_digest(body.strip()) not in _recorded_tagline_digests(record):
+    # Formatter-added separator lines are harmless, but indentation and trailing
+    # spaces can change Markdown and must never be inferred from a legacy digest.
+    if tagline_digest(body.strip("\r\n")) not in _recorded_tagline_digests(record):
         return False
     proposal = record.get("staged_description")
     if isinstance(proposal, dict):

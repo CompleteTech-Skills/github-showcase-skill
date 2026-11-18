@@ -78,6 +78,29 @@ def test_empty_live_description_keeps_authored_tagline_without_drift(make_ctx):
     assert tagline_body(ctx, "**An authored line the owner wrote.**", authored) == "**An authored line the owner wrote.**"
 
 
+def test_legacy_tagline_provenance_does_not_claim_horizontal_whitespace_edits(make_ctx, tmp_path):
+    from ctshowcase.readme import _replaceable_tagline
+    from ctshowcase.staged import recorded_tagline, tagline_digest
+
+    ctx = make_ctx(repo_dir=tmp_path, description="New public description.")
+    original_description = "Old generated description."
+    original = f"**{original_description}**"
+    images = tmp_path / "docs" / "images"
+    images.mkdir(parents=True)
+    record = {"tagline_sha256": tagline_digest(original),
+              "description_sha256": tagline_digest(original_description)}
+    (images / ".showcase.json").write_text(json.dumps({"outputs": {"README.md": record}}), encoding="utf-8")
+
+    assert recorded_tagline(ctx, f"\n{original}\n")
+    assert not recorded_tagline(ctx, "    " + original)
+    assert not recorded_tagline(ctx, original + "  ")
+    ctx.format_root = tmp_path
+    reflowed = "**Old generated\ndescription.**"
+    assert _replaceable_tagline(ctx, reflowed, original)
+    assert not _replaceable_tagline(ctx, "    " + reflowed, original)
+    assert not _replaceable_tagline(ctx, reflowed + "  ", original)
+
+
 def test_cli_doctor_empty_live_description_is_not_drift(tmp_path):
     capture = tmp_path / "meta.json"
     target = tmp_path / "repo"
