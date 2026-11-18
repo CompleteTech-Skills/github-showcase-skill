@@ -385,6 +385,8 @@ def _html_references(text: str, starts: list[int]) -> dict[int, list[dict]]:
 
 def extract_links(text: str) -> list[dict]:
     """Every link and image target outside code: inline, reference definitions, HTML and bare URLs."""
+    from .mdcode import REF_DEFINITION, _balanced_destination, _definition_key
+
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     starts = [0] + [m.end() for m in re.finditer("\n", text)]
     reference_comments = _reference_comment_lines(text, starts)
@@ -404,9 +406,20 @@ def extract_links(text: str) -> list[dict]:
                 spans.append((offset + m.start(), offset + m.end()))
                 md(m.group(2), offset + m.start(2))
         md(markdown, 0)
-        m = REF_DEF.match(masked if n in reference_comments else markdown)
-        if m:
-            found.append({"line": n, "target": m.group(2).strip("<>"), "image": False, "alt": m.group(1),
+        target = None
+        if n in reference_comments:
+            # The trailing text is visible again after the recognized comment is
+            # collapsed. Apply the complete shared definition grammar to it.
+            m = REF_DEFINITION.fullmatch(masked)
+            if (m and _definition_key(m, masked)
+                    and (m.group(3) is None or _balanced_destination(m.group(3), allow_unmatched_openers=True))):
+                target = m.group(2) if m.group(2) is not None else m.group(3)
+        else:
+            m = REF_DEF.match(markdown)
+            if m:
+                target = m.group(2).strip("<>")
+        if m and target is not None and "\x00" not in target:
+            found.append({"line": n, "target": target, "image": False, "alt": m.group(1),
                           "syntax": "reference"})
             spans.append((m.start(), m.end()))
         found.extend(html_references.get(n, ()))

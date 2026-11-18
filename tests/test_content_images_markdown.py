@@ -276,3 +276,29 @@ def test_cli_reference_targets_never_include_or_truncate_html_masks(tmp_path, en
     ]
     assert "\\u0000" not in images.stdout
     assert readme.read_bytes() == authored
+
+
+@pytest.mark.parametrize("ending", [b"\n", b"\r\n", b"\r"])
+def test_cli_references_after_comments_use_the_complete_definition_grammar(tmp_path, ending):
+    readme = tmp_path / "README.md"
+    source = ending.join([
+        b"<!-- marker -->[Malformed]: <span>.png",
+        b"<!-- marker -->[Prefix]: <span>docs/images/pretend.png",
+        b"<!-- marker -->[<span>invalid]: docs/images/also-pretend.png invalid title",
+        b"<!-- marker -->[<span>valid]: <docs/images/accepted.png> 'Optional title'",
+        b"<!-- marker -->[Valid]: docs/images/plain.png",
+        b"",
+    ])
+    readme.write_bytes(source)
+    refs = {"docs/images/accepted.png": 4, "docs/images/plain.png": 5}
+
+    links = run_cli("--repo-dir", tmp_path, "content", "links", "README.md")
+    assert links.returncode == 0, links.stdout + links.stderr
+    assert {row["target"]: row["line"] for row in json.loads(links.stdout)["findings"]} == refs
+
+    images = run_cli("--repo-dir", tmp_path, "content", "images", "README.md")
+    assert images.returncode == 1, images.stdout + images.stderr
+    assert {row["path"]: row["referenced_from"] for row in json.loads(images.stdout)["images"]} == {
+        path: [f"README.md:{line}"] for path, line in refs.items()
+    }
+    assert readme.read_bytes() == source
