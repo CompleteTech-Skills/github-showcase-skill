@@ -467,7 +467,7 @@ def test_personal_lint_requires_intro_image_source(tmp_path, intro_bytes, target
     path.write_text(source, encoding="utf-8")
     result = run_cli(*args, "lint", "readme", path)
     fails = json.loads(result.stdout)["fails"]
-    assert any("hero must open" in failure for failure in fails), fails
+    assert any("hero banner must open" in failure for failure in fails), fails
     assert "D13 the hero must be the first image (assets/intro.svg)" in fails
 
 
