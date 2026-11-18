@@ -32,6 +32,7 @@ from ctshowcase.fingerprint import ART_NAMES, output_records, read_sidecar, repl
 IMAGES = Path("docs/images")
 SIDECAR = IMAGES / ".showcase.json"
 TEMPLATE_REPO = "CompleteTech-LLC/completetech-repo-template"  # intake.TEMPLATE_REPO, the `new --template` default
+COMMIT_HOOKS = ("pre-commit", "prepare-commit-msg", "commit-msg", "post-commit")
 
 
 def _sidecar() -> dict:
@@ -169,6 +170,21 @@ def _git_operation_in_progress(git_dir: Path) -> bool:
     ))
 
 
+def _has_commit_hooks() -> bool:
+    # Porcelain hooks may modify the candidate or enforce local policy.
+    hook_path = subprocess.check_output(["git", "rev-parse", "--git-path", "hooks"], timeout=30)
+    hooks = Path(os.fsdecode(hook_path.removesuffix(b"\n").removesuffix(b"\r")))
+    if any(os.access(hooks / name, os.X_OK) for name in COMMIT_HOOKS):
+        return True
+    # Git versions with named config hooks can run commands outside core.hooksPath.
+    config = subprocess.run(["git", "config", "--null", "--get-regexp", r"^hook\..+\.event$"],
+                            capture_output=True, timeout=30)
+    if config.returncode not in (0, 1):
+        config.check_returncode()
+    events = {record.partition(b"\n")[2] for record in config.stdout.split(b"\0")}
+    return any(name.encode("ascii") in events for name in COMMIT_HOOKS)
+
+
 def _stop_ref_update(transaction: subprocess.Popen) -> None:
     if transaction.poll() is None:
         transaction.terminate()
@@ -277,12 +293,7 @@ def prepare_commit_index(index: Path, snapshot: Path, ref: str, message: str, pa
             return "changed"
         if _git_operation_in_progress(git_dir):
             return "busy"
-        hooks = Path(subprocess.check_output(["git", "rev-parse", "--git-path", "hooks"],
-                                             text=True, timeout=30).rstrip("\n"))
-        # Hooks run by git commit may modify its candidate or enforce local policy.
-        if any(os.access(hooks / name, os.X_OK) for name in (
-            "pre-commit", "prepare-commit-msg", "commit-msg", "post-commit",
-        )):
+        if _has_commit_hooks():
             return "hooks"
         sign = subprocess.check_output(["git", "config", "--type=bool", "--default=false", "--get", "commit.gpgSign"],
                                        text=True, timeout=30).strip()

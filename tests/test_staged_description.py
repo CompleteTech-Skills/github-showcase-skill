@@ -1038,7 +1038,7 @@ def test_action_stages_while_holding_the_renderers_lock(tmp_path):
 
 
 @pytest.mark.requires_bash
-@pytest.mark.parametrize("protection", ["signing", "hook", "staged"])
+@pytest.mark.parametrize("protection", ["signing", "hook", "config-hook", "staged"])
 def test_action_leaves_checkout_untouched_when_publication_is_refused(tmp_path, protection):
     import os
     import subprocess
@@ -1065,6 +1065,9 @@ def test_action_leaves_checkout_untouched_when_publication_is_refused(tmp_path, 
         hook.parent.mkdir()
         hook.write_bytes(b"#!/bin/sh\nexit 1\n")
         hook.chmod(0o700)
+    elif protection == "config-hook":
+        git("config", "hook.synthetic.event", "pre-commit")
+        git("config", "hook.synthetic.command", "false")
     else:
         card.write_bytes(b"previously staged card")
         git("add", "--", "docs/images/card.svg")
@@ -1080,7 +1083,7 @@ def test_action_leaves_checkout_untouched_when_publication_is_refused(tmp_path, 
         assert "missing-signer" in result.stderr
     else:
         assert result.returncode == 0, (result.stdout, result.stderr)
-        reason = "local Git commit hooks" if protection == "hook" else "conflicting index changes"
+        reason = "local Git commit hooks" if protection.endswith("hook") else "conflicting index changes"
         assert reason in result.stdout
     assert git("rev-parse", "HEAD") == parent
     assert git("diff", "--cached", "--binary") == staged
