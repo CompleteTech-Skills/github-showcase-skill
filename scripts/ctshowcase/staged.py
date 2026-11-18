@@ -227,6 +227,14 @@ def check_outputs(ctx, *paths: Path, auxiliary: tuple[Path, ...] = (), adjacent:
 
 
 @contextmanager
+def _lock_sidecars(sidecars: set[Path]):
+    with ExitStack() as locks:
+        for sidecar in sorted(sidecars):
+            locks.enter_context(fp.sidecar_lock(sidecar))
+        yield
+
+
+@contextmanager
 def lock_outputs(ctx, *paths: Path, adjacent: bool = False, auxiliary: tuple[Path, ...] = ()):
     sidecars = _sidecars(ctx, paths, adjacent=adjacent)
     if getattr(ctx, "staged_description", None) is not None:
@@ -235,9 +243,7 @@ def lock_outputs(ctx, *paths: Path, adjacent: bool = False, auxiliary: tuple[Pat
             if _action_managed_path(path, ctx.repo_dir):
                 sidecars.update(root / "docs" / "images" / fp.SIDECAR for root in _action_roots(path, ctx.repo_dir))
     sidecars.update(path.resolve().parent / fp.SIDECAR for path in auxiliary)
-    with ExitStack() as locks:
-        for sidecar in sorted(sidecars):
-            locks.enter_context(fp.sidecar_lock(sidecar))
+    with _lock_sidecars(sidecars):
         yield
 
 
@@ -281,7 +287,7 @@ def plan_sidecars(ctx, *entries: tuple[Path, dict, bool], adjacent: bool = False
 def record_output(ctx, path: Path, record: dict, *, always: bool = False,
                   adjacent: bool = False) -> Path | None:
     """Record a generated output and preserve provenance for untouched surfaces."""
-    with lock_outputs(ctx, path, adjacent=adjacent):
+    with _lock_sidecars(_sidecars(ctx, (path,), adjacent=adjacent)):
         planned = plan_sidecars(ctx, (path, record, always), adjacent=adjacent)
         for sidecar, data in planned.items():
             private = fp.has_staged_outputs(data)
