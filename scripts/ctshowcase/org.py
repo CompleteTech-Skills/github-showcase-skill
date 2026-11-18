@@ -16,6 +16,7 @@ import json
 import re
 import shlex
 import subprocess
+import sys
 from datetime import date
 from pathlib import Path
 from urllib.parse import quote
@@ -2582,10 +2583,13 @@ def cmd_org(args):
         snap = _json_file(args.snapshot) or {}
         row = doctor(estate, org, snap, repo_dir=args.dot_github, avatar=args.avatar, email_approved=args.email_approved,
                      allow_t3=getattr(args, "allow_t3", False))
+        from . import provenance  # decision 25: a row of its own beside the O-checks, never part of `done`
+        prov = provenance.doctor_local("org", row["org"], estate.brand, estate.resolver, args.dot_github)
         if args.org_doctor_format != "json":
             print(as_tsv(row, args.header) if args.org_doctor_format == "tsv" else as_md(row, args.header))
+            print("Provenance (not a cell): " + json.dumps(prov, ensure_ascii=False), file=sys.stderr)
             return None, OK
         return {"command": "org", "action": "doctor", "owner": row["org"], "result": "done" if row["done"] == "yes" else "open",
-                **row}, OK
+                **row, "provenance": prov}, OK
     append_jobs(args.jobs, res.get("jobs") or [])
     return res, code

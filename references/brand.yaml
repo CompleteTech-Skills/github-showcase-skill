@@ -46,6 +46,19 @@ footer:
   line_prefix: Built by
   line_suffix: "· Innovation at Every Integration"
 
+# Public attribution and provenance (decision 25, PROPOSAL pending user confirmation). The credit line follows the
+# decision 18 footer in its own marker block (never inside the footer); the stamp names the skill in every target.
+attribution:
+  skill: github-showcase-skill
+  skill_repo: CompleteTech-Skills/github-showcase-skill
+  skill_url: https://github.com/CompleteTech-Skills/github-showcase-skill
+  publisher: CompleteTech LLC
+  credit_prefix: README styled with
+  credit_suffix: by CompleteTech LLC
+  install_label: Get the skill          # the install prompt after the credit (user answer, 2026-11-18)
+  install_url: https://github.com/CompleteTech-Skills/github-showcase-skill#quick-start
+  topic: github-showcase-skill
+
 fonts:
   poppins-regular: Poppins-Regular.ttf
   poppins-medium: Poppins-Medium.ttf

@@ -10,6 +10,7 @@
 - `lint readme` reads `~~~` fences and URL-encoded image paths.
 - `content images` never offers a one-frame candidate for an animated PNG.
 """
+from conftest import footer_then_credit  # noqa: E402
 import copy
 import io
 import json
@@ -245,7 +246,7 @@ def test_upgrade_replaces_an_old_footer_instead_of_adding_a_second(brand, fixtur
     src = (ROOT / "tests/fixtures/readmes/CompleTetech-Security__php2shell-check.md").read_text(encoding="utf-8")
     ctx = RepoContext(brand, normalize(fixture_meta("CompleTetech-Security__php2shell-check")), None)
     out, removed = readme.upgrade(ctx, src)
-    assert out.count("Built by") == 1 and out.rstrip().endswith("<!-- showcase:footer:end -->")
+    assert out.count("Built by") == 1 and footer_then_credit(out)
     assert readme.preservation(src, out, removed) == []
     (tmp_path / "README.md").write_text(out, encoding="utf-8")
     again, _ = readme.upgrade(RepoContext(brand, normalize(fixture_meta("CompleTetech-Security__php2shell-check")),

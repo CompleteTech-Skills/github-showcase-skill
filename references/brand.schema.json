@@ -406,6 +406,56 @@
     "line_suffix"
    ]
   },
+  "attribution": {
+   "type": "object",
+   "additionalProperties": false,
+   "properties": {
+    "skill": {
+     "type": "string",
+     "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "skill_repo": {
+     "type": "string",
+     "pattern": "^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$"
+    },
+    "skill_url": {
+     "type": "string",
+     "pattern": "^https://github\\.com/"
+    },
+    "publisher": {
+     "type": "string",
+     "minLength": 1
+    },
+    "credit_prefix": {
+     "type": "string",
+     "minLength": 1
+    },
+    "credit_suffix": {
+     "type": "string",
+     "minLength": 1
+    },
+    "topic": {
+     "type": "string",
+     "pattern": "^[a-z0-9][a-z0-9-]{0,49}$"
+    },
+    "install_label": {
+     "type": "string",
+     "minLength": 1
+    },
+    "install_url": {
+     "type": "string",
+     "pattern": "^https://"
+    }
+   },
+   "required": [
+    "skill",
+    "skill_repo",
+    "skill_url",
+    "publisher",
+    "credit_prefix",
+    "credit_suffix"
+   ]
+  },
   "fonts": {
    "type": "object",
    "additionalProperties": {

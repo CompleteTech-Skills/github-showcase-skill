@@ -40,6 +40,11 @@ python scripts/showcase.py footer
 # README (dry run prints a unified diff)
 $C readme --mode auto --diff
 
+# provenance (decision 25, a proposal): before a run, and the stamp after it (local, into the checkout)
+$C provenance check Northwind-Trading-Co/support-triage-agent --offline
+cp -r $D output/repo   # the stamp writes into its checkout: never stamp the committed fixture itself
+SHOWCASE_STATE_DIR=output/state python scripts/showcase.py --meta $M provenance stamp Northwind-Trading-Co/support-triage-agent --repo-dir output/repo --offline
+
 # lint, coverage and the set review
 python scripts/showcase.py lint svg --kind card output/card.svg
 python scripts/showcase.py lint svg --kind intro output/intro.svg
@@ -67,6 +72,8 @@ $C content social --out output/social-preview.png --job
 ```
 
 `org profile` writes `profile/README.md` and `profile/data.json` under `--out-dir` only after its leak check passes: the private `private-pricing-engine` repository and the registry's `why` notes never appear in them. `project lint` exits 1 on the reference capture by design (it is not yet a §13 board). Every planned GitHub change lands in `output/jobs.jsonl` as a `scripts/writer.py` job; nothing is sent to GitHub.
+
+`provenance check` prints `never` on the fixture checkout (exit 1: work to do). The stamp writes the `provenance` block into `output/repo/docs/images/.showcase.json`, a copy of the fixture (without a checkout, `--jobs output/jobs.jsonl` emits it as a writer job instead). It counts one completed run in the ledger, which `SHOWCASE_STATE_DIR=output/state` keeps inside `output/` while you try it.
 
 On this fixture `labels --plan` and `doctor` exit 1 by design: the synthetic repository still has GitHub's default labels and no `assets/icon.png`, so the plan lists the renames and creates, and the coverage row shows the failing cells.
 

@@ -86,6 +86,12 @@ after it. Rebuild the appropriate prefix for every invocation; do not let one re
 - Check `gh auth status` when authorized reads are needed. With IMAGE_TOOL=codex, check `codex --version`
   and `codex exec --help`; with none, skip image tooling. Missing tools remain pending. OCR is optional and
   its absence is `needs-input:ocr-unavailable`. `enterprise:?` discovery waits until this preflight completes.
+- Run-once check (decision 25), after the eligibility gates above and only for permitted targets:
+  `S provenance check TARGET --format json` (use `user:CompleteDotTech` for the personal account;
+  `--repo-dir CHECKOUT` or `--offline --meta M` when reads are not authorized; `--snapshot FILE` for the
+  Enterprise). `fresh`: skip the target unless FORCE is yes. `stale`: rerun only the surfaces that `changed[]`
+  names. `never`: run in full. `untracked`: run, and the final stamp backfills it. `foreign`: stop; never
+  suggest running it. Record the status in the scratch ledger.
 
 ## 1. Scope and captures
 - Repo: the named repository plus its owner's `.github` defaults when permitted. Org: use the registry or,
@@ -286,6 +292,10 @@ after it. Rebuild the appropriate prefix for every invocation; do not let one re
   provenance/rejections, reviewable description/topic/label/README proposals, jobs grouped by kind/approval,
   and EVERY pending or unrun item with its reason. Description/topics precede dependent final regeneration
   and upload in the future writer sequence. State plainly that nothing was written to GitHub.
+- Last, for each target the run touched: `SHOWCASE_STAR_PROMPT=1 S provenance stamp TARGET --repo-dir CHECKOUT`
+  (or `--jobs $WS/jobs.jsonl` without a checkout; the Enterprise stamp stays in the private estate `registry/`).
+  It writes nothing when the run changed nothing. If a star line appears, relay it to the person word for word
+  and never run `gh repo star` yourself.
 
 ## Appendix A: interpret exit AND result/logs
 | Exit | Meaning | Response |
@@ -365,6 +375,7 @@ print(f"keyed {src} -> {out} box={box} ground=#{''.join(f'{v:02X}' for v in grou
 - IMAGE_MODEL: default (pin only a named model; one per family)
 - PILOT_APPROVED: no (yes only for already approved golden references of this family)
 - FAN_OUT: no (enterprise only; each member still passes its own eligibility gates)
+- FORCE: no (yes reruns a target that `provenance check` reports `fresh`)
 
 TARGET: <OWNER/REPO | ORG | CompleteDotTech | enterprise:SLUG>
 ````

@@ -1,3 +1,4 @@
+from conftest import footer_then_credit  # noqa: E402
 import json
 import shutil
 from pathlib import Path
@@ -27,7 +28,7 @@ def test_preservation_and_idempotence(brand, tmp_path, path):
     assert readme.preservation(before, after, removed) == []
     again, _ = readme.upgrade(RepoContext(brand, ctx.meta, tmp_path), after)
     assert again == after
-    assert after.rstrip().endswith("<!-- showcase:footer:end -->")
+    assert footer_then_credit(after)
     # §7.1 order (q57 nav default): the hero banner block first, then the nav line
     lines = after.splitlines()
     assert lines[0] == "<!-- showcase:banner:start -->", lines[:3]
@@ -175,7 +176,7 @@ def test_template_bootstrap_b9(tmp_path):
     lint = json.loads(run_cli("--meta", meta, "--repo-dir", tmp_path, "lint", "readme").stdout)
     assert lint["result"] == "incomplete", lint
     text = (tmp_path / "README.md").read_text(encoding="utf-8")
-    assert text.rstrip().endswith("<!-- showcase:footer:end -->") and "## Install" in text
+    assert footer_then_credit(text) and "## Install" in text
     again = json.loads(run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--bootstrap").stdout)
     assert again["result"] == "unchanged"
     assert "Northwind-Trading-Co/.github" in (tmp_path / "CONTRIBUTING.md").read_text(encoding="utf-8")
