@@ -1266,6 +1266,8 @@ def test_reflowed_taglines_record_exact_bodies_and_follow_the_live_capture(tmp_p
 
     capture(proposed)
     assert not drift()
+    capture(f"  {proposed}  ")
+    assert not drift()
     assert action_prepare.has_staged_outputs()
 
     live = "Keep the live help queue available and route each synthetic request to the owner."
@@ -1279,6 +1281,8 @@ def test_reflowed_taglines_record_exact_bodies_and_follow_the_live_capture(tmp_p
     assert showcase.main(args) == 0
     assert not drift()
     assert recorded()["description_sha256"] == tagline_digest(live)
+    capture(f"  {live}  ")
+    assert not drift()
     edited = path.read_text(encoding="utf-8").replace("owner.**", "maintainer.**", 1)
     path.write_text(edited, encoding="utf-8")
     assert drift()

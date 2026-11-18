@@ -331,5 +331,5 @@ def tagline_drift(ctx, text: str, path: Path | None = None) -> bool:
     record = _readme_record(ctx, path)
     staged = record.get("staged_description")
     rendered_description = staged.get("sha256") if isinstance(staged, dict) else record.get("description_sha256")
-    return (rendered_description != tagline_digest(captured)
+    return (rendered_description != tagline_digest(captured.strip())
             or not {tagline_digest(block) for block in different}.issubset(_recorded_tagline_digests(record)))

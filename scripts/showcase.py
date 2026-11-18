@@ -714,7 +714,7 @@ def cmd_readme(args):
             if len(digests) > 1:
                 tagline_record["tagline_sha256s"] = digests
             if not staged:
-                tagline_record["description_sha256"] = tagline_digest(captured_description)
+                tagline_record["description_sha256"] = tagline_digest(captured_description.strip())
         destinations = [target for target, _ in outputs]
         if matched_taglines and path not in destinations:
             destinations.append(path)
