@@ -104,7 +104,7 @@ One dark file, no `<picture>`:
 
 ### Sidecar `docs/images/.showcase.json`
 
-Written by `banner` and `card` when their output is under `docs/images/`. Sorted keys, no timestamps:
+Written by `banner` and `card` when their output is under `docs/images/`. Sorted keys; the generators write no timestamps:
 
 ```json
 {"schema": 1, "skill_version": "1.0.0", "standard": "ct-std-v1", "config_sha256": "…",
@@ -114,6 +114,8 @@ Written by `banner` and `card` when their output is under `docs/images/`. Sorted
  "outputs": {"banner.png": {"sha256": "…", "px": [2560, 720], "bytes": 211234, "scale": 2, "repository_id": 123},
              "card.svg": {"sha256": "…", "bytes": 27110, "repository_id": 123}}}
 ```
+
+`provenance stamp` (decision 25, a proposal) adds one more key, `provenance` ([schema](provenance.schema.json)): the skill, its version and standard, the resolved target, `first_run_at`, `last_run_at`, `last_changed_at`, `run_count`, the art's `fingerprint` and `surfaces[]`. Its timestamps and count are outside the fingerprint inputs, every generator keeps the block when it rewrites the sidecar, and a new sidecar written by a stamp alone carries an empty `outputs` map.
 
 `fingerprint` compares the current inputs with `fingerprint` here; the composite Action regenerates only when they differ. Each output record carries `repository_id`, the repository's immutable id from `meta --from-gh` (outside the fingerprint inputs), when the metadata has one.
 

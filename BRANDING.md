@@ -18,6 +18,19 @@ The estate uses one dark design per surface on both GitHub themes (decision 21).
 
 Typography: Poppins (eyebrows, subtitles, chips) and JetBrains Mono (slugs) for CompleteTech; Fraunces and Bricolage Grotesque for AI Ascension; Press Start 2P only at 36 px or larger for jevplay.games. All text is outlined to paths at build time.
 
+## Credit line (decision 25, a proposal pending user confirmation)
+
+Every README and profile README the skill manages ends with the decision 18 footer, then one credit block that credits the skill, not the repository's owner:
+
+```html
+<!-- showcase:credit:start -->
+<!-- generated-by: github-showcase-skill v=1.0.0 std=ct-std-v1 -->
+<p align="center"><sub>README styled with <a href="https://github.com/CompleteTech-Skills/github-showcase-skill">github-showcase-skill</a> by CompleteTech LLC</sub></p>
+<!-- showcase:credit:end -->
+```
+
+The visible wording is *README styled with [github-showcase-skill](https://github.com/CompleteTech-Skills/github-showcase-skill) by CompleteTech LLC*. Its parts (`credit_prefix`, the skill name and URL, `credit_suffix`) live only in the `attribution` row of `references/brand.yaml`. The credit never goes inside the footer, the footer's markup stays byte-identical, and it stays the only `<picture>`. T2 families carry the same credit, because the footer they already carry names CompleteTech LLC (decision 18). The Enterprise has no README and gets no credit.
+
 ## Handoff to the next skill
 
 Carry verified facts and their sources, artifact path/version, approved identity and local logo path, palette overrides, confidentiality, intended audience, approval owner/status, blockers and next specialist. Preserve these in the orchestrator's existing `project_state`; do not replace its workflow schema with an incompatible parallel state format. For estate work, also carry the `logs[]` codes and any change records the commands emitted, unchanged.
