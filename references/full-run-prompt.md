@@ -1,6 +1,6 @@
 # Full-capacity run prompt
 
-A copy-ready operator prompt for one repository, organization, the supported personal profile or the Enterprise.
+A copy-ready operator prompt for one repository, organization, personal account or enterprise, for any GitHub user.
 The skill renders deterministic surfaces and proposes GitHub changes. Optional image generation supplies only
 illustration layers through the [image-generation recipe](art-direction.md#codex-image-generation-recipe).
 Missing inputs, exemptions and owner-controlled work remain visible; nothing in this prompt writes to GitHub.
@@ -9,16 +9,24 @@ Missing inputs, exemptions and owner-controlled work remain visible; nothing in 
 
 1. Copy the prompt below. Replace `<SKILL_DIR>`, `<PY>` and `<SCRATCH_DIR>` with absolute paths; `<PY>` is the
    venv Python (`.venv/bin/python` or `.venv\Scripts\python.exe`). Scratch must be outside every repository.
-2. Adjust the options and replace the single final TARGET line. Existing scoped authorization is reusable;
+2. Set your identity. The shipped `references/brand.yaml` describes the CompleteTech estate. For your own
+   accounts, add your family and organization rows to a config you own with `brand add-family` and
+   `brand add-org` ([brand onboarding](brand-onboarding.md)) and set `<BRAND_CONFIG>` to it. Set
+   `<ESTATE_ROOT>` only if you keep a private registry (layout: `examples/estate/`), and never commit it. Leave
+   either empty and the agent proposes the onboarding dry run at STOP 1 instead of guessing.
+3. Adjust the options and replace the single final TARGET line. Existing scoped authorization is reusable;
    STOP 1 asks only for an unresolved gate, and STOP 2 is the existing per-family pilot gate.
-3. Send it to the agent. `SKILL.md` and the referenced command contracts remain authoritative if they change.
+4. Send it to the agent. `SKILL.md` and the referenced command contracts remain authoritative if they change.
 
 ````markdown
 # GitHub Showcase: full-capacity run
 
-Run the CompleteTech `github-showcase-skill` at `<SKILL_DIR>` on the final TARGET. Produce every applicable,
-authorized surface, run its audits and leave reviewable plans and uncommitted local outputs. Continue independent
-work when a surface is pending; never turn a refusal, missing input or exemption into apparent completion.
+Run `github-showcase-skill` at `<SKILL_DIR>` on the final TARGET. Produce every applicable, authorized
+surface, run its audits and leave reviewable plans and uncommitted local outputs. Continue independent work when
+a surface is pending; never turn a refusal, missing input or exemption into apparent completion.
+
+The operator's identity comes only from BRAND_CONFIG, ESTATE_ROOT and the TARGET. Never assume the skill's
+shipped CompleteTech estate, its logins, legal wording, affiliation or approvals for an owner they do not name.
 
 Read the target's maintainer instructions and the skill's `SKILL.md`, `references/decisions.md`,
 `art-direction.md`, `content.md`, `staged-descriptions.md` and `profile-readmes.md`; for scope extensions also
@@ -32,21 +40,29 @@ read `org.md`, `projects.md` and `enterprise.md` under `references/`. Follow the
 3. Skip excluded owners. Never invent approval or add `--allow-hold`, `--allow-unmeasured` or `--allow-t3`
    yourself; never use `--allow-few-chips`. Flags lift only the specific documented gate, on supported commands.
 4. The image model draws only illustration layers, never text, logos, marks, people or third-party IP.
-   Use committed marks unchanged. One dark design per surface; only the decision 18 footer uses `<picture>`.
+   Use committed marks unchanged. One dark design per surface; only the configured footer uses `<picture>`
+   (decision 18; an owner whose brand row sets `footer: no` is exempt).
 5. Read the entire generated prompt before sending it. Only public facts may leave the machine. Private
    repositories use only family glyph fields and a neutral name, or stay pending. Keep raw captures, private
-   names, jobs and candidates in scratch; never copy the estate bundle into a repository.
+   names, jobs and candidates in scratch; never copy an estate bundle or registry into a repository.
 6. Keep a scratch ledger with target, step, argv, exit, structured result/logs, output paths and sha256.
    Resume from verified outputs; do not regenerate paid art merely because the run was interrupted.
 
 Use Python argv lists on both POSIX and Windows, never a space-joined executable string or `eval`:
 ```python
 from pathlib import Path
+import os
 import subprocess
 PY = str(Path(r"<PY>").resolve())
 SKILL_DIR = Path(r"<SKILL_DIR>").resolve()
 WS = Path(r"<SCRATCH_DIR>").resolve()
-BASE = [PY, str(SKILL_DIR / "scripts/showcase.py"), "--format", "json"]
+BRAND_CONFIG = r"<BRAND_CONFIG>"  # empty: the shipped references/brand.yaml
+ESTATE_ROOT = r"<ESTATE_ROOT>"    # empty: no private registry (registry-free paths)
+CONFIG = ["--config", str(Path(BRAND_CONFIG).resolve())] if BRAND_CONFIG else []
+ENV = dict(os.environ)
+if ESTATE_ROOT:
+    ENV["SHOWCASE_ESTATE_ROOT"] = str(Path(ESTATE_ROOT).resolve())
+BASE = [PY, str(SKILL_DIR / "scripts/showcase.py"), *CONFIG, "--format", "json"]
 G = []  # global flags for THIS authorized invocation only; re-check scope/expiry each time
 S = [*BASE, *G]  # scope commands: no repository capture/checkout
 # Set these for EACH repository after its capture and checkout succeed:
@@ -54,23 +70,24 @@ M = WS / "meta" / OWNER / (REPO + ".json")
 CHECKOUT = WS / "checkouts" / OWNER / REPO
 R = [*S, "--meta", str(M), "--repo-dir", str(CHECKOUT)]
 # Example: D is [] for unchanged descriptions; otherwise ["--description", proposed_text].
-result = subprocess.run([*R, "banner", *D], cwd=CHECKOUT,
+result = subprocess.run([*R, "banner", *D], cwd=CHECKOUT, env=ENV,
                         capture_output=True, text=True, encoding="utf-8", shell=False)
 ```
 Below, `R command ...` means append those argument tokens to R; `S command ...` uses the scope prefix without
 repository metadata. Substitute each path/text placeholder as ONE string argument; `[D]` means append D, not
 literal brackets. Use absolute paths for ALL file arguments, including README, glyph YAML, prompt, candidate,
-keyer inputs, reports and captures. Global T3 flags go before the command; supported hold/unmeasured flags go
+keyer inputs, reports and captures. Pass `env=ENV` to every invocation. Global T3 flags go before the command; supported hold/unmeasured flags go
 after it. Rebuild the appropriate prefix for every invocation; do not let one repository's flags leak to another.
 
 ## 0. Local preflight and target eligibility (before any target network read)
 - Prepare WS with `meta/`, `checkouts/`, `tools/`, `art/{prompts,runs,candidates,golden}/`, `proof/`, and
   scratch jobs/records/ledger paths. Use a venv with the pinned requirements; run `S fonts --check` and `S config`.
   Fetch missing fonts only when network use is authorized; otherwise record `needs-input:fonts`.
-- Read the estate bundle in place when available (`SHOWCASE_ESTATE_ROOT` or beside the skill), including
-  registry, decisions and approvals. Resolve current/former owner logins with the skill's shared resolver and
-  brand data. Classify `OWNER/REPO`, configured org login, `CompleteDotTech`, or `enterprise:SLUG` locally;
-  an unknown owner/identity is pending, not a reason to query arbitrary accounts. No other user is supported.
+- Read an estate bundle in place only when one exists (ESTATE_ROOT, or the bundle beside the skill), including
+  registry, decisions and approvals; without one, use the registry-free paths below. Resolve current/former
+  owner logins with the skill's shared resolver and the selected brand config. Classify `OWNER/REPO`, an org
+  login, `user:LOGIN` or `enterprise:SLUG` locally. Resolve a bare login from the config or registry, or after
+  STOP 1 with `gh api users/LOGIN --jq .type`. An owner with no brand row is not refused: see Brand identity.
 - Check exclusions, HOLD, family holds, unmeasured palettes, exposure/private-data decisions and T3 scope
   BEFORE `gh` enumeration, metadata reads, cloning or image capture. STOP 1: show the scope and unresolved
   gates first. Reuse existing explicit authorization only within its scope; otherwise hold the affected work.
@@ -82,12 +99,19 @@ after it. Rebuild the appropriate prefix for every invocation; do not let one re
   flags; this reads supplied/local inputs and prints proposed reads, without executing them.
 - Local diagnostics the contracts expressly allow (such as repository `doctor`'s T3 hold row, or HOLD org
   about/pins/health/doctor) remain available; their exception never grants permission for otherwise denied reads.
-  For an unknown brand row, show the `S brand add-org` dry run only after its required identity inputs exist.
+- Brand identity. An owner with no row in the selected config renders only in neutral style
+  (`needs-input:org-row`). At STOP 1, ask the operator for the identity inputs: family name and label, dark
+  canvas, ink and accent hex, tier, display name, `footer yes|no|hold`, and an authorized mark PNG if any. Then
+  show the `S brand add-family ...` or `S brand add-org ...` dry run against BRAND_CONFIG
+  (`references/brand-onboarding.md`). Never invent colours, legal wording or affiliation, and never write to
+  the shipped `references/brand.yaml` of a shared install. Repeat with `--write` only after approval. A new
+  family is `measured: false`: `--allow-unmeasured` needs the operator's explicit approval, and its outputs
+  are review renders. Topic proposals wait for the org's `brand_topic` (`needs-input:brand-topic`).
 - Check `gh auth status` when authorized reads are needed. With IMAGE_TOOL=codex, check `codex --version`
   and `codex exec --help`; with none, skip image tooling. Missing tools remain pending. OCR is optional and
   its absence is `needs-input:ocr-unavailable`. `enterprise:?` discovery waits until this preflight completes.
 - Run-once check (decision 25), after the eligibility gates above and only for permitted targets:
-  `S provenance check TARGET --format json` (use `user:CompleteDotTech` for the personal account;
+  `S provenance check TARGET --format json` (`user:LOGIN` for a personal account;
   `--repo-dir CHECKOUT` or `--offline --meta M` when reads are not authorized; `--snapshot FILE` for the
   Enterprise). `fresh`: skip the target unless FORCE is yes. `stale`: rerun only the surfaces that `changed[]`
   names. `never`: run in full. `untracked`: run, and the final stamp backfills it. `foreign`: stop; never
@@ -97,8 +121,11 @@ after it. Rebuild the appropriate prefix for every invocation; do not let one re
 - Repo: the named repository plus its owner's `.github` defaults when permitted. Org: use the registry or,
   only after owner-wide eligibility, paginated read-only `gh api --paginate orgs/ORG/repos?per_page=100`.
   Retain the complete list, including private/archived repositories, privately. Apply each repository's gates.
-- Personal: first include `CompleteDotTech/CompleteDotTech` and all registry-referenced public repositories
-  across owners (pins, more projects, directory/estate activity inputs). Establish visibility from captures,
+- Personal (`user:LOGIN`): after eligibility, map the account with
+  `S account-chart capture LOGIN --out WS/account.snapshot.json`. This is read-only GraphQL; it applies the same
+  gates, names only public repositories, and reports enterprise and role data only when LOGIN is the signed-in
+  viewer. Keep the snapshot private. Scope is `LOGIN/LOGIN`, plus the public repositories the operator selects
+  from the snapshot, plus, with a registry, its profile references (pins, more projects). Establish visibility from captures,
   applying each owner's gates before capture. Capture required source metadata even when no source checkout
   is needed; clone every repository selected for local changes. Do not render a sparse personal profile when
   required captures or the registry are missing: list the missing scope and keep that render pending.
@@ -153,8 +180,9 @@ after it. Rebuild the appropriate prefix for every invocation; do not let one re
    - Select the first readable image path reported by THAT invocation, then copy to absolute C/slot-N.png.
      Never use a directory listing or the newest generated image. No readable path: retry the unchanged
      prompt at most 3 attempts for that slot, then stop it with `art-fail`.
-   - References must be text-free approved family art. Every jevplay-games prompt also requires the exact
-     `jevplay-games/.github/profile/assets/jev-reference.png`; if unavailable, hold it. No banners/cards.
+   - References must be text-free approved family art. When the family's art direction requires an exact
+     reference image (for example the jevplay-games mascot), attach that file; if it is unavailable, hold the
+     slot. Never attach banners or cards.
    - One tool/model per family. Request a seed only through `content icon prompt --seed N`; report the
      returned model identity or `not exposed`. IMAGE_TOOL=api uses the same public prompt verbatim, one image
      per call, only when that capability is authorized. Optional art is never a prerequisite for other audits.
@@ -189,8 +217,9 @@ after it. Rebuild the appropriate prefix for every invocation; do not let one re
    `R content social --job --jobs JOBS`; record its applicability/result, output path and any withheld job.
 4. `R readme --diff [D]`: save the JSON `diff` field as PROOF/OWNER__REPO-readme.diff, then
    `R readme --write [D]` only after its dry-run checks pass. `readme-shrink` stops this repository's writes.
-5. `R footer --check CHECKOUT/README.md`; add `--online` only when the read is authorized, else report that
-   remote check unrun. Do not treat offline footer validation as live URL evidence.
+5. `R footer --check CHECKOUT/README.md` when the owner's brand row has `footer: yes`; otherwise report the
+   footer exempt (`S footer --org OWNER` states the reason). Add `--online` only when the read is authorized,
+   else report that remote check unrun. Do not treat offline footer validation as live URL evidence.
 
 ## 5. Repository content audits (R; proposals only)
 - `R content links --base-ref origin/DEFAULT_BRANCH --cache WS/links-cache.json --diff`; use the verified
@@ -256,21 +285,34 @@ after it. Rebuild the appropriate prefix for every invocation; do not let one re
   approved writer action and a fresh target-board capture. Never run a mutation from the returned jobs.
 - With registry: `S doctor --estate --meta-dir WS/meta --out WS/NEW_PROPOSALS.yaml`.
 
-### Personal account (CompleteDotTech, built last)
-- Require the complete section 1 capture set and top-level registry profile first. Without them, no personal
-  profile render; report the missing inputs. Independently audit its existing verified checkout with R.
-- Run sections 2, 3 (icon), 4 (card/social/footer only) and 5 on the profile repository. `banner` is exempt;
-  `readme` is skipped because `org profile --user` owns README.md. Description proposals stay staged.
-- Apply the same no-output preview and destination ownership checks before
-  `S org profile --user CompleteDotTech --meta-dir WS/meta --out-dir PROFILE_CHECKOUT --render`. Inspect
-  logs/assets/outputs and stop on refusal. Then `S intro --profile CompleteDotTech
-  --out PROFILE_CHECKOUT/assets/intro.svg` under the generated-asset ownership rule above.
-  Run `R footer --check PROFILE_CHECKOUT/README.md` and `S lint public-leak FILE... --meta-dir WS/meta`
-  against the whole registry. Never infer completeness from an exit-0 sparse profile or missing visibility.
+### Personal account (`user:LOGIN`, built last)
+- Account chart, for any LOGIN: `S account-chart render --snapshot WS/account.snapshot.json --out-dir PROOF/chart`,
+  then `S lint svg --kind chart PROOF/chart/account-chart.svg`. Copy it into PROFILE_CHECKOUT/docs/images only
+  when the operator wants it there and that path holds no authored file. Its `account-chart.md` block is a
+  README proposal for the operator to place, not an automatic edit.
+- Generated profile README. `S org profile --user LOGIN` supports only the personal account configured in the
+  skill (today `CompleteDotTech`, with the registry's top-level `profile`). For that account:
+  - Require the complete section 1 capture set and the registry profile first. Without them, render no
+    profile and report the missing inputs.
+  - Run sections 2, 3 (icon), 4 (card/social/footer only) and 5 on `LOGIN/LOGIN`. `banner` is exempt, and
+    `readme` is skipped because `org profile --user` owns README.md.
+  - Apply the same no-output preview and destination ownership checks before
+    `S org profile --user LOGIN --meta-dir WS/meta --out-dir PROFILE_CHECKOUT --render`, then
+    `S intro --profile LOGIN --out PROFILE_CHECKOUT/assets/intro.svg` under the generated-asset ownership rule.
+- Any other LOGIN: report the generated profile README as unsupported, never hand-write it. Run sections 2, 3
+  and 5 on `LOGIN/LOGIN`. Render its banner, card and social preview only to PROOF for review. Keep `readme`
+  to `R readme --diff [D]` as a proposal, never `--write`, because a profile README is authored content.
+  `S intro --profile LOGIN --out PROOF/intro.svg` works once LOGIN has a brand row.
+- Run `S lint public-leak FILE...` on every public output (with `--meta-dir WS/meta` and the registry when
+  present). Never infer completeness from an exit-0 sparse profile or missing visibility.
 
 ### Enterprise
 - `S enterprise snapshot --slug SLUG --out SNAPSHOT` runs read-only GraphQL;
   `S enterprise snapshot-query --slug SLUG` prints the queries. Keep the snapshot private in WS/enterprise.
+- The E-checks, seat check and plan compare the snapshot with the skill's `references/enterprise.yaml`, which
+  describes the CompleteTech Enterprise. For any other enterprise, report their cells as informational against
+  that file and queue no plan jobs until the operator supplies a reviewed desired-state file of their own in
+  their skill copy. Pass `--user LOGIN` to seat-check only for a user the operator names.
 - `S enterprise doctor --snapshot SNAPSHOT [--baseline OLD]`, `S enterprise seat-check --snapshot SNAPSHOT`,
   `S enterprise plan --snapshot SNAPSHOT --jobs JOBS --records RECORDS`; with baseline also
   `S enterprise diff --baseline OLD --snapshot SNAPSHOT`. No art, billing, policy or domain changes here.
@@ -293,7 +335,7 @@ after it. Rebuild the appropriate prefix for every invocation; do not let one re
   and EVERY pending or unrun item with its reason. Description/topics precede dependent final regeneration
   and upload in the future writer sequence. State plainly that nothing was written to GitHub.
 - Last, for each target the run touched: `SHOWCASE_STAR_PROMPT=1 S provenance stamp TARGET --repo-dir CHECKOUT`
-  (or `--jobs $WS/jobs.jsonl` without a checkout; the Enterprise stamp stays in the private estate `registry/`).
+  (or `--jobs $WS/jobs.jsonl` without a checkout; an enterprise stamp stays in the private `ESTATE_ROOT/registry/`, never in a repository).
   It writes nothing when the run changed nothing. If a star line appears, relay it to the person word for word
   and never run `gh repo star` yourself.
 
@@ -377,10 +419,23 @@ print(f"keyed {src} -> {out} box={box} ground=#{''.join(f'{v:02X}' for v in grou
 - FAN_OUT: no (enterprise only; each member still passes its own eligibility gates)
 - FORCE: no (yes reruns a target that `provenance check` reports `fresh`)
 
-TARGET: <OWNER/REPO | ORG | CompleteDotTech | enterprise:SLUG>
+TARGET: <OWNER/REPO | ORG | user:LOGIN | enterprise:SLUG>
 ````
 
 ## Verification boundary
+
+Generalized for any operator on 2026-11-18, on Windows with Python 3.14 and the pinned requirements, on top of
+the account-chart guards in #205:
+- A synthetic outside owner with no brand row rendered neutrally (`needs-input:org-row`).
+- `brand add-family --write` into a scratch copy of the config, selected with `--config`, gave that owner its
+  own label and palette with no CompleteTech branding. The shipped `references/brand.yaml` was unchanged.
+- The new family was refused without `--allow-unmeasured` (exit 4), and `footer --org` reported it exempt.
+- Another user's `LOGIN/LOGIN` repository is treated as an ordinary repository, which is why its README stays
+  a proposal. `intro --profile` needs a brand row for LOGIN (exit 4 without one).
+- `org profile --user` refuses every login except the skill's configured personal account.
+- `account-chart render` on the synthetic Northwind snapshot passed `lint svg --kind chart`.
+
+The earlier checks below still apply to the unchanged steps.
 
 Checked offline on 2026-11-18 with Python 3.12 on Linux: 10 CLI help contracts, 69 CLI invocations/assertions
 on synthetic Northwind inputs, and 75 focused regression tests. This covered absolute paths containing spaces,
