@@ -55,6 +55,7 @@
    "archived": "Archived",
    "empty": "no public repositories",
    "enterprise": "ENTERPRISE",
+   "failed": "capture failed",
    "fork": "Fork",
    "held": "on hold",
    "language": "Language",
@@ -63,10 +64,12 @@
    "organization": "ORGANIZATION",
    "organizations": "Organizations",
    "owner": "Owner",
+   "partial": "partially captured",
    "personal": "PERSONAL",
    "personal_title": "Personal repositories",
    "private": "private work",
-   "uncaptured": "not captured"
+   "uncaptured": "not captured",
+   "unknown": "capture status unknown"
   },
   "mermaid": {
    "columns": 6,

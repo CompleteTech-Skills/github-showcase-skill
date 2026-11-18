@@ -691,6 +691,18 @@
        "type": "string",
        "minLength": 1
       },
+      "failed": {
+       "type": "string",
+       "minLength": 1
+      },
+      "partial": {
+       "type": "string",
+       "minLength": 1
+      },
+      "unknown": {
+       "type": "string",
+       "minLength": 1
+      },
       "fork": {
        "type": "string",
        "minLength": 1
