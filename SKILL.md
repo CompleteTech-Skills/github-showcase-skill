@@ -320,7 +320,7 @@ These user decisions outrank `STANDARD.md` (`ct-std-v1`). Full text: [references
 | [references/readme-variants.md](references/readme-variants.md) | Header block with banner and footer, variants A–J, H2 order, license rows, preserve list. |
 | [references/banner-layout.md](references/banner-layout.md) | Banner and card geometry measured from the golden, chip rules, eyebrow rules. |
 | [references/art-direction.md](references/art-direction.md) | Family palettes, motifs, asset sizes, prompt template for illustrations, art QA. |
-| [references/full-run-prompt.md](references/full-run-prompt.md) | A copy-ready operator prompt that runs the whole pipeline on one repository, org, the personal profile or the Enterprise, including image-model icons and org illustrations; read-only toward GitHub. |
+| [references/full-run-prompt.md](references/full-run-prompt.md) | A copy-ready workflow for a repository, org, supported personal profile or Enterprise: authorization and capture gates, applicable surfaces, optional image preparation, and explicit pending work; read-only toward GitHub. |
 | [references/svg-rules.md](references/svg-rules.md) | GitHub-safe SVG rules with decision 21 applied, and what `lint svg` checks. |
 | [references/profile-readmes.md](references/profile-readmes.md) | Org and personal profile README structure, cards, intros and what to skip. |
 | [references/orgs-and-projects.md](references/orgs-and-projects.md) | Org About fields, O-checks, org `.github` contents, profile rules and the GitHub Projects rules. |

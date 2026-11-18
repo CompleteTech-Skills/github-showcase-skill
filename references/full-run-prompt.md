@@ -1,258 +1,300 @@
 # Full-capacity run prompt
 
-A copy-ready prompt that has an agent (Claude Code or Codex, with this skill installed) run the whole pipeline on
-one target: a repository, an organization, the personal profile or the Enterprise. Repository icons and org
-illustrations come from an image model through the
-[Codex image-generation recipe](art-direction.md#codex-image-generation-recipe). Every word, mark, banner, card,
-tile, intro and profile is still rendered by `scripts/showcase.py`, and every GitHub change leaves as a writer
-job or `gh` line for approval. Nothing in the prompt writes to GitHub.
+A copy-ready operator prompt for one repository, organization, the supported personal profile or the Enterprise.
+The skill renders deterministic surfaces and proposes GitHub changes. Optional image generation supplies only
+illustration layers through the [image-generation recipe](art-direction.md#codex-image-generation-recipe).
+Missing inputs, exemptions and owner-controlled work remain visible; nothing in this prompt writes to GitHub.
 
 ## How to use it
 
-1. Copy the prompt below with the code block's copy button.
-2. Replace `<SKILL_DIR>` with this skill's checkout and `<PY>` with its virtual environment's Python
-   (`.venv/bin/python`, or `.venv\Scripts\python.exe` on Windows).
-3. Adjust the run options if needed, and replace the last line with the target: `OWNER/REPO`, an org login,
-   `CompleteDotTech` or `enterprise:SLUG`.
-4. Send it to the agent. It stops only to ask for the flags or approvals the skill requires (STOP 1) and for
-   the per-family pilot approval (STOP 2).
-
-`SKILL.md` and the references stay authoritative: when they change, they win over the prompt, and the agent
-names the conflict in its report.
+1. Copy the prompt below. Replace `<SKILL_DIR>`, `<PY>` and `<SCRATCH_DIR>` with absolute paths; `<PY>` is the
+   venv Python (`.venv/bin/python` or `.venv\Scripts\python.exe`). Scratch must be outside every repository.
+2. Adjust the options and replace the single final TARGET line. Existing scoped authorization is reusable;
+   STOP 1 asks only for an unresolved gate, and STOP 2 is the existing per-family pilot gate.
+3. Send it to the agent. `SKILL.md` and the referenced command contracts remain authoritative if they change.
 
 ````markdown
 # GitHub Showcase: full-capacity run
 
-You are running the CompleteTech `github-showcase-skill` (checkout at `<SKILL_DIR>`) end to end on the TARGET
-named on the last line. Produce every applicable surface: repository icons drawn by an image model, then the
-skill's deterministic banner, card, social preview, README, org banner, tile, intro and profile. Run every audit,
-emit every GitHub change as a reviewable plan, and prove the result on contact sheets. Work autonomously and
-stop only at STOP 1 and STOP 2.
+Run the CompleteTech `github-showcase-skill` at `<SKILL_DIR>` on the final TARGET. Produce every applicable,
+authorized surface, run its audits and leave reviewable plans and uncommitted local outputs. Continue independent
+work when a surface is pending; never turn a refusal, missing input or exemption into apparent completion.
 
-Before acting, read `SKILL.md`, `references/art-direction.md`, `references/content.md` and
-`references/decisions.md`; for org, project or enterprise targets also `references/org.md`,
-`references/projects.md` and `references/enterprise.md`. Where they disagree with this prompt they win; name
-the conflict in the report.
+Read the target's maintainer instructions and the skill's `SKILL.md`, `references/decisions.md`,
+`art-direction.md`, `content.md`, `staged-descriptions.md` and `profile-readmes.md`; for scope extensions also
+read `org.md`, `projects.md` and `enterprise.md` under `references/`. Follow their gates and report conflicts.
 
-## Hard rules
-1. Every generation, check and plan runs through `S="<PY> <SKILL_DIR>/scripts/showcase.py"`, from inside the
-   target checkout. Put `--format json` before the command when you parse a generator's result. Never
-   hand-edit a generated file, marker block or profile README: fix the input (`.github/showcase.yml`, the
-   description, a flag) and regenerate.
-2. Nothing is written to GitHub: no `gh` write verbs, no push, no commit, no settings. Proposals leave as
-   `--jobs $WS/jobs.jsonl`, `--records $WS/records.jsonl`, `--gh` lines and diffs. Local outputs stay
-   uncommitted in each checkout for review. Clones and read-only `gh api` GETs are fine.
-3. Gates are answers. Never pass `--allow-hold`, `--allow-unmeasured` or `--allow-t3` on your own, never use
-   `--allow-few-chips`, and skip excluded owners. Exit 3 and 4 name the input to fix (Appendix A).
-4. The image model draws illustration layers only: no text, letters, numbers, logos, marks, people or
-   third-party IP. Marks come only from committed files, and the skill typesets every word.
-5. Only public facts leave the machine. Read every prompt in full before sending it. For a private repository,
-   send only the glyph fields with a neutral name in place of the slug, or hold it.
-6. One dark design per surface (decision 21): never a light variant or a `-dark`/`-light` sibling.
-7. Keep `$WS/ledger.jsonl`, one line per finished step (target, step, outputs, sha256, result), so an
-   interrupted run resumes without regenerating paid art.
+## Hard rules and command notation
+1. Run generation, checks and plans through `scripts/showcase.py`. Never hand-edit generated art, marker
+   blocks or profile READMEs: change an authorized input and regenerate. Preserve authored content and ownership.
+2. No GitHub writes, commits, pushes or settings changes. Leave jobs, records, exact argv and diffs for the
+   approved writer (or standalone user). Read-only network access still requires the eligibility checks below.
+3. Skip excluded owners. Never invent approval or add `--allow-hold`, `--allow-unmeasured` or `--allow-t3`
+   yourself; never use `--allow-few-chips`. Flags lift only the specific documented gate, on supported commands.
+4. The image model draws only illustration layers, never text, logos, marks, people or third-party IP.
+   Use committed marks unchanged. One dark design per surface; only the decision 18 footer uses `<picture>`.
+5. Read the entire generated prompt before sending it. Only public facts may leave the machine. Private
+   repositories use only family glyph fields and a neutral name, or stay pending. Keep raw captures, private
+   names, jobs and candidates in scratch; never copy the estate bundle into a repository.
+6. Keep a scratch ledger with target, step, argv, exit, structured result/logs, output paths and sha256.
+   Resume from verified outputs; do not regenerate paid art merely because the run was interrupted.
 
-## 0. Resolve the target
-- `OWNER/REPO` is a repository. `enterprise:SLUG` is the enterprise (`enterprise:?` runs `$S enterprise
-  discover` first). A bare login: `gh api users/LOGIN --jq .type` gives `Organization` (org run) or `User`.
-- The only supported personal account is `CompleteDotTech` (`org profile --user` refuses every other); stop
-  for any other user.
-- Resolve org logins through the skill (former logins resolve, CQ-03) and report any rename found.
+Use Python argv lists on both POSIX and Windows, never a space-joined executable string or `eval`:
+```python
+from pathlib import Path
+import subprocess
+PY = str(Path(r"<PY>").resolve())
+SKILL_DIR = Path(r"<SKILL_DIR>").resolve()
+WS = Path(r"<SCRATCH_DIR>").resolve()
+BASE = [PY, str(SKILL_DIR / "scripts/showcase.py"), "--format", "json"]
+G = []  # global flags for THIS authorized invocation only; re-check scope/expiry each time
+S = [*BASE, *G]  # scope commands: no repository capture/checkout
+# Set these for EACH repository after its capture and checkout succeed:
+M = WS / "meta" / OWNER / (REPO + ".json")
+CHECKOUT = WS / "checkouts" / OWNER / REPO
+R = [*S, "--meta", str(M), "--repo-dir", str(CHECKOUT)]
+# Example: D is [] for unchanged descriptions; otherwise ["--description", proposed_text].
+result = subprocess.run([*R, "banner", *D], cwd=CHECKOUT,
+                        capture_output=True, text=True, encoding="utf-8", shell=False)
+```
+Below, `R command ...` means append those argument tokens to R; `S command ...` uses the scope prefix without
+repository metadata. Substitute each path/text placeholder as ONE string argument; `[D]` means append D, not
+literal brackets. Use absolute paths for ALL file arguments, including README, glyph YAML, prompt, candidate,
+keyer inputs, reports and captures. Global T3 flags go before the command; supported hold/unmeasured flags go
+after it. Rebuild the appropriate prefix for every invocation; do not let one repository's flags leak to another.
 
-## 1. Preflight
-- `WS` = a new scratch directory outside every repository, holding `meta/`, `checkouts/`, `tools/`,
-  `art/{prompts,runs,candidates,golden}/`, `proof/`, `jobs.jsonl`, `records.jsonl` and `ledger.jsonl`.
-- Create a venv, `pip install -r <SKILL_DIR>/requirements.txt`, then `$S fonts --check` (`--fetch` on failure)
-  and `$S config`.
-- Tools: `gh auth status`; `codex --version` and `codex exec --help` (this run uses `--json`,
-  `--skip-git-repo-check`, `-C`, `-i`, `-m` and `-` for stdin; if a flag is rejected, adapt only that flag);
-  `tesseract` enables `--ocr` (absent is fine, logged `needs-input:ocr-unavailable`).
-- Estate bundle: if one is present (`SHOWCASE_ESTATE_ROOT` or beside the skill) read it, never copy it.
-  Without it, use the registry-free paths named below.
+## 0. Local preflight and target eligibility (before any target network read)
+- Prepare WS with `meta/`, `checkouts/`, `tools/`, `art/{prompts,runs,candidates,golden}/`, `proof/`, and
+  scratch jobs/records/ledger paths. Use a venv with the pinned requirements; run `S fonts --check` and `S config`.
+  Fetch missing fonts only when network use is authorized; otherwise record `needs-input:fonts`.
+- Read the estate bundle in place when available (`SHOWCASE_ESTATE_ROOT` or beside the skill), including
+  registry, decisions and approvals. Resolve current/former owner logins with the skill's shared resolver and
+  brand data. Classify `OWNER/REPO`, configured org login, `CompleteDotTech`, or `enterprise:SLUG` locally;
+  an unknown owner/identity is pending, not a reason to query arbitrary accounts. No other user is supported.
+- Check exclusions, HOLD, family holds, unmeasured palettes, exposure/private-data decisions and T3 scope
+  BEFORE `gh` enumeration, metadata reads, cloning or image capture. STOP 1: show the scope and unresolved
+  gates first. Reuse existing explicit authorization only within its scope; otherwise hold the affected work.
+- T3 needs the explicit flag for each permitted invocation AND a current, unrevoked record covering that
+  owner/repository in the private sign-off file (`references/t3-signoff.md`). The default file or global
+  `--t3-signoff-file PATH` is read, never fabricated. Repository-only consent does not authorize org-wide
+  discovery, `.github`, unrelated repositories or image work. Preserve the separate writer approval gates.
+- Before org enumeration, obtain local `S org doctor ORG --doctor-format json` diagnostics with the scoped
+  flags; this reads supplied/local inputs and prints proposed reads, without executing them.
+- Local diagnostics the contracts expressly allow (such as repository `doctor`'s T3 hold row, or HOLD org
+  about/pins/health/doctor) remain available; their exception never grants permission for otherwise denied reads.
+  For an unknown brand row, show the `S brand add-org` dry run only after its required identity inputs exist.
+- Check `gh auth status` when authorized reads are needed. With IMAGE_TOOL=codex, check `codex --version`
+  and `codex exec --help`; with none, skip image tooling. Missing tools remain pending. OCR is optional and
+  its absence is `needs-input:ocr-unavailable`. `enterprise:?` discovery waits until this preflight completes.
 
-## 2. Scope (STOP 1 only if something needs me)
-- Repositories: one for a repo target; for an org, the registry or
-  `gh repo list ORG --limit 1000 --json name,visibility,isFork,isArchived`.
-- For each: `gh repo clone OWNER/REPO $WS/checkouts/OWNER/REPO -- --depth 1` (also clone `OWNER/.github` when
-  it exists), then `$S meta --from-gh OWNER/REPO --out $WS/meta/OWNER/REPO.json`.
-- Classify the results:
-  - A refusal or exemption (exit 2: `exempt`, `hold`, `t3-signoff`) is skipped and logged.
-  - `needs-input:palette-v1.1` (an unmeasured family), a family on hold, a T3 owner, or an org with no
-    `brand.yaml` row (show the `brand add-org` dry run) goes on the STOP 1 list.
-  - A low-confidence `type-suggestion` is decided from the file tree and set as `type:` in
-    `.github/showcase.yml`.
-- STOP 1: show the scope table and the flags or approvals it needs. If nothing needs me, continue.
+## 1. Scope and captures
+- Repo: the named repository plus its owner's `.github` defaults when permitted. Org: use the registry or,
+  only after owner-wide eligibility, paginated read-only `gh api --paginate orgs/ORG/repos?per_page=100`.
+  Retain the complete list, including private/archived repositories, privately. Apply each repository's gates.
+- Personal: first include `CompleteDotTech/CompleteDotTech` and all registry-referenced public repositories
+  across owners (pins, more projects, directory/estate activity inputs). Establish visibility from captures,
+  applying each owner's gates before capture. Capture required source metadata even when no source checkout
+  is needed; clone every repository selected for local changes. Do not render a sparse personal profile when
+  required captures or the registry are missing: list the missing scope and keep that render pending.
+- For each permitted slug, run `S meta --from-gh OWNER/REPO --out M` BEFORE cloning. This command checks
+  excluded/HOLD/T3 eligibility before its loader; inspect its result/logs and saved capture before continuing.
+  With a supplied current capture, validate its identity and completeness instead. Never edit the original M.
+- Only then `gh repo clone OWNER/REPO CHECKOUT -- --depth 1` for local work; verify origin matches M. Apply
+  this same order to `.github`. Watching-org forks are metadata-only; do not clone/render them. Missing
+  defaults, archived upload/adopt windows and repository-specific holds remain pending, not bypassed.
+- Set R for this repository. Resolve low-confidence type suggestions from its captured tree/checkout, then
+  set a scoped `type:` in `.github/showcase.yml` if justified. Revisit STOP 1 before newly discovered gated work.
 
-## 3. Facts before art (per repository; `cd` into its checkout; `M=$WS/meta/OWNER/REPO.json`)
-1. `$S --meta $M describe`. On `needs-writer`, write the sentence from `references/descriptions.md` and the
-   repo's facts, and iterate `describe --text "..."` until it answers `keep`. Also run
-   `lint prose --prose-kind description --text "..."`. If the result differs from the live description, it is
-   STAGED.
-2. `topics --gh --records $WS/records.jsonl` (add `--registry` when the bundle exists).
-3. `labels --plan --org-defaults $WS/checkouts/OWNER/.github --jobs $WS/jobs.jsonl --records $WS/records.jsonl`.
-4. Every later generator for this repository gets `--description "$STAGED"`, so R2 still holds once the
-   writer applies the description.
+## 2. Facts before art (R always carries M and CHECKOUT)
+1. `R describe --records RECORDS`. For `edit`, review `proposed`; for `needs-writer`, compose from the facts
+   and `references/descriptions.md`. Validate the chosen sentence with `R describe --text TEXT` until its
+   `action` is `keep`, then `R lint prose --prose-kind description --text TEXT`.
+2. If TEXT differs from M's live description, save a reviewable scratch proposal with slug, captured before,
+   proposed after, reason, validation result and argv `['gh', 'repo', 'edit', 'OWNER/REPO', '--description', TEXT]`.
+   Do not execute it. Keep emitted change records too; `describe --text` returning `keep` alone is no proposal.
+3. `R topics --gh --records RECORDS` (add `--registry REGISTRY` when available).
+   `R labels --plan --org-defaults DOTGITHUB --jobs JOBS --records RECORDS` with verified defaults; when
+   unavailable, omit that argument and retain held renames. Follow the .github-first label workflow in org.md;
+   this run does not rewrite/apply issue forms or label changes. Required writer work stays pending.
+4. Set D to `[]` for an unchanged description, else `['--description', TEXT]`. Append D ONLY to `R banner`,
+   `R card`, `R content social` and `R readme` (including dry runs). No other command accepts this staging flag.
+   Never modify M to make checks pass. Staged outputs remain proposals; R2 drift and R10 upload stay pending
+   until the approved writer acts, fresh metadata is captured, and affected surfaces are regenerated without D.
+   Topic proposals likewise wait for fresh capture before final art reconciliation.
 
-## 4. Art from the image model
-### 4a. Repository icon (decision 12): before the banner, card and social preview, which embed it
-1. Skip it if `assets/icon.png` exists and `content icon check` passes.
-2. Write `$WS/art/prompts/OWNER/REPO/glyph.yaml`.
-   - Option A: `glyph_name`, `glyph_description`, `spark_placement`, and `size_class`
-     (WIDE|TALL|SQUARE|DIAGONAL). The description is one simple geometric silhouette of what the repository
-     does, distinct at 48 px from the org glyph and from its siblings' icons.
-   - Option B: `subject` and `objects` (3–5 from the object library or the family motif).
-3. Run `$S --meta $M content icon prompt --option $ICON_OPTION --glyph glyph.yaml --out .../icon.md` until it
-   answers `result: ok`.
-4. Copy only the fenced `text` block of `icon.md` into `prompt.txt`. The rest of the file is notes for you,
-   including a "Then: run normalize" line the image agent must not act on. Apply rule 5.
-5. Run four candidate slots serially. Each is one image in its own new, empty directory `$SLOT`:
-   `codex exec --json --skip-git-repo-check -C "$SLOT" [-m $IMAGE_MODEL] [-i REF.png ...] - < prompt.txt > "$SLOT/run.jsonl"`
-   - The candidate is the first readable image path this run's own output reports. Never use the newest
-     file in `generated_images` or a directory listing. Copy it to
-     `$WS/art/candidates/OWNER/REPO/slot-N.png`.
-   - A run with no readable path is empty. Retry that slot with the unchanged prompt, at most 3 attempts,
-     then `art-fail` for the slot.
-   - `-i` references must be text-free: this family's approved golden icons (after STOP 2), and
-     `jevplay-games/.github/profile/assets/jev-reference.png` for every jevplay-games prompt. Never attach
-     a banner or card; they contain text.
-   - Use one tool and model per family. Request a seed only through `content icon prompt --seed N`.
-   - `IMAGE_TOOL: api`: any image API you are configured for, with `prompt.txt` verbatim, one 1024×1024
-     image per call. Record the model id the response reports, or `not exposed`; never invent one.
-6. Inspect each candidate at 200% before normalizing it. Reject any with glyph-like marks, people, objects
-   inside the 10% margin, a non-flat ground or off-palette colour.
-   - Take the survivors in generation order: `content icon normalize --in slot-N.png --ground auto --preview
-     $WS/proof/OWNER__REPO-icon-48.png [--ocr]`, then `content icon check --strict --min-contrast 4.5`. The
-     first that passes wins; record a one-line reason.
-   - For a slight vignette (corner dE 3–5), add `--ground-tolerance 5`. Never lower the QA bar.
-   - If none of the four passes, run four more slots once, then log `art-fail`. The banner falls back to
-     the org mark (`needs-input:repo-icon`).
-7. Append the provenance block to `assets/PROMPTS.md` in the format in art-direction.md:
-   - date, tool and model as reported, seed, reference images;
-   - the prompt verbatim, images requested and selected, the reason;
-   - showcase.py version, sha256 and size.
-   Record the Codex session id and the image name relative to `$CODEX_HOME`; never an absolute path or user
-   name. Raw candidates never enter a repository.
+## 3. Optional image layers
+### Repository icon (before banner, card and social)
+1. Reuse `assets/icon.png` only if `R content icon check --strict --min-contrast 4.5` passes applicable QA.
+   With IMAGE_TOOL=none or unavailable, keep any valid existing art; missing icons stay `needs-input:repo-icon`.
+2. Define absolute `P = WS/art/prompts/OWNER/REPO`, `C = WS/art/candidates/OWNER/REPO`; create them.
+   Write `P/glyph.yaml`: option A needs glyph_name, glyph_description, spark_placement, size_class
+   (WIDE|TALL|SQUARE|DIAGONAL); option B needs subject and 3–5 objects from the approved library/family motif.
+3. `R content icon prompt --option ICON_OPTION --glyph P/glyph.yaml --out P/icon.md` must report `ok`.
+   Read the full file for privacy; put only its fenced text prompt in `P/prompt.txt`. Its operator notes
+   (including "Then: run normalize") are not instructions for the image agent.
+4. Run four candidate slots serially, one image per invocation, each in its own new empty absolute SLOT.
+   Build argv `['codex', 'exec', '--json', '--skip-git-repo-check', '-C', str(SLOT), ... , '-']`, adding
+   `['-m', IMAGE_MODEL]` only for a named model and repeatable `['-i', str(REFERENCE)]` for approved references.
+   Read PROMPT_TEXT from the absolute P/prompt.txt, then capture the result explicitly:
+   ```python
+   result = subprocess.run(argv, input=PROMPT_TEXT, capture_output=True,
+                           text=True, encoding="utf-8", shell=False)
+   (SLOT / "run.jsonl").write_text(result.stdout, encoding="utf-8")
+   (SLOT / "run.stderr.txt").write_text(result.stderr, encoding="utf-8")
+   ```
+   Record `result.returncode` in the scratch ledger and handle nonzero exits as failed attempts before
+   selecting an image. Never use shell input redirection.
+   - Select the first readable image path reported by THAT invocation, then copy to absolute C/slot-N.png.
+     Never use a directory listing or the newest generated image. No readable path: retry the unchanged
+     prompt at most 3 attempts for that slot, then stop it with `art-fail`.
+   - References must be text-free approved family art. Every jevplay-games prompt also requires the exact
+     `jevplay-games/.github/profile/assets/jev-reference.png`; if unavailable, hold it. No banners/cards.
+   - One tool/model per family. Request a seed only through `content icon prompt --seed N`; report the
+     returned model identity or `not exposed`. IMAGE_TOOL=api uses the same public prompt verbatim, one image
+     per call, only when that capability is authorized. Optional art is never a prerequisite for other audits.
+5. Inspect at 200%: reject text/glyph-like marks, people, third-party marks, margin violations, uneven ground
+   or off-palette art. For survivors in generation order, run
+   `R content icon normalize --in C/slot-N.png --ground auto --strict --min-contrast 4.5 --preview PROOF/icon-48.png`
+   then `R content icon check --strict --min-contrast 4.5` (add `--ocr` when available).
+   For corner dE 3–5 only, use `--ground-tolerance 5`; never lower QA. First pass wins, with a recorded reason.
+   If four candidates fail QA, try four new slots once, then `art-fail`; the surfaces may use the org fallback.
+6. Record provenance in CHECKOUT/assets/PROMPTS.md: verbatim public prompt, date, tool/model, requested seed,
+   references, requested/selected images, selection/reject reasons, skill version, sha256 and size. Record the
+   session id and image filename or `$CODEX_HOME`-relative path, never a real absolute user path. Raw art stays scratch.
 
-### 4b. Org illustration (org targets)
-1. Fill the art-direction "Prompt template for illustrations":
-   - the family STYLE LOCK, verbatim;
-   - SUBJECT: one sentence for the org's function;
-   - OBJECTS: the org's motif row (CompleteTech) or the family motif (T2);
-   - Wide 1536x1024 on a perfectly flat family canvas (CompleteTech `#0F172A`; jevplay-games `#F386A1`,
-     never the halftone);
-   - the PALETTE and highlight line, the EXCLUSIONS and the family addition.
-   Save it as `$WS/art/prompts/ORG/org-banner.md`.
-2. Generate and select it with steps 4a.5–6 (visual QA only; `icon normalize` does not apply).
-3. Key it with `<PY> $WS/tools/key_illustration.py slot-N.png $WS/art/ORG-illustration.png <CANVAS_HEX>`
-   (Appendix B). The generators place an illustration as-is, so an unkeyed ground shows as a dark rectangle
-   over the grid.
-4. Record its provenance in `.github/profile/assets/PROMPTS.md`.
+### Org illustration and pilot (org targets)
+- Fill art-direction's illustration template: verbatim family style lock, org subject, 3–5 approved motif
+  objects, wide 1536×1024, flat family canvas, palette/highlights, exclusions and family additions. Save the
+  prompt at absolute WS/art/prompts/ORG/org-banner.md and apply the same privacy/candidate/visual QA rules.
+- Key the selected absolute candidate with argv `[PY, str(WS/'tools/key_illustration.py'), str(CANDIDATE),
+  str(ILLUSTRATION), CANVAS_HEX]` using Appendix B. ILLUSTRATION is WS/art/ORG-illustration.png. This is an
+  illustration, not an icon: do not use icon normalization. The org compositor centers it in the 464×320 slot
+  (1040,40)–(1504,360). Record provenance alongside any approved destination asset, otherwise in scratch.
+- STOP 2: before generating the rest of a family, finish its first applicable banner/card/social (and org
+  surface), show both contact-sheet page colours, and wait for the existing pilot approval unless that
+  family's golden references are already approved. Copy approved text-free art to WS/art/golden/FAMILY.
 
-### 4c. Pilot gate (STOP 2)
-When more repositories of the same family remain in this run, render the first one completely (icon, banner,
-card, social preview, plus the org banner for an org run). Put it on a contact sheet, show me both page
-colours and wait for approval, unless PILOT_APPROVED is yes. Copy approved text-free art to
-`$WS/art/golden/<family>/` and attach it as `-i` references for the rest of that family.
+## 4. Repository surfaces (R, in order; respect personal-profile exceptions in section 6)
+1. `R banner [D]` writes CHECKOUT/docs/images/banner.png. Missing chips/subtitle must come from facts;
+   `art-fail` needs shorter source text, never truncation. Preserve valid banner exemptions.
+2. `R card --png PROOF/OWNER__REPO-card.png [D]`. Forks, backups and `.github` may be `exempt:no-card`.
+3. Changed description: `R content social [D]`, WITHOUT `--job`; report its actual private staging output
+   (default CHECKOUT/assets/.showcase-staging/social-preview.png), sidecar and pending upload. Unchanged:
+   `R content social --job --jobs JOBS`; record its applicability/result, output path and any withheld job.
+4. `R readme --diff [D]`: save the JSON `diff` field as PROOF/OWNER__REPO-readme.diff, then
+   `R readme --write [D]` only after its dry-run checks pass. `readme-shrink` stops this repository's writes.
+5. `R footer --check CHECKOUT/README.md`; add `--online` only when the read is authorized, else report that
+   remote check unrun. Do not treat offline footer validation as live URL evidence.
 
-## 5. Deterministic surfaces (per repository, in this order)
-1. `banner` writes `docs/images/banner.png`.
-   - `needs-input:banner-chips`, `key-chip` or `subtitle`: add `chips:` or `subtitle:` from real facts to
-     `.github/showcase.yml`.
-   - `art-fail`: shorten the subtitle; never truncate.
-2. `card --png $WS/proof/OWNER__REPO-card.png` writes `docs/images/card.svg`. `exempt:no-card` for forks,
-   backups and `.github` is correct.
-3. `content social --job --jobs $WS/jobs.jsonl` writes `assets/social-preview.png` and its browser upload
-   job.
-4. `readme --diff`: save the diff to `$WS/proof/OWNER__REPO-readme.diff`, then run `readme --write`. On
-   `readme-shrink`, stop this repository and report it.
-5. `footer --check README.md --online`.
+## 5. Repository content audits (R; proposals only)
+- `R content links --base-ref origin/DEFAULT_BRANCH --cache WS/links-cache.json --diff`; use the verified
+  captured default branch and ensure that ref exists. Add `--online` only for authorized network checks.
+- `R content linguist`; `R content images --out-dir PROOF/OWNER__REPO-images`.
+- Save separate read-only captures for `gh api repos/O/R/actions/runs?per_page=50`,
+  `gh api repos/O/R/actions/workflows` and `gh api repos/O/R/pages`. Then
+  `R content actions --runs RUNS --workflows WORKFLOWS [--pages PAGES]`; omit pages on a recorded 404.
+  Missing/failed captures are unknown, never fabricated empty objects; the result must retain their limits.
+- Sidebar facts are NOT M. Save a separate JSON object with `releases`, `packages`, `deployments`: each is
+  a captured count, complete list, or object with `total_count`/`totalCount`. Use paginated GETs of
+  `repos/O/R/releases` and `repos/O/R/deployments`; packages need complete owner package listings for all
+  applicable package types (`orgs/O/packages?package_type=TYPE`, or `users/O/packages?package_type=TYPE`),
+  mapped by `repository.full_name`. Keep raw captures and coverage evidence. Never turn a failed/partial
+  listing into zero. Combine captured pages before counting/list serialization. Leave an unknown key absent (e.g. `{}` when all are unknown), then run
+  `R content sidebar --facts SIDEBAR_FACTS --jobs JOBS`; retain `needs-input:sidebar-facts:*` and withheld jobs.
+  Use `--packages` only with proven complete package coverage, since absent repos then count as zero.
+- `R adopt OWNER/REPO --jobs JOBS --records RECORDS` if no docs/images/.showcase.json existed before this
+  run. Captured archived state stays pending until the approved unarchive window and a fresh capture.
 
-## 6. Content audits (per repository; proposals only)
-- `content links --base-ref origin/<default_branch> --online --cache $WS/links-cache.json --diff`
-- `content linguist`
-- `content images --out-dir $WS/proof/OWNER__REPO-images`
-- `content actions --runs runs.json --workflows workflows.json [--pages pages.json]`, captured with
-  `gh api repos/O/R/actions/runs?per_page=50`, `gh api repos/O/R/actions/workflows` and
-  `gh api repos/O/R/pages` (omit `--pages` on a 404).
-- `content sidebar --facts $M`
-- `adopt OWNER/REPO --jobs $WS/jobs.jsonl --records $WS/records.jsonl` when the repository had no
-  `docs/images/.showcase.json` before this run.
+## 6. Scope extensions (S, never R)
+### Organization
+- Without a registry, keep about/profile/pins pending (`needs-input:registry`). Supported partial work:
+  `S org labels ORG --repos-from-gh --checkouts WS/checkouts --dot-github DOTGITHUB --jobs JOBS`,
+  `S org health ORG --dot-github DOTGITHUB`, and `S org doctor` below. Registry-free labels must receive no
+  registry, metadata or decision inputs; preserve its owner gates and held reference rewrites.
+- With the registry: `S org about ORG --jobs JOBS`; `S org labels ORG --meta-dir WS/meta
+  --checkouts WS/checkouts --dot-github DOTGITHUB --jobs JOBS`; `S org pins ORG --meta-dir WS/meta --jobs JOBS`;
+  `S org health ORG --meta-dir WS/meta --dot-github DOTGITHUB`. Pass required explicit bundle paths if not
+  auto-discovered. The top metadata directory includes cross-owner captures; complete profile inputs first.
+- Preview with `S org profile ORG --meta-dir WS/meta` first. Inventory the target README and planned asset
+  paths; an existing authored/unproven asset is preserved, with optional rendering directed to scratch instead.
+  This preview does not bypass the real checkout's profile-retemplate gate: an authored profile still needs
+  that approval before dependent writes. Only after destination ownership and inputs are established run
+  `S org profile ORG --meta-dir WS/meta --out-dir DOTGITHUB --render`. Inspect result, logs, assets AND outputs.
+  `needs-approval:profile-retemplate`, leaks, refusal or missing required inputs stop dependent writes.
+  Preserve a kept banner (`banner:keep-existing:*`) and every authored/unproven asset. Only replace an org
+  banner when this successful invocation lists its org-banner asset AND that exact output was written by
+  this run with verified bytes; no keep-existing log or pending gate may apply. Then, if art is available:
+  `S org-banner --org ORG --illustration ILLUSTRATION --out GENERATED_BANNER`. Otherwise render optional
+  art only to a fresh scratch output and report the existing/missing hero unchanged. A generated intro hero
+  is not an org-banner output. Never force `--banner` to evade keep-existing or re-template approval.
+- For a T1 flagship's generated intro hero, run the applicable `S intro --org ORG --out INTRO` only after
+  successful profile generation: create a missing listed asset, or refresh an existing asset only with verified
+  generated ownership; use scratch for an authored/unproven asset.
+  `S org-tile --org ORG --illustration ILLUSTRATION --out PROOF/ORG-tile.svg --png PROOF/ORG-tile.png`;
+  on `art-fail:tile-name`, retry without illustration. Skip optional illustration flags when no art exists.
+- `S lint public-leak FILE... --meta-dir WS/meta` for every public output. Without registry use only
+  `--denylist PRIVATE_DENYLIST` and report its limited coverage; an empty/missing list cannot certify privacy.
+- `S org doctor ORG --doctor-format json` prints snapshot `reads`. After the scope gates, run each read argv,
+  save raw responses. For `profile_readme`, also GET `repos/ORG/.github/contents/profile/README.md` and decode
+  its base64 content (the directory listing is not README text). Assemble `{org, graphql, repos, profile_readme}`.
+  Then `S org doctor ORG --snapshot SNAPSHOT --dot-github DOTGITHUB --avatar AVATAR
+  --doctor-format md --header`. Omit absent optional file flags; missing evidence stays unknown, never invented.
+- Projects: eligible `gh project list --owner ORG --format json` finds N; then
+  `S project capture-query --owner ORG --number N` emits FOUR reads: GraphQL, REST project, REST fields and
+  `gh project field-list`. Run each returned `reads[].argv` from WS; save its `out` under WS (cross-check has
+  null out: choose PROOF/ORG-project-fields.json). Keep raw GraphQL/node IDs separate from normalized data.
+  Run the COMPLETE emitted normalize command, rebased to S with absolute paths:
+  `S project normalize --capture RAW_GRAPHQL --rest-fields RAW_FIELDS --out SPEC`. Never execute its text
+  through a shell. Then `S project lint --capture SPEC --owner ORG --role org`.
+  Missing/failing board: `S project copy-plan --target ORG --jobs JOBS` plans stage 1 only; stage 2 waits for
+  approved writer action and a fresh target-board capture. Never run a mutation from the returned jobs.
+- With registry: `S doctor --estate --meta-dir WS/meta --out WS/NEW_PROPOSALS.yaml`.
 
-## 7. Scope extensions
-### Organization (after its repositories)
-- `org about ORG --jobs $WS/jobs.jsonl`
-- `org labels ORG --meta-dir $WS/meta/ORG --checkouts $WS/checkouts --dot-github $WS/checkouts/ORG/.github
-  --jobs $WS/jobs.jsonl`. Without the registry, use `--repos-from-gh` instead of `--meta-dir` and no
-  registry inputs.
-- `org profile ORG --meta-dir $WS/meta/ORG --out-dir $WS/checkouts/ORG/.github --render`, then
-  `org-banner --org ORG --illustration $WS/art/ORG-illustration.png
-  --out $WS/checkouts/ORG/.github/profile/assets/banner.jpg`. This replaces the plain banner the profile
-  render wrote and clears `needs-input:org-illustration`.
-- `org-tile --org ORG --illustration $WS/art/ORG-illustration.png --out $WS/proof/ORG-tile.svg
-  --png $WS/proof/ORG-tile.png`. On `art-fail:tile-name`, rerun without `--illustration`; the illustration
-  only fits short names.
-- For a T1 flagship org: `intro --org ORG --out $WS/checkouts/ORG/.github/profile/assets/intro.svg`. Use it
-  as the profile hero (`org profile --banner assets/intro.svg`) only where `references/profile-readmes.md`
-  says so.
-- `lint public-leak` on every public file written (`--meta-dir $WS/meta/ORG`; registry-free:
-  `--denylist $WS/private-names.txt`, one private repository name per line).
-- `org pins ORG --jobs $WS/jobs.jsonl` and `org health ORG --dot-github $WS/checkouts/ORG/.github`.
-- Run `org doctor ORG --doctor-format json` once. Run the read-only `reads` argv it lists, assemble the
-  snapshot `{org, graphql, repos, profile_readme}` per `references/org.md`, then run
-  `org doctor ORG --snapshot $WS/ORG-snapshot.json --dot-github $WS/checkouts/ORG/.github
-  --avatar <current avatar PNG> --doctor-format md --header`. Avatars are checked, not generated.
-- Project board: find N with `gh project list --owner ORG --format json`, then
-  `project capture-query --owner ORG --number N`. Run the printed query with `gh api graphql`, then
-  `project normalize` and `project lint --capture F --owner ORG --role org`. If the board is missing or fails,
-  run `project copy-plan --target ORG --jobs $WS/jobs.jsonl` (stage 1). Stage 2 (`--copied`) waits for the
-  writer, so list it as pending.
-- With the registry: `doctor --estate --meta-dir $WS/meta/ORG --out $WS/NEW_PROPOSALS.yaml`.
-
-### Personal account (CompleteDotTech)
-- `org profile --user CompleteDotTech --meta-dir $WS/meta --out-dir $WS/checkouts/CompleteDotTech/CompleteDotTech --render`
-- `intro --profile CompleteDotTech --out $WS/checkouts/CompleteDotTech/CompleteDotTech/assets/intro.svg`
-- Run phases 3, 4a and 6 on the profile repository, plus `content social` and `footer --check README.md`.
-  Skip `banner`, which is exempt because the profile opens with the intro, and `readme`, because
-  `org profile --user` owns that README.md.
-- `lint public-leak` on every public file written.
+### Personal account (CompleteDotTech, built last)
+- Require the complete section 1 capture set and top-level registry profile first. Without them, no personal
+  profile render; report the missing inputs. Independently audit its existing verified checkout with R.
+- Run sections 2, 3 (icon), 4 (card/social/footer only) and 5 on the profile repository. `banner` is exempt;
+  `readme` is skipped because `org profile --user` owns README.md. Description proposals stay staged.
+- Apply the same no-output preview and destination ownership checks before
+  `S org profile --user CompleteDotTech --meta-dir WS/meta --out-dir PROFILE_CHECKOUT --render`. Inspect
+  logs/assets/outputs and stop on refusal. Then `S intro --profile CompleteDotTech
+  --out PROFILE_CHECKOUT/assets/intro.svg` under the generated-asset ownership rule above.
+  Run `R footer --check PROFILE_CHECKOUT/README.md` and `S lint public-leak FILE... --meta-dir WS/meta`
+  against the whole registry. Never infer completeness from an exit-0 sparse profile or missing visibility.
 
 ### Enterprise
-- `enterprise snapshot --slug SLUG --out $WS/enterprise/snapshot.json` (read-only GraphQL;
-  `enterprise snapshot-query --slug SLUG` shows the queries).
-- `enterprise doctor --snapshot F [--baseline OLD]`, `enterprise seat-check --snapshot F`, and
-  `enterprise plan --snapshot F --jobs $WS/jobs.jsonl --records $WS/records.jsonl`. Add
-  `enterprise diff --baseline OLD --snapshot F` when a baseline exists.
-- No art at this level. List the member orgs with their `org doctor` rows and recommend which to run next.
-  Run them only if FAN_OUT is yes.
+- `S enterprise snapshot --slug SLUG --out SNAPSHOT` runs read-only GraphQL;
+  `S enterprise snapshot-query --slug SLUG` prints the queries. Keep the snapshot private in WS/enterprise.
+- `S enterprise doctor --snapshot SNAPSHOT [--baseline OLD]`, `S enterprise seat-check --snapshot SNAPSHOT`,
+  `S enterprise plan --snapshot SNAPSHOT --jobs JOBS --records RECORDS`; with baseline also
+  `S enterprise diff --baseline OLD --snapshot SNAPSHOT`. No art, billing, policy or domain changes here.
+- Report member orgs from the snapshot; with FAN_OUT=no, their org-doctor rows are unrun, not inferred.
+  With FAN_OUT=yes, restart each member at eligibility/preflight before its own reads or local work.
 
-## 8. Verify and prove
-- Per repository: `lint all`, `lint svg --kind card docs/images/card.svg`, `lint banner`, and
-  `doctor --header --format md`. A repository is done only when every cell is pass, warn, incomplete or n/a.
-- Set review: `contact-sheet <every banner> --mode stack --labels --out $WS/proof/banners`. For an org, also
-  `contact-sheet --org ORG --cross-surface --avatar A --banner B --card C --social D --org-banner E
-  --out $WS/proof/ORG-g4`.
-- Open both `.on-github-dark.png` and `.on-github-light.png` yourself. Fix anything clipped, illegible or
-  off-family by regenerating from inputs, then re-run the checks.
+## 7. Verify and report
+- Each repository: `R lint all`, then `R doctor --header --format md` (retain JSON doctor evidence too).
+  Use `R lint svg --kind card CARD` and `R lint banner BANNER` only for present applicable outputs; retain
+  valid absent-card/banner exemptions. Missing required outputs remain failures; do not invent files to lint.
+- Inspect structured result/logs and applicable cells, not exit 0 alone. Report local `skill_complete`,
+  `owner_pending`, `done`, staging drift, incomplete/manual/unrun checks and exemptions separately.
+- `S contact-sheet PRESENT_BANNERS... --mode stack --labels --out PROOF/banners`; skip an empty set.
+  For orgs use `S contact-sheet --org ORG --cross-surface --avatar A --banner B --card C --social D
+  --org-banner E --out PROOF/ORG-g4`, supplying only real applicable files. Missing surfaces remain logged
+  incomplete; staged previews must be labelled staged. View both `.on-github-dark.png` and `.on-github-light.png`.
+  Correct clipping, illegibility or palette errors by regenerating authorized inputs and rerun affected checks.
+- Report scope/exclusions and authorization, doctor rows, files with sha256/KB and `git status --short`, art
+  provenance/rejections, reviewable description/topic/label/README proposals, jobs grouped by kind/approval,
+  and EVERY pending or unrun item with its reason. Description/topics precede dependent final regeneration
+  and upload in the future writer sequence. State plainly that nothing was written to GitHub.
 
-## 9. Final report
-1. Scope: target type; repositories in and out, with reasons; flags used and who approved them.
-2. Doctor rows (md) per repository, plus the org O-row or the enterprise E-cells.
-3. Files written per checkout (path, sha256, KB), with `git status --short`. Everything is uncommitted.
-4. Art provenance per asset: tool and model, slots used, the selected candidate and its reason, rejects and
-   their reasons.
-5. Plans: `$WS/jobs.jsonl` grouped by kind and `approval_id`, and the exact `gh` lines in apply order
-   (description and topics first, because the art reads them).
-6. Open items: every `needs-input:*`, `owner_pending` and held item, and every check not run, with the reason.
-State plainly that nothing was written to GitHub.
-
-## Appendix A: exit codes
+## Appendix A: interpret exit AND result/logs
 | Exit | Meaning | Response |
 |---|---|---|
-| 0 | ok, warn, incomplete, n/a | Continue; collect the `logs`. |
-| 1 | a check failed | Fix the cause in the inputs and re-run. Never edit outputs. |
-| 2 | refused or usage | Fix a usage error. Skip and log a refusal (`exempt`, `hold`, `t3-signoff`). |
-| 3 | `art-fail` | Shorter subtitle, other chips, the next candidate. Never truncate. |
-| 4 | `needs-input:<x>` | Supply `<x>` (chips, subtitle, glyph, art direction) or record it as `owner_pending`. |
+| 0 | May include warn, incomplete, n/a, pending input or proposals | Inspect result, logs, outputs and cells before continuing dependencies. |
+| 1 | Check failed or needs-writer | Fix inputs, validate the proposal, or retain the failure. |
+| 2 | Usage/config error or refusal | Fix usage; preserve excluded/hold/T3 refusal and stop dependent work. |
+| 3 | art-fail | Fix source text/chips or use the next candidate; never truncate. |
+| 4 | Needs input/approval | Supply only authorized inputs or report the specific pending gate. |
 
 ## Appendix B: `$WS/tools/key_illustration.py` (Pillow only, a declared dependency)
 ```python
@@ -318,43 +360,25 @@ print(f"keyed {src} -> {out} box={box} ground=#{''.join(f'{v:02X}' for v in grou
 ```
 
 ## Run options (defaults; edit before sending)
-- ICON_OPTION: A  (A = Neon Night glyph, B = isometric illustration)
-- IMAGE_TOOL: codex  (codex, api, or none; none = no generated art, banners use the org mark)
-- IMAGE_MODEL: default  (pin with `-m` only when you name a model; one model per family)
-- PILOT_APPROVED: no  (yes = this family's golden references are already approved; skip STOP 2)
-- FAN_OUT: no  (enterprise only: also run every member org)
+- ICON_OPTION: A (A = Neon Night glyph, B = isometric illustration)
+- IMAGE_TOOL: codex (codex, api, or none; optional capability, never assumed available)
+- IMAGE_MODEL: default (pin only a named model; one per family)
+- PILOT_APPROVED: no (yes only for already approved golden references of this family)
+- FAN_OUT: no (enterprise only; each member still passes its own eligibility gates)
 
 TARGET: <OWNER/REPO | ORG | CompleteDotTech | enterprise:SLUG>
 ````
 
-## Why some steps are there
+## Verification boundary
 
-- `labels --plan` takes `--org-defaults`. Without the owner's `.github` default issue forms, every label rename
-  is held (`needs-input:label-references`, exit 1).
-- Only the fenced `text` block of `icon.md` goes to the image tool. The file's notes include a
-  "Then: run normalize" line meant for the operator, not the image agent.
-- Org illustrations are keyed before use (Appendix B). `org-banner` and `org-tile` place an illustration as
-  given, so an unkeyed flat ground renders as a rectangle over the grid.
-- `org-tile --illustration` leaves 136 px for the org name, so typical names return `art-fail:tile-name`; the
-  prompt then renders the tile without the illustration.
-- The icon comes before the banner, card and social preview because all three embed `assets/icon.png`.
-- The profile repository skips `banner` (exempt: it opens with the intro) and `readme` (`org profile --user`
-  owns its README.md).
+Checked offline on 2026-11-18 with Python 3.12 on Linux: 10 CLI help contracts, 69 CLI invocations/assertions
+on synthetic Northwind inputs, and 75 focused regression tests. This covered absolute paths containing spaces,
+mocked metadata-loader gates, staged/live surfaces and unchanged captures, social upload refusal, R2 drift,
+card/banner exemptions, sidebar unknowns, registry-free boundaries, profile preview/ownership/keep controls, project
+capture/normalize plans and enterprise fixture checks. Plan argv were inspected, never executed against GitHub.
+The prior Windows/Python 3.14 run against `bc4e10b` predates these repairs and does not validate them.
 
-## Verification
-
-Checked on 2026-11-18 against `main` at `bc4e10b`, on Windows with Python 3.14 and the pinned requirements, in a
-scratch copy of the synthetic Northwind fixtures (`examples/`). These ran:
-
-- the repository steps (`describe`, `topics`, `labels --plan`, `content icon prompt`, `normalize` and
-  `check` at `--min-contrast 4.5` on a synthetic stand-in candidate, `banner`, `card`, `content social`,
-  `readme`, `footer --check`, `lint all`, `doctor` and `contact-sheet`);
-- the org steps (`org about`, `org profile --render`, `org-banner` with an unkeyed and a keyed stand-in
-  illustration, `org-tile` with and without one, `intro`, `org doctor` and `lint public-leak`);
-- `enterprise doctor` on the test snapshot.
-
-The Appendix B keyer produced the same pixels as a numpy implementation and took 2.4 s on a worst-case
-1536×1024 noise image.
-
-Not run: a real image generation (Codex or an API), live `gh` captures (`meta --from-gh`, org snapshots,
-project boards) and a fresh virtual machine.
+Appendix B is unchanged and retains the supplied/automatic-ground, foreground, feather/crop and
+empty/unequal-corner refusal coverage; the repair also rechecked its identity and supplied/automatic-ground
+outputs. No real image generation, live GitHub capture, writer action, Windows rerun or fresh-VM run is claimed.
+The prompt is operator guidance, not evidence that a real target has been processed or its art approved.
