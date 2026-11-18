@@ -330,7 +330,8 @@ class _Draw:
 def _items(node: dict, labels: dict) -> list[dict]:
     items = [{"kind": "repo", **r} for r in node["repos"]]
     for note in node["notes"]:
-        items.append({"kind": "note", "note": note, "text": labels[note], "icon": note == "private"})
+        items.append({"kind": "note", "note": note, "text": labels.get(note, labels["uncaptured"]),
+                      "icon": note == "private"})
     return items
 
 
@@ -365,6 +366,11 @@ def layout(model: dict, brand, fonts: Fonts, *, width: int = W_DEFAULT, avatar: 
             break  # an optional chip that does not fit is left out (the Markdown companion lists the facts)
         cx += dr.chip(cx, handle_base - 19, st, text, kind, 12.5, 26, 12) + 10
     y = max(M + AV, handle_base + 10) + HEAD_GAP
+    if model.get("evidence"):
+        item = _items({"repos": [], "notes": ["partial"]}, labels)[0]
+        item["w"] = dr.pill_width(item)
+        dr.pill(tx, y, item, st)
+        y += PILL_H + PILL_ROWGAP
 
     # -- the tree -----------------------------------------------------------------------------------
     trunk_x = M + AV / 2
@@ -409,6 +415,10 @@ def layout(model: dict, brand, fonts: Fonts, *, width: int = W_DEFAULT, avatar: 
                               stroke_opacity=0.6))
         top = y
         dr.card(inner, y + ENT_PAD, ent, met, ent_avatar)
+        if ent.get("capture_status", "complete") != "complete":
+            item = _items({"repos": [], "notes": [ent["capture_status"]]}, labels)[0]
+            item["w"] = dr.pill_width(item)
+            dr.pill(inner + CARD_W + PILLS_DX, y + ENT_PAD + (met["h"] - PILL_H) / 2, item, est)
         ent_cy = y + ENT_PAD + met["h"] / 2
         branch_ys.append((ent_cy, False))  # the junction sits on the enterprise card, past the frame edge
         sub_x = inner + 16 + CAV / 2
@@ -602,7 +612,8 @@ def mermaid(model: dict, brand) -> tuple[str, dict]:
                           "padding": 14, "diagramPadding": 24}}
     out = ["%%{init: " + json.dumps(init) + "}%%", "flowchart LR"]
     out += [f"    accTitle: {_mq(model['title'])}", f"    accDescr: {_mq(model['desc'])}", ""]
-    out.append(f'    acct(["{_mq(acct["name"])}<br/>@{acct["login"]}"])')
+    capture_note = f'<br/>{_mq(labels.get("partial", labels["uncaptured"]))}' if model.get("evidence") else ""
+    out.append(f'    acct(["{_mq(acct["name"])}<br/>@{acct["login"]}{capture_note}"])')
     classes: dict[str, list[str]] = {"account": ["acct"]}
     styles: list[str] = []
     fam_defs: dict[str, dict] = {}
@@ -669,6 +680,8 @@ def mermaid(model: dict, brand) -> tuple[str, dict]:
         eid = f"e{i}"
         role = {"owner": labels["owner"], "member": labels["member"]}.get(ent.get("role") or "")
         tail = f"{labels['enterprise'].title()} · {role}" if role else labels["enterprise"].title()
+        if ent.get("capture_status", "complete") != "complete":
+            tail += " · " + labels.get(ent["capture_status"], labels["uncaptured"])
         out.append(f'    {eid}{{{{"{_mq(ent["name"])}<br/>{_mq(tail)}"}}}}')
         out.append(f"    acct --> {eid}")
         edges += 1
