@@ -20,7 +20,9 @@ import json
 import os
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from tempfile import TemporaryFile
 
 # Keep direct and runpy entry points equivalent when the caller's CWD is a target checkout.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -145,6 +147,77 @@ def _index_contents(index: Path) -> bytes | None:
         return None
 
 
+def _head_ref() -> str:
+    result = subprocess.run(["git", "symbolic-ref", "--quiet", "--no-recurse", "HEAD"],
+                            capture_output=True, text=True, timeout=30)
+    if result.returncode == 1:
+        return "HEAD"
+    result.check_returncode()
+    return result.stdout.strip()
+
+
+def _ref_oid(ref: str) -> str:
+    result = subprocess.run(["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+                            capture_output=True, text=True, timeout=30)
+    return result.stdout.strip()
+
+
+def _stop_ref_update(transaction: subprocess.Popen) -> None:
+    if transaction.poll() is None:
+        transaction.terminate()
+        try:
+            transaction.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            transaction.kill()
+            transaction.wait()
+
+
+def _update_head(ref: str, parent: str, commit: str, subject: str,
+                 index: Path, snapshot: Path, original: bytes | None) -> bool:
+    """Hold Git's HEAD lock from the symbolic-ref check through index installation."""
+    command = ["git", "update-ref", "-m", f"commit: {subject}", "--stdin"]
+    # A dereferencing update of HEAD locks both HEAD and its current branch.
+    option = "option no-deref\n" if ref == "HEAD" else ""
+    with (
+        TemporaryFile(mode="w+t", encoding="utf-8", errors="replace") as errors,
+        ThreadPoolExecutor(max_workers=1) as reader,
+        subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=errors, text=True) as transaction,
+    ):
+        try:
+            transaction.stdin.write(f"{option}update HEAD {commit} {parent}\nprepare\n")
+            transaction.stdin.flush()
+            prepared = reader.submit(transaction.stdout.readline).result(timeout=30)
+            if prepared != "prepare: ok\n":
+                transaction.communicate(timeout=30)
+                if _head_ref() != ref or _ref_oid("HEAD") != parent:
+                    return False
+                errors.seek(0)
+                raise RuntimeError(f"Could not prepare the Git ref update: {errors.read().strip()}")
+            if _head_ref() != ref:
+                transaction.communicate("abort\n", timeout=30)
+                return False
+            # Keep index.lock present while installing the checked index. If
+            # Git fails to commit, restore the former index under the same lock.
+            os.replace(snapshot, index)
+            try:
+                transaction.communicate("commit\n", timeout=30)
+                if transaction.returncode:
+                    errors.seek(0)
+                    raise RuntimeError(f"Could not commit the Git ref update: {errors.read().strip()}")
+            except BaseException:
+                _stop_ref_update(transaction)
+                if _ref_oid(ref) != commit:
+                    if original is None:
+                        index.unlink()
+                    else:
+                        snapshot.write_bytes(original)
+                        os.replace(snapshot, index)
+                raise
+            return True
+        finally:
+            _stop_ref_update(transaction)
+
+
 def prepare_commit_index(index: Path, snapshot: Path, ref: str, message: str, paths: list[str], *,
                          allow_icon_removal: bool = False) -> str:
     """Commit the checked tree against its checked parent, then install the successful index."""
@@ -171,38 +244,22 @@ def prepare_commit_index(index: Path, snapshot: Path, ref: str, message: str, pa
     if tree == parent_tree:
         return "unchanged"
 
-    # Take the same lock as Git index writers and compare against the original
-    # bytes before replacing the caller's index. Keep the lock through ref update.
+    # Take the same lock as Git index writers and compare the original
+    # bytes before installing the candidate. Keep it through ref update.
     lock = index.with_name(index.name + ".lock")
     try:
-        staged = lock.open("xb")
+        lock.touch(exist_ok=False)
     except FileExistsError:
         return "changed"
-    installed = False
     try:
-        with staged:
-            symbolic_head = subprocess.run(["git", "symbolic-ref", "--quiet", "HEAD"],
-                                           capture_output=True, text=True, timeout=30)
-            current_ref = symbolic_head.stdout.strip() if symbolic_head.returncode == 0 else "HEAD"
-            if current_ref != ref or _index_contents(index) != original:
-                return "changed"
-            staged.write(snapshot.read_bytes())
+        if _head_ref() != ref or _index_contents(index) != original:
+            return "changed"
         commit = subprocess.check_output(["git", "commit-tree", tree, "-p", parent, "-m", message],
                                          text=True, timeout=30).strip()
         subject = message.split("\n", 1)[0]
-        update = subprocess.run(["git", "update-ref", "--no-deref", "-m", f"commit: {subject}", ref, commit, parent],
-                                capture_output=True, timeout=30)
-        if update.returncode:
-            if subprocess.check_output(["git", "rev-parse", "--verify", f"{ref}^{{commit}}"],
-                                       text=True, timeout=30).strip() != parent:
-                return "changed"
-            update.check_returncode()
-        os.replace(lock, index)
-        installed = True
-        return commit
+        return commit if _update_head(ref, parent, commit, subject, index, snapshot, original) else "changed"
     finally:
-        if not installed:
-            lock.unlink(missing_ok=True)
+        lock.unlink(missing_ok=True)
 
 
 def drop(name: str) -> None:

@@ -18,7 +18,7 @@ done
 # stage the deletion on its own: only when the tracked icon is missing from the checkout, and never an edit to it.
 icon_removed="$(git ls-files --deleted -- assets/icon.png)"
 [ "${#paths[@]}" -eq 0 ] && [ -z "$icon_removed" ] && { echo "showcase: nothing to stage"; exit 0; }
-ref="$(git symbolic-ref --quiet HEAD)" || ref=HEAD
+ref="$(git symbolic-ref --quiet --no-recurse HEAD)" || ref=HEAD
 branch="${ref#refs/heads/}"
 if [ -n "$prepare" ]; then
   # Hold the render lock while staging and validating the private index.

@@ -605,8 +605,14 @@ def cmd_readme(args):
     if args.records and changed:
         if staged and not args.write:
             check_outputs(ctx, path, auxiliary=report)
-        records.append(args.records, [records.record(ctx.owner, ctx.repo, "readme", "README.md", before, after,
-                                                     f"§7 variant {ctx.det['variant']} ({mode})")])
+        change = records.record(ctx.owner, ctx.repo, "readme", "README.md", before, after,
+                                f"§7 variant {ctx.det['variant']} ({mode})")
+        if staged:
+            from ctshowcase.staged import protected_auxiliary
+            with protected_auxiliary(getattr(ctx, "meta_path", None), ctx.repo_dir, Path(args.records)):
+                records.append(args.records, [change])
+        else:
+            records.append(args.records, [change])
     res = base("readme", ctx, result="changed" if changed else "unchanged", mode="bootstrap" if args.bootstrap else mode,
                variant=ctx.det["variant"], written=bool(args.write and changed))
     if args.diff or not args.write:

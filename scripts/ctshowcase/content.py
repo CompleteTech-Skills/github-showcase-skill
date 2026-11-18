@@ -2594,7 +2594,7 @@ def _ctx(args, cli, resolver):
     return ctx
 
 
-def _finish(args, obj: dict, code: int):
+def _finish(args, obj: dict, code: int, *, checkout: Path | None = None):
     jobs = list(obj.get("jobs") or []) + ([obj["job"]] if obj.get("job") else [])
     from .signoff import stamp
     stamp(jobs)  # before any serialization (--jobs, --report)
@@ -2611,7 +2611,9 @@ def _finish(args, obj: dict, code: int):
         payload = json.dumps(obj, indent=1, ensure_ascii=False, default=str) + "\n"
         if obj.get("staged_description"):
             from .fingerprint import replace_bytes
-            replace_bytes(p, payload.encode("utf-8"), private=True)
+            from .staged import protected_auxiliary
+            with protected_auxiliary(Path(args.meta) if args.meta else None, checkout, p):
+                replace_bytes(p, payload.encode("utf-8"), private=True, preserve_mode=False)
         else:
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(payload, encoding="utf-8")
@@ -2651,7 +2653,7 @@ def cmd_content(args, cli=None):
                 obj["logs"] = list(obj.get("logs") or []) + ["needs-input:social-login"]
                 job = None
             obj["job"] = job
-        return _finish(args, obj, code)
+        return _finish(args, obj, code, checkout=cli.repo_dir(args))
     if act in ("links", "images"):
         rd = cli.repo_dir(args)
         if rd is None:

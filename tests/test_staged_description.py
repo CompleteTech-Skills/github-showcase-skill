@@ -1038,8 +1038,10 @@ def test_action_stages_while_holding_the_renderers_lock(tmp_path):
 
 
 @pytest.mark.requires_bash
-@pytest.mark.parametrize("concurrent_change", ["head", "index", "branch"])
-def test_action_skips_commit_when_git_state_changes_after_staging(tmp_path, concurrent_change):
+@pytest.mark.parametrize("concurrent_change", [
+    "head", "index", "branch", "late-branch", "late-detached", "locked-branch", "ref-failure",
+])
+def test_action_handles_concurrent_git_changes_during_commit(tmp_path, concurrent_change):
     import os
     import subprocess
 
@@ -1053,6 +1055,11 @@ def test_action_skips_commit_when_git_state_changes_after_staging(tmp_path, conc
     git("config", "user.email", "fixture@example.invalid")
     git("commit", "--allow-empty", "-qm", "base")
     initial = git("rev-parse", "HEAD")
+    original_ref = git("symbolic-ref", "HEAD")
+    if concurrent_change in ("late-branch", "late-detached", "locked-branch"):
+        git("branch", "competing")
+    if concurrent_change == "late-detached":
+        git("switch", "--detach", "-q")
     (tmp_path / "README.md").write_text("live README", encoding="utf-8")
     (tmp_path / "notes.txt").write_text("concurrent staged text", encoding="utf-8")
     index = tmp_path / ".git/index"
@@ -1063,20 +1070,43 @@ import os
 import runpy
 import subprocess
 import sys
+from pathlib import Path
 
 original_run = subprocess.run
+change = os.environ["SHOWCASE_TEST_CONCURRENT_CHANGE"]
+
+
+class ObserveRefUpdate(subprocess.Popen):
+    def __init__(self, argv, *args, **kwargs):
+        self.ref_transaction = argv[:2] == ["git", "update-ref"] and "--stdin" in argv
+        if self.ref_transaction and change == "head":
+            parent = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+            tree = subprocess.check_output(["git", "rev-parse", f"{parent}^{{tree}}"], text=True).strip()
+            advanced = subprocess.check_output(["git", "commit-tree", tree, "-p", parent, "-m", "Concurrent"],
+                                               text=True).strip()
+            original_run(["git", "update-ref", "HEAD", advanced, parent], check=True)
+        if self.ref_transaction and change in ("late-branch", "late-detached"):
+            original_run(["git", "symbolic-ref", "HEAD", "refs/heads/competing"], check=True)
+        super().__init__(argv, *args, **kwargs)
+
+    def communicate(self, input=None, timeout=None):
+        if self.ref_transaction and input == "commit\n":
+            assert Path(".git/index.lock").is_file()
+            if change == "locked-branch":
+                attempt = original_run(["git", "symbolic-ref", "HEAD", "refs/heads/competing"],
+                                       capture_output=True, timeout=5)
+                assert attempt.returncode, "HEAD switched during installation of the caller's index"
+            if change == "ref-failure":
+                candidate = original_run(["git", "show", ":README.md"], check=True, capture_output=True).stdout
+                Path("failed-ref-candidate").write_bytes(candidate)
+                output = super().communicate("abort\n", timeout)
+                self.returncode = 1
+                return output
+        return super().communicate(input, timeout)
 
 
 def change_git_state(argv, *args, **kwargs):
-    operation = argv[:2]
-    change = os.environ["SHOWCASE_TEST_CONCURRENT_CHANGE"]
-    if change == "head" and operation == ["git", "update-ref"]:
-        parent = argv[-1]
-        tree = subprocess.check_output(["git", "rev-parse", f"{parent}^{{tree}}"], text=True).strip()
-        advanced = subprocess.check_output(["git", "commit-tree", tree, "-p", parent, "-m", "Concurrent"],
-                                           text=True).strip()
-        original_run(["git", "update-ref", "HEAD", advanced, parent], check=True)
-    if operation == ["git", "write-tree"]:
+    if argv[:2] == ["git", "write-tree"]:
         if change == "index":
             original_run(["git", "add", "--", "notes.txt"], check=True)
         if change == "branch":
@@ -1084,6 +1114,7 @@ def change_git_state(argv, *args, **kwargs):
     return original_run(argv, *args, **kwargs)
 
 
+subprocess.Popen = ObserveRefUpdate
 subprocess.run = change_git_state
 sys.argv.pop(0)
 runpy.run_path(sys.argv[0], run_name="__main__")
@@ -1098,19 +1129,38 @@ bash "$GITHUB_ACTION_PATH/scripts/action_commit.sh" "Synthetic" fail "$GITHUB_AC
     env = {**os.environ, "GITHUB_ACTION_PATH": str(ROOT), "SHOWCASE_DRY_RUN": "1",
            "SHOWCASE_TEST_INDEX_WRAPPER": str(wrapper), "SHOWCASE_TEST_CONCURRENT_CHANGE": concurrent_change}
     result = run_bash(script, cwd=tmp_path, env=env)
+    assert not (tmp_path / ".git/index.lock").exists()
+    if concurrent_change == "locked-branch":
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "would push" in result.stdout
+        assert git("symbolic-ref", "HEAD") == original_ref
+        assert git("rev-parse", "HEAD^") == initial
+        assert git("rev-parse", "refs/heads/competing") == initial
+        assert git("show", "HEAD:README.md") == "live README"
+        assert git("diff", "--cached", "--name-only") == ""
+        return
+    if concurrent_change == "ref-failure":
+        assert result.returncode != 0, result.stdout + result.stderr
+        assert (tmp_path / "failed-ref-candidate").read_bytes() == b"live README"
+        assert "would push" not in result.stdout
+        assert git("rev-parse", "HEAD") == initial
+        assert index.read_bytes() == original
+        return
     assert result.returncode == 0, result.stdout + result.stderr
     assert "commit skipped because HEAD or the caller's Git index changed" in result.stdout
     assert "would push" not in result.stdout
-    assert not (tmp_path / ".git/index.lock").exists()
     if concurrent_change == "head":
         assert git("rev-parse", "HEAD^") == initial
         assert git("log", "-1", "--format=%s") == "Concurrent"
         assert index.read_bytes() == original
         assert git("diff", "--cached", "--name-only") == ""
-    elif concurrent_change == "branch":
+    elif concurrent_change in ("branch", "late-branch", "late-detached"):
         assert git("symbolic-ref", "--short", "HEAD") == "competing"
         assert git("rev-parse", "HEAD") == initial
+        assert git("rev-parse", original_ref) == initial
         assert git("diff", "--cached", "--name-only") == ""
+        if concurrent_change.startswith("late-"):
+            assert index.read_bytes() == original
     else:
         assert git("rev-parse", "HEAD") == initial
         assert git("diff", "--cached", "--name-only") == "notes.txt"

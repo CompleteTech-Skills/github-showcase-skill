@@ -172,7 +172,7 @@ def sidecar_lock(path: Path):
             _HELD_LOCKS.reset(token)
 
 
-def replace_bytes(path: Path, data: bytes, *, private: bool = False) -> None:
+def replace_bytes(path: Path, data: bytes, *, private: bool = False, preserve_mode: bool = True) -> None:
     """Replace the directory entry instead of writing through an existing link."""
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -190,7 +190,7 @@ def replace_bytes(path: Path, data: bytes, *, private: bool = False) -> None:
     with TemporaryDirectory(dir=path.parent) as directory:
         source = Path(directory) / path.name
         source.write_bytes(data)
-        if existing is not None and regular:
+        if existing is not None and regular and preserve_mode:
             source.chmod(existing.st_mode & 0o777)
         elif private:
             source.chmod(0o600)
@@ -209,7 +209,9 @@ def write_sidecar(out_dir: Path, inp: dict, cfg_sha: str, name: str, record: dic
         data.update(schema=1, skill_version=__version__, standard=STANDARD, outputs=outputs)
         if summarize:
             data.update(config_sha256=cfg_sha, inputs=inp, fingerprint=current)
-        replace_bytes(p, (json.dumps(data, sort_keys=True, indent=1, ensure_ascii=False) + "\n").encode("utf-8"))
+        private = any(isinstance(value, dict) and "staged_description" in value for value in outputs.values())
+        replace_bytes(p, (json.dumps(data, sort_keys=True, indent=1, ensure_ascii=False) + "\n").encode("utf-8"),
+                      private=private, preserve_mode=not private)
         return p
 
 

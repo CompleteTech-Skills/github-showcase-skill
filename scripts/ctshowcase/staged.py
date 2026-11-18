@@ -101,6 +101,8 @@ def check_auxiliary(capture: Path | None, checkout: Path | None, *paths: Path) -
     for path in paths:
         if path.is_symlink() or (path.exists() and (not path.is_file() or path.stat().st_nlink > 1)):
             raise ShowcaseError("staged reports must use an unlinked regular file", log="staged-description:path")
+        if _live_social_output(path):
+            raise ShowcaseError("staged reports must not replace a live social preview", log="staged-description:path")
         if path.is_file():
             with path.open("rb") as stream:
                 signature = stream.read(8)
@@ -108,6 +110,14 @@ def check_auxiliary(capture: Path | None, checkout: Path | None, *paths: Path) -
                 raise ShowcaseError("staged reports must not replace an existing image", log="staged-description:path")
         if _action_managed_path(path, checkout):
             raise ShowcaseError("staged reports must stay outside Action-managed paths", log="staged-description:path")
+
+
+@contextmanager
+def protected_auxiliary(capture: Path | None, checkout: Path | None, path: Path):
+    """Revalidate the report destination while the neighboring renderer is excluded."""
+    with fp.sidecar_lock(path.resolve().parent / fp.SIDECAR):
+        check_auxiliary(capture, checkout, path)
+        yield
 
 
 def _live_social_output(path: Path) -> bool:
