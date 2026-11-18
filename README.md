@@ -78,6 +78,7 @@ flowchart LR
 - Renders org profile READMEs from the estate registry's public slice (leak-checked), and plans org About fields, pins and star lists, labels and `.github` health files, with an O-check row per org.
 - Captures, lints and copies GitHub Projects boards from the estate template in two stages (structure only, nothing deleted), writes the board README, and plans the private cross-org Estate board.
 - Snapshots the CompleteTech Enterprise read-only, checks it (E1–E14, the romgenie seat), and plans the approved profile and domain changes.
+- Maps one account as a tree: its own repositories, each enterprise it owns or belongs to, each organization and every public repository of each, as a themed Mermaid source, a dark SVG and an HD PNG in the estate design, plus a Markdown block that links every repository. Private and internal repositories are counted, never named, and excluded, T3, HOLD and exposure-flagged owners and repositories follow the estate gates.
 - Checks repository content: relative links and anchors, the language bar, Actions health and merge side effects, README images, the About sidebar, repository icons and the social preview.
 - Keeps repositories current: README scaffolds that never drop a line and end with the CompleteTech LLC footer, plus a composite GitHub Action that regenerates the banner and card when the description, topics, type or icon change, and writes description and topic proposals to the run summary.
 
@@ -89,7 +90,7 @@ flowchart LR
 - `action.yml` - the composite GitHub Action used by `completetech-repo-template` and by this repository's own Showcase workflow.
 - `references/` - the standard in condensed form, the user decisions, `brand.yaml` (the single place for brand data) and the machine-readable rule files in `references/standard/`; `enterprise.yaml` and `references/enterprise/` hold the enterprise module's desired state and its read-only GraphQL queries.
 - `assets/brand/`, `assets/orgs/`, `assets/fonts/` - brand masters, organization marks and the OFL fonts the generators place and outline.
-- `examples/` - synthetic Northwind Trading Co. metadata, fixture checkouts, an example per-repository override file, a synthetic estate registry for the `org` commands (`examples/estate/`), and the script that regenerates every committed preview.
+- `examples/` - synthetic Northwind Trading Co. metadata, fixture checkouts, an example per-repository override file, a synthetic estate registry for the `org` commands (`examples/estate/`), a synthetic account snapshot for `account-chart` (`examples/account-chart/`), and the script that regenerates every committed preview.
 - `requirements.txt` - pinned Python dependencies for typesetting and compositing.
 
 ## Quick Start
@@ -121,8 +122,9 @@ Every command runs through `python3 scripts/showcase.py`. All of them are read-o
 | `project capture-query`, `normalize`, `copy-plan`, `readme`, `lint`, `estate-plan` | GitHub Projects boards from the estate template |
 | `enterprise snapshot-query`, `discover`, `snapshot`, `doctor`, `seat-check`, `diff`, `plan` | The CompleteTech Enterprise, read-only |
 | `content social`, `icon`, `links`, `linguist`, `actions`, `images`, `sidebar` | Repository content checks and the social preview upload job |
+| `account-chart capture-query`, `capture`, `render` | One account's repositories, enterprises and organizations as a Mermaid tree, a dark SVG and an HD PNG |
 
-`SKILL.md` documents every option; `references/org.md`, `references/projects.md`, `references/enterprise.md` and `references/content.md` cover the command groups.
+`SKILL.md` documents every option; `references/org.md`, `references/projects.md`, `references/enterprise.md` and `references/content.md` cover the command groups, and `references/account-chart.md` covers the account chart.
 
 ## Example
 
@@ -145,6 +147,20 @@ Example files: [Banner](assets/examples/banner-example.png) · [Card](assets/exa
 python3 scripts/showcase.py --meta examples/meta/northwind-support-triage-agent.json --repo-dir examples/repos/northwind-support-triage-agent banner --out assets/examples/banner-example.png
 python3 scripts/showcase.py --meta examples/meta/northwind-support-triage-agent.json --repo-dir examples/repos/northwind-support-triage-agent card --out assets/examples/card-example.svg --png assets/examples/card-example.png
 bash examples/render_examples.sh   # every committed example, contact sheets and this README's own banner and card
+```
+
+**Account chart: a synthetic Northwind account**
+
+<p align="center">
+  <img src="assets/examples/account-chart-example.svg" alt="GitHub account map of Northwind Developer (@northwind-dev): personal repositories, one enterprise and six organizations, each with its public repositories" width="100%">
+</p>
+
+- Rendered from the synthetic snapshot in `examples/account-chart/northwind.snapshot.json`: [Mermaid source](assets/examples/account-chart-example.mmd), [SVG](assets/examples/account-chart-example.svg), [HD PNG](assets/examples/account-chart-example.png) and the [Markdown block](assets/examples/account-chart-example.md) that links every repository.
+- `account-chart capture` reads the signed-in account with read-only GraphQL queries; private and internal repositories are counted, never named.
+
+```bash
+python3 scripts/showcase.py account-chart capture --out account.snapshot.json        # the signed-in account
+python3 scripts/showcase.py account-chart render --snapshot account.snapshot.json --out-dir docs/images
 ```
 
 ## Inputs
@@ -175,7 +191,7 @@ This skill needs local filesystem access only for the documented showcase workfl
 
 ## Network Boundary
 
-Generation and checks are local. The only network calls are read-only `gh api` GETs for `meta --from-gh`, `labels --plan`, `adopt` and opt-in `org labels ORG --repos-from-gh` (paginated discovery of the org repositories accessible to the authenticated account, including private repositories, their labels and file trees), read-only GraphQL queries for `enterprise discover` and `enterprise snapshot`, the opt-in link and image checks of `content links --online` and `content images --online`, the pinned font download of `fonts --fetch`, and the two read-only HEAD requests of `footer --check --online`, each only when asked. The skill does not include callbacks or any helper that posts run metadata to an external service. The composite Action pushes only into the repository it runs in.
+Generation and checks are local. The only network calls are read-only `gh api` GETs for `meta --from-gh`, `labels --plan`, `adopt` and opt-in `org labels ORG --repos-from-gh` (paginated discovery of the org repositories accessible to the authenticated account, including private repositories, their labels and file trees), read-only GraphQL queries for `enterprise discover`, `enterprise snapshot` and `account-chart capture`, the opt-in link and image checks of `content links --online` and `content images --online`, the pinned font download of `fonts --fetch`, and the two read-only HEAD requests of `footer --check --online`, each only when asked. The skill does not include callbacks or any helper that posts run metadata to an external service. The composite Action pushes only into the repository it runs in.
 
 ## Source
 

@@ -1,0 +1,6 @@
+# `account-chart capture` (read only): the organizations the account belongs to (logins only), one page at a time.
+query AccountOrgs($login: String!, $after: String) {
+  user(login: $login) {
+    organizations(first: 100, after: $after) { pageInfo { hasNextPage endCursor } nodes { login } }
+  }
+}

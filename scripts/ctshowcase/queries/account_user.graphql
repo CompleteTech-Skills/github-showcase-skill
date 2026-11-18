@@ -1,0 +1,15 @@
+# `account-chart capture` (read only): the account's profile and its public repositories, one page at a time.
+# Private and internal repositories are never named: only `all` (every owned repository the viewer can see) and
+# `public` are counted, and the difference is the not-public count.
+query AccountUser($login: String!, $after: String) {
+  user(login: $login) {
+    login name company location websiteUrl
+    all: repositories(ownerAffiliations: OWNER) { totalCount }
+    public: repositories(ownerAffiliations: OWNER, privacy: PUBLIC) { totalCount }
+    repositories(first: 100, after: $after, ownerAffiliations: OWNER, privacy: PUBLIC,
+                 orderBy: {field: NAME, direction: ASC}) {
+      pageInfo { hasNextPage endCursor }
+      nodes { name description isFork isArchived primaryLanguage { name } }
+    }
+  }
+}
