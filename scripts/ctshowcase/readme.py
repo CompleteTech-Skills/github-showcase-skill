@@ -1303,7 +1303,6 @@ def license_block(ctx: RepoContext, text: str) -> str:
 
 TEMPLATE_H1 = "CompleteTech Repo Template"
 PRISTINE = re.compile(r"<!-- showcase:template-body:pristine(?: sha256=([0-9a-f]{64}))? -->\n?")
-TEMPLATE_BODY = re.compile(re.escape(start("template-body")) + r"\n?(.*?)\n?" + re.escape(end("template-body")), re.S)
 
 
 def body_sha(body: str) -> str:
@@ -1324,33 +1323,64 @@ def pristine_block(body: str) -> str:
     return wrap("template-body", f"<!-- showcase:template-body:pristine sha256={body_sha(body)} -->\n{body}")
 
 
+def _template_block(text: str) -> re.Match | None:
+    return next((block for block in find_blocks(MARK, text) if block.group(1) == "template-body"), None)
+
+
+def _pristine_marker(text: str, block: re.Match) -> re.Match | None:
+    return next((marker for marker in find_blocks(PRISTINE, text)
+                 if block.start(2) <= marker.start() < block.end(2) and marker.end() <= block.end(2) + 1), None)
+
+
 def bootstrap_state(text: str) -> str:
-    """'pristine' (the block is byte-for-byte what was generated), 'edited' (a marker without a matching hash: a person
-    wrote in the block) or 'none' (no marker: the README is the repository's own)."""
-    found = find_blocks(TEMPLATE_BODY, normalize_text(text))
-    if not found:
+    """Return the ownership state of the first genuine template-body block."""
+    text = normalize_text(text)
+    block = _template_block(text)
+    if block is None or (marker := _pristine_marker(text, block)) is None:
         return "none"
-    m = found[0]
-    pm = PRISTINE.search(m.group(1))
-    if not pm:
-        return "none"
-    rest = PRISTINE.sub("", m.group(1), count=1)
-    return "pristine" if pm.group(1) and pm.group(1) == body_sha(rest) else "edited"
+    body = text[block.start(2):marker.start()] + text[marker.end():block.end(2)]
+    return "pristine" if marker.group(1) and marker.group(1) == body_sha(body) else "edited"
 
 
 def drop_pristine(text: str) -> str:
-    """`text` without the pristine marker of the first template-body block outside code; a marker shown as an example
-    (inline or fenced code) stays byte-identical."""
-    found = find_blocks(TEMPLATE_BODY, text)
-    if not found:
+    """Remove only a genuine ownership marker inside the first template body."""
+    block = _template_block(text)
+    if block is None or (marker := _pristine_marker(text, block)) is None:
         return text
-    tb = found[0]
-    return text[:tb.start(1)] + PRISTINE.sub("", tb.group(1), count=1) + text[tb.end(1):]
+    return text[:marker.start()] + text[marker.end():]
 
 
-def _header_region(text: str) -> re.Match | None:
-    """From the top of the README to the rule after the tagline block (the §7.2 header)."""
-    return re.match(r"\A.*?" + re.escape(end("tagline")) + r"\n(?:.*?\n)??---\n", text, re.S)
+_HEADER_RULE = re.compile(r"\n+(?:</div>\n+)?---\n")
+_HEADER_LAYOUT = re.compile(r'(?:<div align="center">\n+)?(?:# ([^\n]+)\n+)?(?:</div>\n+)?---\n')
+
+
+def _header_region(text: str) -> tuple[int, list[re.Match], str | None] | None:
+    """Identify a rebuildable header using live blocks and exact generated structure."""
+    blocks = []
+    seen = set()
+    parts = []
+    offset = 0
+    for block in find_blocks(MARK, text):
+        name = block.group(1)
+        if name not in {"banner", "nav", "badges", "tagline"} or name in seen:
+            return None
+        if ((block.start() and text[block.start() - 1] != "\n")
+                or text[block.end():block.end() + 1] != "\n"):
+            return None
+        seen.add(name)
+        blocks.append(block)
+        parts.append(text[offset:block.start()])
+        offset = block.end()
+        if name == "tagline":
+            rule = _HEADER_RULE.match(text, offset)
+            if rule is None:
+                return None
+            parts.append(rule.group())
+            layout = _HEADER_LAYOUT.fullmatch("".join(parts).lstrip("\n"))
+            if layout is not None:
+                return rule.end(), blocks, layout.group(1)
+            return None
+    return None
 
 
 def bootstrap(ctx: RepoContext, text: str, *, already_normalized: bool = False) -> str:
@@ -1376,25 +1406,23 @@ def bootstrap(ctx: RepoContext, text: str, *, already_normalized: bool = False) 
             secs.append(f"## {h2}\n\n<!-- needs-input: {variant}:{h2} -- write from repository facts only -->")
             ctx.log(f"needs-input:{variant}:{h2}")
     new = pristine_block("\n\n".join(secs))
-    tb = find_blocks(TEMPLATE_BODY, text)[0]  # bootstrap_state found it outside code
+    tb = _template_block(text)
+    assert tb is not None  # bootstrap_state verified the template body
     text = text[:tb.start()] + new + text[tb.end():]
     # the header: rebuilt for this variant unless a person retitled the README
-    hm = _header_region(text)
-    if hm and not text.startswith(BOM):
-        h1 = re.search(r"(?m)^# (.+)$", hm.group(0))
+    region = _header_region(text)
+    if region is not None:
+        header_end, markers, old_title = region
         auto = cased_title(ctx.repo, ctx.meta.get("description") or "")
-        if not h1 or h1.group(1).strip() in (TEMPLATE_H1, auto, slug_title(ctx.repo)):
-            # the tagline block carries over (tagline_body), so a line the owner wrote survives the rebuild and only an
-            # inherited one is emptied, exactly as header_only decides it
-            markers = find_blocks(MARK, hm.group(0))
+        if old_title is None or old_title.strip() in (TEMPLATE_H1, auto, slug_title(ctx.repo)):
+            # Carry an authored tagline forward under the same rule as an in-place refresh.
             if variant == "J" and _badge_blocks_need_in_place_refresh(markers):
-                # Refresh in place to preserve distinct or noncanonical blocks.
                 return header_only(ctx, text, already_normalized=True)
-            blocks = {m.group(1): m.group(2) for m in markers}
-            old = blocks.get("tagline")
+            blocks = {marker.group(1): marker.group(2) for marker in markers}
+            old = blocks["tagline"]
             new_header = header(ctx, title=auto, tagline=tagline_body(ctx, old, text),
                                 existing_badges=blocks.get("badges"))
-            text = new_header + "\n\n" + text[hm.end():].lstrip("\n")
+            text = new_header + "\n\n" + text[header_end:].lstrip("\n")
     return header_only(ctx, text, already_normalized=True)
 
 

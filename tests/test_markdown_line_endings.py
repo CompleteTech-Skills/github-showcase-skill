@@ -464,6 +464,8 @@ from ctshowcase import mdcode, readme
 text = (readme.start("nav") + "\\n") * 10000
 assert mdcode.find_blocks(readme.MARK, text) == []
 assert [m.group(1) for m in mdcode.find_blocks(readme.MARK, text + readme.wrap("tagline", "A live row."))] == ["tagline"]
+template_openers = (readme.start("template-body") + "\\n") * 4000
+assert readme.bootstrap_state(template_openers) == "none"
 """
     result = subprocess.run([sys.executable, "-c", probe, str(ROOT / "scripts")],
                             capture_output=True, text=True, timeout=20, check=False)
@@ -482,3 +484,35 @@ def test_bootstrap_preserves_the_authored_bom_prefix(tmp_path):
     result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--bootstrap", "--write")
     assert result.returncode == 0, result.stdout + result.stderr
     assert path.read_bytes().startswith((authored_title + "\n").encode("utf-8"))
+
+
+@pytest.mark.parametrize("fenced", [False, True])
+def test_bootstrap_never_confuses_authored_preface_with_generated_header(tmp_path, fenced):
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps({"owner": "Northwind-Trading-Co", "repo": ".github",
+                                "license": "MIT", "files": ["README.md"]}), encoding="utf-8")
+    path = tmp_path / "README.md"
+    sample = readme.wrap("tagline", "Example tagline.") + "\n---\n"
+    preface = "Authored preface\n\n" + ("\x60\x60\x60md\n" + sample + "\x60\x60\x60\n" if fenced else sample)
+    original = preface.replace("\n", "\r\n") + "\r\n" + readme.pristine_block("## Install\n\nPlaceholder.") + "\n"
+    path.write_bytes(original.encode())
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--bootstrap", "--write")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert path.read_bytes().startswith(preface.split("<!--", 1)[0].replace("\n", "\r\n").encode())
+    if fenced:
+        assert preface.replace("\n", "\r\n").encode() in path.read_bytes()
+    assert b"Placeholder." not in path.read_bytes()
+
+
+def test_bootstrap_does_not_drop_a_pristine_marker_shown_inside_a_fence(tmp_path):
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps({"owner": "Northwind-Trading-Co", "repo": ".github",
+                                "license": "MIT", "files": ["README.md"]}), encoding="utf-8")
+    path = tmp_path / "README.md"
+    authored = readme.wrap("template-body", "\x60\x60\x60markdown\n<!-- showcase:template-body:pristine -->\n"
+                         "Authored example.\n\x60\x60\x60")
+    original = ("# Profile\n\n" + authored + "\n").replace("\n", "\r\n")
+    path.write_bytes(original.encode())
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--bootstrap", "--write")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert authored.replace("\n", "\r\n").encode() in path.read_bytes()
