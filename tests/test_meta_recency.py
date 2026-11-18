@@ -3,6 +3,7 @@ Synthetic data only; the subprocess transport stub answers read-only GETs on eve
 import json
 import subprocess
 
+import pytest
 import showcase
 
 from ctshowcase import meta as M
@@ -69,3 +70,43 @@ def test_load_metas_is_recursive(tmp_path, brand):
     est = O.Estate(brand, Resolver(brand, {"orgs": {}}, None))
     assert O.load_metas(tmp_path, est) == 2
     assert est.meta("Old-Org/moved") is not None
+
+
+@pytest.mark.parametrize("fallback", [None, "type: workspace\n"])
+def test_meta_from_gh_keeps_unreadable_preferred_override(tmp_path, monkeypatch, capsys, fallback):
+    full_name = "Northwind-Trading-Co/handbook"
+    prefix = f"repos/{full_name}"
+    preferred, alternative = ".github/showcase.yml", ".github/showcase.yaml"
+    files = ["README.md", "docs/guide.md", preferred]
+    if fallback is not None:
+        files.append(alternative)
+    payloads = {
+        prefix: {"name": "handbook", "full_name": full_name, "owner": {"login": "Northwind-Trading-Co"},
+                 "visibility": "public", "default_branch": "main"},
+        f"{prefix}/git/trees/main?recursive=1": {
+            "tree": [{"type": "blob", "path": path, "size": 1} for path in files], "truncated": False,
+        },
+        f"{prefix}/contents/{alternative}?ref=main": fallback,
+    }
+    requests = []
+
+    def gh(path, *, paginate=False, raw=False):
+        requests.append((path, raw))
+        return payloads.get(path)
+
+    monkeypatch.setattr(M, "_gh", gh)
+    capture = tmp_path / "capture.json"
+    assert showcase.main(["meta", "--from-gh", full_name, "--out", str(capture)]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert (f"{prefix}/contents/{preferred}?ref=main", True) in requests
+    metadata = json.loads(capture.read_text(encoding="utf-8"))
+    assert preferred in metadata["files"]
+    assert metadata["manifests"] == ({alternative: fallback} if fallback is not None else {})
+    assert (metadata["detected"]["type"], metadata["detected"]["rule"]) == ("documentation", 25)
+    assert "suggestion" not in metadata["detected"]
+    assert result["logs"] == []
+
+    assert showcase.main(["--meta", str(capture), "--no-repo-dir", "doctor", "--format", "json"]) == 2
+    diagnostic = json.loads(capsys.readouterr().out)
+    assert diagnostic["logs"] == ["config"]
+    assert f"{preferred}: captured override contents unavailable" in diagnostic["error"]

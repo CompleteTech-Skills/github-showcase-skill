@@ -38,10 +38,10 @@ class RepoContext:
         self.brand, self.meta = brand, meta
         self.repo_dir = Path(repo_dir) if repo_dir else None
         self.facts = RepoFacts(meta, repo_dir, metadata_path=metadata_path)
-        self.override, self.override_sha = load_repo_override(repo_dir) if repo_dir else ({}, None)
+        self.override, self.override_sha = load_repo_override(repo_dir, facts=self.facts) if repo_dir else ({}, None)
         if not self.override and not repo_dir:
             # metadata only: the override `meta --from-gh` captured (either spelling), validated like a checkout's
-            self.override = override_from_manifests(meta.get("manifests"))
+            self.override = override_from_manifests(meta.get("manifests"), meta.get("files"))
         # GitHub logins are case-insensitive (an origin URL may be lower-cased): take the org's own spelling so every
         # literal org rule (README variant, nav line, R6, R9) matches. Only the case is fixed; a former login is not
         # rewritten here, since the rename may not have happened on GitHub yet (CQ-03).

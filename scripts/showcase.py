@@ -689,20 +689,21 @@ def cmd_meta(args):
         rd = repo_dir(args)
         m = M.merged(args.meta, str(rd) if rd else None)
     resolver = b.resolver() if b else None
+    facts = RepoFacts(m, rd, metadata_path=args.meta, metadata_output=args.out)
     unread_override = False
     override = {}
     override_errors = (ConfigError, OSError, ValueError, RecursionError)
     if C.yaml is not None:
         override_errors += (C.yaml.YAMLError,)
     try:
-        override = C.load_repo_override(rd)[0] if rd else C.override_from_manifests(m.get("manifests"))
+        override = (C.load_repo_override(rd, facts=facts)[0] if rd
+                    else C.override_from_manifests(m.get("manifests"), m.get("files")))
     except override_errors:
         # Preserve the capture on the stdlib-only Action step and for invalid
         # config. A later config-aware command reports the exact failure.
         unread_override = True
     if override.get("for") and not same_repository(override["for"], m["owner"], m["repo"], resolver):
         override = {}
-    facts = RepoFacts(m, rd, metadata_path=args.meta, metadata_output=args.out)
     m["detected"] = detect(m, facts, override, type_override=args.type_override,
                            same_owner=resolver.same if resolver else None)
     if unread_override:

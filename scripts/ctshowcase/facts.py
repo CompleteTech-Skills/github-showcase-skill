@@ -8,6 +8,7 @@ import json
 import os
 import re
 import subprocess
+from functools import cached_property
 from pathlib import Path
 
 try:
@@ -27,6 +28,15 @@ def _req_name(line: str) -> str | None:
         return None
     m = _REQ.match(line)
     return m.group(1).lower() if m else None
+
+
+def captured_file_exists(files: object, name: str) -> bool:
+    if isinstance(files, list):
+        return name in files
+    if isinstance(files, dict):
+        value = files.get(name)
+        return value is True or isinstance(value, dict)
+    return False
 
 
 class RepoFacts:
@@ -64,7 +74,9 @@ class RepoFacts:
             for name in sorted(names):
                 if not relative.parts and name == ".git":  # linked checkout pointer
                     continue
-                out.append((relative / name).as_posix())
+                path = (relative / name).as_posix()
+                if path not in self._scratch_metadata_paths:
+                    out.append(path)
         return out
 
     def documentation_files(self) -> list[str]:
@@ -72,12 +84,11 @@ class RepoFacts:
         if self.dir is None:
             return self.files
         if self._documentation_files is None:
-            files = self._checkout_files(SKIP_DIRS - {"build", "dist"})
-            scratch = self._scratch_metadata_paths(files)
-            self._documentation_files = [name for name in files if name not in scratch]
+            self._documentation_files = self._checkout_files(SKIP_DIRS - {"build", "dist"})
         return self._documentation_files
 
-    def _scratch_metadata_paths(self, files: list[str]) -> set[str]:
+    @cached_property
+    def _scratch_metadata_paths(self) -> set[str]:
         root = self.dir.resolve()
         captured = self.meta.get("files")
         scratch = set()
@@ -88,9 +99,8 @@ class RepoFacts:
             if not path.is_relative_to(root):
                 continue
             name = path.relative_to(root).as_posix()
-            if name in files and not (isinstance(captured, list) and name in captured):
-                if not self._git_tracks(name):
-                    scratch.add(name)
+            if path.is_file() and not captured_file_exists(captured, name) and not self._git_tracks(name):
+                scratch.add(name)
         return scratch
 
     def _git_tracks(self, name: str) -> bool:
@@ -111,7 +121,7 @@ class RepoFacts:
     def read(self, rel: str) -> str | None:
         if self.dir is not None:
             p = self.dir / rel
-            if p.is_file():
+            if self.is_file(rel):
                 try:
                     return p.read_text(encoding="utf-8", errors="replace")
                 except OSError:
@@ -122,13 +132,13 @@ class RepoFacts:
 
     def exists(self, rel: str) -> bool:
         if self.dir is not None:
-            return (self.dir / rel).exists()
+            return Path(rel).as_posix() not in self._scratch_metadata_paths and (self.dir / rel).exists()
         return rel in set(self.files) or any(f.startswith(rel.rstrip("/") + "/") for f in self.files)
 
     def is_file(self, rel: str) -> bool:
         """Require positive file evidence; an incomplete tree can still contain a known blob."""
         if self.dir is not None:
-            return (self.dir / rel).is_file()
+            return Path(rel).as_posix() not in self._scratch_metadata_paths and (self.dir / rel).is_file()
         files = self.meta.get("files")
         if not isinstance(files, list):
             return False
@@ -238,7 +248,7 @@ class RepoFacts:
     def readme(self) -> str | None:
         if self.dir is not None:
             for n in ("README.md", "readme.md", "Readme.md"):
-                if (self.dir / n).is_file():
+                if self.is_file(n):
                     return (self.dir / n).read_text(encoding="utf-8", errors="replace")
             return None
         return self.meta.get("readme_head")

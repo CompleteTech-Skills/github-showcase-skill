@@ -278,6 +278,7 @@ def from_gh(full_name: str) -> dict:
                 txt = _gh(f"repos/{full_name}/contents/{p}?ref={branch}", raw=True)
                 if txt is not None:
                     manifests[p] = txt
+        # The file list retains listed overrides even when their manifest text could not be read.
         raw["manifests"] = manifests
     parent = repo.get("parent") if isinstance(repo.get("parent"), dict) else None
     if repo.get("fork") and parent and parent.get("full_name"):

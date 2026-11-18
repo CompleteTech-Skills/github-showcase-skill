@@ -512,6 +512,47 @@ def test_meta_out_repeated_inside_docs_checkout_keeps_type_and_logs(tmp_path):
     assert json.loads(tracked.stdout)["detected"]["type"] == "workspace"
 
 
+@pytest.mark.parametrize("name,tracked_type,tracked_rule", [
+    ("capture.snapshot.json", "workspace", 25),
+    ("SKILL.md", "agent-skills", 5),
+    (".github/showcase.yml", "workspace", 25),
+])
+def test_meta_scratch_paths_do_not_change_notebook_classification(tmp_path, name, tracked_type, tracked_rule):
+    _tree(tmp_path, {"README.md": "# Notebook research\n", "lab.ipynb": "{}"})
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, capture_output=True)
+    output = tmp_path / name
+    output.parent.mkdir(parents=True, exist_ok=True)
+    args = ["--repo-dir", tmp_path]
+    first = run_cli(*args, "meta", "--out", output)
+    assert first.returncode == 0, first.stderr
+    payload = output.read_bytes()
+    second = run_cli(*args, "meta", "--out", output)
+    assert second.returncode == 0, second.stderr
+    assert output.read_bytes() == payload
+    detected = json.loads(second.stdout)["detected"]
+    assert (detected["type"], detected["rule"]) == ("research", 22)
+
+    facts = RepoFacts(repo_dir=tmp_path, metadata_path=output)
+    assert name not in facts.files
+    assert not facts.exists(name) and not facts.is_file(name) and facts.read(name) is None
+    doctor_args = ["--meta", output, *args, "doctor", "--format", "json"]
+    scratch = run_cli(*doctor_args)
+    assert json.loads(scratch.stdout)["type"] == "research", scratch.stderr
+
+    if name != ".github/showcase.yml":
+        # A repository path remains evidence when it is listed in the capture or staged in Git.
+        original = json.loads(payload)
+        output.write_text(json.dumps(dict(original, files=["README.md", "lab.ipynb", name])), encoding="utf-8")
+        captured = run_cli(*doctor_args)
+        assert json.loads(captured.stdout)["type"] == tracked_type, captured.stderr
+        output.write_bytes(payload)
+        subprocess.run(["git", "-C", str(tmp_path), "add", "--", name], check=True, capture_output=True)
+        tracked = run_cli(*args, "meta")
+        assert tracked.returncode == 0, tracked.stderr
+        detected = json.loads(tracked.stdout)["detected"]
+        assert (detected["type"], detected["rule"]) == (tracked_type, tracked_rule)
+
+
 def test_meta_counts_tracked_input_without_captured_file_list(tmp_path):
     capture = "tracked[1].json"
     _tree(tmp_path, {"README.md": "# Handbook\n", "docs/guide.md": "# Guide\n", capture: json.dumps(meta_dict())})
@@ -525,7 +566,7 @@ def test_meta_counts_tracked_input_without_captured_file_list(tmp_path):
     assert json.loads(doctor.stdout)["type"] == "workspace"
 
 
-@pytest.mark.parametrize("primary", ["", "  # No override\n"])
+@pytest.mark.parametrize("primary", ["", "  # No override\n", "---\n# Empty document\n...\n"])
 def test_meta_empty_yml_override_takes_precedence_over_yaml(tmp_path, primary):
     manifests = {".github/showcase.yml": primary, ".github/showcase.yaml": "type: workspace\n"}
     files = {"README.md": "# Handbook\n", "docs/guide.md": "# Guide\n", **manifests}
@@ -556,6 +597,27 @@ def test_meta_preserves_malformed_manifests_for_config_aware_validation(tmp_path
     doctor = run_cli(*args, "doctor", "--format", "json")
     assert doctor.returncode != 0, doctor.stdout
     assert json.loads(doctor.stdout)["logs"] == ["config"]
+
+
+@pytest.mark.parametrize("primary", ["false", "0", "[]", "''", "null", "~"])
+@pytest.mark.parametrize("checkout", [False, True])
+def test_repo_override_rejects_non_mapping_yaml(tmp_path, primary, checkout):
+    manifests = {".github/showcase.yml": primary, ".github/showcase.yaml": "type: workspace\n"}
+    files = {"README.md": "# Handbook\n", "docs/guide.md": "# Guide\n", **manifests}
+    repo = tmp_path / "repo"
+    if checkout:
+        _tree(repo, files)
+    capture = tmp_path / "capture.json"
+    capture.write_text(json.dumps(meta_dict(files=list(files), manifests=manifests)), encoding="utf-8")
+    args = ["--meta", capture, *(["--repo-dir", repo] if checkout else ["--no-repo-dir"])]
+    snapshot = run_cli(*args, "meta")
+    assert snapshot.returncode == 0, snapshot.stderr
+    assert "suggestion" not in json.loads(snapshot.stdout)["detected"]
+    doctor = run_cli(*args, "doctor", "--format", "json")
+    assert doctor.returncode != 0
+    diagnostic = json.loads(doctor.stdout)
+    assert diagnostic["logs"] == ["config"]
+    assert ".github/showcase.yml must be a mapping" in diagnostic["error"]
 
 
 def test_stdlib_meta_preserves_override_for_later_validation(tmp_path):
