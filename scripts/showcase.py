@@ -553,6 +553,16 @@ def _authored_footer_refusal(ctx, text):
     return []
 
 
+def readme_diff(before: str, after: str) -> str:
+    """A unified patch over exact file bytes, using Git's LF line framing."""
+    def patch_lines(text):
+        *lines, tail = text.split("\n")
+        return [line + "\n" for line in lines] + ([tail] if tail else [])
+
+    diff = difflib.unified_diff(patch_lines(before), patch_lines(after), "a/README.md", "b/README.md")
+    return "".join(line if line.endswith("\n") else line + "\n\\ No newline at end of file\n" for line in diff)
+
+
 def cmd_readme(args):
     from ctshowcase import readme, records
     ctx = context(args)
@@ -573,17 +583,17 @@ def cmd_readme(args):
         from ctshowcase.formatting import target_relative
         target_relative(rd, path)
     original_readme = path.read_bytes() if path.is_file() else None
-    raw_readme = (original_readme or b"").decode("utf-8")
-    before = readme.normalize_text(raw_readme.replace("\r\n", "\n").replace("\r", "\n"))
+    raw = (original_readme or b"").decode("utf-8")
+    before = readme.normalize_text(raw)
     if args.variant and args.variant != "auto":
         ctx.det["variant"] = args.variant
     ctx.local_badges = args.badges == "local"
     def preservation(old, new, removed):
-        problems = readme.preservation(old, new, removed)
+        problems = readme.preservation(old, new, removed, ctx=ctx)
         if problems and args.format_generated:
             from ctshowcase.formatting import match_formatted_managed_blocks
             comparable = match_formatted_managed_blocks(rd, path, old, new)
-            problems = readme.preservation(old, comparable, removed)
+            problems = readme.preservation(old, comparable, removed, ctx=ctx)
         return problems
 
     mode = args.mode
@@ -598,7 +608,7 @@ def cmd_readme(args):
             return base("readme", ctx, result="fail", mode="bootstrap", problems=problems,
                         logs=ctx.logs + ["readme-shrink"]), CHECK_FAILED
         if state == "pristine":
-            after = readme.bootstrap(ctx, before)
+            after = readme.bootstrap(ctx, before, already_normalized=True)
             if contrib_path.is_file() and after != before:
                 if args.format_generated:
                     target_relative(rd, contrib_path)
@@ -611,7 +621,7 @@ def cmd_readme(args):
             # never-drop-a-line check; if that check objects, only the marker goes and the header blocks refresh.
             ctx.log("bootstrap:edited")
             base_text = readme.drop_pristine(before)
-            after, removed = readme.upgrade(ctx, base_text)
+            after, removed = readme.upgrade(ctx, base_text, already_normalized=True)
             problems = preservation(base_text, after, removed)
             if problems:
                 # a marked footer that holds authored content (partner or foreign image) must never be regenerated
@@ -621,19 +631,19 @@ def cmd_readme(args):
                                 problems=refusal + problems[:19],
                                 logs=ctx.logs + ["readme-shrink"]), CHECK_FAILED
                 ctx.log("readme-shrink")
-                after, removed = readme.header_only(ctx, base_text), []
+                after, removed = readme.header_only(ctx, base_text, already_normalized=True), []
         else:
-            after = readme.header_only(ctx, before)
+            after = readme.header_only(ctx, before, already_normalized=True)
     else:
         if mode == "auto":
-            mode = "scaffold" if len([ln for ln in before.splitlines() if ln.strip()]) < 3 else "upgrade"
+            mode = "scaffold" if len([ln for ln in readme.source_lines(before) if ln.strip(" \t")]) < 3 else "upgrade"
         removed = []
         if mode == "scaffold":
             after = readme.scaffold(ctx, before)
         elif mode == "header":
-            after = readme.header_only(ctx, before)
+            after = readme.header_only(ctx, before, already_normalized=True)
         else:
-            after, removed = readme.upgrade(ctx, before)
+            after, removed = readme.upgrade(ctx, before, already_normalized=True)
             problems = preservation(before, after, removed)
             if problems:
                 return base("readme", ctx, result="fail", mode=mode, problems=problems[:20],
@@ -656,24 +666,40 @@ def cmd_readme(args):
                                 log="staged-description:provenance", code=CHECK_FAILED)
     if args.format_generated:
         from ctshowcase.formatting import format_text, markdown_source_style
-        encoding_bom = "\ufeff" if raw_readme.startswith("\ufeff") else ""
-        formatted = format_text(rd, path, encoding_bom + markdown_source_style(after, raw_readme))
-        markers = [m.group(1) for m in readme.find_blocks(readme.MARK, after)]
-        if markers != [m.group(1) for m in readme.find_blocks(readme.MARK, formatted)]:
+        encoding_bom = "\ufeff" if raw.startswith("\ufeff") else ""
+        formatted = format_text(rd, path, encoding_bom + markdown_source_style(after, raw))
+        before_blocks = readme.find_blocks(readme.MARK, after)
+        formatted_blocks = readme.find_blocks(readme.MARK, formatted)
+        if [m.group(1) for m in before_blocks] != [m.group(1) for m in formatted_blocks]:
             raise ShowcaseError("formatter changed the README managed blocks", log="formatter-content",
+                                code=CHECK_FAILED)
+        formatted = readme.reseal_formatted_badges(ctx, formatted, before_blocks, formatted_blocks)
+        if formatted is None:
+            raise ShowcaseError("formatter changed the README badge ownership", log="formatter-content",
                                 code=CHECK_FAILED)
         if readme.bootstrap_state(after) == "pristine":
             formatted = readme.reseal_pristine(formatted)
             if formatted is None:
                 raise ShowcaseError("formatter changed the README template-body markers", log="formatter-content",
                                     code=CHECK_FAILED)
+        elif readme.bootstrap_state(formatted) == "pristine":
+            raise ShowcaseError("formatter changed the README template-body ownership", log="formatter-content",
+                                code=CHECK_FAILED)
+        if readme.generated_license(formatted) and not readme.generated_license(after):
+            raise ShowcaseError("formatter changed the README license ownership", log="formatter-content",
+                                code=CHECK_FAILED)
         after = formatted
         # Prettier can emit CRLF. Compare against the exact bytes used for the plan.
-        before = raw_readme
         if contrib_new is not None:
             contrib_new = format_text(rd, contrib_path, markdown_source_style(contrib_new, original_contrib.decode("utf-8")))
-    changed = after != before
-    diff = "".join(difflib.unified_diff(before.splitlines(True), after.splitlines(True), "a/README.md", "b/README.md"))
+    if args.format_generated:
+        restored = after
+    elif after != before:
+        bom = readme.BOM if raw.startswith(readme.BOM) else ""
+        restored = bom + readme.restore_line_endings(raw, before, after)
+    else:
+        restored = raw
+    changed = restored != raw
     badge_outputs = {}
     if getattr(ctx, "badge_files", None):
         from ctshowcase import badge
@@ -693,7 +719,7 @@ def cmd_readme(args):
     capture = getattr(ctx, "meta_path", None)
     change_records = []
     if args.records and changed:
-        change_records.append(records.record(ctx.owner, ctx.repo, "readme", "README.md", before, after,
+        change_records.append(records.record(ctx.owner, ctx.repo, "readme", "README.md", raw, restored,
                                              f"§7 variant {ctx.det['variant']} ({mode})"))
     if args.format_generated and change_records:
         ensure_distinct_outputs(Path(args.records), path, contrib_path, *(rd / rel for rel in badge_outputs),
@@ -702,8 +728,9 @@ def cmd_readme(args):
         if badge_outputs or (changed and contrib_new is not None):
             ensure_distinct_outputs(path, contrib_path, *(rd / rel for rel in badge_outputs))
         outputs = [(rd / rel, content) for rel, content in badge_outputs.items()]
+        rendered_readme = restored.encode("utf-8")
         if changed:
-            outputs.append((path, after.encode("utf-8")))
+            outputs.append((path, rendered_readme))
             if contrib_new is not None:
                 outputs.append((contrib_path, contrib_new.encode("utf-8")))
         rendered_taglines = tagline_blocks(after) if tagline_indices and args.format_generated else planned_taglines
@@ -746,7 +773,6 @@ def cmd_readme(args):
                     if current != original:
                         raise ShowcaseError("README inputs changed during formatting", log="formatter-source-changed",
                                             code=CHECK_FAILED)
-                rendered_readme = after.encode("utf-8") if changed else original_readme or b""
                 planned = (
                     plan_sidecars(ctx, (path, bytes_record(rendered_readme, **tagline_record), reflowed))
                     if matched_taglines else {}
@@ -775,7 +801,6 @@ def cmd_readme(args):
                     write_formatted_outputs(output_group, repo_root=ctx.format_root, snapshots=snapshots,
                                             private=staged, private_metadata=private_metadata, append_output=append_output)
             else:
-                rendered_readme = after.encode("utf-8") if changed else original_readme or b""
                 if staged and matched_taglines:
                     record_output(ctx, path, bytes_record(rendered_readme, **tagline_record))
                 for target, data in outputs:
@@ -796,10 +821,15 @@ def cmd_readme(args):
     res = base("readme", ctx, result="changed" if changed else "unchanged", mode="bootstrap" if args.bootstrap else mode,
                variant=ctx.det["variant"], written=bool(args.write and changed))
     if args.diff or not args.write:
+        diff = readme_diff(raw, restored)
         if args.format == "text":
             if getattr(ctx, "staged_description", None) is not None:
                 sys.stderr.write(f"staged-description: {json.dumps(ctx.staged_description, ensure_ascii=False)}\n")
-            sys.stdout.write(diff)
+            output = getattr(sys.stdout, "buffer", None)
+            if output is None:
+                sys.stdout.write(diff)
+            else:
+                output.write(diff.encode("utf-8"))
             return None, OK
         res["diff"] = diff
     return res, OK

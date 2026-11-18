@@ -64,6 +64,12 @@ BADGE 1 BADGE 2 [BADGE 3] [BADGE 4]
 3. License: `license-SPDX-64748B` from the captured license for either visibility; omitted without a captured license (`needs-input:license`). Private visibility and legal wording never supply an SPDX identifier. The configured AGPL/commercial badge requires the consistent policy inputs described below.
 4. CI, public repositories only: the Actions badge of a workflow whose file name contains `test`, else `ci`, using the current owner.
 
+Variant J (`.github`) uses the `GitHub profile` type badge from `references/standard/types.yaml` (the profile has no card category) plus the license badge when the license is known. Without a known license it gets only the type badge and the `badges-short` warning; no license is invented. Generated rows carry a whitespace-preserving content digest, so an untouched generated block refreshes when metadata or `--badges local` changes. Any edit, including added indentation or trailing spaces, makes the block authored, and nonempty authored blocks survive upgrade, header refresh and bootstrap unchanged. A formatter pass that would restore generator ownership of an authored block fails before writing. Two forms migrate to current facts: the inherited template type row (exact, CRLF or newline-padded, remote or local SVG, with or without its marker) and the previous generator's exact language/license/CI row. A migration records the replaced block's digest (`replaces=`) so the shrink guard admits only that replacement. A public unmarked license block is kept when the current license is absent, `NOASSERTION` or `other`. An empty block is regenerated.
+
+R7 counts rendered header images only: inline images, full, collapsed and shortcut reference images (case-insensitive labels, first definition wins) and HTML `<img>` with quoted or unquoted, case-insensitive attributes, including local `docs/images/badges/*.svg`. Unused definitions, links, escaped syntax, code spans and fences, raw HTML text and attributes, autolinks, and inline link destinations and titles never count and are not image-checked. Every recognized image keeps the alt-text, local-file and palette checks.
+
+Marker refresh, metadata extraction and image lint share one stdlib scanner (`scripts/ctshowcase/mdcode.py`) that follows the published GFM grammar for code spans and fences, raw HTML blocks and inline tokens, URI, email and bare GFM autolinks, link destinations and titles, reference definitions, list-item and block-quote containers (including tab columns) and paragraph boundaries. LF, CRLF and lone CR are line endings, and source NUL reads as U+FFFD; both apply only to a source-aligned parsing view that never changes authored README bytes.
+
 Each label and message segment doubles `-` and `_` (shields.io's escapes) and is then percent-encoded, so `C#` reads `language-C%23-1E3A8A` and `#`, `?`, `/` or `%` never end the path early.
 
 | Token | Hex | Use |
@@ -74,6 +80,7 @@ Each label and message segment doubles `-` and `_` (shields.io's escapes) and is
 | Neutral | `64748B` | license |
 
 The table shows CompleteTech defaults. Each family uses its configured `badge_brand` and `badge_accent` in `references/brand.yaml`; shared neutral tokens remain configured there. AI-Ascension keeps its badges unchanged. Never infer CompleteTech colours for another family. Local badges (`--badges local`) retain those fills and select configured foregrounds meeting 4.5:1 for label and value text; if none qualifies, generation returns `needs-input:badge-contrast` before writing. Repository READMEs default to shields.io; local rendering does not establish remote rendering parity. Pending identities require owner-supplied palette and mark (`needs-input:brand-identity`), even after consent.
+
 
 ## Shared rules (MUST)
 
