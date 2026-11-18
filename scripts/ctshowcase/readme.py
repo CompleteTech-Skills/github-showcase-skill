@@ -1581,9 +1581,9 @@ def header_only(ctx: RepoContext, text: str, *, already_normalized: bool = False
         if b == "footer" and personal and not is_footer_copy(body, ctx.brand):
             return m.group(0)
         if b == "nav" and personal and preserve_structure and body.strip():
-            # An in-place refresh must not erase prose merely wrapped in nav
-            # markers. The generated navigation is one bold-label/link row.
-            if not re.fullmatch(r"\*\*[^*\n]+\*\* · [^\n]+", body.strip("\n")):
+            # Formatting is not ownership. Keep any nonempty row that cannot be
+            # established as the exact navigation generated for this context.
+            if body.strip("\n") != gen["nav"]:
                 return m.group(0)
         if b == "badges" and (preserve_structure or ctx.det["variant"] == "J"):
             fresh = badge_body(ctx, body)
@@ -1623,6 +1623,29 @@ def _source_offset_mapper(original: str, *, strip_bom: bool = True):
     return source_offset
 
 
+def _personal_context_views(text: str) -> tuple:
+    """Source-aligned code/Markdown visibility and the actual local link inventory."""
+    from .content import extract_links
+
+    markdown = _outside_code(text, mask_html=True, mask_autolinks=False)
+    syntax = list(re.sub(r"[^\[\]!*_~`#>|\\]", " ", markdown))
+    # Plain prose may move out of raw HTML without changing its meaning. Keep
+    # Markdown delimiters and line-start list/rule markers visible in the proof.
+    for match in re.finditer(r"(?m)^ {0,3}(?:(?:[-+]|[0-9]{1,9}[.)])(?=[ \t])|(?:-[ \t]*){3,}(?=\n|$))", markdown):
+        syntax[match.start():match.end()] = markdown[match.start():match.end()]
+    links = defaultdict(list)
+    for row in extract_links(text):
+        links[row["line"]].append((row["target"], row["syntax"], row["image"], row.get("alt") or ""))
+    return _outside_code(text), "".join(syntax), links, top_level_heading_spans(text)
+
+
+def _personal_context_key(text: str, views: tuple, start: int, end: int) -> tuple:
+    visible, markdown, links, headings = views
+    line = text.count("\n", 0, start) + 1
+    return (visible[start:end], markdown[start:end], tuple(sorted(links.get(line, ()))), tuple(
+        (a - start, level) for a, _, level in headings if start <= a < end))
+
+
 def personal_hero_source_spans(ctx: RepoContext, before: str, after: str) -> list[tuple[int, int, int, int]]:
     """Prove unchanged inline seams in normalized text before restoring source bytes."""
     old = [block for block in find_blocks(MARK, before)
@@ -1641,7 +1664,8 @@ def personal_hero_source_spans(ctx: RepoContext, before: str, after: str) -> lis
     if seam.strip(" \t\n") and after.count(seam) == 1:
         start = after.find(seam)
         if (start >= current[0].end()
-                and _outside_code(before)[block.end():end] == _outside_code(after)[start:start + len(seam)]):
+                and _personal_context_key(before, _personal_context_views(before), block.end(), end)
+                == _personal_context_key(after, _personal_context_views(after), start, start + len(seam))):
             spans.append((start, start + len(seam), block.end(), end))
     return spans
 
@@ -1660,9 +1684,9 @@ def guard_personal_hero_context(ctx: RepoContext, original: str, updated: str, *
     current = [block for block in find_blocks(MARK, after) if block.group(1) == "banner"]
     old_offset = _source_offset_mapper(original, strip_bom=not already_normalized)
     new_offset = _source_offset_mapper(updated, strip_bom=not already_normalized)
-    old_view, new_view = _outside_code(before), _outside_code(after)
+    old_views, new_views = _personal_context_views(before), _personal_context_views(after)
 
-    def signatures(raw: str, view: str, fragment: str) -> Counter:
+    def signatures(raw: str, text: str, views: tuple, fragment: str) -> Counter:
         # Exact bytes include the authored line ending. Compare every occurrence,
         # so an identical line elsewhere cannot hide a lost or reinterpreted seam.
         width = len(normalize_line_endings(fragment))
@@ -1670,7 +1694,7 @@ def guard_personal_hero_context(ctx: RepoContext, original: str, updated: str, *
         for match in re.finditer(re.escape(fragment), raw):
             prefix = raw[:match.start()]
             start = len(prefix if already_normalized else normalize_text(prefix))
-            result[view[start:start + width]] += 1
+            result[_personal_context_key(text, views, start, start + width)] += 1
         return result
 
     for block in inline:
@@ -1681,7 +1705,8 @@ def guard_personal_hero_context(ctx: RepoContext, original: str, updated: str, *
         tail = original[old_offset(block.end()):]
         ending = re.search(r"\r\n|[\r\n]", tail)
         seam = tail[:ending.end()] if ending else tail
-        if seam.strip(" \t\r\n") and signatures(original, old_view, seam) != signatures(updated, new_view, seam):
+        if (seam.strip(" \t\r\n")
+                and signatures(original, before, old_views, seam) != signatures(updated, after, new_views, seam)):
             raise NeedsInput("intro-order", "Put the managed personal hero markers on their own lines before "
                              "a refresh that would change adjacent authored text or its line ending.")
 

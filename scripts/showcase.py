@@ -694,12 +694,16 @@ def cmd_readme(args):
             after = readme.header_only(ctx, before, already_normalized=True)
         else:
             after, removed = readme.upgrade(ctx, before, already_normalized=True, source_spans=source_spans)
-            if personal and not args.format_generated:
+            if personal:
                 readme.guard_personal_hero_context(ctx, before, after, already_normalized=True)
             problems = preservation(before, after, removed)
             if problems:
                 return base("readme", ctx, result="fail", mode=mode, problems=problems[:20],
                             logs=ctx.logs + ["readme-shrink"]), CHECK_FAILED
+    if personal and not args.no_regroup:
+        # Formatting may change spelling, but never authorizes a generator to
+        # reinterpret authored content before the formatter sees the candidate.
+        readme.guard_personal_hero_context(ctx, before, after, already_normalized=True)
     from ctshowcase.fingerprint import bytes_record, has_staged_outputs
     from ctshowcase.staged import (
         check_outputs, lock_outputs, plan_sidecars, protected_auxiliary, record_output, record_staged_writes,

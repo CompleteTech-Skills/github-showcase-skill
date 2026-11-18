@@ -163,11 +163,15 @@ For an inline managed hero, a uniquely matched authored suffix keeps its exact s
 line ending. A refresh that would move the authored prefix, reinterpret adjacent text
 as code, or lose its exact source seam returns `needs-input:intro-order` before any
 README, badge, sidecar or change-record write. Put the managed markers on their own
-lines before retrying. Ordinary safe inline refreshes remain supported.
+lines before retrying. Ordinary safe inline refreshes remain supported. The source
+check also compares Markdown visibility, headings and the local link inventory;
+literal Markdown inside a raw HTML block cannot become an active link or image.
+`--format-generated` runs the context check before formatting and cannot bypass it.
 Artwork visibility is determined in the original document before excluding managed
 ranges: removing a nav block cannot turn literal Markdown inside HTML into artwork,
-or hide an authored inline HTML image. In-place personal refreshes retain nonstandard
-prose inside navigation markers; the generated bold-label navigation row can refresh.
+or hide an authored inline HTML image. In-place personal refreshes retain a nonempty
+navigation block unless it matches the exact current generated row. A bold label
+and separator alone do not establish ownership of authored navigation prose.
 Images inside HTML comments do not count as authored heroes or badges; the README
 still needs its applicable intro or an actionable missing-input result.
 Personal scaffolding retains the authored body's blank separators, including
