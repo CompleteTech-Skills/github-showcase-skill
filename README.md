@@ -197,3 +197,8 @@ Code, templates, and documentation are licensed under the MIT License. CompleteT
   Built by <a href="https://www.complete.tech">CompleteTech LLC</a> · Innovation at Every Integration
 </p>
 <!-- showcase:footer:end -->
+
+<!-- showcase:credit:start -->
+<!-- generated-by: github-showcase-skill v=1.0.0 std=ct-std-v1 -->
+<p align="center"><sub>README styled with <a href="https://github.com/CompleteTech-Skills/github-showcase-skill">github-showcase-skill</a> by CompleteTech LLC</sub></p>
+<!-- showcase:credit:end -->
