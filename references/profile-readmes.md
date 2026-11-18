@@ -138,6 +138,12 @@ that hero ahead of the badges. A full G or H upgrade also moves a managed hero
 out of the authored body. Header-only and `--no-regroup` refreshes instead
 return `needs-input:intro-order` before writing, because they cannot move the
 existing marker block. Fenced image examples do not affect the image order.
+G and H can refresh an exactly owned hero body in place when authored text touches
+its marker lines; that text keeps its original bytes. If preceding badges require
+moving such a block, they instead return `needs-input:intro-order` before writing.
+Put those markers on separate lines before requesting that move.
+G and H also move an owned hero out of the authored body into the opening area;
+a header-only refresh reports the same ordering refusal when that move is needed.
 
 Personal header refresh migrates only the exact legacy generated banner body
 (or an empty managed banner block). Owner spelling and configured former slugs

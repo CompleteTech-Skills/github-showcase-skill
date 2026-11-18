@@ -1261,7 +1261,8 @@ def upgrade(ctx: RepoContext, text: str, *, already_normalized: bool = False) ->
 
     def is_header_line(ln: str) -> bool:
         if HEADER_LINE.match(ln) or "docs/images/banner.png" in ln:
-            return not personal or not any(_badge_or_logo(source) for _, source, _ in _image_entries(masked(ln), ln))
+            return not personal or not any(_badge_or_logo(source, personal=True)
+                                           for _, source, _ in _image_entries(masked(ln), ln))
         return False
 
     # group the preamble into units: centred HTML blocks and <picture> blocks are classified as a whole
