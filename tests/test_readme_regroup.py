@@ -135,3 +135,14 @@ def test_heading_summary_includes_variant_status_rename(checkout):
     assert {"heading": "Status", "from": 2, "to": 2, "new_heading": "Findings"} in (
         json.loads(result.stdout)["heading_moves"]
     )
+
+
+@pytest.mark.parametrize("write", [False, True])
+def test_no_regroup_rejects_readme_as_records_destination(checkout, write):
+    repo, invoke = checkout
+    path = repo / "README.md"
+    before = b"# Project\r\n\r\n<!-- showcase:tagline:start -->\r\n**Old.**\r\n<!-- showcase:tagline:end -->"
+    path.write_bytes(before)
+    result = invoke("--no-regroup", "--records", path, *(("--write",) if write else ()))
+    assert result.returncode == 2
+    assert path.read_bytes() == before

@@ -664,6 +664,10 @@ def cmd_readme(args):
     if args.records and changed:
         change_records.append(records.record(ctx.owner, ctx.repo, "readme", "README.md", raw, restored,
                                              f"§7 variant {ctx.det['variant']} ({mode})"))
+    if args.no_regroup and change_records:
+        capture = (Path(args.meta),) if args.meta else ()
+        ensure_distinct_outputs(Path(args.records), path, rd / "docs/images/.showcase.json",
+                                *(rd / rel for rel in badge_outputs), *capture)
     if args.format_generated and change_records:
         capture = getattr(ctx, "meta_path", None)
         ensure_distinct_outputs(Path(args.records), path, contrib_path, *(rd / rel for rel in badge_outputs),
