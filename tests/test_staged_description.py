@@ -1115,3 +1115,47 @@ bash "$GITHUB_ACTION_PATH/scripts/action_commit.sh" "Synthetic" fail "$GITHUB_AC
         assert git("rev-parse", "HEAD") == initial
         assert git("diff", "--cached", "--name-only") == "notes.txt"
         assert git("show", ":notes.txt") == "concurrent staged text"
+
+
+def test_sidecar_lock_is_shared_across_process_temp_directories(tmp_path):
+    import os
+    import subprocess
+    import sys
+    import time
+
+    from conftest import ROOT
+    from ctshowcase.fingerprint import sidecar_lock
+
+    child_temp = tmp_path / "child-temp"
+    child_temp.mkdir()
+    sidecar = tmp_path / ".showcase.json"
+    started = tmp_path / "started"
+    entered = tmp_path / "entered"
+    code = (
+        "from pathlib import Path\n"
+        "import sys\n"
+        "sys.path.insert(0, sys.argv[1])\n"
+        "from ctshowcase.fingerprint import sidecar_lock\n"
+        "Path(sys.argv[3]).touch()\n"
+        "with sidecar_lock(Path(sys.argv[2])):\n"
+        "    Path(sys.argv[4]).touch()\n"
+    )
+    env = {**os.environ, **dict.fromkeys(("TMPDIR", "TEMP", "TMP"), str(child_temp))}
+    with sidecar_lock(sidecar):
+        child = subprocess.Popen([sys.executable, "-c", code, str(ROOT / "scripts"), str(sidecar),
+                                  str(started), str(entered)], env=env)
+        try:
+            deadline = time.monotonic() + 12
+            while not started.exists() and child.poll() is None and time.monotonic() < deadline:
+                time.sleep(0.02)
+            assert started.exists()
+            assert child.poll() is None
+            time.sleep(0.3)
+            assert not entered.exists()
+        except BaseException:
+            child.kill()
+            child.wait()
+            raise
+    with child:
+        assert child.wait(timeout=15) == 0
+        assert entered.exists()

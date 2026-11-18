@@ -6,7 +6,6 @@ import json
 import os
 import re
 import stat
-import tempfile
 import time
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -145,8 +144,9 @@ def sidecar_lock(path: Path):
     if key in held:
         yield
         return
-    directory = Path(tempfile.gettempdir()) / "showcase-sidecar-locks"
-    directory.mkdir(exist_ok=True)
+    # The Action and renderers can have different per-process scratch directories.
+    directory = Path.home() / ".showcase-sidecar-locks"
+    directory.mkdir(mode=0o700, exist_ok=True)
     with (directory / key).open("a+b") as lock:
         if os.name == "nt":
             import msvcrt
