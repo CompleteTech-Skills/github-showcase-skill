@@ -1006,14 +1006,15 @@ _MANAGED_DELIMITER = re.compile(r"<!-- showcase:([a-z-]+):(start|end) -->")
 def _managed_block_ranges(projection: str):
     """Pair actual delimiters without rescanning the remainder at each unmatched opener."""
     tokens = list(_MANAGED_DELIMITER.finditer(projection))
-    following_end = {}
+    openers = {}
     pairs = {}
-    for token in reversed(tokens):
+    for token in tokens:
         name, kind = token.groups()
-        if kind == "end":
-            following_end[name] = token.end()
-        elif name in following_end:
-            pairs[token.start()] = following_end[name]
+        if kind == "start":
+            # An unclosed opener cannot claim prose before a later opener of the same name.
+            openers[name] = token.start()
+        elif name in openers:
+            pairs[openers.pop(name)] = token.end()
     previous_end = 0
     for token in tokens:
         start = token.start()

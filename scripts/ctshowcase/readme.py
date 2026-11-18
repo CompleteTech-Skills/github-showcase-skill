@@ -14,7 +14,7 @@ from . import footer as footermod
 from .context import RepoContext
 from .detect import standard
 from .errors import ConfigError, NeedsInput
-from .mdcode import MANAGED_BLOCK_PATTERN, code_block_spans, code_spans, find_blocks, masked  # noqa: F401  (code_spans: re-exported for callers)
+from .mdcode import MANAGED_BLOCK_PATTERN, after_line_end, code_block_spans, code_spans, find_blocks, masked  # noqa: F401  (code_spans: re-exported for callers)
 
 MARK = MANAGED_BLOCK_PATTERN
 EMOJI = re.compile("[\U0001F000-\U0001FAFF☀-➿⬀-⯿️‍]")
@@ -1307,7 +1307,7 @@ PRISTINE = re.compile(r"<!-- showcase:template-body:pristine(?: sha256=([0-9a-f]
 
 def body_sha(body: str) -> str:
     import hashlib
-    return hashlib.sha256(body.replace("\r\n", "\n").strip().encode("utf-8")).hexdigest()
+    return hashlib.sha256(normalize_line_endings(body).encode("utf-8")).hexdigest()
 
 
 def badge_sha(body: str) -> str:
@@ -1328,8 +1328,9 @@ def _template_block(text: str) -> re.Match | None:
 
 
 def _pristine_marker(text: str, block: re.Match) -> re.Match | None:
+    expected_start = after_line_end(text, block.start() + len(start("template-body")))
     return next((marker for marker in find_blocks(PRISTINE, text)
-                 if block.start(2) <= marker.start() < block.end(2) and marker.end() <= block.end(2) + 1), None)
+                 if marker.start() == expected_start and marker.end() <= block.end(2) + 1), None)
 
 
 def bootstrap_state(text: str) -> str:
@@ -1338,7 +1339,7 @@ def bootstrap_state(text: str) -> str:
     block = _template_block(text)
     if block is None or (marker := _pristine_marker(text, block)) is None:
         return "none"
-    body = text[block.start(2):marker.start()] + text[marker.end():block.end(2)]
+    body = text[marker.end():block.end(2)]
     return "pristine" if marker.group(1) and marker.group(1) == body_sha(body) else "edited"
 
 

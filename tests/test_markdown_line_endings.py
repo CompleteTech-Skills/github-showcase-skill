@@ -516,3 +516,33 @@ def test_bootstrap_does_not_drop_a_pristine_marker_shown_inside_a_fence(tmp_path
     result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--bootstrap", "--write")
     assert result.returncode == 0, result.stdout + result.stderr
     assert authored.replace("\n", "\r\n").encode() in path.read_bytes()
+
+
+@pytest.mark.parametrize("before,after", [("## Install", "    ## Install"), ("Placeholder.", "Placeholder.  ")])
+def test_bootstrap_preserves_whitespace_edits_to_the_template_body(tmp_path, before, after):
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps({"owner": "Northwind-Trading-Co", "repo": ".github",
+                                "license": "MIT", "files": ["README.md"]}), encoding="utf-8")
+    path = tmp_path / "README.md"
+    body = readme.pristine_block("## Install\n\nPlaceholder.")
+    edited = body.replace(before, after)
+    assert readme.bootstrap_state(edited) == "edited"
+    path.write_bytes(("# Authored\n\n" + edited + "\n").replace("\n", "\r\n").encode())
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--bootstrap", "--write")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (after + "\r\n").encode() in path.read_bytes()
+
+
+@pytest.mark.parametrize("ending", ENDINGS)
+def test_bootstrap_paired_marker_does_not_claim_text_after_stray_opener(tmp_path, ending):
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps({"owner": "Northwind-Trading-Co", "repo": ".github",
+                                "license": "MIT", "files": ["README.md"]}), encoding="utf-8")
+    path = tmp_path / "README.md"
+    authored = readme.start("nav") + "\n\nAuthored paragraph before real navigation.\n\n"
+    body = readme.wrap("nav", "Old navigation.") + "\n\n" + readme.pristine_block("## Install\n\nPlaceholder.")
+    path.write_bytes((authored + body + "\n").replace("\n", ending).encode())
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--bootstrap", "--write")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert path.read_bytes().startswith(authored.replace("\n", ending).encode())
+    assert b"Old navigation." not in path.read_bytes()
