@@ -179,5 +179,7 @@ change, and nothing here outranks decisions 1 to 24.
       telemetry.
 
     **Confirmed by the user (2026-11-18):** the Enterprise stamp beside the snapshot, the credit wording with the
-    *Get the skill* install prompt, and the star asks at runs 5, 10, 15, .... **Still to confirm:** the
-    no-timestamp-only-commit rule, the other stamp locations, and `provenance stamp` as the one counted command.
+    *Get the skill* install prompt, the star asks at runs 5, 10, 15, ..., and the no-timestamp-only-commit rule as
+    written above (a run that changes nothing writes nothing; the first stamp of an unstamped target is the one
+    stamp-only write). **Still to confirm:** the repository, org and profile stamp locations, and `provenance stamp`
+    as the one counted command.

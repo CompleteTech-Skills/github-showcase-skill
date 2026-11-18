@@ -311,7 +311,7 @@ These user decisions outrank `STANDARD.md` (`ct-std-v1`). Full text: [references
 | 22 | This skill and `completetech-repo-template` make the standard repeatable; the template's Action calls `action.yml`. |
 | 23 | Orgs and GitHub Projects are covered: project boards are copied from the captured golden template, never deleted. |
 | 24 | The CompleteTech Enterprise is covered read-only: snapshot, E-checks, the romgenie seat check and printed change records; policies stay proposals. |
-| 25 (proposal) | Confirmed by the user on 2026-11-18: the Enterprise stamp beside the snapshot, the credit with its install prompt, and the star asks at runs 5, 10, 15, .... Still pending: the no-timestamp-only-commit rule. |
+| 25 (proposal) | Confirmed by the user on 2026-11-18: the Enterprise stamp beside the snapshot, the credit with its install prompt, the star asks at runs 5, 10, 15, ..., and the no-timestamp-only-commit rule (with the first-stamp backfill). Still pending: the repository, org and profile stamp locations and the one counted command. |
 
 ## Brand and Family Data
 
