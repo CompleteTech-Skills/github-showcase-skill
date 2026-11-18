@@ -27,7 +27,7 @@ import sys
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from tempfile import TemporaryFile
+from tempfile import TemporaryFile, mkdtemp
 
 # Keep direct and runpy entry points equivalent when the caller's CWD is a target checkout.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -384,17 +384,36 @@ def drop(name: str, expected: str | None = None) -> bool:
         if observed is None or (expected is not None and observed != expected):
             return False
         p = IMAGES / name
-        if p.is_file():
-            p.unlink()
         if not data:
+            p.unlink()
             return True
         outs = dict(output_records(data))
         outs.pop(name, None)
-        if outs:
-            data["outputs"] = outs
-            replace_bytes(SIDECAR, (json.dumps(data, sort_keys=True, indent=1, ensure_ascii=False) + "\n").encode("utf-8"))
-        else:
-            SIDECAR.unlink()
+        directory = Path(mkdtemp(dir=IMAGES, prefix=".showcase-cleanup-"))
+        backup = directory / name
+        try:
+            if p.is_file():
+                p.replace(backup)
+            try:
+                if outs:
+                    data["outputs"] = outs
+                    contents = json.dumps(data, sort_keys=True, indent=1, ensure_ascii=False) + "\n"
+                    replace_bytes(SIDECAR, contents.encode("utf-8"))
+                else:
+                    SIDECAR.unlink()
+            except BaseException:
+                if backup.exists():
+                    try:
+                        if p.exists() or p.is_symlink():
+                            raise FileExistsError(p)
+                        backup.replace(p)
+                    except OSError as error:
+                        raise RuntimeError(f"Could not restore {p}. Its original remains at {backup}") from error
+                raise
+            backup.unlink(missing_ok=True)
+        finally:
+            if not backup.exists():
+                directory.rmdir()
         return True
 
 

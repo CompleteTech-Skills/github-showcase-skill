@@ -282,6 +282,34 @@ def test_action_treats_exempt_like_a_skip():
     assert "GITHUB_STEP_SUMMARY" in (ROOT / "scripts" / "action_prepare.py").read_text()
 
 
+def test_action_restores_foreign_artifact_after_sidecar_write_failure(tmp_path, monkeypatch):
+    import action_prepare
+
+    images = tmp_path / "docs/images"
+    images.mkdir(parents=True)
+    path = images / "banner.png"
+    sidecar = images / ".showcase.json"
+    content = {"inputs": {"owner": "Northwind-Trading", "repo": "template", "type": "template"},
+               "outputs": {"banner.png": {}, "card.svg": {}}}
+    sidecar.write_text(json.dumps(content), encoding="utf-8")
+    path.write_bytes(b"copied banner")
+    inode = path.stat().st_ino
+    previous = sidecar.read_bytes()
+    monkeypatch.chdir(tmp_path)
+    key = action_prepare.foreign_key("Northwind-Trading/project", path.name)
+    assert key
+
+    def fail_sidecar(*args, **kwargs):
+        raise OSError("synthetic sidecar replacement failure")
+
+    monkeypatch.setattr(action_prepare, "replace_bytes", fail_sidecar)
+    with pytest.raises(OSError, match="synthetic sidecar replacement failure"):
+        action_prepare.drop(path.name, key)
+    assert path.read_bytes() == b"copied banner" and path.stat().st_ino == inode
+    assert sidecar.read_bytes() == previous
+    assert sorted(item.name for item in images.iterdir()) == [".showcase.json", "banner.png"]
+
+
 # -- 16 and visual -------------------------------------------------------------------------------------------------
 def test_metatron_and_prompdev_are_excluded(brand):
     assert brand.owner_status("MetatronAngelAgent") == "excluded" and brand.owner_status("PrompDev") == "excluded"

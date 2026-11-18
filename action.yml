@@ -136,7 +136,7 @@ runs:
         skipped=0
         art() {
           local kind="$1" file="$2" foreign="$3"; shift 3
-          local rc=0 result
+          local rc=0 result dropped
           "${S[@]}" --format json "$kind" --out "docs/images/$file" "$@" > "$RUNNER_TEMP/art.json" || rc=$?
           cat "$RUNNER_TEMP/art.json"
           result="$(python -c 'import json,sys;print(json.load(open(sys.argv[1])).get("result",""))' "$RUNNER_TEMP/art.json" 2>/dev/null || true)"
@@ -148,7 +148,8 @@ runs:
             echo "::warning title=CompleteTech Showcase::$kind skipped: $(python -c 'import json,sys;d=json.load(open(sys.argv[1]));print(d.get("error") or " ".join(d.get("logs") or []))' "$RUNNER_TEMP/art.json" 2>/dev/null)"
             skipped=1
             if [ -n "$foreign" ]; then
-              if [ "$("${P[@]}" drop "$file" "$foreign")" = "true" ]; then
+              dropped="$("${P[@]}" drop "$file" "$foreign")" || return $?
+              if [ "$dropped" = "true" ]; then
                 echo "::notice title=CompleteTech Showcase::removed the template's $file until this repository's own can be generated"
               fi
             fi
