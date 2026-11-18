@@ -1009,7 +1009,7 @@ def callout_only(ctx: RepoContext, text: str, *, retain_personal_banner: bool = 
             if old_footer:
                 had_footer = True
         if had_footer or footermod.check(ctx.brand, out)[0] == "fail:missing":
-            out = drop_own_credit(out, ctx.brand)  # only exact owned credit is re-emitted
+            out = drop_own_credit(out, ctx.brand, source_spans=retained)  # only exact owned credit is re-emitted
             body_without_gap = out.rstrip("\n")
             if personal:
                 out += "\n" * max(0, 2 - (len(out) - len(body_without_gap)))
@@ -1052,8 +1052,18 @@ def is_own_credit(body: str, brand=None) -> bool:
     return brand is not None and footermod.credit_matches(brand, body)
 
 
-def drop_own_credit(text: str, brand=None) -> str:
+def drop_own_credit(text: str, brand=None, *,
+                    source_spans: list[tuple[int, int, int, int]] | None = None) -> str:
     """`text` without our own credit marker blocks; an authored block under the same name stays."""
+    if source_spans is not None:
+        # Personal migrations retain every authored separator. Cut only proven
+        # owned blocks, rebasing the same spans used to restore original bytes.
+        owned = [m for m in find_blocks(MARK, text)
+                 if m.group(1) == "credit" and is_own_credit(m.group(2), brand)]
+        for block in reversed(owned):
+            text = text[:block.start()] + text[block.end():]
+            _edit_source_spans(source_spans, block.start(), block.end(), 0)
+        return text
     if not any(m.group(1) == "credit" and is_own_credit(m.group(2), brand) for m in find_blocks(MARK, text)):
         return text
     return _sub_blocks(text, lambda m: "" if m.group(1) == "credit" and is_own_credit(m.group(2), brand) else m.group(0))

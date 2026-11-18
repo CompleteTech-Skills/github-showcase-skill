@@ -68,10 +68,20 @@ Legacy stamps without this evidence remain readable but cannot certify freshness
 Staged descriptions and stale generator receipts remain incomplete until reconciled.
 
 The stamp's timestamps and count stay outside the rendering fingerprint. An
-unchanged fresh or unchanged incomplete capture writes nothing; there is no
-timestamp-only commit. A changed README is a recorded output change and advances
-`last_changed_at`. The Action records evidence in the same local change set as its
-art; it never changes its commit boundary merely to update a timestamp.
+ordinary `--changed auto` or `--changed no` capture without `--force` writes
+nothing when its recorded evidence is unchanged, even if the checkout still has
+the same uncommitted changes. This applies to fresh and incomplete captures. A
+changed README is a recorded output change and advances `last_changed_at`.
+
+The existing explicit controls have separate meanings: `--force` requests a new
+local observation timestamp even for unchanged evidence; `--changed yes` asserts
+that this run has other changes to accompany its stamp. They retain their
+documented last-run/count behavior and never turn missing or pending evidence
+into completed work. `--changed no` does not suppress a genuine recorded-output
+change. The CLI never commits files, and these controls do not authorize a
+standalone timestamp-only commit. The Action records evidence in the same local
+change set as its art, does not forward provenance `--force`, and never changes
+its commit boundary merely to update a timestamp.
 
 `stamp --jobs FILE` prepares a pending writer job. Pending jobs are never proof of
 execution and do not count as completed local captures. Queue preflight occurs

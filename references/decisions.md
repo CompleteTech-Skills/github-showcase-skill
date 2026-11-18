@@ -148,8 +148,12 @@ engineering choices resolved under the campaign's delegated design authority.
   results report `skip: false`; missing or pending evidence cannot certify a run.
 - Credit is a separately owned block **before** the unchanged final decision-18
   footer. Authored or foreign credit is preserved, with atomic refusal when needed.
-- Unchanged fresh and incomplete captures write no timestamp-only update. Pending
-  writer jobs are proposals, not completed work.
+- Ordinary automatic captures and `--changed no` without `--force` leave unchanged
+  fresh or incomplete evidence byte-identical, including retries in a dirty
+  checkout. Existing explicit `--force` and `--changed yes` controls retain their
+  local observation behavior; neither authorizes a timestamp-only commit or
+  certifies missing or pending work. The Action never forwards provenance
+  `--force`. Pending writer jobs are proposals, not completed work.
 - Only verified local captures enter the operator ledger. The optional star check
   is read-only, online and interactive; offline, non-TTY, CI, JSON and opt-outs
   suppress it. No environment variable authorizes an unattended marketing prompt.

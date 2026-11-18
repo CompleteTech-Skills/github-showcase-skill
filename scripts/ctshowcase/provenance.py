@@ -704,11 +704,11 @@ def local_changes(root: Path, exclude: str) -> bool | None:
     return False
 
 
-def jobs_for(path: str | None, target: Target) -> bool:
+def jobs_for(path: str | None, target: Target, resolver) -> bool:
     """A queue entry is pending work, including attribution and provenance proposals, never an execution receipt."""
+    from .context import same_repository
     if not path or not Path(path).is_file():
         return False
-    names = {x.lower() for x in (target.id, target.stamp_repo or "") if x}
     for line in Path(path).read_text(encoding="utf-8").splitlines():
         try:
             j = json.loads(line)
@@ -716,9 +716,22 @@ def jobs_for(path: str | None, target: Target) -> bool:
             raise NeedsInput("writer-jobs", "cannot determine pending work from an invalid jobs file") from None
         if not isinstance(j, dict):
             raise NeedsInput("writer-jobs", "writer jobs must be objects")
-        if str(j.get("repo") or j.get("org") or "").lower() in names:
-            return True
+        for name in (j.get("repo"), j.get("org")):
+            if not isinstance(name, str) or not name:
+                continue
+            if target.stamp_repo and same_repository(name, *target.stamp_repo.split("/", 1), resolver):
+                return True
+            if _same_target({"kind": target.kind, "id": name}, target, resolver):
+                return True
     return False
+
+
+def _stamp_preflight(path: Path, meta_path=None, snapshot_path=None) -> None:
+    """A local stamp must remain distinct from every supplied capture, whether or not a queue is selected."""
+    from .staged import check_capture
+    for capture in (meta_path, snapshot_path):
+        if capture:
+            check_capture(Path(capture), path)
 
 
 def _jobs_preflight(path: Path, target: Target, src: Source, meta_path=None, snapshot_path=None) -> bytes | None:
@@ -767,6 +780,8 @@ def _jobs_preflight(path: Path, target: Target, src: Source, meta_path=None, sna
 
 def _publish_stamp(path, data, queued, jobs, before_queue, target, src, meta_path, snapshot_path):
     """Publish the local stamp and queue append together, restoring both if either replacement fails."""
+    if path:
+        _stamp_preflight(path, meta_path, snapshot_path)
     if jobs and _jobs_preflight(jobs, target, src, meta_path, snapshot_path) != before_queue:
         raise NeedsInput("writer-jobs", "jobs queue changed while preparing provenance; retry")
     if jobs and queued:
@@ -919,6 +934,8 @@ def stamp_one(text: str, brand, resolver, *, root=None, meta_path=None, gh=None,
     refused = owner_refusal(target, resolver)[0]
     src = (Source() if refused else
            source_for(target, root=root, gh=gh, resolver=resolver, meta_path=meta_path))
+    if src.local:
+        _stamp_preflight(src.path(target.stamp_path), meta_path, snapshot_path)
     queue = Path(jobs).absolute() if jobs and not refused else None
     if queue:
         _jobs_preflight(queue, target, src, meta_path, snapshot_path)
@@ -945,8 +962,8 @@ def _stamp_one(target, brand, resolver, src, *, meta_path, gh, snapshot, jobs, c
     if other is None and src.local and target.kind != "enterprise":
         other = local_changes(src.root, target.stamp_path)
     if other is None:
-        other = jobs_for(jobs, target)
-    pending = pending_jobs or bool(extra_jobs) or jobs_for(jobs, target) or not src.local
+        other = jobs_for(jobs, target, resolver)
+    pending = pending_jobs or bool(extra_jobs) or jobs_for(jobs, target, resolver) or not src.local
     if not (force or st["status"] != "fresh" or other or pending):
         res["result"] = "fresh"
         res["completed"] = True  # verified local output comparison, never proof of a live writer run
@@ -961,9 +978,12 @@ def _stamp_one(target, brand, resolver, src, *, meta_path, gh, snapshot, jobs, c
     if pending:
         evidence["missing"].append("writer:pending")
     res["missing"] = evidence["missing"]
-    if previous and evidence == stamp_file.get("evidence") and not st["changed"] and not (force or other):
+    # Git status compares with HEAD, so a retry still sees edits already captured by the previous stamp.
+    # Equal recorded evidence wins over that automatic hint; explicit force/changed requests keep their meaning.
+    if previous and evidence == stamp_file.get("evidence") and not st["changed"] and not (force or changed == "yes"):
         res["result"] = st["status"]
-        res["logs"].append("provenance:incomplete-no-write")
+        res["completed"] = src.local and not evidence["missing"] and not pending
+        res["logs"].append("provenance:fresh-no-write" if res["completed"] else "provenance:incomplete-no-write")
         return res, OK
     now = now or utc_now()
     # Any recorded difference is a change (art regenerated since the last stamp shows as `unstamped-generation`,
