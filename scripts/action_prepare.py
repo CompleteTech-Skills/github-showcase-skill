@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import stat
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -196,7 +197,7 @@ def _stop_ref_update(transaction: subprocess.Popen) -> None:
 
 
 def _update_head(ref: str, parent: str, commit: str, subject: str,
-                 index: Path, snapshot: Path, original: bytes | None) -> bool:
+                 index: Path, snapshot: Path, original: bytes | None, original_mode: int | None) -> bool:
     """Hold Git's HEAD lock from the symbolic-ref check through index installation."""
     command = ["git", "update-ref", "-m", f"commit: {subject}", "--stdin"]
     # A dereferencing update of HEAD locks both HEAD and its current branch.
@@ -234,7 +235,10 @@ def _update_head(ref: str, parent: str, commit: str, subject: str,
                     if original is None:
                         index.unlink()
                     else:
+                        snapshot.touch(mode=0o600, exist_ok=False)
                         snapshot.write_bytes(original)
+                        if original_mode is not None:
+                            snapshot.chmod(original_mode)
                         os.replace(snapshot, index)
                 raise
             return True
@@ -285,7 +289,7 @@ def prepare_commit_index(index: Path, snapshot: Path, ref: str, message: str, pa
     # bytes before installing the candidate. Keep it through ref update.
     lock = index.with_name(index.name + ".lock")
     try:
-        lock.touch(exist_ok=False)
+        lock.touch(mode=0o600, exist_ok=False)
     except FileExistsError:
         return "changed"
     try:
@@ -295,6 +299,7 @@ def prepare_commit_index(index: Path, snapshot: Path, ref: str, message: str, pa
             return "busy"
         if _has_commit_hooks():
             return "hooks"
+        original_mode = stat.S_IMODE(index.stat().st_mode) if original is not None else None
         sign = subprocess.check_output(["git", "config", "--type=bool", "--default=false", "--get", "commit.gpgSign"],
                                        text=True, timeout=30).strip()
         command = ["git", "commit-tree", tree, "-p", parent, "-m", message]
@@ -303,9 +308,11 @@ def prepare_commit_index(index: Path, snapshot: Path, ref: str, message: str, pa
         commit = subprocess.check_output(command, text=True, timeout=30).strip()
         subject = message.split("\n", 1)[0]
         # Retain the original bytes in the lock file for recovery after an interrupted process.
-        if original is not None:
+        if original is not None and original_mode is not None:
             lock.write_bytes(original)
-        return commit if _update_head(ref, parent, commit, subject, index, snapshot, original) else "changed"
+            lock.chmod(original_mode)
+            snapshot.chmod(original_mode)
+        return commit if _update_head(ref, parent, commit, subject, index, snapshot, original, original_mode) else "changed"
     finally:
         lock.unlink(missing_ok=True)
 

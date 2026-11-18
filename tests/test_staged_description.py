@@ -1162,6 +1162,7 @@ def test_action_leaves_an_in_progress_merge_untouched(tmp_path):
 ])
 def test_action_handles_concurrent_git_changes_during_commit(tmp_path, concurrent_change):
     import os
+    import stat
     import subprocess
 
     from conftest import ROOT, run_bash
@@ -1182,6 +1183,9 @@ def test_action_handles_concurrent_git_changes_during_commit(tmp_path, concurren
     (tmp_path / "README.md").write_text("live README", encoding="utf-8")
     (tmp_path / "notes.txt").write_text("concurrent staged text", encoding="utf-8")
     index = tmp_path / ".git/index"
+    if os.name == "posix" and concurrent_change in ("locked-branch", "ref-failure"):
+        index.chmod(0o664)
+    original_mode = stat.S_IMODE(index.stat().st_mode)
     original = index.read_bytes()
     wrapper = tmp_path / "update_git_state.py"
     wrapper.write_text(r'''
@@ -1258,6 +1262,7 @@ bash "$GITHUB_ACTION_PATH/scripts/action_commit.sh" "Synthetic" fail "$GITHUB_AC
         assert git("rev-parse", "HEAD^") == initial
         assert git("rev-parse", "refs/heads/competing") == initial
         assert git("show", "HEAD:README.md") == "live README"
+        assert stat.S_IMODE(index.stat().st_mode) == original_mode
         assert git("diff", "--cached", "--name-only") == ""
         return
     if concurrent_change == "ref-failure":
@@ -1266,6 +1271,7 @@ bash "$GITHUB_ACTION_PATH/scripts/action_commit.sh" "Synthetic" fail "$GITHUB_AC
         assert "would push" not in result.stdout
         assert git("rev-parse", "HEAD") == initial
         assert index.read_bytes() == original
+        assert stat.S_IMODE(index.stat().st_mode) == original_mode
         return
     assert result.returncode == 0, result.stdout + result.stderr
     assert "commit skipped because HEAD or the caller's Git index changed" in result.stdout
