@@ -2415,8 +2415,8 @@ def _raw_marker_text_spans(source, blocks, tags, inline_literals):
         yield end, covered
 
 
-def live_html_tags(text: str):
-    """Yield opening HTML tokens outside code, raw text, and literal Markdown destinations or labels."""
+def live_html_tags(text: str, *, include_closing: bool = False):
+    """Yield real HTML tags outside code, raw text, and literal destinations or labels."""
     source = _source_view(text)
     visible = _outside_code(source, mask_autolinks=False)
     tokens = _HTMLTokens(visible, source)
@@ -2428,6 +2428,8 @@ def live_html_tags(text: str):
         if (image is not None and end <= image[1]) or any(_span_at(spans, start) is not None for spans in literals):
             continue
         if match := HTML_OPEN_TAG.fullmatch(tokens.text, start, end):
+            yield match
+        elif include_closing and (match := _HTML_CLOSE_TAG.fullmatch(tokens.text, start, end)):
             yield match
 
 
