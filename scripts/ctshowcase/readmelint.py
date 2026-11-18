@@ -12,7 +12,7 @@ from .mdcode import find_inline_code  # noqa: F401 (compatibility re-export)
 from .context import RepoContext
 from .detect import required_sections, standard
 from .readme import (
-    EMOJI, MARK, hero_path, is_footer_like, leading_banner_block, masked, normalize_text, nav_first, preserved,
+    EMOJI, MARK, hero_path, is_footer_like, leading_banner_block, masked, normalize_text, nav_first, personal_header_end, preserved,
     source_lines,
     split_sections,
 )
@@ -195,7 +195,8 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
         rest = (text[banner.end():] if banner else text).lstrip()
         if personal:
             unchanged = ctx.preserve_unchanged() and preserved(ctx, text)
-            fails.extend(_personal_hero_failures(banner.group(2) if banner else text, hero, unchanged))
+            opening = banner.group(2) if banner else text[:personal_header_end(text)]
+            fails.extend(_personal_hero_failures(opening, hero, unchanged, readme=path))
         elif not banner and ctx.art_status()["banner"] is None:
             fails.append(f"D13 variant {variant} must open with the hero banner block")
         first = rest.splitlines()[0] if rest.strip() else ""
@@ -362,7 +363,7 @@ def _has_personal_hero(text: str, hero: str) -> bool:
     return any(_is_personal_hero(image, hero) for image in _image_entries(_outside_code(text), text))
 
 
-def _personal_hero_failures(text: str, hero: str, unchanged: bool) -> list[str]:
+def _personal_hero_failures(text: str, hero: str, unchanged: bool, *, readme: Path | None = None) -> list[str]:
     image_view = _outside_code(text)
     parsed = _image_entries(image_view, text, source_order=True)
     failures = []
@@ -371,6 +372,8 @@ def _personal_hero_failures(text: str, hero: str, unchanged: bool) -> list[str]:
             failures.append("D13 no banner image")
         elif not _is_personal_hero(parsed[0], hero):
             failures.append(f"D13 the hero must be the first image ({hero})")
+        elif readme is not None:
+            _local(readme, parsed[0][1], failures)
     pictures = re.finditer(r"<picture\b[^>]*>.*?</picture\s*>", image_view, re.I | re.S)
     if any(_has_personal_hero(picture.group(0), hero) for picture in pictures):
         failures.append("D13 banner must be a plain <img>, not <picture>")

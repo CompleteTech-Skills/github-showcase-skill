@@ -82,12 +82,13 @@ def test_personal_scaffold_does_not_use_linked_intro_outside_the_checkout(tmp_pa
 
 @pytest.mark.parametrize("mode", ["auto", "scaffold"])
 @pytest.mark.parametrize("with_intro", [False, True])
-def test_personal_short_readme_keeps_authored_hero_when_scaffolding(tmp_path, intro_bytes, mode, with_intro):
+@pytest.mark.parametrize("hero", [b"hero.svg", b"assets/profile-cover-badge.svg"])
+def test_personal_short_readme_keeps_authored_hero_when_scaffolding(tmp_path, intro_bytes, mode, with_intro, hero):
     meta = metadata(tmp_path)
     if with_intro:
         put_intro(tmp_path, intro_bytes)
     readme = tmp_path / "README.md"
-    before = b"\xef\xbb\xbf![Custom hero](hero.svg)  \r\n\r# Synthetic Profile\n"
+    before = b"\xef\xbb\xbf![Custom hero](" + hero + b")  \r\n\r# Synthetic Profile\n"
     readme.write_bytes(before)
     records = tmp_path / "records.jsonl"
     modes = [] if mode == "auto" else ["--mode", mode]
@@ -393,6 +394,12 @@ def test_personal_callout_variant_refreshes_managed_hero_to_intro(tmp_path, intr
     lint_args = ("--meta", meta, "--repo-dir", tmp_path, "lint", "readme", path, "--variant", variant)
     lint = run_cli(*lint_args)
     assert lint.returncode == 0, lint.stdout + lint.stderr
+    (tmp_path / "assets/intro.svg").unlink()
+    lint = run_cli(*lint_args)
+    assert lint.returncode == 1
+    assert "R7 local image does not resolve: assets/intro.svg" in json.loads(lint.stdout)["fails"]
+    put_intro(tmp_path, intro_bytes)
+
     legacy = text.replace('src="assets/intro.svg"', 'src="docs/images/banner.png"', 1)
     path.write_text(legacy, encoding="utf-8")
     lint = run_cli(*lint_args)
@@ -418,6 +425,32 @@ def test_personal_callout_variant_missing_intro_refuses_before_writes(tmp_path, 
     assert result.returncode == 4 and "needs-input:intro" in result.stdout, result.stdout + result.stderr
     assert path.read_bytes() == source.encode("utf-8")
     assert not records.exists() and not (tmp_path / "docs").exists()
+
+
+@pytest.mark.parametrize("variant", ["G", "H"])
+@pytest.mark.parametrize("mode", ["header", "upgrade"])
+def test_personal_refresh_validates_intro_and_preserves_the_authored_marker_seam(tmp_path, intro_bytes, variant, mode):
+    meta = metadata(tmp_path)
+    hero = LEGACY_HERO.replace("<!-- showcase:banner:end -->", "<!-- showcase:banner:end -->Authored marker seam.  ")
+    source = ("> [!NOTE]\r\n> Synthetic callout.\r\n\r\n" + hero + "# Profile\r\n\rAuthored notes.\r")
+    path = tmp_path / "README.md"
+    path.write_bytes(source.encode("utf-8"))
+    records = tmp_path / "records.jsonl"
+    args = ("--meta", meta, "--repo-dir", tmp_path, "--format", "json", "readme",
+            "--mode", mode, "--variant", variant, "--records", records, "--write")
+
+    missing = run_cli(*args)
+    assert missing.returncode == 4 and "needs-input:intro" in missing.stdout, missing.stdout + missing.stderr
+    assert path.read_bytes() == source.encode("utf-8")
+    assert not records.exists()
+
+    put_intro(tmp_path, intro_bytes)
+    refreshed = run_cli(*args)
+    assert refreshed.returncode == 0, refreshed.stdout + refreshed.stderr
+    after = path.read_bytes()
+    assert b'src="assets/intro.svg"' in after and b"docs/images/banner.png" not in after
+    seam = b"<!-- showcase:banner:end -->Authored marker seam.  \n\n# Profile\r\n\rAuthored notes.\r"
+    assert seam in after
 
 
 @pytest.mark.parametrize("variant", ["G", "H"])
@@ -645,6 +678,39 @@ def test_personal_callout_variant_without_banner_requires_intro(tmp_path, intro_
         assert "needs-input:intro" in result.stdout
         assert path.read_bytes() == source
         assert not records.exists() and not (tmp_path / "docs").exists()
+
+
+@pytest.mark.parametrize("variant", ["G", "H"])
+def test_personal_callout_moves_managed_intro_out_of_the_authored_body(tmp_path, intro_bytes, variant):
+    meta = metadata(tmp_path)
+    put_intro(tmp_path, intro_bytes)
+    readme = tmp_path / "README.md"
+    prefix = b"> [!NOTE]\r\n> Synthetic callout.\n\n# Profile\r\n\n## Notes\n\nAuthored body.  \r\n\n"
+    before = prefix + LEGACY_HERO.encode("utf-8")
+    readme.write_bytes(before)
+    common = ("--meta", meta, "--repo-dir", tmp_path, "--format", "json")
+    header = run_cli(*common, "readme", "--mode", "header", "--variant", variant, "--write")
+    assert header.returncode == 4 and "needs-input:intro-order" in header.stdout
+    assert readme.read_bytes() == before
+
+    upgrade = run_cli(*common, "readme", "--mode", "upgrade", "--variant", variant, "--write")
+    assert upgrade.returncode == 0, upgrade.stdout + upgrade.stderr
+    updated = readme.read_bytes()
+    close = b"<!-- showcase:banner:end -->"
+    intro, _, rest = updated.partition(close)
+    assert b'src="assets/intro.svg"' in intro
+    assert b"docs/images/banner.png" not in updated
+    assert prefix.rstrip(b"\r\n") in rest
+    lint_args = (*common, "lint", "readme", readme, "--variant", variant)
+    assert run_cli(*lint_args).returncode == 0
+
+    footer = b"<!-- showcase:footer:start -->"
+    body, marker, ending = rest.lstrip(b"\r\n").partition(footer)
+    assert marker
+    readme.write_bytes(body + intro + close + b"\n\n" + marker + ending)
+    late = run_cli(*lint_args)
+    assert late.returncode == 1
+    assert any(fail.startswith("D13 ") for fail in json.loads(late.stdout)["fails"])
 
 
 CALLOUT_PREFIX = b"> [!NOTE]\r\n> Synthetic callout.\n\n"

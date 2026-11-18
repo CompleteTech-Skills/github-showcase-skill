@@ -728,9 +728,14 @@ def _strip_markers(text: str, keep: dict[str, str] | None = None) -> tuple[str, 
 
 
 def _badge_or_logo(source: str, *, personal: bool = False) -> bool:
-    logo = (re.search(r"(?:^|[/_.-])logo(?:$|[/_.-])", re.split(r"[?#]", source, maxsplit=1)[0], re.I)
-            if personal else re.search(r"logo", source, re.I))
-    return bool(logo or "shields.io" in source or "badge.svg" in source or "docs/images/badges/" in source)
+    if not personal:
+        return bool(re.search(r"logo", source, re.I) or "shields.io" in source
+                    or "badge.svg" in source or "docs/images/badges/" in source)
+    location = re.split(r"[?#]", source, maxsplit=1)[0]
+    return bool(re.search(r"(?:^|[/_.-])logo(?:$|[/_.-])", location, re.I)
+                or re.match(r"https?://(?:img\.)?shields\.io/", location, re.I)
+                or re.fullmatch(r"https://github\.com/[^/]+/[^/]+/actions/workflows/[^/]+/badge\.svg", location, re.I)
+                or location.removeprefix("./").startswith("docs/images/badges/"))
 
 
 def _leading_banner(pre: str) -> bool:
@@ -791,6 +796,19 @@ def _badges_precede_banner(text: str, banner: re.Match) -> bool:
     return bool(images) and all(_badge_or_logo(source, personal=True) for _, source, _ in images)
 
 
+def _heading_view(text: str) -> str:
+    clean = list(masked(text))
+    for start, end in html_block_spans(text):
+        clean[start:end] = ["\n" if ch == "\n" else "\x00" for ch in clean[start:end]]
+    return "".join(clean)
+
+
+def personal_header_end(text: str) -> int:
+    """End of the opening area before the first visible Markdown heading."""
+    title = re.search(r"(?m)^ {0,3}#{1,6}(?:[ \t]+|$)", _heading_view(text))
+    return title.start() if title is not None else len(text)
+
+
 def callout_only(ctx: RepoContext, text: str, *, retain_personal_banner: bool = False) -> tuple[str, list[str]]:
     """Variants G and H (§7.4): the hero banner block, then the callout (unless one is already there), then the body
     unchanged, then the decision 18 footer. Nothing else changes. Watching-org forks never reach here (`readme`
@@ -816,12 +834,14 @@ def callout_only(ctx: RepoContext, text: str, *, retain_personal_banner: bool = 
     if not retain_personal_banner and len(banners) > 1:
         raise NeedsInput("intro", "Keep one managed personal hero block before refreshing the intro.")
     if (not retain_personal_banner and not leading and len(banners) == 1
-            and _block_on_separate_lines(text, banners[0])
             and personal_generated_hero(ctx, banners[0].group(2))):
         banner = banners[0]
         old_hero = banner.group(2)
         new_hero = banner_html(ctx)
-        if _badges_precede_banner(text, banner):
+        if _badges_precede_banner(text, banner) or personal_header_end(text) < banner.start():
+            if not _block_on_separate_lines(text, banner):
+                raise NeedsInput("intro-order", "Put the managed personal hero markers on their own lines before "
+                                 "moving the hero into the opening area.")
             # Move only the owned hero; the authored preamble keeps its bytes and order.
             body = text[:banner.start()] + text[banner.end():]
             lead_banner = wrap("banner", new_hero) + banner_gap
@@ -1392,7 +1412,9 @@ def header_only(ctx: RepoContext, text: str, *, already_normalized: bool = False
         text = normalize_text(text)
     personal = personal_profile(ctx)
     if personal and not preserve_structure and not retain_personal_banner:
-        preserve_structure = _personal_has_authored_hero(ctx, text, find_blocks(MARK, text))
+        markers = find_blocks(MARK, text)
+        preserve_structure = (_personal_has_authored_hero(ctx, text, markers)
+                              or any(m.group(1) == "banner" and not _block_on_separate_lines(text, m) for m in markers))
     gen = {"nav": nav_line(ctx), "footer": footermod.markup(ctx.brand)}
     if not personal:
         gen["banner"] = banner_html(ctx)
@@ -1419,9 +1441,10 @@ def header_only(ctx: RepoContext, text: str, *, already_normalized: bool = False
         if b == "banner" and personal:
             owned = not retain_personal_banner and personal_generated_hero(ctx, body)
             fresh = banner_html(ctx) if owned else body
-            if owned and _badges_precede_banner(text, m):
-                raise NeedsInput("intro-order", "The personal intro must precede the badges. Use readme --mode upgrade "
-                                 "without --no-regroup to request a complete header refresh.")
+            if owned and (_badges_precede_banner(text, m)
+                          or (ctx.det["variant"] in ("G", "H") and personal_header_end(text) < m.start())):
+                raise NeedsInput("intro-order", "The personal intro belongs in the opening area. Use readme --mode "
+                                 "upgrade without --no-regroup to request a complete header refresh.")
             return m.group(0) if fresh == body else wrap(b, fresh)
         if b in gen:
             return wrap(b, re.sub(r"\n{3,}", "\n\n", gen[b]))
@@ -1776,11 +1799,8 @@ def heading_moves(before: str, after: str, variant: str) -> list[dict]:
 
     def headings(text):
         text = normalize_text(text)
-        clean = list(masked(text))
-        for start, end in html_block_spans(text):
-            clean[start:end] = ["\n" if ch == "\n" else "\x00" for ch in clean[start:end]]
         groups = {}
-        for match in pattern.finditer("".join(clean)):
+        for match in pattern.finditer(_heading_view(text)):
             title = re.sub(r"[ \t]+#+[ \t]*$", "", text[match.start(2):match.end(2)]).strip()
             key = EMOJI.sub("", title).strip()
             key = renames.get(key.lower(), key).casefold()

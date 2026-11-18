@@ -134,7 +134,8 @@ none of them writes a README, badge, CONTRIBUTING or change record on that refus
 `assets/intro.svg` as the first image of the personal README (D13, R7).
 
 When authored badges precede an owned personal hero, a full upgrade moves only
-that hero ahead of the badges. Header-only and `--no-regroup` refreshes instead
+that hero ahead of the badges. A full G or H upgrade also moves a managed hero
+out of the authored body. Header-only and `--no-regroup` refreshes instead
 return `needs-input:intro-order` before writing, because they cannot move the
 existing marker block. Fenced image examples do not affect the image order.
 
