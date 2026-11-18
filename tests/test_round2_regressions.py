@@ -216,7 +216,8 @@ def test_action_prepare_foreign_and_drop(tmp_path):
     assert not (img / "banner.png").exists() and list(side["outputs"]) == ["card.svg"]
 
 
-@pytest.mark.parametrize("change", ["unrelated-record", "replaced-file", "live-record", "staged-record", "already-staged"])
+@pytest.mark.parametrize("change", ["unrelated-record", "replaced-file", "live-record", "staged-record",
+                                    "already-staged", "already-edited"])
 def test_action_removes_only_the_observed_foreign_artifact(tmp_path, change):
     images = tmp_path / "docs/images"
     images.mkdir(parents=True)
@@ -227,6 +228,8 @@ def test_action_removes_only_the_observed_foreign_artifact(tmp_path, change):
     staged = {"staged_description": {"text": "A proposed sentence."}}
     if change == "already-staged":
         data["outputs"]["banner.png"] = staged
+    elif change == "already-edited":
+        data["outputs"]["banner.png"] = {"sha256": "a" * 64}
     sidecar.write_text(json.dumps(data), encoding="utf-8")
     path.write_bytes(b"copied image")
     helper = [sys.executable, str(ROOT / "scripts/action_prepare.py")]
@@ -236,7 +239,7 @@ def test_action_removes_only_the_observed_foreign_artifact(tmp_path, change):
         return result.stdout.strip()
 
     key = command("foreign-key", "Northwind-Trading/project", path.name)
-    if change == "already-staged":
+    if change in ("already-staged", "already-edited"):
         assert not key
         command("drop", path.name)
         assert path.read_bytes() == b"copied image" and json.loads(sidecar.read_bytes()) == data

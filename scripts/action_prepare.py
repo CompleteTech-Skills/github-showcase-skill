@@ -359,7 +359,10 @@ def _drop_key(name: str, data: dict) -> str | None:
         return None
     if name not in outputs and not path.is_file():
         return None
-    identity = [name, file_record(path) if path.is_file() else None, record]
+    artifact = file_record(path) if path.is_file() else None
+    if artifact is not None and record is not None and "sha256" in record and record["sha256"] != artifact["sha256"]:
+        return None
+    identity = [name, artifact, record]
     return hashlib.sha256(canonical(identity).encode("utf-8")).hexdigest()
 
 

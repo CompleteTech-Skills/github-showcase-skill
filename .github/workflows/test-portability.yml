@@ -12,8 +12,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    # The full Windows suite can finish just before 15 minutes, leaving no time for runner cleanup.
-    timeout-minutes: ${{ matrix.os == 'windows-latest' && 45 || 40 }}
+    # Older Windows runs already took 24 minutes before the new CLI and transaction coverage.
+    # Keep the full suite on every platform, with room for the combined integration and cleanup.
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 60 || 45 }}
     steps:
       - uses: actions/checkout@v4
         with:
