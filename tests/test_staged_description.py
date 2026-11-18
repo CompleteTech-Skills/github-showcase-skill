@@ -1534,7 +1534,8 @@ def test_sidecar_lock_is_shared_across_process_temp_directories(tmp_path):
 
 
 @pytest.mark.parametrize("generated", [True, False], ids=["receipted-generated", "authored-legacy"])
-def test_reflowed_taglines_record_exact_bodies_and_follow_the_live_capture(tmp_path, monkeypatch, generated):
+@pytest.mark.parametrize("ending", ["\n", "\r\n"], ids=["lf", "crlf"])
+def test_reflowed_taglines_record_exact_bodies_and_follow_the_live_capture(tmp_path, monkeypatch, generated, ending):
     import action_prepare
     import showcase
     from ctshowcase import readme
@@ -1545,8 +1546,10 @@ def test_reflowed_taglines_record_exact_bodies_and_follow_the_live_capture(tmp_p
     path = checkout / "README.md"
     original_bodies = ["**Old.**", "**Another old.**"]
     bodies = [receipted(body) for body in original_bodies] if generated else original_bodies
-    path.write_text("# Synthetic documentation\n\n" + readme.wrap("tagline", bodies[0]) + "\n\n"
-                    "## Details\n\n" + readme.wrap("tagline", bodies[1]) + "\n", encoding="utf-8")
+    original = ("# Synthetic documentation\n\n" + readme.wrap("tagline", bodies[0]) + "\n\n"
+                "## Details\n\n" + readme.wrap("tagline", bodies[1]) + "\n")
+    original_bytes = original.replace("\n", ending).encode("utf-8")
+    path.write_bytes(original_bytes)
     meta_path = tmp_path / "metadata.json"
     meta = meta_dict(description="")
     proposed = "Route synthetic support requests across multiple teams and keep queue ownership visible."
@@ -1565,12 +1568,12 @@ def test_reflowed_taglines_record_exact_bodies_and_follow_the_live_capture(tmp_p
             body = block.group(2)
             if not body.startswith("<!-- showcase:tagline:generated sha256="):
                 continue
-            receipt, payload = body.split("\n", 1)
-            assert_receipt(body)
+            receipt, payload = body.split(ending, 1)
+            assert_receipt(body.replace(ending, "\n"))
             words = payload.split(" ")
             boundary = 4 + index
-            parts.extend((source[offset:block.start(2)], receipt, "\n\n", " ".join(words[:boundary]),
-                          "\n", " ".join(words[boundary:]), "\n"))
+            parts.extend((source[offset:block.start(2)], receipt, ending * 2, " ".join(words[:boundary]),
+                          ending, " ".join(words[boundary:]), ending))
             offset = block.end(2)
         return "".join([*parts, source[offset:]])
 
@@ -1592,6 +1595,7 @@ def test_reflowed_taglines_record_exact_bodies_and_follow_the_live_capture(tmp_p
         # These are the original unreceipted fixtures. Neither staged text nor
         # formatter availability makes them generated or authorizes adoption.
         assert exact_tagline_bodies(rendered) == original_bodies
+        assert path.read_bytes() == original_bytes
         assert proposed not in rendered
         assert not (checkout / "docs/images/.showcase.json").exists()
         assert not action_prepare.has_staged_outputs()
@@ -1637,8 +1641,8 @@ def test_reflowed_taglines_record_exact_bodies_and_follow_the_live_capture(tmp_p
     assert recorded()["description_sha256"] == hashlib.sha256(live.encode()).hexdigest()
     capture(f"  {live}  ")
     assert not drift()
-    edited = path.read_text(encoding="utf-8").replace("owner.**", "maintainer.**", 1)
-    path.write_text(edited, encoding="utf-8")
+    edited = path.read_bytes().replace(b"owner.**", b"maintainer.**", 1)
+    path.write_bytes(edited)
     assert drift()
 
 
