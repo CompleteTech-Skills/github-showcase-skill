@@ -15,6 +15,7 @@ brand row, its owner status (watching, T3, excluded), its packages and its links
 """
 from __future__ import annotations
 
+import bisect
 import difflib
 import hashlib
 import html
@@ -352,27 +353,25 @@ def _attrs(s: str) -> dict:
             for m in ATTR.finditer(s)}
 
 
-def _reference_excluded_lines(text: str) -> set[int]:
-    """Raw HTML lines where the legacy reference inventory should not read Markdown."""
+def _reference_comment_lines(text: str) -> set[int]:
+    """Original comment blocks whose semantic trailing definitions remain visible."""
     from .mdcode import html_block_spans
 
-    excluded = set()
-    line, pos = 1, 0
+    starts = [0] + [m.end() for m in re.finditer("\n", text)]
+    comments = set()
     for start, end in html_block_spans(text):
-        line += text.count("\n", pos, start)
-        pos = start
-        # The semantic projection already removes recognized comment bodies.
-        # Keep the legacy inventory of a definition following a leading comment.
-        if text[start:start + 7].lstrip(" ").startswith("<!--"):
-            continue
-        excluded.update(range(line, line + text.count("\n", start, end - 1) + 1))
-    return excluded
+        # Containers precede the actual HTML opener. Use the shared block boundaries rather than reparsing
+        # collapsed comment text, which could otherwise manufacture a new HTML opener from malformed source.
+        opener = text.find("<", start, end)
+        if text.startswith("<!--", opener):
+            comments.update(range(bisect.bisect_right(starts, start), bisect.bisect_right(starts, end - 1) + 1))
+    return comments
 
 
 def extract_links(text: str) -> list[dict]:
     """Every link and image target outside code: inline, reference definitions, HTML and bare URLs."""
     text = text.replace("\r\n", "\n").replace("\r", "\n")
-    reference_excluded = _reference_excluded_lines(text)
+    reference_comments = _reference_comment_lines(text)
     found = []
     for n, markdown, masked in scan_lines(text, markdown_only=True):
         if not masked:
@@ -388,7 +387,7 @@ def extract_links(text: str) -> list[dict]:
                 spans.append((offset + m.start(), offset + m.end()))
                 md(m.group(2), offset + m.start(2))
         md(markdown, 0)
-        m = REF_DEF.match(masked) if n not in reference_excluded else None
+        m = REF_DEF.match(masked if n in reference_comments else markdown)
         if m:
             found.append({"line": n, "target": m.group(2).strip("<>"), "image": False, "alt": m.group(1),
                           "syntax": "reference"})

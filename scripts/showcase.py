@@ -535,7 +535,21 @@ def cmd_readme(args):
             problems = readme.preservation(old, comparable, removed, ctx=ctx)
         return problems
 
+    reason = readme.managed_reason(ctx, before)
+    if reason:
+        proposed = readme.header(ctx)
+        ctx.log("needs-input:readme-managed")
+        if args.format == "text":
+            if not args.quiet:
+                print(f"readme: needs-input:readme-managed ({reason})", file=sys.stderr)
+                if not args.write:
+                    print(proposed)
+            return None, NEEDS_INPUT if args.write else OK
+        return base("readme", ctx, result="needs-input", written=False, reason=reason,
+                    proposed_header=proposed), NEEDS_INPUT if args.write else OK
     mode = args.mode
+    if args.no_regroup and (args.bootstrap or mode == "scaffold"):
+        raise ShowcaseError("--no-regroup cannot be combined with --bootstrap or --mode scaffold", log="usage")
     contrib_new = None
     original_contrib = None
     if args.bootstrap:
@@ -573,6 +587,14 @@ def cmd_readme(args):
                 after, removed = readme.header_only(ctx, base_text, already_normalized=True), []
         else:
             after = readme.header_only(ctx, before, already_normalized=True)
+    elif args.no_regroup:
+        mode = "header"
+        before = raw
+        problems = _authored_footer_refusal(ctx, readme.normalize_text(before))
+        if problems:
+            return base("readme", ctx, result="fail", mode=mode, problems=problems,
+                        logs=ctx.logs + ["readme-shrink"]), CHECK_FAILED
+        after = readme.header_only(ctx, before, preserve_structure=True)
     else:
         if mode == "auto":
             mode = "scaffold" if len([ln for ln in readme.source_lines(before) if ln.strip(" \t")]) < 3 else "upgrade"
@@ -615,7 +637,7 @@ def cmd_readme(args):
         # Prettier can emit CRLF. Compare against the exact bytes used for the plan.
         if contrib_new is not None:
             contrib_new = format_text(rd, contrib_path, markdown_source_style(contrib_new, original_contrib.decode("utf-8")))
-    if args.format_generated:
+    if args.format_generated or args.no_regroup:
         restored = after
     elif after != before:
         bom = readme.BOM if raw.startswith(readme.BOM) else ""
@@ -642,6 +664,10 @@ def cmd_readme(args):
     if args.records and changed:
         change_records.append(records.record(ctx.owner, ctx.repo, "readme", "README.md", raw, restored,
                                              f"§7 variant {ctx.det['variant']} ({mode})"))
+    if args.no_regroup and change_records:
+        capture = (Path(args.meta),) if args.meta else ()
+        ensure_distinct_outputs(Path(args.records), path, rd / "docs/images/.showcase.json",
+                                *(rd / rel for rel in badge_outputs), *capture)
     if args.format_generated and change_records:
         capture = getattr(ctx, "meta_path", None)
         ensure_distinct_outputs(Path(args.records), path, contrib_path, *(rd / rel for rel in badge_outputs),
@@ -690,14 +716,22 @@ def cmd_readme(args):
     if change_records and not (args.format_generated and args.write):
         records.append(args.records, change_records)
     res = base("readme", ctx, result="changed" if changed else "unchanged", mode="bootstrap" if args.bootstrap else mode,
-               variant=ctx.det["variant"], written=bool(args.write and changed))
+               variant=ctx.det["variant"], written=bool(args.write and changed),
+               heading_moves=[] if args.no_regroup else readme.heading_moves(before, after, ctx.det["variant"]))
     if args.diff or not args.write:
         diff = readme_diff(raw, restored)
         if args.format == "text":
+            for move in res["heading_moves"]:
+                if move.get("ambiguous"):
+                    sys.stdout.write(f"Heading: {move['heading']} (ambiguous duplicate; "
+                                     f"old levels {move['old_levels']}, new levels {move['new_levels']})\n")
+                else:
+                    sys.stdout.write(f"Heading: {move['heading']} (H{move['from']} -> H{move['to']}: {move['new_heading']})\n")
             output = getattr(sys.stdout, "buffer", None)
             if output is None:
                 sys.stdout.write(diff)
             else:
+                sys.stdout.flush()
                 output.write(diff.encode("utf-8"))
             return None, OK
         res["diff"] = diff
@@ -1340,6 +1374,8 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--diff", action="store_true")
     s.add_argument("--records")
     s.add_argument("--bootstrap", action="store_true")
+    s.add_argument("--no-regroup", action="store_true",
+                   help="refresh existing marker blocks in place and preserve all surrounding bytes")
     s.add_argument("--badges", choices=("shields", "local"), default="shields",
                    help="local renders badges offline to docs/images/badges/*.svg (profile READMEs)")
     s.add_argument("--format-generated", action="store_true", help="format generated text with the target's pinned local Prettier")

@@ -148,3 +148,54 @@ def test_cli_links_and_images_ignore_literal_html_reference_and_destination(tmp_
         ("docs/images/visible-image.png", ["README.md:9"]),
         ("docs/images/visible-reference.png", ["README.md:6"]),
     ]
+
+
+@pytest.mark.parametrize("ending", [b"\n", b"\r\n", b"\r"])
+def test_cli_images_excludes_reference_definitions_in_raw_html(tmp_path, ending):
+    readme = tmp_path / "README.md"
+    authored = ending.join([
+        b"<pre>",
+        b"[Literal]: docs/images/pre-example.png",
+        b"</pre>",
+        b"",
+        b"<div>",
+        b"[Literal]: docs/images/div-example.png",
+        b"</div>",
+        b"",
+        b"[shot]: <docs/images/reference.png>",
+        b"",
+        b"![Shot][shot]",
+        b"![Real](docs/images/real.png)",
+        b'<img src="docs/images/html.png" alt="HTML image">',
+        b"",
+        b"<pre<!-- comment -->>",
+        b"",
+        b"[visible]: docs/images/visible.png",
+        b"",
+        b"![Visible][visible]",
+        b"",
+        b'Intro <span title="example',
+        b"[Literal]: docs/images/attribute-example.png",
+        b'">Text</span>',
+        b"",
+    ])
+    readme.write_bytes(authored)
+
+    result = run_cli("--repo-dir", tmp_path, "content", "images", "README.md")
+    assert result.returncode == 1, result.stderr
+    report = json.loads(result.stdout)
+    assert report["images"] == [
+        {"path": "docs/images/html.png", "referenced_from": ["README.md:13"], "status": "missing"},
+        {"path": "docs/images/real.png", "referenced_from": ["README.md:12"], "status": "missing"},
+        {"path": "docs/images/reference.png", "referenced_from": ["README.md:9"], "status": "missing"},
+        {"path": "docs/images/visible.png", "referenced_from": ["README.md:17"], "status": "missing"},
+    ]
+    assert report["remote"] == []
+    assert readme.read_bytes() == authored
+
+    links = run_cli("--repo-dir", tmp_path, "content", "links", "README.md")
+    assert links.returncode == 0, links.stderr
+    assert {row["target"] for row in json.loads(links.stdout)["findings"]} == {
+        "docs/images/html.png", "docs/images/real.png", "docs/images/reference.png",
+        "docs/images/visible.png",
+    }
