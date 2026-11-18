@@ -26,7 +26,7 @@ VALIDATOR_COMMAND = re.compile(
     re.I,
 )
 SIMPLE_SHELL_COMMAND = re.compile(
-    r"""(?:[A-Za-z0-9_ :./@=*?\[\]\t-]|'[^'\r\n]*'|"(?:[^"\\$`\r\n]|\\[^\r\n])*")+"""
+    r"""(?:[A-Za-z0-9_ :./@=*?{},\[\]\t-]|'[^'\r\n]*'|"(?:[^"\\$`\r\n]|\\[^\r\n])*")+"""
 )
 DISPLAY_ARGUMENTS = {".", "-q", "-v", "--", "--check", "--write", "--fix", "--quiet", "--verbose", "check", "discover"}
 
@@ -182,6 +182,14 @@ def target_relative(repo_dir: Path | None, destination: Path) -> Path:
         raise ShowcaseError("formatter destination must be inside the target checkout", log="usage") from error
 
 
+def markdown_source_style(text: str, original: str) -> str:
+    """Supply Prettier's auto-EOL detection with the source file's style."""
+    eol = re.search(r"\r\n|\r|\n", original)
+    if eol is not None:
+        text = re.sub(r"\r\n|\r|\n", lambda _: eol.group(), text)
+    return text
+
+
 def _file_state(path: Path) -> tuple[int, ...] | None:
     try:
         info = path.lstat()
@@ -217,12 +225,23 @@ def write_formatted_outputs(outputs: list[tuple[Path, bytes]], *,
                 # Keep the old entry's access check even where directory permissions allow replacing it.
                 with path.open("r+b") as stream:
                     previous = stream.read()
-                backup.write_bytes(previous)
+                if initial[-1] > 1:
+                    if _file_state(path) != initial:
+                        raise ShowcaseError("output changed during formatting", log="formatter-source-changed",
+                                            code=CHECK_FAILED)
+                    backup.hardlink_to(path)
+                    linked = _file_state(path)
+                    if linked is None or linked[:5] != initial[:5] or linked[-1] != initial[-1] + 1:
+                        raise ShowcaseError("output changed during formatting", log="formatter-source-changed",
+                                            code=CHECK_FAILED)
+                    initial = linked
+                else:
+                    backup.write_bytes(previous)
+                    backup.chmod(stat.S_IMODE(initial[2]))
             replacement.write_bytes((previous or b"") + data if append else data)
             if initial is not None:
                 mode = stat.S_IMODE(initial[2])
                 replacement.chmod(mode)
-                backup.chmod(mode)
             if destination in snapshots and previous != snapshots[destination]:
                 raise ShowcaseError("README inputs changed during formatting", log="formatter-source-changed",
                                     code=CHECK_FAILED)

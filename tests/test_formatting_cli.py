@@ -148,7 +148,7 @@ def test_formatted_crlf_readme_is_stable_on_retry(tmp_path, monkeypatch, capsys)
     cli = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(cli)
     monkeypatch.setattr("ctshowcase.formatting.format_text",
-                        lambda root, path, text: text.replace("\n", "\r\n"))
+                        lambda root, path, text: text.replace("\r\n", "\n").replace("\n", "\r\n"))
     argv = ["--meta", str(meta), "--repo-dir", str(repo), "readme", "--mode", "header",
             "--write", "--format-generated"]
     assert cli.main(argv) == 0
@@ -594,7 +594,7 @@ def test_formatter_keeps_markers_after_fences_and_reseals_pristine_body(tmp_path
                 "<!-- showcase:tagline:start -->\n\nOld tagline.\n\n<!-- showcase:tagline:end -->\n\n"
                 + readme.pristine_block("## Install\n\nSynthetic install instructions.") + "\n")
     path.write_bytes(original.encode("utf-8"))
-    monkeypatch.setattr("ctshowcase.formatting.format_text", lambda root, path, text: text.replace("\n", ending))
+    monkeypatch.setattr("ctshowcase.formatting.format_text", lambda root, path, text: text.replace("\r\n", "\n").replace("\r", "\n").replace("\n", ending))
     argv = ["--meta", str(meta), "--repo-dir", str(repo), "readme", "--mode", "header", "--write", "--format-generated"]
     assert showcase.main(argv) == 0
     rendered = path.read_bytes()
@@ -818,3 +818,50 @@ def test_formatted_readme_queue_replacement_serializes_normal_append(tmp_path, m
     assert previous == {"previous": True}
     assert formatted_readme["target"] == "README.md"
     assert ordinary == appended
+
+
+def test_group_rollback_retains_existing_hard_link(tmp_path, monkeypatch):
+    from ctshowcase.formatting import write_formatted_outputs
+
+    card = tmp_path / "card.svg"
+    alias = tmp_path / "linked.svg"
+    preview = tmp_path / "card.png"
+    card.write_bytes(b"original card")
+    try:
+        alias.hardlink_to(card)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"hard links are unavailable: {exc}")
+    replace = Path.replace
+
+    def fail_preview(source, destination):
+        if destination == preview:
+            raise PermissionError("synthetic replacement failure")
+        return replace(source, destination)
+
+    monkeypatch.setattr(Path, "replace", fail_preview)
+    with pytest.raises(PermissionError, match="synthetic replacement failure"):
+        write_formatted_outputs([(card, b"new card"), (preview, b"new preview")])
+    assert card.samefile(alias)
+    assert card.read_bytes() == alias.read_bytes() == b"original card"
+    assert not preview.exists()
+
+
+def test_readme_formatter_receives_existing_style_for_auto_endings(tmp_path, monkeypatch):
+    import showcase
+
+    repo, meta = target(tmp_path)
+    original = "\ufeff# Synthetic title\r\n\r\nAuthored example.\r\n"
+    readme = repo / "README.md"
+    readme.write_bytes(original.encode())
+
+    def format_preserving_first_ending(_root, path, text):
+        assert path == readme
+        assert text.startswith("\ufeff")
+        assert "\r\n" in text and "\n" not in text.replace("\r\n", "")
+        return text
+
+    monkeypatch.setattr("ctshowcase.formatting.format_text", format_preserving_first_ending)
+    args = ["--meta", str(meta), "--repo-dir", str(repo), "readme", "--mode", "scaffold",
+            "--format-generated", "--write"]
+    assert showcase.main(args) == 0
+    assert "Authored example." in readme.read_bytes().decode()

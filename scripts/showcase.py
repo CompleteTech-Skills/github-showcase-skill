@@ -574,8 +574,9 @@ def cmd_readme(args):
                 return base("readme", ctx, result="fail", mode=mode, problems=problems[:20],
                             logs=ctx.logs + ["readme-shrink"]), CHECK_FAILED
     if args.format_generated:
-        from ctshowcase.formatting import format_text
-        formatted = format_text(rd, path, after)
+        from ctshowcase.formatting import format_text, markdown_source_style
+        encoding_bom = "\ufeff" if raw_readme.startswith("\ufeff") else ""
+        formatted = format_text(rd, path, encoding_bom + markdown_source_style(after, raw_readme))
         markers = [m.group(1) for m in readme.find_blocks(readme.MARK, after)]
         if markers != [m.group(1) for m in readme.find_blocks(readme.MARK, formatted)]:
             raise ShowcaseError("formatter changed the README managed blocks", log="formatter-content",
@@ -589,7 +590,7 @@ def cmd_readme(args):
         # Prettier can emit CRLF. Compare against the exact bytes used for the plan.
         before = raw_readme
         if contrib_new is not None:
-            contrib_new = format_text(rd, contrib_path, contrib_new)
+            contrib_new = format_text(rd, contrib_path, markdown_source_style(contrib_new, original_contrib.decode("utf-8")))
     changed = after != before
     diff = "".join(difflib.unified_diff(before.splitlines(True), after.splitlines(True), "a/README.md", "b/README.md"))
     badge_outputs = {}
