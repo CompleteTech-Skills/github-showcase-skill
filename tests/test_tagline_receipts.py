@@ -157,18 +157,22 @@ def test_mock_formatter_reflow_is_resealed_then_real_cli_refreshes(tmp_path, mon
     assert NEW in verify(body(path.read_text(encoding="utf-8")))
 
 
-def test_mock_formatter_cannot_restore_edited_receipt(tmp_path, monkeypatch):
+@pytest.mark.parametrize("ending", ["\n", "\r\n", "\r"], ids=["lf", "crlf", "cr"])
+def test_mock_formatter_cannot_restore_edited_receipt(tmp_path, monkeypatch, ending):
     path, _, argv = generated_checkout(tmp_path)
     original = path.read_text(encoding="utf-8")
     authored = original.replace(f"**{OLD}**", f"**{OLD}** ")
-    path.write_text(authored, encoding="utf-8")
+    authored_bytes = authored.replace("\n", ending).encode("utf-8")
+    path.write_bytes(authored_bytes)
     cli = formatter_cli("tagline_authored_formatter_cli")
     records = path.parent / "records.jsonl"
 
     def synthetic_trim(root, target, value):
-        return re.sub(r" +(?=\n)", "", value)
+        trimmed = re.sub(r" +(?=\r\n|\r|\n)", "", value)
+        assert trimmed != value  # the formatter double must actually attempt the forbidden edit
+        return trimmed
 
     monkeypatch.setattr("ctshowcase.formatting.format_text", synthetic_trim)
     assert cli.main(list(map(str, (*argv, "--mode", "header", "--format-generated", "--records", records)))) == 1
-    assert path.read_text(encoding="utf-8") == authored
+    assert path.read_bytes() == authored_bytes
     assert not records.exists()
