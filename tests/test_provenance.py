@@ -111,7 +111,8 @@ def test_a_renamed_org_still_finds_its_stamp(brand, tmp_path):
     out, code = P.stamp_one("Northwind-Trading-Co", brand, res, root=dot, gh=None, now=T0)
     assert code == 0 and out["target"] == "Northwind-Trading-Co"
     old = P.check_one("Northwind-Trading-Old", brand, res, root=dot, gh=None)
-    assert old["status"] == "fresh" and old["target"] == "Northwind-Trading-Co"
+    assert old["status"] == "incomplete" and old["target"] == "Northwind-Trading-Co"
+    assert "input:about" in old["missing"] and old["skip"] is False
     assert "resolved:Northwind-Trading-Old->Northwind-Trading-Co" in old["logs"]
     repo_t = P.parse_target("northwind-trading-old/support-triage-agent", res)
     assert repo_t.id == "Northwind-Trading-Co/support-triage-agent"
@@ -126,7 +127,9 @@ def test_profile_and_org_statuses(brand, tmp_path):
     assert P.check_one("user:northwind-demo", brand, res, root=prof)["status"] == "untracked"
     out, _ = P.stamp_one("user:northwind-demo", brand, res, root=prof, now=T0)
     assert (prof / ".github" / "showcase.json").is_file() and out["stamp"]["repo"] == "northwind-demo/northwind-demo"
-    assert P.check_one("user:northwind-demo", brand, res, root=prof)["status"] == "fresh"
+    incomplete = P.check_one("user:northwind-demo", brand, res, root=prof)
+    assert incomplete["status"] == "incomplete" and "input:about" in incomplete["missing"]
+    assert "file:data.json" in incomplete["missing"] and incomplete["skip"] is False
     (prof / "README.md").write_text("# Hi, edited\n\n" + footer.block(brand) + "\n", encoding="utf-8")
     r = P.check_one("user:northwind-demo", brand, res, root=prof)
     assert r["status"] == "stale" and "inputs:readme_sha256" in r["changed"]
@@ -142,11 +145,17 @@ def test_enterprise_stamp_is_private_and_needs_a_snapshot(brand, tmp_path):
                             jobs=str(tmp_path / "jobs.jsonl"))
     assert code == 0 and out["jobs"] == [] and out["stamp"]["repo"] is None  # never a public repository, never a job
     assert (reg / "enterprise.showcase.json").is_file() and not (tmp_path / "jobs.jsonl").exists()
+    incomplete = P.check_one("enterprise:completetech", brand, res, root=reg, snapshot=snap)
+    assert incomplete["status"] == "incomplete" and "file:enterprise.snapshot.json" in incomplete["missing"]
+    (reg / "enterprise.snapshot.json").write_text(json.dumps(snap), encoding="utf-8")
+    complete, code = P.stamp_one("enterprise:completetech", brand, res, root=reg, snapshot=snap, now=T1)
+    assert code == 0 and complete["completed"] is True
     assert P.check_one("enterprise:completetech", brand, res, root=reg, snapshot=snap)["status"] == "fresh"
     snap["sections"]["profile"]["description"] = "Changed"
     assert P.check_one("enterprise:completetech", brand, res, root=reg, snapshot=snap)["status"] == "stale"
-    with pytest.raises(NeedsInput):
-        P.check_one("enterprise:completetech", brand, res, root=reg, snapshot=None)
+    unknown = P.check_one("enterprise:completetech", brand, res, root=reg, snapshot=None)
+    assert unknown["status"] == "incomplete" and "input:snapshot_sha256" in unknown["missing"]
+    assert unknown["skip"] is False
 
 
 # ---------------------------------------------------------------------------------------------- the stamp
@@ -179,7 +188,7 @@ def test_stamp_output_is_deterministic_and_idempotent(brand, checkout):
     assert again == text
 
 
-def test_other_changes_bump_last_run_at_but_not_last_changed_at(brand, checkout):
+def test_readme_byte_changes_advance_the_recorded_change_timestamp(brand, checkout):
     generate(checkout)
     stamp(brand, checkout, now=T0)
     commit(checkout)
@@ -187,14 +196,18 @@ def test_other_changes_bump_last_run_at_but_not_last_changed_at(brand, checkout)
         fh.write("\n")  # the run changed something else in a managed path
     res, _ = stamp(brand, checkout, now=T1)
     prov = res["provenance"]
-    assert (prov["last_run_at"], prov["last_changed_at"], prov["run_count"]) == (T1, T0, 2)
+    assert (prov["last_run_at"], prov["last_changed_at"], prov["run_count"]) == (T1, T1, 2)
 
 
-def test_a_repository_stamped_before_any_art_is_fresh(brand, checkout):
+def test_a_repository_stamped_before_any_art_stays_incomplete(brand, checkout):
     res, _ = stamp(brand, checkout, now=T0)
     assert res["status"] == "never" and json.loads((checkout / P.REPO_STAMP).read_text(encoding="utf-8"))["outputs"] == {}
     commit(checkout)
-    assert check(brand, checkout)["status"] == "fresh"
+    incomplete = check(brand, checkout)
+    assert incomplete["status"] == "incomplete" and incomplete["skip"] is False
+    assert "file:docs/images/banner.png" in incomplete["missing"]
+    assert "file:docs/images/card.svg" in incomplete["missing"]
+    assert res["completed"] is False and P.EXIT["incomplete"] == 1
 
 
 def test_regenerated_art_is_a_change(brand, checkout, tmp_path):
@@ -304,11 +317,12 @@ def test_batch_check_spaces_requests_and_stops_on_a_rate_limit(brand, tmp_path):
 
 
 # ---------------------------------------------------------------------------------------------- the public credit
-def test_credit_follows_the_unchanged_decision_18_footer(brand):
+def test_credit_precedes_the_unchanged_final_decision_18_footer(brand):
     from test_footer import DECISION_18
     assert footer.markup(brand) == DECISION_18.strip()  # byte-identical, decision 18
     block = footer.block(brand)
-    assert block.startswith(footer.footer_block(brand) + "\n\n" + footer.CREDIT_START)
+    assert block.startswith(footer.CREDIT_START)
+    assert block.endswith(footer.CREDIT_END + "\n\n" + footer.footer_block(brand))
     assert block.count("<picture>") == 1  # the footer stays the only <picture>
     assert footer.credit_line(brand) == (
         '<p align="center"><sub>README styled with <a href="https://github.com/CompleteTech-Skills/'
@@ -325,7 +339,7 @@ def test_credit_follows_the_unchanged_decision_18_footer(brand):
 
 
 def test_old_footer_migrates_in_one_regeneration(brand, make_ctx):
-    old = readme.scaffold(make_ctx()).split(footer.CREDIT_START)[0].rstrip() + "\n"
+    old = readme.scaffold(make_ctx()).replace(footer.credit_block(brand) + "\n\n", "")
     assert footer.CREDIT_START not in old and footer.check(brand, old)[0] == "fail:credit-missing"
     once = readme.header_only(make_ctx(), old)  # what the Action runs
     assert footer.check(brand, once)[0] == "pass" and once.count(footer.CREDIT_START) == 1
@@ -333,16 +347,19 @@ def test_old_footer_migrates_in_one_regeneration(brand, make_ctx):
     up, removed = readme.upgrade(make_ctx(), old)
     assert footer.check(brand, up)[0] == "pass" and up.count(footer.CREDIT_START) == 1
     assert readme.preservation(old, up, removed) == []
-    stale = once.replace("v=1.0.0", "v=0.9.0").replace("README styled with", "Styled with")
+    stale = once.replace("v=1.0.0", "v=0.9.0")
     again, removed = readme.upgrade(make_ctx(), stale)
-    assert footer.check(brand, again)[0] == "pass" and readme.preservation(stale, again, removed) == []
+    assert footer.check(brand, again)[0] == "pass" and readme.preservation(stale, again, removed, ctx=make_ctx()) == []
+    authored = once.replace("README styled with", "Styled with")
+    with pytest.raises(NeedsInput, match="authored or ambiguous credit"):
+        readme.upgrade(make_ctx(), authored)
 
 
 def test_readme_lint_requires_the_credit(brand, make_ctx, tmp_path):
     ctx = make_ctx()
     text = readme.scaffold(ctx)
     p = tmp_path / "README.md"
-    p.write_text(text.split(footer.CREDIT_START)[0].rstrip() + "\n", encoding="utf-8")
+    p.write_text(text.replace(footer.credit_block(brand) + "\n\n", ""), encoding="utf-8")
     assert "D18 footer fail:credit-missing" in readmelint.lint(ctx, p)["fails"]
     p.write_text(text, encoding="utf-8")
     assert not [f for f in readmelint.lint(ctx, p)["fails"] if f.startswith("D18")]
@@ -389,7 +406,11 @@ def test_action_writes_the_stamp_in_the_same_single_commit(brand, checkout, tmp_
     assert side["provenance"]["run_count"] == 1 and side["provenance"]["target"]["id"] == SLUG
     # A second run that changes nothing writes nothing: no commit just to bump the time.
     p = _action_generate(checkout, rt, out)
-    assert p.returncode == 0 and '"result": "fresh"' in p.stdout
+    assert p.returncode == 0
+    capture = next(json.loads(line) for line in p.stdout.splitlines()
+                   if line.startswith("{") and json.loads(line).get("command") == "provenance")
+    assert capture["result"] == "incomplete" and capture["completed"] is False
+    assert capture["written"] is None and "managed:README.md" in capture["missing"]
     c = run_bash(commit_sh, "docs: regenerate [skip ci]", "fail", cwd=checkout, env=env)
     assert git(checkout, "rev-list", "--count", f"{head}..HEAD").stdout.strip() == "1", c.stdout
     state = ledger.load()
@@ -499,11 +520,12 @@ def test_silent_contexts_never_prompt(brand, tmp_path, env, tty, fmt, kw):
         assert ledger.load(tmp_path)["completed_runs"] == ledger.STAR_THRESHOLD + 1
 
 
-def test_an_agent_can_relay_the_line_without_a_tty(brand, tmp_path):
+def test_an_agent_cannot_override_non_tty_silence(brand, tmp_path):
     gh = StarGh(NOT_STARRED)
     for _ in range(ledger.STAR_THRESHOLD):
         r, line = nudge(brand, tmp_path, gh, env={"SHOWCASE_STAR_PROMPT": "1"}, tty=False)
-    assert line and r["asked"]
+    assert not line and not r["asked"] and gh.argv == []
+    assert ledger.load(tmp_path)["star"]["status"] == "unknown"
 
 
 def test_ledger_location_and_contents(tmp_path):

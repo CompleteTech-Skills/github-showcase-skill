@@ -37,6 +37,10 @@ read `org.md`, `projects.md` and `enterprise.md` under `references/`. Follow the
    repositories use only family glyph fields and a neutral name, or stay pending. Keep raw captures, private
    names, jobs and candidates in scratch; never copy the estate bundle into a repository.
 6. Keep a scratch ledger with target, step, argv, exit, structured result/logs, output paths and sha256.
+   After eligibility, capture and checkout identity are established, an optional local `provenance check`
+   can compare recorded outputs. Pass the selected metadata/source and `--offline --format json`.
+   Its scope is recorded outputs only: `fresh` never skips this workflow, `changed[]` contains reasons,
+   and missing or pending evidence remains work to do. See `references/provenance.md`.
    Resume from verified outputs; do not regenerate paid art merely because the run was interrupted.
 
 Use Python argv lists on both POSIX and Windows, never a space-joined executable string or `eval`:
@@ -86,12 +90,6 @@ after it. Rebuild the appropriate prefix for every invocation; do not let one re
 - Check `gh auth status` when authorized reads are needed. With IMAGE_TOOL=codex, check `codex --version`
   and `codex exec --help`; with none, skip image tooling. Missing tools remain pending. OCR is optional and
   its absence is `needs-input:ocr-unavailable`. `enterprise:?` discovery waits until this preflight completes.
-- Run-once check (decision 25), after the eligibility gates above and only for permitted targets:
-  `S provenance check TARGET --format json` (use `user:CompleteDotTech` for the personal account;
-  `--repo-dir CHECKOUT` or `--offline --meta M` when reads are not authorized; `--snapshot FILE` for the
-  Enterprise). `fresh`: skip the target unless FORCE is yes. `stale`: rerun only the surfaces that `changed[]`
-  names. `never`: run in full. `untracked`: run, and the final stamp backfills it. `foreign`: stop; never
-  suggest running it. Record the status in the scratch ledger.
 
 ## 1. Scope and captures
 - Repo: the named repository plus its owner's `.github` defaults when permitted. Org: use the registry or,
@@ -288,14 +286,13 @@ after it. Rebuild the appropriate prefix for every invocation; do not let one re
   --org-banner E --out PROOF/ORG-g4`, supplying only real applicable files. Missing surfaces remain logged
   incomplete; staged previews must be labelled staged. View both `.on-github-dark.png` and `.on-github-light.png`.
   Correct clipping, illegibility or palette errors by regenerating authorized inputs and rerun affected checks.
+- After local output checks, an optional `provenance stamp` records the selected local capture with
+  `--offline --format json`. Do not represent its receipt or queued writer jobs as live completion.
+  It preserves missing/pending evidence and does not add timestamp-only changes.
 - Report scope/exclusions and authorization, doctor rows, files with sha256/KB and `git status --short`, art
   provenance/rejections, reviewable description/topic/label/README proposals, jobs grouped by kind/approval,
   and EVERY pending or unrun item with its reason. Description/topics precede dependent final regeneration
   and upload in the future writer sequence. State plainly that nothing was written to GitHub.
-- Last, for each target the run touched: `SHOWCASE_STAR_PROMPT=1 S provenance stamp TARGET --repo-dir CHECKOUT`
-  (or `--jobs $WS/jobs.jsonl` without a checkout; the Enterprise stamp stays in the private estate `registry/`).
-  It writes nothing when the run changed nothing. If a star line appears, relay it to the person word for word
-  and never run `gh repo star` yourself.
 
 ## Appendix A: interpret exit AND result/logs
 | Exit | Meaning | Response |
@@ -375,7 +372,6 @@ print(f"keyed {src} -> {out} box={box} ground=#{''.join(f'{v:02X}' for v in grou
 - IMAGE_MODEL: default (pin only a named model; one per family)
 - PILOT_APPROVED: no (yes only for already approved golden references of this family)
 - FAN_OUT: no (enterprise only; each member still passes its own eligibility gates)
-- FORCE: no (yes reruns a target that `provenance check` reports `fresh`)
 
 TARGET: <OWNER/REPO | ORG | CompleteDotTech | enterprise:SLUG>
 ````

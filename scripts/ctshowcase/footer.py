@@ -1,5 +1,4 @@
-"""Decision 18 footer: the exact markup, wrapped in marker comments (spec A6.5), and the decision 25 credit block
-that follows it."""
+"""The unchanged final decision 18 footer and a separately owned credit immediately before it."""
 from __future__ import annotations
 
 import re
@@ -7,11 +6,10 @@ import urllib.error
 import urllib.request
 
 START, END = "<!-- showcase:footer:start -->", "<!-- showcase:footer:end -->"
-# Decision 25 (PROPOSAL pending user confirmation): the public credit follows the decision 18 footer in its own marker
-# block, never inside it, so the footer markup stays byte-identical and stays the only <picture>.
+# Additive maintenance credit never overrides decision 18: the footer remains last,
+# byte-identical, and the only <picture>.
 CREDIT_START, CREDIT_END = "<!-- showcase:credit:start -->", "<!-- showcase:credit:end -->"
 GENERATED_BY = re.compile(r"<!-- generated-by: ([a-z0-9-]+) v=([0-9A-Za-z.+-]+) std=([0-9A-Za-z.-]+) -->")
-_TRAILING_CREDIT = re.compile(re.escape(CREDIT_START) + r"\n(.*?)\n" + re.escape(CREDIT_END) + r"\s*\Z", re.S)
 
 
 def markup(brand) -> str:
@@ -45,8 +43,7 @@ def generated_by(brand) -> str | None:
 
 
 def credit_line(brand) -> str | None:
-    """The visible credit, rendered from brand.yaml: README styled with github-showcase-skill by CompleteTech LLC,
-    then the install prompt (` · Get the skill`, linking to the skill's quick start) when `install_label` is set."""
+    """The configured credit and its optional installation link."""
     a = attribution(brand)
     if not a:
         return None
@@ -72,31 +69,94 @@ def footer_block(brand) -> str:
 
 
 def block(brand) -> str:
-    """What every README and profile generator appends: the decision 18 footer, then (decision 25) the credit block
-    after it. A config without an `attribution` row gets the footer alone."""
+    """Append the credit, then the unchanged final footer; configs without attribution get only the footer."""
     credit = credit_block(brand)
-    return footer_block(brand) + (f"\n\n{credit}" if credit else "")
+    return (f"{credit}\n\n" if credit else "") + footer_block(brand)
 
 
-def split_credit(text: str) -> tuple[str, str | None]:
-    """(text without a trailing credit block, that block's body or None). Only a credit block that ends the file is
-    taken off; anything after it means the footer is not last, which `check` reports."""
+def split_credit(text: str, brand=None) -> tuple[str, str | None]:
+    """Inspect only a real credit block immediately before the final footer, outside code.
+
+    This parser is for checking, never ownership or removal from an authored file.
+    A credit after the footer cannot make the footer-last check pass.
+    """
+    from .mdcode import MANAGED_BLOCK_PATTERN, find_blocks
+
     t = text.replace("\r\n", "\n")
-    m = _TRAILING_CREDIT.search(t)
-    if not m:
+    blocks = find_blocks(MANAGED_BLOCK_PATTERN, t)
+    if (brand is not None and blocks and blocks[-1].group(1) == "credit"
+            and t[blocks[-1].end():].strip() == markup(brand)):
+        credit = blocks[-1]
+        return t[:credit.start()] + t[credit.end():], credit.group(2)
+    if len(blocks) < 2:
         return text, None
-    return t[:m.start()].rstrip("\n") + "\n", m.group(1)
+    credit, footer = blocks[-2:]
+    if (credit.group(1) != "credit" or footer.group(1) != "footer"
+            or t[credit.end():footer.start()].strip() or t[footer.end():].strip()):
+        return text, None
+    return t[:credit.start()] + t[credit.end():], credit.group(2)
 
 
-def _norm_credit(text: str) -> str:
-    # The marker may name an older skill version: the next regeneration bumps it, so a release never fails every README.
-    return GENERATED_BY.sub(lambda m: f"<!-- generated-by: {m.group(1)} v=* std={m.group(3)} -->",
-                            text.replace("\r\n", "\n").strip())
+def _norm_credit(text: str) -> tuple | None:
+    """Strict whole-body HTML tokens, allowing formatting and an older generator version.
+
+    Every tag, attribute, comment and visible word must match; a marker cannot
+    claim ownership of additional authored content or another generator's line.
+    """
+    from html.parser import HTMLParser
+
+    class CreditParser(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self.events, self.stack, self.valid = [], [], True
+
+        def handle_starttag(self, tag, attrs):
+            if len({key for key, _ in attrs}) != len(attrs):
+                self.valid = False
+            self.events.append(("start", tag, tuple(sorted(attrs, key=lambda item: item[0]))))
+            self.stack.append(tag)
+
+        def handle_endtag(self, tag):
+            if not self.stack or self.stack.pop() != tag:
+                self.valid = False
+            self.events.append(("end", tag))
+
+        def handle_data(self, data):
+            value = re.sub(r"[ \t\r\n\f]+", " ", data).strip(" ")
+            if value:
+                self.events.append(("text", value))
+
+        def handle_comment(self, data):
+            marker = GENERATED_BY.fullmatch("<!--" + data + "-->")
+            self.events.append(("generator", marker.group(1), marker.group(3)) if marker else ("comment", data))
+
+        def handle_decl(self, decl):
+            self.valid = False
+
+        def handle_pi(self, data):
+            self.valid = False
+
+        def unknown_decl(self, data):
+            self.valid = False
+
+    parser = CreditParser()
+    try:
+        parser.feed(text)
+        parser.close()
+    except (ValueError, AssertionError):
+        return None
+    return tuple(parser.events) if parser.valid and not parser.stack else None
 
 
 def credit_matches(brand, body: str | None) -> bool:
     want = credit_markup(brand)
-    return body is not None and want is not None and _norm_credit(body) == _norm_credit(want)
+    if body is None or want is None:
+        return False
+    from . import STANDARD
+    marker = GENERATED_BY.search(body)
+    normalized = _norm_credit(body)
+    return (marker is not None and marker.group(1) == "github-showcase-skill"
+            and marker.group(3) == STANDARD and normalized is not None and normalized == _norm_credit(want))
 
 
 def _blocks(text: str) -> list[str]:
@@ -106,9 +166,8 @@ def _blocks(text: str) -> list[str]:
 def check(brand, readme_text: str) -> tuple[str, list[str]]:
     """pass | fail:missing | fail:not-last | fail:drift (any byte difference) | fail:duplicate (an old footer-like
     block, centred with "Built by" and complete.tech, kept outside code before the decision 18 one) |
-    fail:credit-missing | fail:credit-drift (decision 25: the credit block must directly follow the footer and end the
-    README). The footer itself is checked exactly as before, on the text without its trailing credit block."""
-    rest, credit = split_credit(readme_text)
+    fail:credit-missing | fail:credit-drift. The credit directly precedes the unchanged final footer."""
+    rest, credit = split_credit(readme_text, brand)
     st, logs = _check_footer_impl(brand, rest)
     if st != "pass" or attribution(brand) is None:
         return st, logs

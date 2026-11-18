@@ -14,16 +14,18 @@ DECISION_18 = """<p align="center">
 
 def test_exact_markup(brand):
     assert footer.markup(brand) == DECISION_18
-    assert footer.block(brand).startswith("<!-- showcase:footer:start -->\n<p")
+    expected_footer = "<!-- showcase:footer:start -->\n" + DECISION_18 + "\n<!-- showcase:footer:end -->"
+    assert footer.footer_block(brand) == expected_footer
+    assert footer.block(brand) == footer.credit_block(brand) + "\n\n" + expected_footer
 
 
 def test_check(brand):
     good = "# X\n\n## License\n\nMIT.\n\n" + footer.block(brand) + "\n"
     assert footer.check(brand, good)[0] == "pass"
-    # decision 25: the exact decision 18 markup still passes its own check, and the README then needs the credit block
+    # The unchanged decision 18 footer stays last; additive credit goes immediately before it.
     assert footer.check(brand, "# X\n\n## License\n\nMIT.\n" + "\n" + DECISION_18 + "\n")[0] == "fail:credit-missing"
-    assert footer.check(brand, "# X\n\n## License\n\nMIT.\n" + "\n" + DECISION_18 + "\n\n"
-                        + footer.credit_block(brand) + "\n")[0] == "pass"
+    assert footer.check(brand, "# X\n\n## License\n\nMIT.\n\n" + footer.credit_block(brand) + "\n\n"
+                        + DECISION_18 + "\n")[0] == "pass"
     assert footer.check(brand, "# X\n\n## License\n\nMIT.\n")[0] == "fail:missing"
     assert footer.check(brand, DECISION_18 + "\n\n## License\n\nMIT.\n")[0] == "fail:not-last"
     assert footer.check(brand, "# X\n\n" + DECISION_18.replace("200", "220") + "\n")[0] == "fail:drift"

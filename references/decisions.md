@@ -1,6 +1,6 @@
 # User decisions this skill implements
 
-Verbatim excerpt from `decisions/USER_DECISIONS.md` (Timothy Wayne Gregg, 2026-10-25) in the estate hand-off bundle, except that the skill note under decision 18 is skill maintenance and not part of the user decision, and that [proposed decision 25](#proposed-decision-25-provenance-attribution-and-the-star-nudge) at the end is a skill-maintenance **PROPOSAL pending user confirmation**, not a user decision. These decisions outrank the estate standard `ct-std-v1` (`STANDARD.md`), the art direction and every audit proposal. Where this skill's references paraphrase the standard, the decisions below have already been applied.
+Verbatim excerpt from `decisions/USER_DECISIONS.md` (Timothy Wayne Gregg, 2026-10-25) in the estate hand-off bundle, except that the skill note under decision 18 is skill maintenance and not part of the user decision. These decisions outrank the estate standard `ct-std-v1` (`STANDARD.md`), the art direction and every audit proposal. Where this skill's references paraphrase the standard, the decisions below have already been applied.
 
 Skill maintenance (#47): the footer logo URLs configured in `references/brand.yaml` were repaired because the former URLs returned 404. Layout, credit and artwork are unchanged. The user decisions below are unmodified.
 
@@ -19,7 +19,6 @@ Skill maintenance (#47): the footer logo URLs configured in `references/brand.ya
 | 22 Skill and template | This package and `completetech-repo-template` (its workflow calls `action.yml`). |
 | 23 Orgs and Projects | `org` and `project` command groups ([org.md](org.md), [projects.md](projects.md)); rules in [orgs-and-projects.md](orgs-and-projects.md). |
 | 24 Enterprise | `enterprise` command and [enterprise.md](enterprise.md): read-only snapshot query and snapshot, E-checks, seat check, printed change records and writer jobs. |
-| 25 Provenance (PROPOSAL) | `provenance check`, `stamp` and `star`; the credit block after the footer; the `provenance` rows of `doctor`, `org doctor` and `enterprise doctor`. Pending user confirmation. |
 
 ## Structure
 
@@ -132,54 +131,28 @@ Skill maintenance (#47): the footer logo URLs configured in `references/brand.ya
     - **Policies:** changes are proposals only. Each enterprise policy affects every org, so each needs its own tick.
     - **Report:** the final report shows the enterprise before and after (seats, orgs, policies, domain).
 
-## Proposed decision 25: provenance, attribution and the star nudge
+## Provenance maintenance policy
 
-**PROPOSAL pending user confirmation.** This is not part of `decisions/USER_DECISIONS.md`. Skill maintenance proposed
-it on 2026-11-18 and the skill implements it as written below. Until the user confirms it, every item may still
-change, and nothing here outranks decisions 1 to 24.
+The provenance feature originated as the decision-25 proposal in PR #200. The
+repository campaign adopted compatible engineering choices under its delegated
+design authority; this section is maintenance guidance, not a verbatim user
+decision, and does not override decisions 1–24.
 
-25. **Know before running, record when it ran, credit the skill, and ask for a star at most rarely.**
-    - **One stamp per target**, validated against [`provenance.schema.json`](provenance.schema.json). The
-      `provenance` block holds `skill`, `skill_url`, `publisher` ("CompleteTech LLC"), `skill_version`, `standard`,
-      `target {kind, id}` (the resolver's canonical id, so a renamed org still finds its stamp), `first_run_at`,
-      `last_run_at`, `last_changed_at` (UTC ISO-8601), `run_count`, `fingerprint` and `surfaces[]`.
+Concurrent PR commits `500d615` and `bdcbe6b` record the confirmed Enterprise
+location, the **Get the skill** installation link, the 5/10/15 star cadence and
+the no-timestamp-only-commit rule. This implementation preserves those choices;
+the repository, org and profile locations and the counted-command definition are
+engineering choices resolved under the campaign's delegated design authority.
 
-      | Target | Stamp |
-      |---|---|
-      | Repository | the existing `docs/images/.showcase.json`, extended (no second file) |
-      | Organization | `.github/showcase.json` in the `ORG/.github` repository |
-      | Personal profile | `.github/showcase.json` in the `USER/USER` repository |
-      | Enterprise | `<estate root>/registry/enterprise.showcase.json`, beside `registry/enterprise.snapshot.json` in the private estate bundle ([enterprise.md](enterprise.md)); never a public repository |
+- Freshness verifies only recorded output bytes and supplied/captured inputs. All
+  results report `skip: false`; missing or pending evidence cannot certify a run.
+- Credit is a separately owned block **before** the unchanged final decision-18
+  footer. Authored or foreign credit is preserved, with atomic refusal when needed.
+- Unchanged fresh and incomplete captures write no timestamp-only update. Pending
+  writer jobs are proposals, not completed work.
+- Only verified local captures enter the operator ledger. The optional star check
+  is read-only, online and interactive; offline, non-TTY, CI, JSON and opt-outs
+  suppress it. No environment variable authorizes an unattended marketing prompt.
 
-    - **No timestamp-only commits.** Timestamps and `run_count` are never part of the fingerprint, so they never make a
-      target look changed and never loop the Action. `last_run_at` is written only in the same Action commit, checkout
-      commit or writer batch as the run's other changes. A run that changes nothing writes nothing, is reported
-      `fresh` and is counted only in the operator's local ledger. The one stamp-only write is the first stamp of a
-      target that has none (`never`, or the `untracked` backfill).
-    - **Pre-run check.** `provenance check TARGET` answers `never`, `fresh` (skip unless `--force`), `stale` (rerun
-      only the surfaces in `changed[]`), `untracked` (showcased before stamps existed; offer the stamp-only backfill)
-      or `foreign` (excluded owner, T3 without sign-off, watching-org fork; never suggest running).
-    - **Credit wording.** Directly after the decision 18 footer, in its own `showcase:credit` marker block (never
-      inside the footer, whose markup stays byte-identical and stays the only `<picture>`): a hidden
-      `<!-- generated-by: github-showcase-skill v=<version> std=ct-std-v1 -->` marker and the visible line *README
-      styled with [github-showcase-skill](https://github.com/CompleteTech-Skills/github-showcase-skill) by
-      CompleteTech LLC · [Get the skill](https://github.com/CompleteTech-Skills/github-showcase-skill#quick-start)*, rendered from `attribution` in `brand.yaml`. Repository READMEs, org profile READMEs and the
-      personal profile README carry it; the Enterprise has no README and gets none. `footer --check` and `lint
-      readme` require it, and one regeneration adds it to an old footer. Optional and off by default: a
-      `github-showcase-skill` topic proposed by `provenance stamp --propose-topic` as a writer job that needs approval.
-    - **Star thresholds** (confirmed 2026-11-18: runs 5, 10, 15, ...). The operator's ledger (`~/.config/github-showcase-skill/state.json`,
-      `%APPDATA%\github-showcase-skill\state.json` on Windows, `$SHOWCASE_STATE_DIR` to override) counts completed
-      runs: one successful `provenance stamp` is one completed run, and nothing else counts. At **5** completed runs
-      the skill makes one read-only GET of `user/starred/CompleteTech-Skills/github-showcase-skill`. If the skill is
-      starred, that is recorded and it never asks again. If not, it prints one line with the link and `gh repo star
-      CompleteTech-Skills/github-showcase-skill`, then asks again every **5** further runs (runs 5, 10, 15, ...),
-      and never again after a decline. A missing, unauthenticated or offline `gh` is silent and never counts as "not starred". The
-      skill never stars on the operator's behalf, never prompts in CI, with `--format json` or without a TTY, and
-      honours `--no-star-prompt` and `SHOWCASE_NO_STAR_PROMPT=1`. The ledger stores no target names and sends no
-      telemetry.
-
-    **Confirmed by the user (2026-11-18):** the Enterprise stamp beside the snapshot, the credit wording with the
-    *Get the skill* install prompt, the star asks at runs 5, 10, 15, ..., and the no-timestamp-only-commit rule as
-    written above (a run that changes nothing writes nothing; the first stamp of an unstamped target is the one
-    stamp-only write). **Still to confirm:** the repository, org and profile stamp locations, and `provenance stamp`
-    as the one counted command.
+See [provenance.md](provenance.md) for exact commands, evidence requirements, stamp
+locations, status codes and the five-capture first and repeat prompt thresholds.

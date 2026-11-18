@@ -46,8 +46,8 @@ footer:
   line_prefix: Built by
   line_suffix: "· Innovation at Every Integration"
 
-# Public attribution and provenance (decision 25, PROPOSAL pending user confirmation). The credit line follows the
-# decision 18 footer in its own marker block (never inside the footer); the stamp names the skill in every target.
+# Public attribution and bounded provenance. Credit precedes the unchanged final decision 18 footer
+# in its own marker block; this maintenance policy does not override the settled user decisions.
 attribution:
   skill: github-showcase-skill
   skill_repo: CompleteTech-Skills/github-showcase-skill
