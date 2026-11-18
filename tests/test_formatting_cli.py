@@ -3,6 +3,7 @@ import importlib.util
 import json
 import os
 import subprocess
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Event
@@ -659,25 +660,26 @@ def test_workflow_preflight_reports_simple_validator_chain(tmp_path):
     ]
 
 
-def test_workflow_preflight_handles_quoted_arguments_without_exposing_them(tmp_path):
+def test_workflow_preflight_handles_quoted_arguments_and_bare_globs(tmp_path):
     repo, meta = target(tmp_path)
     workflows = repo / ".github/workflows"
     workflows.mkdir(parents=True)
     (workflows / "validation.yml").write_text(
         "jobs:\n  validate:\n    steps:\n"
         '      - run: npx prettier --check "**/*" && npm run lint && npm run typecheck\n'
+        "      - run: npx prettier --check **/* && npm run format\n"
         "      - run: echo 'synthetic value && npm run test' && npm run contracts\n"
         '      - run: echo "synthetic value \\" && npm run verify" && npm run validate\n',
         encoding="utf-8")
     result = run_cli("--meta", meta, "--repo-dir", repo, "doctor", "--format", "json")
     assert json.loads(result.stdout)["tooling"]["validators"] == [
         {"source": ".github/workflows", "command": command, "status": "not run"}
-        for command in ("npx prettier --check", "npm run lint", "npm run typecheck", "npm run contracts",
-                        "npm run validate")
+        for command in ("npx prettier --check", "npm run lint", "npm run typecheck", "npx prettier --check",
+                        "npm run format", "npm run contracts", "npm run validate")
     ]
 
 
-@pytest.mark.parametrize("failure", ["directory", "replacement"])
+@pytest.mark.parametrize("failure", ["directory", "hard-link", "replacement"])
 def test_formatted_readme_and_explicit_records_publish_together(tmp_path, monkeypatch, failure):
     import showcase
 
@@ -686,10 +688,16 @@ def test_formatted_readme_and_explicit_records_publish_together(tmp_path, monkey
     original = b"# Human Title\n\nAuthored overview.\n\n## About\n\nExisting information.\n"
     readme.write_bytes(original)
     log = tmp_path / "queue.jsonl"
+    alias = tmp_path / "queue-alias.jsonl"
     if failure == "directory":
         log.mkdir()
     else:
         log.write_bytes(b'{"previous":true}\n')
+        if failure == "hard-link":
+            try:
+                alias.hardlink_to(log)
+            except OSError as exc:
+                pytest.skip(f"hard links are unavailable: {exc}")
     monkeypatch.setattr("ctshowcase.formatting.format_text", lambda _root, _path, text: text)
     argv = ["--meta", str(meta), "--repo-dir", str(repo), "readme", "--write", "--format-generated",
             "--records", str(log)]
@@ -709,15 +717,55 @@ def test_formatted_readme_and_explicit_records_publish_together(tmp_path, monkey
         log.rmdir()
     else:
         assert log.read_bytes() == b'{"previous":true}\n'
+    if failure == "hard-link":
+        assert alias.samefile(log)
+        assert alias.read_bytes() == b'{"previous":true}\n'
+        alias.unlink()
 
     assert showcase.main(argv) == 0
     queued = log.read_bytes()
     assert json.loads(queued.splitlines()[-1])["target"] == "README.md"
-    if failure == "replacement":
+    if failure != "directory":
         assert queued.startswith(b'{"previous":true}\n')
     assert showcase.main(argv) == 0
     assert log.read_bytes() == queued
 
+
+def test_output_lock_namespace_is_shared_across_process_temporary_directories(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    queue = tmp_path / "queue.jsonl"
+    script = """
+import sys
+from pathlib import Path
+from ctshowcase.output_lock import output_lock
+
+original_open = Path.open
+
+def capture_open(path, mode="r", *args, **kwargs):
+    if mode == "a+b":
+        print(path)
+    return original_open(path, mode, *args, **kwargs)
+
+Path.open = capture_open
+with output_lock(Path(sys.argv[1])):
+    pass
+"""
+    locked_paths = []
+    for name in ("first-temp", "second-temp"):
+        temporary = tmp_path / name
+        temporary.mkdir()
+        result = subprocess.run(
+            [sys.executable, "-c", script, str(queue)],
+            cwd=ROOT / "scripts",
+            env={**os.environ, "HOME": str(home), "USERPROFILE": str(home),
+                 "TMPDIR": str(temporary), "TEMP": str(temporary), "TMP": str(temporary)},
+            capture_output=True, text=True, check=True, timeout=10,
+        )
+        locked_paths.append(Path(result.stdout.strip()))
+    assert locked_paths[0] == locked_paths[1]
+    assert locked_paths[0].is_relative_to(home)
+    assert locked_paths[0].is_file()
 
 
 def test_formatted_readme_queue_replacement_serializes_normal_append(tmp_path, monkeypatch):

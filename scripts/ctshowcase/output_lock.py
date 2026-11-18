@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import hashlib
 import os
-import tempfile
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -13,13 +12,14 @@ from .errors import NeedsInput
 
 @contextmanager
 def output_lock(path: Path | None):
-    """Serialize local generator writes to the same resolved output path."""
+    """Serialize a user's local generator writes to the same resolved output path."""
     if path is None:
         yield
         return
     key = hashlib.sha256(os.fsencode(os.path.normcase(str(path.resolve())))).hexdigest()
-    directory = Path(tempfile.gettempdir()) / "showcase-sidecar-locks"
-    directory.mkdir(exist_ok=True)
+    # Keep the lock shared by generators launched with different temporary directories.
+    directory = Path.home() / ".showcase-sidecar-locks"
+    directory.mkdir(mode=0o700, exist_ok=True)
     with (directory / key).open("a+b") as lock:
         if os.name == "nt":
             import msvcrt

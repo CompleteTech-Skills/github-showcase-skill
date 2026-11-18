@@ -26,7 +26,7 @@ VALIDATOR_COMMAND = re.compile(
     re.I,
 )
 SIMPLE_SHELL_COMMAND = re.compile(
-    r"""(?:[A-Za-z0-9_ :./@=\t-]|'[^'\r\n]*'|"(?:[^"\\$`\r\n]|\\[^\r\n])*")+"""
+    r"""(?:[A-Za-z0-9_ :./@=*?\[\]\t-]|'[^'\r\n]*'|"(?:[^"\\$`\r\n]|\\[^\r\n])*")+"""
 )
 DISPLAY_ARGUMENTS = {".", "-q", "-v", "--", "--check", "--write", "--fix", "--quiet", "--verbose", "check", "discover"}
 
@@ -189,7 +189,7 @@ def _file_state(path: Path) -> tuple[int, ...] | None:
         return None
     if not stat.S_ISREG(info.st_mode):
         raise ShowcaseError("formatted output must be a regular file", log="formatter-output")
-    return (info.st_dev, info.st_ino, info.st_mode, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_size, info.st_mtime_ns, info.st_ctime_ns, info.st_nlink)
 
 
 def write_formatted_outputs(outputs: list[tuple[Path, bytes]], *,
@@ -206,6 +206,8 @@ def write_formatted_outputs(outputs: list[tuple[Path, bytes]], *,
             if not append and repo_root is not None and not path.is_relative_to(repo_root):
                 raise ShowcaseError("formatter destination must be inside the target checkout", log="usage")
             initial = _file_state(path)
+            if append and initial is not None and initial[-1] != 1:
+                raise ShowcaseError("formatted output cannot replace a hard-linked records queue", log="formatter-output")
             path.parent.mkdir(parents=True, exist_ok=True)
             working = Path(scratch.enter_context(tempfile.TemporaryDirectory(dir=path.parent)))
             replacement = working / "output"
@@ -257,7 +259,7 @@ def _display_validator(command: str) -> str | None:
 
 
 def _display_validators(command: str):
-    """Recognize simple conjunctions with literal quoted arguments."""
+    """Recognize simple conjunctions with quoted arguments and bare globs."""
     command = command.strip()
     parts = []
     offset = 0
