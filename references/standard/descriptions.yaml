@@ -10,7 +10,7 @@ verbs: [Generate, Create, Draft, Check, Track, Compile, Serve, Coordinate, Build
         Manage, Render, Automate, Analyze, Collect, Deploy, Export, Index, Map, Search, Test, Validate, Visualize, Control,
         Read, Record]
 verb_types: [agent-skills, cli, library, api, mcp-server, bot, discord-bot, plugin, chrome-extension, security-check, template,
-             infrastructure, hardware, workspace]
+             infrastructure, hardware, documentation, workspace]
 prefix_types: {website: "Source for ", fork: "Fork of ", backup: "Archived: "}
 brand_fixes:
   "Complete Tech LLC": CompleteTech LLC

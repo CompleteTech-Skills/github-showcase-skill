@@ -12,7 +12,7 @@ from urllib.parse import quote
 
 from . import footer as footermod
 from .context import RepoContext
-from .detect import standard
+from .detect import required_sections, standard
 from .errors import ConfigError, NeedsInput
 from .mdcode import code_spans, find_blocks, masked  # noqa: F401  (code_spans: re-exported for callers)
 
@@ -376,6 +376,8 @@ def section_facts(ctx: RepoContext, h2: str) -> str | None:
     if h2 == "Workflow Diagram" and f.read("assets/diagrams/workflow.mmd"):
         return ("Source: [assets/diagrams/workflow.mmd](assets/diagrams/workflow.mmd).\n\n```mermaid\n"
                 + f.read("assets/diagrams/workflow.mmd").strip() + "\n```")
+    if ctx.det["type"] == "mobile-app" and ctx.det["variant"] == "B" and h2 in ("Install", "Quick Start"):
+        return None
     if h2 == "Install":
         cmds = []
         if f.exists("requirements.txt"):
@@ -438,7 +440,7 @@ def callout(ctx) -> str | None:
 # ------------------------------------------------------------------------------------------------
 def scaffold(ctx: RepoContext, existing: str = "") -> str:
     variant = ctx.det["variant"]
-    order = standard("readme-variants")["variants"].get(variant, [])
+    order = required_sections(ctx.det, meta=ctx.meta)
     parts = [header(ctx)]
     co = callout(ctx)
     if co:
@@ -952,8 +954,8 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
     intro = "\n".join(keep_pre).strip()
     # sections: renames, mapping, Notes demotion, License last
     renames = rv["renames"]
-    order = [h for h, _ in rv["variants"].get(variant, [])]
-    low_order = {h.lower(): h for h in order}
+    section_rows = required_sections(ctx.det, meta=ctx.meta)
+    low_order = {h.lower(): h for h, _ in section_rows}
     placed: dict[str, str] = {}
     notes: list[str] = []
     license_body = None
@@ -1008,16 +1010,16 @@ def upgrade(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
         if co and co not in intro:
             out.append(co)
         if intro:
-            if variant == "A" or "About" in placed or "About" not in order:
+            if variant == "A" or "About" in placed or "about" not in low_order:
                 out.append(intro)
             else:
                 placed["About"] = intro + ("\n\n" + placed["About"] if placed.get("About") else "")
-    for h in order:
+    for h, req in section_rows:
         if h in ("License", "Licensing"):
             continue
         if h in placed:
             out.append(f"## {h}\n\n{placed[h].strip()}" if placed[h].strip() else f"## {h}")
-        elif dict(rv["variants"][variant]).get(h) == "R" and not preserve:
+        elif req == "R" and not preserve:
             body = section_facts(ctx, h)
             if body:
                 out.append(f"## {h}\n\n{body}")
@@ -1205,7 +1207,7 @@ def bootstrap(ctx: RepoContext, text: str) -> str:
     if ctx.meta.get("is_template") or bootstrap_state(text) != "pristine":
         return text
     variant = ctx.det["variant"]
-    order = standard("readme-variants")["variants"].get(variant, [])
+    order = required_sections(ctx.det, meta=ctx.meta)
     secs = []
     for h2, req in order:
         if h2 in ("License", "Licensing"):

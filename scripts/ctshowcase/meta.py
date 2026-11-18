@@ -111,7 +111,10 @@ def normalize(raw: dict) -> dict:
     # has_pages and size come from the REST capture; releases/deployments/packages/environments are the About
     # sidebar counts (adopt, content sidebar); size == 0 is the estate doctor's empty-repository rule
     # id / node_id: the repository's immutable identity (a rename or transfer keeps it; a template copy gets a new one)
-    for k in ("id", "node_id", "files", "files_complete", "manifests", "file_sizes", "pushed_at", "last_substantive_commit",
+    for k in ("files", "files_complete"):
+        if k in raw:
+            m[k] = raw[k]  # explicit unknown evidence must not become a legacy size-only capture
+    for k in ("id", "node_id", "manifests", "file_sizes", "pushed_at", "last_substantive_commit",
               "last_substantive_sha", "has_pages", "size", "releases", "deployments", "packages", "environments"):
         if raw.get(k) is not None:
             m[k] = raw[k]
@@ -182,7 +185,9 @@ def _gh(path: str, paginate: bool = False, raw: bool = False):
     if raw:
         cmd[2:2] = ["-H", "Accept: application/vnd.github.raw"]
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", timeout=60)
+    except UnicodeDecodeError:
+        return None  # an unreadable response is unavailable evidence
     except (OSError, subprocess.SubprocessError) as exc:
         raise ShowcaseError(f"gh api failed: {exc}", log="needs-input:gh")
     if p.returncode != 0:
@@ -266,13 +271,16 @@ def from_gh(full_name: str) -> dict:
         raw["files"] = sorted(t["path"] for t in blobs)
         # GitHub cuts a large recursive tree short: only an untruncated listing proves that an unlisted path is absent
         raw["files_complete"] = tree.get("truncated") is False
-        raw["file_sizes"] = {t["path"]: t.get("size", 0) for t in blobs}
+        # An absent or malformed blob size is unknown. A real zero-byte blob is still measured.
+        raw["file_sizes"] = {t["path"]: size for t in blobs
+                             if type(size := t.get("size")) is int and size >= 0}
         manifests = {}
         for p in MANIFEST_PATHS:
             if p in raw["files"]:
                 txt = _gh(f"repos/{full_name}/contents/{p}?ref={branch}", raw=True)
                 if txt is not None:
                     manifests[p] = txt
+        # The file list retains listed overrides even when their manifest text could not be read.
         raw["manifests"] = manifests
     parent = repo.get("parent") if isinstance(repo.get("parent"), dict) else None
     if repo.get("fork") and parent and parent.get("full_name"):
