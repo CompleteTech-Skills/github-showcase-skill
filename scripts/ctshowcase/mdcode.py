@@ -2361,6 +2361,27 @@ def _images(text: str, document: str) -> list[tuple[str, str]]:
     return [(alt, source) for alt, source, _ in _image_entries(text, document)]
 
 
+def tagline_reflow_key(body: str) -> str:
+    """Normalize prose wrapping outside syntax with meaningful source whitespace."""
+    body = body.replace("\r\n", "\n").replace("\r", "\n")
+    opaque = [*inline_code_spans(body), *_link_literal_spans(body), *html_block_spans(body)]
+    opaque.extend(_HTMLTokens(masked(body), body).tags)
+    # Two-space or backslash hard breaks, paragraph breaks, and indented code
+    # cannot be equated with ordinary wrapping.
+    opaque.extend(m.span() for m in re.finditer(r"(?: {2,}|\\)\n|\n[ \t]*\n|(?m:^[ ]{4,}[^ \t\n])", body))
+    parts = []
+    cursor = 0
+    for start, end in sorted(opaque):
+        if end <= cursor:
+            continue
+        if start > cursor:
+            parts.append(re.sub(r"[ \t\n]+", " ", body[cursor:start]))
+        parts.append(body[max(cursor, start):end])
+        cursor = end
+    parts.append(re.sub(r"[ \t\n]+", " ", body[cursor:]))
+    return "".join(parts).strip(" ")
+
+
 def find_inline_code(text: str, start: int = 0) -> tuple[int, int] | None:
     """First accepted code span at/after `start`, after canonical inline precedence."""
     spans = inline_code_spans(text)
