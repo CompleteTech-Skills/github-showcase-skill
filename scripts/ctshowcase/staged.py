@@ -45,24 +45,48 @@ def check_social_path(path: Path, *, staged: bool, job: bool, checkout: Path | N
 
 def _checkout_slot(path: Path, root: Path) -> tuple[Path, str, bool]:
     directory = root / "docs" / "images"
-    if not directory.resolve().is_relative_to(root):
+    resolved_directory = directory.resolve()
+    if not resolved_directory.is_relative_to(root):
         raise ShowcaseError("the showcase sidecar must stay inside the target checkout", log="staged-description:path")
+    at_images = path.parent == resolved_directory
     relative = path.relative_to(root).as_posix()
-    if path.parent == directory and path.name != "README.md":
-        name = path.name
-    elif (path.parent == root and path.name != "README.md") or path.parent == directory:
+    if at_images:
+        name = "./docs/images/README.md" if path.name == "README.md" else path.name
+    elif path.parent == root and path.name != "README.md":
         name = "./" + relative
     else:
         name = relative
-    return directory, name, path.parent == directory and name in fp.ART_NAMES
+    return directory, name, at_images and name in fp.ART_NAMES
+
+
+def _inferred_checkout(path: Path) -> Path | None:
+    enclosing = next((parent for parent in path.parents if (parent / ".git").exists()), None)
+    if enclosing is not None:
+        return enclosing
+    images = next((parent for parent in path.parents
+                   if parent.name == "images" and parent.parent.name == "docs"), None)
+    return images.parent.parent if images else None
+
+
+def _adjacent_name(path: Path, root: Path | None) -> str:
+    """Avoid the root README key when an adjacent slot shares its sidecar."""
+    if path.name == "README.md":
+        enclosing = root if root is not None and path.is_relative_to(root) else _inferred_checkout(path)
+        if enclosing is not None and (enclosing / "docs/images").resolve() == path.parent:
+            return _checkout_slot(path, enclosing)[1]
+    return path.name
 
 
 def _output_slots(ctx, path: Path, *, adjacent: bool = False) -> tuple[tuple[Path, str, bool], ...]:
     path = Path(path).resolve()
-    if adjacent or SOCIAL_STAGING in map(str.casefold, path.parent.parts):
-        return ((path.parent, path.name, False),)
-    adjacent_slot = (path.parent, path.name, True)
     root = Path(ctx.repo_dir).resolve() if ctx.repo_dir else None
+    enclosing = _inferred_checkout(path) if root is None and not adjacent else None
+    scope = root if root is not None and path.is_relative_to(root) else enclosing
+    parent = path.parent.relative_to(scope) if scope is not None else path.parent
+    name = _adjacent_name(path, root or enclosing)
+    if adjacent or SOCIAL_STAGING in map(str.casefold, parent.parts):
+        return ((path.parent, name, False),)
+    adjacent_slot = (path.parent, name, True)
     if root is not None:
         if not path.is_relative_to(root):
             return (adjacent_slot,)
@@ -71,17 +95,15 @@ def _output_slots(ctx, path: Path, *, adjacent: bool = False) -> tuple[tuple[Pat
         primary = adjacent_slot
         # Metadata-only rendering still shares any existing checkout provenance.
         # A synthetic or exported checkout can have the same layout without .git.
-        enclosing = next((parent for parent in path.parents if (parent / ".git").exists()), None)
-        if enclosing is None:
-            images = next((parent for parent in path.parents
-                           if parent.name == "images" and parent.parent.name == "docs"), None)
-            enclosing = images.parent.parent if images else None
         if enclosing is None or not (enclosing / "docs/images").resolve().is_relative_to(enclosing):
             return (primary,)
         alternate = _checkout_slot(path, enclosing)
-    # Within the same sidecar, a differently spelled key may belong to a
-    # different artifact (for example, root and docs/images README.md).
-    return (primary,) if primary[0] == alternate[0] else (primary, alternate)
+    if primary[0].resolve() == alternate[0].resolve():
+        # Shared location, distinct identity: a nested README.md must never
+        # take the key used for the checkout's root README.md.
+        key = primary[1] if root is not None else alternate[1]
+        return ((primary[0], key, primary[2]),)
+    return primary, alternate
 
 
 def _sidecars(ctx, paths, *, adjacent: bool) -> set[Path]:
@@ -122,6 +144,8 @@ def _action_managed_path(path: Path, checkout: Path | None) -> bool:
 def check_auxiliary(capture: Path | None, checkout: Path | None, *paths: Path) -> None:
     check_capture(capture, *paths)
     for path in paths:
+        if path.name.casefold() == fp.SIDECAR.casefold():
+            raise ShowcaseError("staged reports must not replace showcase provenance", log="staged-description:path")
         if path.is_symlink() or (path.exists() and (not path.is_file() or path.stat().st_nlink > 1)):
             raise ShowcaseError("staged reports must use an unlinked regular file", log="staged-description:path")
         if _live_social_output(path):
@@ -156,8 +180,8 @@ def _live_social_output(path: Path) -> bool:
     if (resolved.parent / fp.SIDECAR).is_symlink():
         return True
     records = fp.output_records(fp.read_sidecar(resolved.parent))
-    if any(os.path.normcase(name) == os.path.normcase(resolved.name)
-           and _marked_live_social(record)
+    names = {os.path.normcase(name) for name in (resolved.name, _adjacent_name(resolved, None))}
+    if any(os.path.normcase(name) in names and _marked_live_social(record)
            for name, record in records.items()):
         return True
     if not resolved.is_file():

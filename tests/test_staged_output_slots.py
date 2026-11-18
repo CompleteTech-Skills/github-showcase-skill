@@ -148,3 +148,82 @@ def test_metadata_only_ignores_inferred_sidecar_outside_enclosing_checkout(check
     ctx = make_ctx()
     assert staged._output_slots(ctx, out) == ((out.parent, out.name, True),)
     staged.check_outputs(ctx, out)
+
+
+@pytest.mark.parametrize("surface", ["card", "social", "external-card"])
+def test_adjacent_art_keeps_root_readme_draft_in_shared_sidecar(checkout, monkeypatch, surface):
+    repo, _, _ = checkout
+    capture = repo.parent / "meta.json"
+    staged_readme = run_cli("--meta", capture, "--repo-dir", repo, "readme", "--mode", "scaffold",
+                            "--write", "--description", "Route a synthetic draft.")
+    assert staged_readme.returncode == 0, staged_readme.stdout + staged_readme.stderr
+    root_readme = repo / "README.md"
+    images = repo / "docs/images"
+    root_record = fp.read_sidecar(images)["outputs"]["README.md"]
+    original = root_readme.read_bytes()
+    monkeypatch.chdir(repo)
+
+    nested_output = images / "README.md"
+    other = repo.parent / "other-checkout"
+    other.mkdir()
+    commands = {"card": ("--no-repo-dir", "card"), "social": ("--repo-dir", repo, "content", "social"),
+                "external-card": ("--repo-dir", other, "card")}
+    result = run_cli("--meta", capture, *commands[surface], "--out", nested_output)
+    assert result.returncode == 0, result.stdout + result.stderr
+    records = fp.read_sidecar(images)["outputs"]
+    assert records["README.md"] == root_record
+    assert root_readme.read_bytes() == original
+    assert records["./docs/images/README.md"]["sha256"] == fp.file_record(nested_output)["sha256"]
+    assert action_prepare.has_staged_outputs()
+
+
+def test_internal_image_directory_alias_uses_one_canonical_slot(checkout, make_ctx):
+    repo, _, _ = checkout
+    redirected = repo / "assets/generated"
+    redirected.mkdir(parents=True)
+    images = repo / "docs/images"
+    images.parent.mkdir()
+    try:
+        images.symlink_to(redirected, target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"directory symlinks unavailable: {exc}")
+    out = images / "card.svg"
+    for ctx in (make_ctx(repo_dir=repo), make_ctx()):
+        (directory, key, summary), = staged._output_slots(ctx, out)
+        assert directory.resolve() == redirected.resolve()
+        assert key == "card.svg" and summary
+        staged.check_outputs(ctx, out)
+
+
+def test_staging_named_checkout_ancestor_keeps_readme_provenance_canonical(tmp_path):
+    repo = tmp_path / ".showcase-staging" / "checkout"
+    repo.mkdir(parents=True)
+    capture = tmp_path / "meta.json"
+    capture.write_text(json.dumps(meta_dict(description="")), encoding="utf-8")
+
+    args = ("--meta", capture, "--repo-dir", repo)
+    result = run_cli(*args, "readme", "--mode", "scaffold", "--variant", "A", "--write",
+                     "--description", "Route synthetic requests.")
+    assert result.returncode == 0, result.stdout + result.stderr
+    record = fp.read_sidecar(repo / "docs/images")["outputs"]["README.md"]
+    assert record["staged_description"]["text"] == "Route synthetic requests."
+    assert not (repo / fp.SIDECAR).exists()
+    health = run_cli(*args, "doctor", "--format", "json")
+    assert "description-drift:readme" in json.loads(health.stdout)["logs"]
+
+
+def test_exempt_staged_social_report_preserves_existing_adjacent_provenance(checkout):
+    repo, _, _ = checkout
+    capture = repo.parent / "meta.json"
+    meta = meta_dict()
+    args = ("--meta", capture, "--repo-dir", repo, "--format", "json", "content", "social")
+    first = run_cli(*args, "--description", "Route the unpublished synthetic proposal.")
+    assert first.returncode == 0, first.stdout + first.stderr
+    sidecar = repo / "assets/.showcase-staging" / fp.SIDECAR
+    before = sidecar.read_bytes()
+    meta.update(isFork=True, fork=True)
+    capture.write_text(json.dumps(meta), encoding="utf-8")
+    result = run_cli(*args, "--report", sidecar, "--description", "A second synthetic proposal.")
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "staged-description:path" in json.loads(result.stdout)["logs"]
+    assert sidecar.read_bytes() == before
