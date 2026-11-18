@@ -846,3 +846,34 @@ def test_legacy_badge_with_malformed_license_uses_the_typed_error(make_ctx, tmp_
     ctx.meta["license"] = 123
     with pytest.raises(NeedsInput, match="license"):
         readme.badge_body(ctx, PLAIN_MIT)
+
+
+@pytest.mark.parametrize("ending", ["\n", "\r\n", "\r"])
+def test_nonbreaking_space_badge_body_is_authored_markdown(make_ctx, tmp_path, ending):
+    ctx = profile_context(make_ctx, tmp_path)
+    scaffold = readme.scaffold(ctx)
+    original = scaffold.replace(badge_block(scaffold), "\u00a0").replace("\n", ending).encode("utf-8")
+    path = tmp_path / "README.md"
+    path.write_bytes(original)
+    profile_cli(ctx, tmp_path, "readme", "--mode", "header", "--write")
+    assert path.read_bytes() == original
+
+
+@pytest.mark.parametrize("ending", ["\r\n", "\r"])
+def test_duplicate_badge_rows_cannot_take_an_authored_line_ending(make_ctx, tmp_path, ending):
+    ctx = profile_context(make_ctx, tmp_path, license="MIT")
+    inherited = badge_block(readme.scaffold(ctx))
+    generated = readme.wrap("badges", inherited)
+    edited = re.sub(r"sha256=[0-9a-f]{64}", "sha256=" + "0" * 64, generated, count=1)
+    authored = re.sub(r"(!\[License MIT\][^\n]*)\n", lambda m: m.group(1) + ending, edited)
+    assert authored != edited
+    path = tmp_path / "README.md"
+    path.write_bytes(f"# Synthetic profile\n\n{generated}\n\n{authored}\n\n{generated}\n".encode("utf-8"))
+
+    ctx.meta["license"] = "Apache-2.0"
+    profile_cli(ctx, tmp_path, "readme", "--mode", "header", "--write")
+    updated = path.read_bytes()
+    assert updated.count(b"![License Apache-2.0]") == 2
+    assert authored.encode("utf-8") in updated
+    profile_cli(ctx, tmp_path, "readme", "--mode", "header", "--write")
+    assert path.read_bytes() == updated

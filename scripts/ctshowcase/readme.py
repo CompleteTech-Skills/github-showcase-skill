@@ -6,6 +6,7 @@ those blocks. Content is never invented (§1.5 rule 2) and never lost (§7.1 res
 from __future__ import annotations
 
 import re
+from bisect import bisect_right
 from collections import Counter, defaultdict, deque
 from pathlib import Path
 from urllib.parse import quote
@@ -313,7 +314,7 @@ def badge_body(ctx: RepoContext, existing: str | None = None) -> str:
     )
     if is_legacy and has_license_row and ctx.public and license_unknown:
         return existing  # missing metadata cannot disprove an authored license claim
-    if existing and existing.strip() and not generated_badges(existing) and not is_legacy:
+    if existing and existing.strip(" \t\r\n") and not generated_badges(existing) and not is_legacy:
         return existing
     body = badges_md(ctx)
     previous = GENERATED_BADGES.fullmatch(existing or "")
@@ -1569,8 +1570,9 @@ def preservation(before: str, after: str, removed: list[str], *, ctx: RepoContex
             if _legacy_badge_body(brand, body, style, ci_matches=ci_matches):
                 replacements[digest] -= 1
                 return wrap("badges", "")
-        if body.strip() and (ctx is None or ctx.det["variant"] == "J"):
-            problems.append(f"lost badge block: {body.strip()[:60]}")
+        authored = body.strip(" \t\r\n")
+        if authored and (ctx is None or ctx.det["variant"] == "J"):
+            problems.append(f"lost badge block: {authored[:60]}")
         return m.group(0)
 
     comparison = []
@@ -1624,6 +1626,30 @@ def _line_sections(text: str, lines: list[str]) -> list[str | None]:
     return names
 
 
+def _managed_line_matches(before: str, after: str, old: list[str], new: list[str]) -> dict[int, int]:
+    """Pair unchanged managed blocks before matching individual repeated lines."""
+    originals = defaultdict(deque)
+    old_offsets = [0, *(ending.end() for ending in re.finditer("\n", before))]
+    new_offsets = [0, *(ending.end() for ending in re.finditer("\n", after))]
+    for block in find_blocks(MARK, before):
+        originals[block.group(0)].append(block.start())
+    matched = {}
+    used = set()
+    for block in find_blocks(MARK, after):
+        if not (origins := originals.get(block.group(0))):
+            continue
+        old_start = bisect_right(old_offsets, origins.popleft()) - 1
+        start_line = bisect_right(new_offsets, block.start()) - 1
+        end_line = min(bisect_right(new_offsets, block.end()), len(new) - 1)
+        for new_index in range(start_line, end_line):
+            old_index = old_start + new_index - start_line
+            if (old_index < len(old) - 1 and old[old_index] == new[new_index]
+                    and old_index not in used and new_index not in matched):
+                matched[new_index] = old_index
+                used.add(old_index)
+    return matched
+
+
 def restore_line_endings(raw: str, before: str, after: str) -> str:
     """`after` with the authored line endings of `raw` restored (#160).
 
@@ -1648,19 +1674,25 @@ def restore_line_endings(raw: str, before: str, after: str) -> str:
     # by occurrence, including lines moved during section reordering.
     old_count, new_count = len(old) - 1, len(new) - 1
     old_sections, new_sections = _line_sections(before, old), _line_sections(after, new)
+    anchored = _managed_line_matches(before, after, old, new)
+    used = set(anchored.values())
+
+    def matches_edge(old_index, new_index):
+        if (old[old_index], old_sections[old_index]) != (new[new_index], new_sections[new_index]):
+            return False
+        matched = anchored.get(new_index)
+        return matched == old_index if matched is not None else old_index not in used
+
     head = 0
-    while head < min(old_count, new_count) and (old[head], old_sections[head]) == (new[head], new_sections[head]):
+    while head < min(old_count, new_count) and matches_edge(head, head):
         head += 1
     tail = 0
     while tail < min(old_count, new_count) - head:
-        a, b = old_count - 1 - tail, new_count - 1 - tail
-        if (old[a], old_sections[a]) != (new[b], new_sections[b]):
+        if not matches_edge(old_count - 1 - tail, new_count - 1 - tail):
             break
         tail += 1
     old_middle = range(head, old_count - tail)
     new_middle = range(head, new_count - tail)
-    anchored = {}
-    used = set()
 
     def unique_context(lines, indexes, offsets, sections):
         keys = {}
