@@ -43,7 +43,7 @@ ownership digest of a pristine template body after formatting. Verified generate
 tagline receipts are similarly resealed after the content check. The receipt
 itself must survive unchanged before resealing; an authored or edited tagline
 cannot gain ownership through formatting. After exact verification, metadata and
-lint ignore outer blank lines that separate the rendered tagline from its receipt.
+lint ignore empty separator lines around the rendered tagline.
 The digest still covers those lines. Wrapping preserves whitespace inside
 literal markup and code. These checks happen before any write. Bootstrap
 applies the normal CONTRIBUTING owner-token replacement before formatting.

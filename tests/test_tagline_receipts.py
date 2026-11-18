@@ -196,6 +196,27 @@ def test_cli_r2_requires_bold_delimiters_even_with_verified_receipt(tmp_path, le
     assert r2_fails()
 
 
+@pytest.mark.parametrize("interrupt", ["# queue owners.", "- proceed.", "> read notes.", "1. start here."])
+def test_cli_r2_rejects_a_block_interrupting_the_verified_bold_tagline(tmp_path, interrupt):
+    description = f"Return to setup.    {interrupt}"
+    path, meta, _ = generated_checkout(tmp_path, description=description)
+    source = path.read_text(encoding="utf-8")
+    old = body(source)
+    args = ("--meta", meta, "--repo-dir", path.parent, "lint", "readme", path, "--variant", "A")
+
+    def r2_fails():
+        result = run_cli(*args)
+        return any(fail.startswith("R2 ") for fail in json.loads(result.stdout)["fails"])
+
+    assert not r2_fails()
+    split = f"**Return to setup.\n{interrupt}**"
+    path.write_text(source.replace(old, tagline.generated(split)), encoding="utf-8")
+    assert r2_fails()
+
+    old_receipt = old.partition("\n")[0]
+    assert tagline.reseal(old, f"{old_receipt}\n{split}") is None
+
+
 def test_verified_wrapping_does_not_ignore_whitespace_inside_html_attributes(tmp_path):
     expected = "See <span data-note='one two'>the guide</span>."
     path, meta, _ = generated_checkout(tmp_path, description=expected)

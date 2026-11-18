@@ -52,8 +52,11 @@ def inherited_payload(body: str) -> str | None:
 
 def _rendered_unit(value: str) -> tuple[str, str] | None:
     if value.startswith("**") and value.endswith("**"):
+        from .mdcode import inline_regions
+
         inner = value[2:-2]
-        if inner and not (inner[0].isspace() or inner[-1].isspace()):
+        if (inner and not (inner[0].isspace() or inner[-1].isspace())
+                and inline_regions(value) == ((0, len(value)),)):
             return "markdown", inner
         return None
     match = re.fullmatch(r'<p align="center">[ \t\n]*<b>(.*?)</b>[ \t\n]*</p>', value, re.S)
@@ -67,10 +70,8 @@ def matches_description(body: str, description: str) -> bool:
         return False
     value = normalize(body) if verified is None else verified
     description = description.strip()
-    if value == f"**{description}**" or value == f'<p align="center"><b>{description}</b></p>':
-        return True
     if verified is None:
-        return False
+        return value in (f"**{description}**", f'<p align="center"><b>{description}</b></p>')
     from .mdcode import tagline_reflow_key
 
     unit = _rendered_unit(value)
