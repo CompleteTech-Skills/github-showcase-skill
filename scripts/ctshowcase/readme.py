@@ -697,9 +697,10 @@ def scaffold(ctx: RepoContext, existing: str = "", *, already_normalized: bool =
         if {"banner", "nav"} <= managed or _personal_has_authored_hero(ctx, normalized, markers):
             return header_only(ctx, existing, already_normalized=already_normalized, preserve_structure=True)
         if "banner" in managed:
-            # A leading U+FEFF in this view is authored, not the removed encoding BOM.
-            # Keep it before the replacement header instead of moving it into About.
-            authored_prefix = normalized[:len(normalized) - len(normalized.lstrip(BOM))]
+            # Keep the complete authored format prefix beside the replacement hero.
+            # Moving its spaces/tabs onto the suffix could turn prose into indented code.
+            prefix = re.match(r"\ufeff[\ufeff \t]*", normalized)
+            authored_prefix = prefix.group(0) if prefix else ""
             # Recognize blocks before the prefix removal can turn following spaces into indented code.
             existing = _sub_blocks(normalized,
                                    lambda marker: "" if marker.group(1) == "banner" else marker.group(0))
@@ -796,12 +797,20 @@ def fork_callout(ctx: RepoContext) -> str | None:
             "The upstream README follows unchanged; the upstream license applies.")
 
 
-def leading_banner_block(text: str) -> re.Match | None:
-    """Return the paired banner with no authored content preceding it."""
+def leading_banner_block(text: str, *, personal: bool = False) -> re.Match | None:
+    """Return the paired opening banner, allowing a retained personal format prefix."""
     first = next(iter(find_blocks(MARK, text)), None)
-    if (first is not None and first.group(1) == "banner" and not text[:first.start()].strip()
-            and _block_on_separate_lines(text, first)):
+    if first is None or first.group(1) != "banner":
+        return None
+    prefix = text[:first.start()]
+    if not prefix.strip() and _block_on_separate_lines(text, first):
         return first
+    if personal and prefix.startswith(BOM) and not prefix.strip(BOM + " \t\r\n"):
+        # Use the span found in the original context; the suffix must still start
+        # on another line before the G/H callout can be placed after this hero.
+        suffix = re.split(r"\r\n|\r|\n", text[first.end():], maxsplit=1)[0]
+        if not suffix.strip(" \t"):
+            return first
     return None
 
 
@@ -897,8 +906,8 @@ def callout_only(ctx: RepoContext, text: str, *, retain_personal_banner: bool = 
         ctx.log("needs-input:fork-variant (q27 full treatment: pass readme --variant for the §5.4 variant)")
     body = text
     lead_banner = ""
-    leading = leading_banner_block(text)
     personal = personal_intro_applies(ctx)
+    leading = leading_banner_block(text, personal=personal)
     retained = [(0, len(text), 0, len(text))] if personal and source_spans is not None else None
     body_start = 0
     banner_prefix = text[:leading.start()] if personal and leading is not None else ""
@@ -939,6 +948,10 @@ def callout_only(ctx: RepoContext, text: str, *, retain_personal_banner: bool = 
             co = None  # the H callout needs the archive date and reason from the registry
             ctx.log("needs-input:archive-callout")
         if co:
+            if (personal and not retain_personal_banner and not leading and not lead_banner
+                    and len(banners) == 1 and personal_generated_hero(ctx, banners[0].group(2))):
+                raise NeedsInput("intro-order", "Put the managed personal hero markers on their own lines before "
+                                 "adding the fork callout after the intro.")
             out = co + "\n\n" + (body if personal and not leading else body.lstrip("\n"))
             _edit_source_spans(retained, 0, 0, len(co) + 2)
     if ctx.art_status()["banner"] is None:

@@ -12,7 +12,7 @@ from .mdcode import find_inline_code  # noqa: F401 (compatibility re-export)
 from .context import RepoContext
 from .detect import required_sections, standard
 from .readme import (
-    EMOJI, MARK, hero_path, is_footer_like, leading_banner_block, masked, normalize_text, nav_first, personal_header_end, preserved,
+    BOM, EMOJI, MARK, hero_path, is_footer_like, leading_banner_block, masked, normalize_text, nav_first, personal_header_end, preserved,
     source_lines,
     split_sections,
 )
@@ -191,7 +191,7 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
     personal = hero == "assets/intro.svg"
     if variant in ("G", "H"):
         # §7.4 G/H: the hero banner block, then the callout, then the body unchanged, then the footer
-        banner = leading_banner_block(text)
+        banner = leading_banner_block(text, personal=personal)
         rest = (text[banner.end():] if banner else text).lstrip()
         if personal:
             unchanged = ctx.preserve_unchanged() and preserved(ctx, text)
@@ -214,7 +214,10 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
         offset = block.end()
     parts.append(text[offset:])
     plain = "".join(parts)
-    lines = [line for line in source_lines(plain) if line.strip(" \t")]
+    # A retained personal format prefix is nonprinting; visible authored preambles
+    # still participate in ordering. Source/image checks keep the original view.
+    presentation = plain.lstrip(BOM + " \t") if personal and plain.startswith(BOM) else plain
+    lines = [line for line in source_lines(presentation) if line.strip(" \t")]
     preserve = preserved(ctx, text)
     unchanged = preserve and ctx.preserve_unchanged()
     # §7.1 order (q57 `nav`): hero banner, then the nav line; "Nav line first" (readme.nav_first) puts the nav on top

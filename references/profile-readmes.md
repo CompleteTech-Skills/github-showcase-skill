@@ -148,6 +148,15 @@ Source mapping distinguishes the file's encoding BOM from an authored U+FEFF pre
 both that prefix and text immediately beside a managed hero stay intact.
 Indentation after that authored prefix does not change which managed hero is replaced
 or leave an extra legacy banner in the scaffolded README.
+The authored prefix includes its following spaces and tabs. Those bytes stay beside
+the replacement hero instead of becoming indentation on the authored body; adjacent
+prose and links keep their Markdown context. Personal header-order lint accepts this
+nonprinting prefix while still rejecting visible content before the hero.
+A personal G/H opening hero with that prefix is recognized from its original source
+span, so an existing callout stays after it and is not duplicated ahead of it.
+If adding a fork callout would split an inline hero from its adjacent authored text,
+the command refuses atomically with `needs-input:intro-order`; put the managed markers
+on their own lines before retrying.
 Scaffold uses the CLI's already-normalized view and retains an authored U+FEFF prefix
 before the new header when migrating a lone managed hero.
 Images inside HTML comments do not count as authored heroes or badges; the README
