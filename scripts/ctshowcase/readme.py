@@ -786,6 +786,11 @@ def _personal_has_authored_hero(ctx: RepoContext, text: str, markers: list[re.Ma
             or _personal_preamble_has_art(text))
 
 
+def _badges_precede_banner(text: str, banner: re.Match) -> bool:
+    images = _image_entries(masked(text)[:banner.start()], text)
+    return bool(images) and all(_badge_or_logo(source, personal=True) for _, source, _ in images)
+
+
 def callout_only(ctx: RepoContext, text: str, *, retain_personal_banner: bool = False) -> tuple[str, list[str]]:
     """Variants G and H (§7.4): the hero banner block, then the callout (unless one is already there), then the body
     unchanged, then the decision 18 footer. Nothing else changes. Watching-org forks never reach here (`readme`
@@ -816,9 +821,13 @@ def callout_only(ctx: RepoContext, text: str, *, retain_personal_banner: bool = 
         banner = banners[0]
         old_hero = banner.group(2)
         new_hero = banner_html(ctx)
-        if new_hero != old_hero:
+        if _badges_precede_banner(text, banner):
+            # Move only the owned hero; the authored preamble keeps its bytes and order.
+            body = text[:banner.start()] + text[banner.end():]
+            lead_banner = wrap("banner", new_hero) + banner_gap
+        elif new_hero != old_hero:
             body = text[:banner.start(2)] + new_hero + text[banner.end(2):]
-            replaced_hero = _unreemitted(source_lines(old_hero), Counter(line.strip() for line in source_lines(new_hero)))
+        replaced_hero = _unreemitted(source_lines(old_hero), Counter(line.strip() for line in source_lines(new_hero)))
     if leading:  # our banner block is already on top (a re-run): keep it, look for the callout below
         remainder = text[leading.end():]
         body = remainder.lstrip("\n")
@@ -1154,7 +1163,7 @@ def _badge_blocks_need_in_place_refresh(text: str, markers: list[re.Match]) -> b
 
 
 def upgrade(ctx: RepoContext, text: str, *, already_normalized: bool = False) -> tuple[str, list[str]]:
-    """Return (new text, header lines removed). Raises nothing; callers run the shrink checks."""
+    """Return (new text, header lines removed); callers run preservation checks before writing."""
     if not already_normalized:
         text = normalize_text(text)
     variant = ctx.det["variant"]
@@ -1408,7 +1417,11 @@ def header_only(ctx: RepoContext, text: str, *, already_normalized: bool = False
             new = tagline_body(ctx, body, text)
             return m.group(0) if new == body else wrap(b, new)
         if b == "banner" and personal:
-            fresh = banner_html(ctx) if not retain_personal_banner and personal_generated_hero(ctx, body) else body
+            owned = not retain_personal_banner and personal_generated_hero(ctx, body)
+            fresh = banner_html(ctx) if owned else body
+            if owned and _badges_precede_banner(text, m):
+                raise NeedsInput("intro-order", "The personal intro must precede the badges. Use readme --mode upgrade "
+                                 "without --no-regroup to request a complete header refresh.")
             return m.group(0) if fresh == body else wrap(b, fresh)
         if b in gen:
             return wrap(b, re.sub(r"\n{3,}", "\n\n", gen[b]))

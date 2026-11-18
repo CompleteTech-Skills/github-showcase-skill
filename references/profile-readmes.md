@@ -133,6 +133,11 @@ example a README over 15,000 bytes). Each either writes the intro or returns the
 none of them writes a README, badge, CONTRIBUTING or change record on that refusal. `lint readme` checks
 `assets/intro.svg` as the first image of the personal README (D13, R7).
 
+When authored badges precede an owned personal hero, a full upgrade moves only
+that hero ahead of the badges. Header-only and `--no-regroup` refreshes instead
+return `needs-input:intro-order` before writing, because they cannot move the
+existing marker block. Fenced image examples do not affect the image order.
+
 Personal header refresh migrates only the exact legacy generated banner body
 (or an empty managed banner block). Owner spelling and configured former slugs
 can identify the same profile. Authored hero bodies and unmarked artwork
