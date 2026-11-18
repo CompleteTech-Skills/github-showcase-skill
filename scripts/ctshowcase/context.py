@@ -141,6 +141,11 @@ class RepoContext:
         from .detect import is_fork
         return is_fork(dict(self.meta, repo=self.repo)) or self.det["type"] == "fork"
 
+    @property
+    def personal_profile(self) -> bool:
+        """Decision 15 applies to a profile repository that names the same account as its owner."""
+        return self.det["type"] == "github-profile" and self.same_owner(self.repo)
+
     def card_exempt(self) -> bool:
         """§5.4: forks (any `is_fork`), backups and profile repositories never get a card, whoever owns them: art_status
         keeps `exempt:no-card` in the card slot under the watching, t3-signoff and hold owner codes."""
@@ -174,7 +179,7 @@ class RepoContext:
             return {"banner": code, "card": no_card or code, "icon": code}
         if no_card:
             out["card"] = no_card
-        if self.det["type"] == "github-profile" and self.repo.lower() == self.owner.lower():
+        if self.personal_profile:
             out["banner"] = "exempt:profile-readme"  # the personal profile README opens with the intro (decision 15)
         if self.repo == ".github" and self.placeholder_org():
             out["banner"] = out["icon"] = "exempt:placeholder-org"

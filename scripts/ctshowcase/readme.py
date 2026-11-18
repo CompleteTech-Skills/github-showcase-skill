@@ -174,12 +174,12 @@ def nav_line(ctx: RepoContext) -> str:
 
 def personal_profile(ctx: RepoContext) -> bool:
     """Use the same personal-profile exemption as banner generation (decision 15, CQ-03)."""
-    return ctx.det["type"] == "github-profile" and ctx.same_owner(ctx.repo)
+    return ctx.personal_profile
 
 
 def personal_intro_applies(ctx: RepoContext) -> bool:
     """The banner surface is exempt only because this is the personal profile, which opens with its intro instead."""
-    return ctx.art_status()["banner"] == "exempt:profile-readme" and personal_profile(ctx)
+    return ctx.art_status()["banner"] == "exempt:profile-readme"
 
 
 def hero_path(ctx: RepoContext) -> str:
