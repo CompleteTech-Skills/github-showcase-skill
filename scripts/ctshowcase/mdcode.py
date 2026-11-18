@@ -2584,6 +2584,10 @@ def _marker_projection(text: str) -> str:
     source = _source_view(text)
     parsed = _accepted_inline(source)
     spans = list(code_block_spans(source)) + list(parsed[1]) + list(parsed[2]) + list(parsed[3])
+    # Accepted image descriptions render as alt text, including comment-shaped
+    # data. Reuse the image grammar so only real neighboring markers stay live.
+    visible = _outside_code(source, mask_autolinks=False)
+    spans.extend((start, end) for _, _, start, end in _markdown_images(visible, source))
     # The main inline pass skips raw HTML blocks. Their tag attributes still
     # contain literal data, whereas real marker comments must remain visible.
     blocks = html_block_spans(source)

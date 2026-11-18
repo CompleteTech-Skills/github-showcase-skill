@@ -1,56 +1,6 @@
 {
- "config_sha256": "190506a620d63253bb66e6c7ed476d26a2b401f5be546a3a1a4b7d42320fed37",
- "evidence": {
-  "config_sha256": "190506a620d63253bb66e6c7ed476d26a2b401f5be546a3a1a4b7d42320fed37",
-  "inputs": {
-   "description": "Generate CompleteTech LLC GitHub banners, cards, icons and READMEs, with repository checks and metadata plans.",
-   "icon_sha256": "a1bbf17b8f066ec7e8442a323d4b1a21656a8f8788a1e54ece6f83e76dde7bf5",
-   "language": "Python",
-   "license": "MIT",
-   "override_sha256": "750ad1a2898d2dedf41d61b6bbcd8304834e661a8c98eac2e5ca5251b4dc310d",
-   "owner": "CompleteTech-Skills",
-   "repo": "github-showcase-skill",
-   "topics": [
-    "agent-skills",
-    "agentic-ai",
-    "claude-skill",
-    "codex-skill",
-    "completetech",
-    "content-creation",
-    "python"
-   ],
-   "type": "agent-skills",
-   "visibility": "public"
-  },
-  "missing": [],
-  "outputs": {
-   "README.md": {
-    "sha256": "772d8de86e027bdbb82432e1cc8ee3a157df9efc3b65b86c0898aebcb1c56692"
-   },
-   "assets/brand/logo.png": {
-    "sha256": "a5c3c4ef55336ed4b883d3bc3bb6e1e942b836469bd2b2933bc8cc230b321621"
-   },
-   "assets/examples/account-chart-example.svg": {
-    "sha256": "f607e207267e11748bd36c8206c3e89a7f855f162d8ad3c8d47845643f335617"
-   },
-   "assets/examples/banner-example.png": {
-    "sha256": "3f2effb2ae35cd418d9a13a7d30012a0a12d4e914977e9c5071deb8c53d52b97"
-   },
-   "assets/examples/card-example.svg": {
-    "sha256": "8f8c11f213337477d57a9d51aefe4ab9e03a171572896ae00e23db0b9569a971"
-   },
-   "docs/images/banner.png": {
-    "sha256": "ef088e8fe22f3e62ad6b77bfe34fa618f17c1157447452b2139b8897d885d4cd"
-   },
-   "docs/images/card.svg": {
-    "sha256": "c44a9db0388202a334a2cf032cb8d27c562aa3bd4aee726d0351671d36d1b092"
-   }
-  },
-  "pending_jobs": false,
-  "scope": "recorded-outputs",
-  "version": 1
- },
- "fingerprint": "181527fd661ff78f97f8f837945391ef99334e362ef2dcc33f340cdf1b3815f3",
+ "config_sha256": "09228dc8378c61982db1ba451bb46dc545fdfab2bc45169feb81ff005daf240e",
+ "fingerprint": "c6b359fa5c2659b908c5b348ec4c365f344766e1fd4f47f387a72816764e47bb",
  "inputs": {
   "description": "Generate CompleteTech LLC GitHub banners, cards, icons and READMEs, with repository checks and metadata plans.",
   "icon_sha256": "a1bbf17b8f066ec7e8442a323d4b1a21656a8f8788a1e54ece6f83e76dde7bf5",
@@ -109,40 +59,38 @@
      "text": "Offline"
     }
    ],
-   "fingerprint": "181527fd661ff78f97f8f837945391ef99334e362ef2dcc33f340cdf1b3815f3",
+   "fingerprint": "c6b359fa5c2659b908c5b348ec4c365f344766e1fd4f47f387a72816764e47bb",
    "icon_source": "repo",
    "px": [
     2560,
     720
    ],
+   "repository_id": 1433830462,
    "scale": 2,
    "sha256": "ef088e8fe22f3e62ad6b77bfe34fa618f17c1157447452b2139b8897d885d4cd"
   },
   "card.svg": {
    "bytes": 27727,
-   "fingerprint": "181527fd661ff78f97f8f837945391ef99334e362ef2dcc33f340cdf1b3815f3",
+   "fingerprint": "c6b359fa5c2659b908c5b348ec4c365f344766e1fd4f47f387a72816764e47bb",
+   "repository_id": 1433830462,
    "sha256": "c44a9db0388202a334a2cf032cb8d27c562aa3bd4aee726d0351671d36d1b092"
   }
  },
  "provenance": {
-  "fingerprint": "181527fd661ff78f97f8f837945391ef99334e362ef2dcc33f340cdf1b3815f3",
-  "first_run_at": "2026-11-18T21:15:10Z",
-  "last_changed_at": "2026-11-18T21:15:10Z",
-  "last_run_at": "2026-11-18T21:15:10Z",
+  "fingerprint": "c6b359fa5c2659b908c5b348ec4c365f344766e1fd4f47f387a72816764e47bb",
+  "first_run_at": "2026-11-18T21:14:16Z",
+  "last_changed_at": "2026-11-18T22:29:42Z",
+  "last_run_at": "2026-11-18T22:29:42Z",
   "publisher": "CompleteTech LLC",
-  "run_count": 1,
+  "run_count": 2,
   "skill": "github-showcase-skill",
   "skill_url": "https://github.com/CompleteTech-Skills/github-showcase-skill",
   "skill_version": "1.0.0",
   "standard": "ct-std-v1",
   "surfaces": [
    "README.md",
-   "assets/brand/logo.png",
-   "assets/examples/account-chart-example.svg",
-   "assets/examples/banner-example.png",
-   "assets/examples/card-example.svg",
-   "docs/images/banner.png",
-   "docs/images/card.svg"
+   "banner.png",
+   "card.svg"
   ],
   "target": {
    "id": "CompleteTech-Skills/github-showcase-skill",

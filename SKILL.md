@@ -60,6 +60,14 @@ Every surface uses one **dark** design on both GitHub themes (decision 21): navy
 
 Do not use it for accounts outside the estate. Excluded owners (BunsDev, GoZippy, h-mascot, lmvdz, GalaxyRuler, and per decisions 1 and 2 MetatronAngelAgent and PrompDev) are refused with exit 2, and T3 owners before co-owner sign-off (Pick-Your-AI, Jevelopers-neatHack-2026) are refused with exit 2 unless the global `--allow-t3` is passed for that run.
 
+Another operator must first establish their own verified, authorized estate and identity inputs through the
+[full-run workflow](references/full-run-prompt.md) and [local brand onboarding](references/brand-onboarding.md).
+Preparing an owned config does not grant access, extend an existing approval or authorize rollout; targets
+outside that verified scope stay pending. Installed exclusions, holds and T3 consent remain in force even when
+an external config omits their rows. Generic account capture and configured chart rendering do not broaden
+`org profile --user`, which still supports only the skill's configured personal account. The workflow also
+withholds fixed-operator pin instructions and external Enterprise plans without reviewed owned desired state.
+
 ## Boundaries
 
 | This skill does | This skill does not |
@@ -343,7 +351,7 @@ These user decisions outrank `STANDARD.md` (`ct-std-v1`). Full text: [references
 | [references/readme-variants.md](references/readme-variants.md) | Header block with banner and footer, variants A–J, H2 order, license rows, preserve list. |
 | [references/banner-layout.md](references/banner-layout.md) | Banner and card geometry measured from the golden, chip rules, eyebrow rules. |
 | [references/art-direction.md](references/art-direction.md) | Family palettes, motifs, asset sizes, prompt template for illustrations, art QA. |
-| [references/full-run-prompt.md](references/full-run-prompt.md) | A copy-ready workflow for a repository, org, supported personal profile or Enterprise: authorization and capture gates, applicable surfaces, optional image preparation, and explicit pending work; read-only toward GitHub. |
+| [references/full-run-prompt.md](references/full-run-prompt.md) | A copy-ready workflow for an operator's verified estate: owned identity setup, isolated optional registry, conditional supported command paths and explicit pending work; fixed-operator pins and unconfigured Enterprise plans remain withheld, and GitHub stays read-only. |
 | [references/svg-rules.md](references/svg-rules.md) | GitHub-safe SVG rules with decision 21 applied, and what `lint svg` checks. |
 | [references/profile-readmes.md](references/profile-readmes.md) | Org and personal profile README structure, cards, intros and what to skip. |
 | [references/orgs-and-projects.md](references/orgs-and-projects.md) | Org About fields, O-checks, org `.github` contents, profile rules and the GitHub Projects rules. |

@@ -38,11 +38,26 @@ def test_malformed_credit_is_not_generation_or_lint_evidence(brand, kind):
     '<span title="<!-- showcase:credit:end -->">Literal attribute</span>',
     '<script>const example = "<!-- showcase:credit:start -->";</script>',
     '<!-- Documentation example: <!-- showcase:credit:end -->',
+    '![Screenshot <!-- showcase:credit:start -->](diagram.svg)',
+    '![Screenshot <!-- showcase:credit:end -->](diagram.svg)',
+    '![Screenshot <!-- showcase:credit:start -->][shot]\n\n[shot]: diagram.svg',
+    '![Screenshot <!-- showcase:credit:end -->][shot]\n\n[shot]: diagram.svg',
 ])
 def test_inert_delimiter_examples_do_not_claim_a_credit_block(brand, example):
     text = "# Synthetic\n\n" + example + "\n\n" + footer.block(brand) + "\n"
     readme.guard_credit_ownership(brand, text)
     assert footer.check(brand, text)[0] == "pass"
+
+
+@pytest.mark.parametrize("form", ["inline", "reference"])
+@pytest.mark.parametrize("delimiter", [footer.CREDIT_START, footer.CREDIT_END])
+def test_literal_image_does_not_hide_an_actual_neighboring_credit_delimiter(brand, form, delimiter):
+    image = "![Screenshot " + delimiter + "]" + (
+        "(diagram.svg)" if form == "inline" else "[shot]\n\n[shot]: diagram.svg")
+    text = image + "\n\n" + delimiter + "\n\n" + footer.block(brand) + "\n"
+    with pytest.raises(NeedsInput, match="ownership"):
+        readme.guard_credit_ownership(brand, text)
+    assert footer.check(brand, text)[0] == "fail:credit-drift"
 
 
 @pytest.mark.parametrize("kind", ["missing-start", "missing-end", "duplicate"])
