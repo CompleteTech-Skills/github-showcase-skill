@@ -83,10 +83,17 @@ def test_cli_scaffold_formatter_boundary_reflow_is_owned_and_r2_compliant(
     repo, meta = target(tmp_path)
     path = repo / "README.md"
     calls = []
+    sidecar_calls = []
 
     def prettier_paragraph_boundary_double(root, destination, source):
         """Synthetic Prettier-style reflow; F's centered HTML is the control."""
-        assert root == repo and destination == path
+        assert root == repo
+        if destination == repo / "docs/images/.showcase.json":
+            data = json.loads(source)
+            assert data["outputs"]["README.md"]["description_sha256"]
+            sidecar_calls.append(destination)
+            return json.dumps(data, indent=2) + "\n"
+        assert destination == path
         source = normalize(source)
         before = extract(source)
         payload = assert_receipt(before)
@@ -108,6 +115,7 @@ def test_cli_scaffold_formatter_boundary_reflow_is_owned_and_r2_compliant(
             "--variant", variant, "--write", "--format-generated"]
     assert showcase.main(args) == 0
     assert len(calls) == 1
+    assert len(sidecar_calls) == (1 if variant == "C" else 0)
     raw = path.read_bytes().decode("utf-8")
     assert raw == normalize(raw).replace("\n", ending)
     body = extract(raw)
