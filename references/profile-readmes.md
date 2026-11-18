@@ -135,7 +135,9 @@ none of them writes a README, badge, CONTRIBUTING or change record on that refus
 
 When authored badges precede an owned personal hero, a full upgrade moves only
 that hero ahead of the badges. A full G or H upgrade also moves a managed hero
-out of the authored body. Header-only and `--no-regroup` refreshes instead
+out of the authored body. A hero immediately after the profile title can
+still refresh in place when its marker shares an authored line.
+Header-only and `--no-regroup` refreshes instead
 return `needs-input:intro-order` before writing, because they cannot move the
 existing marker block. Fenced image examples do not affect the image order.
 G and H can refresh an exactly owned hero body in place when authored text touches

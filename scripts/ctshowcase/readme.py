@@ -804,9 +804,9 @@ def _heading_view(text: str) -> str:
 
 
 def personal_header_end(text: str) -> int:
-    """End of the opening area before the first visible Markdown heading."""
-    title = re.search(r"(?m)^ {0,3}#{1,6}(?:[ \t]+|$)", _heading_view(text))
-    return title.start() if title is not None else len(text)
+    """End of the opening area before the first visible section heading."""
+    section = re.search(r"(?m)^ {0,3}#{2,6}(?:[ \t]+|$)", _heading_view(text))
+    return section.start() if section is not None else len(text)
 
 
 def callout_only(ctx: RepoContext, text: str, *, retain_personal_banner: bool = False) -> tuple[str, list[str]]:
