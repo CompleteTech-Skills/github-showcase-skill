@@ -15,7 +15,7 @@ from urllib.parse import quote
 from . import footer as footermod
 from .context import RepoContext
 from .detect import required_sections, standard
-from .errors import ConfigError, NeedsInput
+from .errors import ArtFail, ConfigError, NeedsInput
 from .mdcode import (  # noqa: F401  (code_spans: re-exported for callers)
     MANAGED_BLOCK_PATTERN, _image_entries, after_line_end, code_block_spans, code_spans, find_blocks, html_block_spans,
     masked,
@@ -249,7 +249,7 @@ def banner_html(ctx: RepoContext) -> str:
                                       mark_path=mark, height=height, static=static).encode()
                    for height in (320, 360) for static in variants):
             raise ValueError("intro does not match configured profile")
-    except (OSError, ValueError, KeyError, TypeError):
+    except (OSError, ValueError, KeyError, TypeError, ArtFail):
         raise NeedsInput("intro", "Generate an applicable default profile intro with showcase.py first.") from None
     return body
 
@@ -717,12 +717,16 @@ def _strip_markers(text: str, keep: dict[str, str] | None = None) -> tuple[str, 
     return "".join(out) + text[pos:], blocks
 
 
+def _badge_or_logo(source: str) -> bool:
+    return (bool(re.search(r"logo", source, re.I)) or "shields.io" in source
+            or "badge.svg" in source or "docs/images/badges/" in source)
+
+
 def _leading_banner(pre: str) -> bool:
     """True when the README preamble opens with a third-party banner image (not ours, not a logo or badge)."""
     first_img = re.search(r"<(img|picture)\b[^>]*>|!\[[^\]]*\]\([^)]*\)", pre)
     return bool(first_img and "docs/images/banner.png" not in first_img.group(0)
-                and not re.search(r"logo", first_img.group(0), re.I)
-                and "shields.io" not in first_img.group(0) and "badge.svg" not in first_img.group(0)
+                and not _badge_or_logo(first_img.group(0))
                 and not pre[:first_img.start()].strip().replace("<p align=\"center\">", "").strip())
 
 
@@ -762,7 +766,8 @@ def leading_banner_block(text: str) -> re.Match | None:
 def _personal_preamble_has_art(text: str) -> bool:
     unmarked, _ = _strip_markers(text)
     preamble, _ = split_sections(unmarked)
-    return bool(_image_entries(masked(unmarked)[:len(preamble)], unmarked))
+    return any(not _badge_or_logo(source)
+               for _, source, _ in _image_entries(masked(unmarked)[:len(preamble)], unmarked))
 
 
 def callout_only(ctx: RepoContext, text: str, *, retain_personal_banner: bool = False) -> tuple[str, list[str]]:
@@ -785,6 +790,16 @@ def callout_only(ctx: RepoContext, text: str, *, retain_personal_banner: bool = 
     leading = leading_banner_block(text)
     personal = personal_intro_applies(ctx)
     banner_gap = "\n\n"
+    replaced_hero: list[str] = []
+    banners = [block for block in find_blocks(MARK, text) if block.group(1) == "banner"] if personal and not leading else []
+    if (not retain_personal_banner and len(banners) == 1 and _block_on_separate_lines(text, banners[0])
+            and personal_generated_hero(ctx, banners[0].group(2))):
+        banner = banners[0]
+        old_hero = banner.group(2)
+        new_hero = banner_html(ctx)
+        if new_hero != old_hero:
+            body = text[:banner.start(2)] + new_hero + text[banner.end(2):]
+            replaced_hero = _unreemitted(source_lines(old_hero), Counter(line.strip() for line in source_lines(new_hero)))
     if leading:  # our banner block is already on top (a re-run): keep it, look for the callout below
         remainder = text[leading.end():]
         body = remainder.lstrip("\n")
@@ -800,7 +815,6 @@ def callout_only(ctx: RepoContext, text: str, *, retain_personal_banner: bool = 
             ctx.log("needs-input:archive-callout")
         if co:
             out = co + "\n\n" + (body if personal and not leading else body.lstrip("\n"))
-    replaced_hero: list[str] = []
     if ctx.art_status()["banner"] is None:
         lead_banner = wrap("banner", banner_html(ctx)) + "\n\n"  # decision 13: the hero banner opens G and H too
     elif leading:
@@ -813,9 +827,7 @@ def callout_only(ctx: RepoContext, text: str, *, retain_personal_banner: bool = 
                                   - Counter(source_lines(new_hero))).elements())
         else:
             lead_banner = leading.group(0) + banner_gap
-    elif personal and not retain_personal_banner and not _personal_preamble_has_art(text) and not any(
-        block.group(1) == "banner" for block in find_blocks(MARK, text)
-    ):
+    elif personal and not retain_personal_banner and not banners and not _personal_preamble_has_art(text):
         lead_banner = wrap("banner", banner_html(ctx)) + "\n\n"
     out = lead_banner + (out if personal and not leading else out.lstrip("\n"))
     removed: list[str] = list(replaced_hero)
@@ -1135,7 +1147,7 @@ def upgrade(ctx: RepoContext, text: str, *, already_normalized: bool = False) ->
         heroes = [m.group(2) for m in markers if m.group(1) == "banner"]
         if any(not personal_generated_hero(ctx, body) for body in heroes) or _personal_preamble_has_art(text):
             # Every personal variant preserves authored artwork and refreshes only existing owned blocks.
-            return header_only(ctx, text, already_normalized=True,
+            return header_only(ctx, text, already_normalized=True, preserve_structure=True,
                                retain_personal_banner=retain_personal_banner), []
     if variant in ("G", "H"):
         return callout_only(ctx, text, retain_personal_banner=retain_personal_banner)
@@ -1204,7 +1216,7 @@ def upgrade(ctx: RepoContext, text: str, *, already_normalized: bool = False) ->
     def is_header_line(ln: str) -> bool:
         s_ = ln.strip()
         if HEADER_LINE.match(ln) or "docs/images/banner.png" in ln:
-            return True
+            return not personal or not any(_badge_or_logo(source) for _, source, _ in _image_entries(masked(ln), ln))
         return old_tag is None and bool(desc) and s_ in (f"**{desc}**", f"<p align=\"center\"><b>{desc}</b></p>", f"<b>{desc}</b>")
 
     # group the preamble into units: centred HTML blocks and <picture> blocks are classified as a whole

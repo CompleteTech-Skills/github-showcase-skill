@@ -554,3 +554,98 @@ def test_personal_callout_variant_without_banner_requires_intro(tmp_path, intro_
         assert "needs-input:intro" in result.stdout
         assert path.read_bytes() == source
         assert not records.exists() and not (tmp_path / "docs").exists()
+
+
+CALLOUT_PREFIX = b"> [!NOTE]\r\n> Synthetic callout.\n\n"
+CALLOUT_SUFFIX = b"# Profile\n\nAuthored notes.  \r\n"
+LEADING_BUILD_BADGE = b"![Build](https://img.shields.io/badge/build-passing-green)"
+
+
+@pytest.mark.parametrize("variant", ["G", "H"])
+def test_personal_nonleading_managed_banner_missing_intro_refuses_before_writes(tmp_path, variant):
+    meta = metadata(tmp_path)
+    path = tmp_path / "README.md"
+    source = CALLOUT_PREFIX + LEGACY_HERO.replace("\n", "\r\n").encode() + CALLOUT_SUFFIX
+    path.write_bytes(source)
+    records = tmp_path / "records.jsonl"
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--mode", "upgrade", "--variant", variant,
+                     "--badges", "local", "--records", records, "--write")
+    assert result.returncode == 4 and "needs-input:intro" in result.stdout, result.stdout + result.stderr
+    assert path.read_bytes() == source
+    assert not records.exists() and not (tmp_path / "docs").exists()
+
+
+@pytest.mark.parametrize("variant", ["G", "H"])
+def test_personal_nonleading_managed_banner_refreshes_in_place(tmp_path, intro_bytes, variant):
+    meta = metadata(tmp_path)
+    put_intro(tmp_path, intro_bytes)
+    path = tmp_path / "README.md"
+    suffix = b"# Profile\n\nAuthored notes.  \r\n"
+    source = b"\xef\xbb\xbf" + CALLOUT_PREFIX + LEGACY_HERO.replace("\n", "\r\n").encode() + suffix
+    path.write_bytes(source)
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--mode", "upgrade", "--variant", variant,
+                     "--badges", "local", "--write")
+    assert result.returncode == 0, result.stdout + result.stderr
+    updated = path.read_bytes()
+    assert updated.startswith(b"\xef\xbb\xbf" + CALLOUT_PREFIX + b"<!-- showcase:banner:start -->")
+    assert b'src="assets/intro.svg"' in updated and b"docs/images/banner.png" not in updated
+    assert suffix in updated
+
+
+@pytest.mark.parametrize("variant", ["G", "H"])
+def test_personal_leading_badge_is_not_a_hero_for_missing_intro(tmp_path, variant):
+    meta = metadata(tmp_path)
+    path = tmp_path / "README.md"
+    source = LEADING_BUILD_BADGE + b"\n\n" + CALLOUT_PREFIX + CALLOUT_SUFFIX
+    path.write_bytes(source)
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--mode", "upgrade", "--variant", variant,
+                     "--badges", "local", "--write")
+    assert result.returncode == 4 and "needs-input:intro" in result.stdout, result.stdout + result.stderr
+    assert path.read_bytes() == source and not (tmp_path / "docs").exists()
+
+
+def test_personal_upgrade_adds_intro_and_preserves_authored_leading_badge(tmp_path, intro_bytes):
+    meta = metadata(tmp_path)
+    put_intro(tmp_path, intro_bytes)
+    path = tmp_path / "README.md"
+    path.write_bytes(LEADING_BUILD_BADGE + b"\n\n# Profile\n\nAuthored profile notes.\n")
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--mode", "upgrade", "--badges", "local",
+                     "--write")
+    assert result.returncode == 0, result.stdout + result.stderr
+    updated = path.read_bytes()
+    assert updated.startswith(b"<!-- showcase:banner:start -->\n")
+    assert b'src="assets/intro.svg"' in updated
+    assert LEADING_BUILD_BADGE in updated and b"Authored profile notes." in updated
+
+
+def test_personal_authored_marked_hero_keeps_mixed_ending_seam(tmp_path):
+    meta = metadata(tmp_path)
+    path = tmp_path / "README.md"
+    source = (b'\xef\xbb\xbf<!-- showcase:banner:start -->\r\n<p align="center">\n'
+              b'  <img src="custom.svg" alt="Owned artwork">\r\n</p>\n<!-- showcase:banner:end -->'
+              b'\r\n\n\r\n\r\n# Profile\r\n\r\nAuthored notes.  \n')
+    path.write_bytes(source)
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--mode", "upgrade", "--write")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert path.read_bytes() == source
+
+
+def test_unrenderable_profile_config_refuses_intro_applicability_before_writes(tmp_path, intro_bytes):
+    import yaml
+
+    from conftest import ROOT
+
+    config = yaml.safe_load((ROOT / "references/brand.yaml").read_text(encoding="utf-8"))
+    config["orgs"]["CompleteDotTech"]["profile"]["eyebrow"] = "Synthetic impossibly long eyebrow " * 50
+    brand = tmp_path / "brand.yaml"
+    brand.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    meta = metadata(tmp_path)
+    put_intro(tmp_path, intro_bytes)
+    direct = run_cli("--config", brand, "intro", "--profile", "CompleteDotTech", "--static",
+                     "--out", tmp_path / "attempt.svg")
+    assert direct.returncode == 3, direct.stdout + direct.stderr
+    records = tmp_path / "records.jsonl"
+    result = run_cli("--config", brand, "--meta", meta, "--repo-dir", tmp_path, "readme", "--mode", "scaffold",
+                     "--badges", "local", "--records", records, "--write")
+    assert result.returncode == 4 and "needs-input:intro" in result.stdout, result.stdout + result.stderr
+    assert not (tmp_path / "README.md").exists() and not (tmp_path / "docs").exists() and not records.exists()
