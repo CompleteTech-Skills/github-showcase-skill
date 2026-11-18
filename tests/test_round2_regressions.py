@@ -4,6 +4,7 @@ import json
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 from PIL import Image
@@ -282,7 +283,8 @@ def test_action_treats_exempt_like_a_skip():
     assert "GITHUB_STEP_SUMMARY" in (ROOT / "scripts" / "action_prepare.py").read_text()
 
 
-def test_action_restores_foreign_artifact_after_sidecar_write_failure(tmp_path, monkeypatch):
+@pytest.mark.parametrize("restore_fails", [False, True])
+def test_action_keeps_foreign_artifact_after_sidecar_write_failure(tmp_path, monkeypatch, restore_fails):
     import action_prepare
 
     images = tmp_path / "docs/images"
@@ -303,11 +305,27 @@ def test_action_restores_foreign_artifact_after_sidecar_write_failure(tmp_path, 
         raise OSError("synthetic sidecar replacement failure")
 
     monkeypatch.setattr(action_prepare, "replace_bytes", fail_sidecar)
-    with pytest.raises(OSError, match="synthetic sidecar replacement failure"):
-        action_prepare.drop(path.name, key)
-    assert path.read_bytes() == b"copied banner" and path.stat().st_ino == inode
+    if restore_fails:
+        real_replace = Path.replace
+
+        def fail_artifact_restore(source, target):
+            if source.parent.name.startswith(".showcase-cleanup-"):
+                raise OSError("synthetic artifact restoration failure")
+            return real_replace(source, target)
+
+        monkeypatch.setattr(Path, "replace", fail_artifact_restore)
+        with pytest.raises(RuntimeError, match="original remains at"):
+            action_prepare.drop(path.name, key)
+        assert not path.exists()
+        recovered, = list((tmp_path / "docs").glob(".showcase-cleanup-*/banner.png"))
+        assert recovered.read_bytes() == b"copied banner" and recovered.stat().st_ino == inode
+        assert list(images.iterdir()) == [sidecar]
+    else:
+        with pytest.raises(OSError, match="synthetic sidecar replacement failure"):
+            action_prepare.drop(path.name, key)
+        assert path.read_bytes() == b"copied banner" and path.stat().st_ino == inode
+        assert not list(images.parent.glob(".showcase-cleanup-*"))
     assert sidecar.read_bytes() == previous
-    assert sorted(item.name for item in images.iterdir()) == [".showcase.json", "banner.png"]
 
 
 # -- 16 and visual -------------------------------------------------------------------------------------------------

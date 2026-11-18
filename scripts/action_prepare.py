@@ -389,7 +389,8 @@ def drop(name: str, expected: str | None = None) -> bool:
             return True
         outs = dict(output_records(data))
         outs.pop(name, None)
-        directory = Path(mkdtemp(dir=IMAGES, prefix=".showcase-cleanup-"))
+        # A retained recovery copy must stay outside the Action's docs/images commit group.
+        directory = Path(mkdtemp(dir=IMAGES.parent, prefix=".showcase-cleanup-"))
         backup = directory / name
         try:
             if p.is_file():
