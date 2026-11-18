@@ -66,7 +66,8 @@ Preparing an owned config does not grant access, extend an existing approval or 
 outside that verified scope stay pending. Installed exclusions, holds and T3 consent remain in force even when
 an external config omits their rows. Generic account capture and configured chart rendering do not broaden
 `org profile --user`, which still supports only the skill's configured personal account. The workflow also
-withholds fixed-operator pin instructions and external Enterprise plans without reviewed owned desired state.
+withholds fixed-identity About jobs, fixed-operator pin instructions and external Enterprise plans without
+reviewed owned desired state.
 
 ## Boundaries
 

@@ -326,11 +326,18 @@ require the operator's selected label policy; the shipped standard is not inferr
   `S org labels ORG --repos-from-gh --checkouts WS/checkouts --dot-github DOTGITHUB --jobs JOBS`,
   `S org health ORG --dot-github DOTGITHUB`, and `S org doctor` below. Registry-free labels must receive no
   registry, metadata or decision inputs; preserve its owner gates and held reference rewrites.
-- With the registry: `S org about ORG --jobs JOBS`; `S org labels ORG --meta-dir WS/meta
+- With the registry: `S org labels ORG --meta-dir WS/meta
   --checkouts WS/checkouts --dot-github DOTGITHUB --jobs JOBS`;
   `S org health ORG --meta-dir WS/meta --dot-github DOTGITHUB`. Pass required explicit bundle paths if not
   discovered inside SELECTED_ESTATE. The top metadata directory includes cross-owner captures; complete
   profile inputs first and resolve every rendered owner/asset's identity, not just ORG's.
+- About: T1 proposals still insert the fixed `CompleteTechLLC` Twitter/X handle; an owned brand row or
+  registry `twitter_username` does not replace it. Verified-domain diagnostics also use the installed
+  Enterprise desired state. Only the configured estate workflow, after verifying every effective identity
+  field and its applicable policy, may use `S org about ORG --jobs JOBS`. For an external operator, optionally
+  run `S org about ORG` as a private diagnostic with no `--jobs`. Its stdout still contains mutation proposals:
+  inspect their effective fields, withhold external About jobs and fixed-identity instructions from the writer
+  handoff, and report support pending. Do not hand-edit the generated payload to imply runtime support.
 - Pins: the CLI still names `CompleteDotTech` as the signed-in org owner in browser steps; a custom config
   or registry cannot change that actor. Only the configured estate workflow, with that actor and ownership
   verified, may use `S org pins ORG --meta-dir WS/meta --jobs JOBS`. For an external operator, optionally run
