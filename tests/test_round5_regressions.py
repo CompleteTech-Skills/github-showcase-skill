@@ -1,7 +1,7 @@
 """Round 5 (final coherence pass, decision-log rows K01-K16): user decisions 12/13/18 n/a rules, review q27/q57/q92
 defaults, the command-name contract and the read-only commands the orchestrator calls by name. Synthetic Northwind
 data and public org logins only."""
-from conftest import footer_then_credit  # noqa: E402
+from conftest import credit_then_footer  # noqa: E402
 import copy
 import json
 from pathlib import Path
@@ -298,7 +298,7 @@ def test_user_profile_kit_order_and_public_slice(tmp_path):
     assert "featured-dropped:Northwind-Trading-Co/private-pricing-engine" in r["logs"]
     assert (out / "data.json").is_file() and (out / "assets" / "badges" / "x.svg").is_file()
     assert (out / "assets" / "cards" / "Northwind-Trading-Co__support-triage-agent.svg").is_file()
-    assert footer_then_credit(text)
+    assert credit_then_footer(text)
 
 
 def test_user_profile_leak_writes_nothing(tmp_path):

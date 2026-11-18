@@ -261,7 +261,7 @@ header mode preserves a marked section when no replacement can be derived or pol
 upgrade retains its never-delete check. Never modify, rename or delete an existing
 LICENSE, NOTICE or COPYING file.
 
-## Footer (decision 18; the last block, followed only by the decision 25 credit)
+## Footer (decision 18; always the final block)
 
 ```html
 <!-- showcase:footer:start -->
@@ -278,7 +278,7 @@ LICENSE, NOTICE or COPYING file.
 <!-- showcase:footer:end -->
 ```
 
-The credit block (decision 25, a proposal) follows the footer directly and ends the README. `footer --check` and `lint readme` fail with `fail:credit-missing` or `fail:credit-drift` without it, and `readme` (header mode too) adds it to an old footer in one regeneration:
+The configured credit block immediately precedes the unchanged final footer. `footer --check` and `lint readme` fail with `fail:credit-missing` or `fail:credit-drift` without it, and `readme` (header mode too) adds it to an old footer in one regeneration:
 
 ```html
 <!-- showcase:credit:start -->
