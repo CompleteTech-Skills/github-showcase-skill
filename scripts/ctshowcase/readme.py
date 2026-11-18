@@ -25,7 +25,10 @@ SHIELDS = "https://img.shields.io/badge/"
 GENERATED_BADGES = re.compile(r"<!-- showcase:badges:generated sha256=([0-9a-f]{64})"
                               r"(?: replaces=([0-9a-f]{64}))? -->(?:\r\n|\r|\n)(.*)", re.S)
 BOM = "\ufeff"
-GENERATED_TAGLINE = re.compile(r'(?:\*\*[^\n]+\*\*|<p align="center"><b>[^\n]+</b></p>)')
+# A complete formatting unit may be generated. Multiple bold spans or inner HTML are authored.
+GENERATED_TAGLINE = re.compile(
+    r'(?:\*\*(?=\S)(?:[^*\r\n]|\*(?!\*))+(?<=\S)\*\*|<p align="center"><b>(?=\S)[^<\r\n]+(?<=\S)</b></p>)'
+)
 MANAGED_NOTICE = re.compile(r"\b(?:generated\s+by|do\s+not\s+edit)\b", re.I)
 HTML_COMMENT = re.compile(r"<!--.*?(?:-->|\Z)", re.S)
 

@@ -174,3 +174,38 @@ def test_managed_cli_write_refuses_and_dry_run_offers_header(tmp_path, managed_b
     assert path.read_bytes() == original.encode()
     assert not (checkout / "docs").exists()
     assert not records.exists()
+
+
+@pytest.mark.parametrize("options", [(), ("--no-regroup",)])
+@pytest.mark.parametrize(("variant", "authored"), [
+    ("A", "**Important:** see the [migration notes](migration.md) before enabling **automatic updates.**"),
+    ("F", '<p align="center"><b>Important:</b> read the <a href="migration.md">migration notes</a>. '
+          '<b>Update carefully.</b></p>'),
+])
+def test_write_preserves_authored_tagline_with_multiple_bold_spans(tmp_path, options, variant, authored):
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    meta = tmp_path / "meta.json"
+    write_meta(meta, NEW)
+    args = ("--meta", meta, "--repo-dir", checkout, "readme", "--variant", variant, "--write")
+    path = checkout / "README.md"
+    authored_block = readme.wrap("tagline", authored)
+    before = f"# Workflow guide\n\n{authored_block}\n\n## Usage\n\nRun from the project directory.\n".encode("utf-8")
+    path.write_bytes(before)
+
+    result = run_cli(*args, *options)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert authored_block.encode("utf-8") in path.read_bytes()
+    if options:
+        assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize(("variant", "template"), [
+    ("A", "**{}**"),
+    ("F", '<p align="center"><b>{}</b></p>'),
+])
+def test_single_generated_tagline_unit_still_refreshes(make_ctx, variant, template):
+    ctx = make_ctx(description=NEW)
+    ctx.det["variant"] = variant
+    old = template.format("Keep API v2.0 & use *care* when migrating.")
+    assert readme.tagline_body(ctx, old) == template.format(NEW)
