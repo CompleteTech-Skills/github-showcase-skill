@@ -307,7 +307,11 @@ def badge_body(ctx: RepoContext, existing: str | None = None) -> str:
     is_legacy = _legacy_badge_body(ctx.brand, existing or "", ctx.style,
                                   ci_matches=lambda owner, repo: _legacy_ci_matches(ctx, owner, repo))
     has_license_row = "![License " in (existing or "") or "![AGPL-3.0 or commercial license]" in (existing or "")
-    if is_legacy and has_license_row and ctx.public and (ctx.meta.get("license") or "").upper() in ("", "NOASSERTION", "OTHER"):
+    metadata_license = ctx.meta.get("license")
+    license_unknown = metadata_license is None or (
+        isinstance(metadata_license, str) and metadata_license.upper() in ("", "NOASSERTION", "OTHER")
+    )
+    if is_legacy and has_license_row and ctx.public and license_unknown:
         return existing  # missing metadata cannot disprove an authored license claim
     if existing and existing.strip() and not generated_badges(existing) and not is_legacy:
         return existing
@@ -1284,6 +1288,11 @@ LICENSE_MARK = "<!-- showcase:license -->"
 LICENSE_BODY_START = "<!-- showcase:license:body:start -->"
 LICENSE_BODY_END = "<!-- showcase:license:body:end -->"
 LICENSE_MARKERS = re.compile("|".join(map(re.escape, (LICENSE_MARK, LICENSE_BODY_START, LICENSE_BODY_END))))
+_LICENSE_BODY = re.compile(
+    re.escape(LICENSE_MARK) + r"\n<!-- showcase:license:sha256=([0-9a-f]{64}) -->\n"
+    + re.escape(LICENSE_BODY_START) + r"\n(.*?)\n" + re.escape(LICENSE_BODY_END),
+    re.S,
+)
 
 
 def license_sha(body: str) -> str:
@@ -1297,6 +1306,20 @@ def managed_license(body: str) -> str:
             f"{LICENSE_BODY_START}\n{body}\n{LICENSE_BODY_END}")
 
 
+def _owned_license_match(text: str, markers: list[re.Match]) -> re.Match | None:
+    if [match.group() for match in markers] != [LICENSE_MARK, LICENSE_BODY_START, LICENSE_BODY_END]:
+        return None
+    match = _LICENSE_BODY.match(text, markers[0].start())
+    if match and match.end() == markers[-1].end() and license_sha(match.group(2)) == match.group(1):
+        return match
+    return None
+
+
+def generated_license(text: str) -> bool:
+    source = normalize_line_endings(text)
+    return _owned_license_match(source, find_blocks(LICENSE_MARKERS, source)) is not None
+
+
 def license_block(ctx: RepoContext, text: str) -> str:
     """Refresh only an unambiguously bounded body with a matching digest."""
     markers = find_blocks(LICENSE_MARKERS, text)
@@ -1307,10 +1330,8 @@ def license_block(ctx: RepoContext, text: str) -> str:
     if not lic or any(code in ctx.logs for code in ("needs-input:license-policy", "needs-input:license-file",
                                                     "needs-input:licensing-file")):
         return text
-    pattern = (re.escape(LICENSE_MARK) + r"\n<!-- showcase:license:sha256=([0-9a-f]{64}) -->\n" +
-               re.escape(LICENSE_BODY_START) + r"\n(.*?)\n" + re.escape(LICENSE_BODY_END))
-    m = re.compile(pattern, re.S).match(text, i)
-    if not m or m.end() != markers[-1].end() or license_sha(m.group(2)) != m.group(1):
+    m = _owned_license_match(text, markers)
+    if m is None:
         return text
     text = text[:i] + managed_license(lic[1]) + text[m.end():]
     h = re.search(r"(?m)^## (?:License|Licensing|Licence)[ \t]*\n(\n?)\Z", text[:i])
@@ -1359,17 +1380,26 @@ def bootstrap_state(text: str) -> str:
     return "pristine" if marker.group(1) and marker.group(1) == body_sha(body) else "edited"
 
 
-def reseal_formatted_badges(text: str, before: list[re.Match], after: list[re.Match]) -> str | None:
-    """Refresh proven ownership digests after an equivalent Markdown format."""
+def reseal_formatted_badges(ctx: RepoContext, text: str, before: list[re.Match], after: list[re.Match]) -> str | None:
+    """Reseal generated badges and reject formatter changes that claim authored badges."""
+    def legacy(body: str) -> bool:
+        return _legacy_badge_body(ctx.brand, body, ctx.style,
+                                  ci_matches=lambda owner, repo: _legacy_ci_matches(ctx, owner, repo))
+
     parts = []
     offset = 0
     for original, formatted in zip(before, after, strict=True):
         if original.group(1) != "badges":
             continue
-        marker = GENERATED_BADGES.fullmatch(original.group(2))
+        original_body, formatted_body = original.group(2), formatted.group(2)
+        marker = GENERATED_BADGES.fullmatch(original_body)
         if marker is None or marker.group(1) != badge_sha(marker.group(3)):
+            if generated_badges(formatted_body):
+                return None
+            if original_body != formatted_body and legacy(formatted_body) and not legacy(original_body):
+                return None
             continue
-        candidate = GENERATED_BADGES.fullmatch(formatted.group(2))
+        candidate = GENERATED_BADGES.fullmatch(formatted_body)
         if candidate is None or candidate.group(1, 2) != marker.group(1, 2):
             return None
         start, end = candidate.span(1)

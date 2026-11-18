@@ -596,15 +596,21 @@ def cmd_readme(args):
         if [m.group(1) for m in before_blocks] != [m.group(1) for m in formatted_blocks]:
             raise ShowcaseError("formatter changed the README managed blocks", log="formatter-content",
                                 code=CHECK_FAILED)
-        formatted = readme.reseal_formatted_badges(formatted, before_blocks, formatted_blocks)
+        formatted = readme.reseal_formatted_badges(ctx, formatted, before_blocks, formatted_blocks)
         if formatted is None:
-            raise ShowcaseError("formatter changed the README badge ownership markers", log="formatter-content",
+            raise ShowcaseError("formatter changed the README badge ownership", log="formatter-content",
                                 code=CHECK_FAILED)
         if readme.bootstrap_state(after) == "pristine":
             formatted = readme.reseal_pristine(formatted)
             if formatted is None:
                 raise ShowcaseError("formatter changed the README template-body markers", log="formatter-content",
                                     code=CHECK_FAILED)
+        elif readme.bootstrap_state(formatted) == "pristine":
+            raise ShowcaseError("formatter changed the README template-body ownership", log="formatter-content",
+                                code=CHECK_FAILED)
+        if readme.generated_license(formatted) and not readme.generated_license(after):
+            raise ShowcaseError("formatter changed the README license ownership", log="formatter-content",
+                                code=CHECK_FAILED)
         after = formatted
         # Prettier can emit CRLF. Compare against the exact bytes used for the plan.
         if contrib_new is not None:

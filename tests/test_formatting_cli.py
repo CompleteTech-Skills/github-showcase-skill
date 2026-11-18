@@ -905,3 +905,41 @@ def test_formatted_profile_badges_remain_refreshable(tmp_path, monkeypatch, endi
     assert showcase.main([*args, "header"]) == 0
     assert not readme.generated_badges(badges())
     assert path.read_bytes() == authored
+
+
+@pytest.mark.parametrize("managed", ["badge-digest", "badge-legacy", "template-body", "license"])
+def test_formatter_cannot_restore_generator_ownership_of_authored_content(tmp_path, monkeypatch, capsys, managed):
+    import showcase
+    from ctshowcase import readme
+
+    repo, meta = target(tmp_path)
+    meta.write_text(json.dumps(meta_dict(repo=".github", language=None, license="MIT")), encoding="utf-8")
+    path = repo / "README.md"
+    records = tmp_path / "records.jsonl"
+    detail = "Synthetic authored wording."
+    badge = "![License MIT](https://img.shields.io/badge/license-MIT-64748B)"
+    if managed == "badge-digest":
+        stamp = f"<!-- showcase:badges:generated sha256={readme.badge_sha(badge)} -->"
+        managed_block = readme.wrap("badges", f"{stamp}\n {badge}")
+        detail = badge
+    elif managed == "badge-legacy":
+        managed_block = readme.wrap("badges", " " + badge)
+        detail = badge
+    elif managed == "template-body":
+        managed_block = readme.pristine_block(detail).replace("\n" + detail, "\n " + detail)
+    else:
+        managed_block = readme.managed_license(detail).replace("\n" + detail, "\n " + detail)
+    original = ("# Synthetic profile\n\n" + managed_block + "\n").encode("utf-8")
+    path.write_bytes(original)
+
+    def normalize_authored_indent(root, target, value):
+        assert "\n " + detail in value
+        return value.replace("\n " + detail, "\n" + detail)
+
+    monkeypatch.setattr("ctshowcase.formatting.format_text", normalize_authored_indent)
+    args = ["--meta", str(meta), "--repo-dir", str(repo), "readme", "--write", "--format-generated", "--mode",
+            "header", "--variant", "J", "--records", str(records)]
+    assert showcase.main(args) == 1
+    assert "formatter-content" in json.loads(capsys.readouterr().out)["logs"]
+    assert path.read_bytes() == original
+    assert not records.exists()

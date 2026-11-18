@@ -837,3 +837,12 @@ def test_legacy_runtime_badges_require_generated_version_shape(make_ctx, tmp_pat
         row = (f"![{language} {version}+](https://img.shields.io/badge/"
                f"{language.lower()}-{readme.shield(version + '+')}-1E3A8A?logo={logo}&logoColor=white)")
         assert readme.legacy_profile_badges(ctx.brand, row) is legacy
+
+
+def test_legacy_badge_with_malformed_license_uses_the_typed_error(make_ctx, tmp_path):
+    from ctshowcase.errors import NeedsInput
+
+    ctx = profile_context(make_ctx, tmp_path)
+    ctx.meta["license"] = 123
+    with pytest.raises(NeedsInput, match="license"):
+        readme.badge_body(ctx, PLAIN_MIT)
