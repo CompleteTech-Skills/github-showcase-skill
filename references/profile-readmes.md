@@ -166,7 +166,7 @@ README, badge, sidecar or change-record write. Put the managed markers on their 
 lines before retrying. Ordinary safe inline refreshes remain supported. The source
 check also compares Markdown visibility, headings and the local link inventory;
 literal Markdown inside a raw HTML block cannot become an active link or image.
-The comparison also protects hard breaks, bare URLs and email/mention syntax
+The comparison also protects hard breaks, math delimiters, bare URLs and email/mention syntax
 whose interpretation would change when moved out of raw HTML.
 The proof covers every authored line sharing the hero's original raw HTML block,
 including enclosing prefixes and later lines up to the parser's block boundary.

@@ -1628,7 +1628,7 @@ def _personal_context_views(text: str) -> tuple:
     from .content import extract_links
 
     markdown = _outside_code(text, mask_html=True, mask_autolinks=False)
-    syntax = list(re.sub(r"[^\[\]!*_~`#>@|\\]", " ", markdown))
+    syntax = list(re.sub(r"[^\[\]!*_~`#>@|\\$]", " ", markdown))
     # Plain prose may move out of raw HTML without changing its meaning. Keep
     # Markdown delimiters and line-start list/rule markers visible in the proof.
     for match in re.finditer(r"(?m)^ {0,3}(?:(?:[-+]|[0-9]{1,9}[.)])(?=[ \t])|(?:-[ \t]*){3,}(?=\n|$))", markdown):

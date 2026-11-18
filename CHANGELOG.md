@@ -43,6 +43,8 @@ All notable changes to `github-showcase-skill` are recorded here. Versions follo
 
 ### Fixed
 
+- Personal hero context proof retains math delimiters, preventing literal inline or block math inside raw HTML from becoming active Markdown. Four added CLI regressions and two formatter-ordering controls accompany independent native Prettier parsing probes.
+
 - Personal hero context proof now covers complete affected raw HTML regions, including later authored lines and markers already on separate lines. All covered line/link inventories and source bytes must retain their meaning, or generation refuses atomically; 30 new source-blind regressions exercise mixed endings, literal links/images, hard breaks, email links and safe controls.
 
 - Personal source-context protection runs before optional formatting, compares original Markdown visibility and active links/headings, and refuses activation of literal markup. In-place navigation ownership requires the exact generated row, so bold-formatted authored prose stays intact (#159).
