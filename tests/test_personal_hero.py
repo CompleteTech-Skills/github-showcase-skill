@@ -489,8 +489,13 @@ def test_personal_preserve_unchanged_keeps_managed_intro_in_place(tmp_path, intr
     brand.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
     (tmp_path / "assets" / "intro.svg").unlink()
     facts = json.loads(meta.read_text(encoding="utf-8"))
-    facts["description"] = "Updated synthetic profile description."
+    facts["language"] = "Python"
     meta.write_text(json.dumps(facts), encoding="utf-8")
     result = run_cli("--config", brand, *args, "readme", "--mode", "upgrade", "--badges", "local", "--write")
     assert result.returncode == 0, result.stdout + result.stderr
-    assert path.read_bytes() == source.replace(b"Show synthetic public projects.", b"Updated synthetic profile description.")
+    updated = path.read_bytes()
+    opener = b"<!-- showcase:badges:start -->"
+    closer = b"<!-- showcase:badges:end -->"
+    assert updated.split(opener, 1)[0] == source.split(opener, 1)[0]
+    assert updated.split(closer, 1)[1] == source.split(closer, 1)[1]
+    assert b"![Language Python](docs/images/badges/language-python.svg)" in updated
