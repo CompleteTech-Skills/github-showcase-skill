@@ -159,6 +159,15 @@ the command refuses atomically with `needs-input:intro-order`; put the managed m
 on their own lines before retrying.
 Scaffold uses the CLI's already-normalized view and retains an authored U+FEFF prefix
 before the new header when migrating a lone managed hero.
+For an inline managed hero, a uniquely matched authored suffix keeps its exact source
+line ending. A refresh that would move the authored prefix, reinterpret adjacent text
+as code, or lose its exact source seam returns `needs-input:intro-order` before any
+README, badge, sidecar or change-record write. Put the managed markers on their own
+lines before retrying. Ordinary safe inline refreshes remain supported.
+Artwork visibility is determined in the original document before excluding managed
+ranges: removing a nav block cannot turn literal Markdown inside HTML into artwork,
+or hide an authored inline HTML image. In-place personal refreshes retain nonstandard
+prose inside navigation markers; the generated bold-label navigation row can refresh.
 Images inside HTML comments do not count as authored heroes or badges; the README
 still needs its applicable intro or an actionable missing-input result.
 Personal scaffolding retains the authored body's blank separators, including

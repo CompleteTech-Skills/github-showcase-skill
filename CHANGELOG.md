@@ -41,6 +41,7 @@ All notable changes to `github-showcase-skill` are recorded here. Versions follo
 
 ### Fixed
 
+- Personal hero refresh checks authored inline seams before writing: safe source spans retain exact mixed line endings, while a moved prefix or prose-to-code change refuses atomically with `needs-input:intro-order`. Artwork visibility is parsed in the original document before excluding managed ranges, and in-place personal refresh preserves nonstandard navigation prose. Additive offline CLI controls cover whitespace, BOM, HTML, comments, code and no-write refusals (#159).
 - Personal scaffolding retains the complete authored U+FEFF/space/tab prefix before the hero, preserving the adjacent suffix's prose/link context. Header-order lint accepts that nonprinting prefix without ignoring visible authored preambles. G/H callouts stay after the hero; an unsafe inline insertion refuses atomically (#159).
 - Personal scaffolding removes the owned hero in its original source context before separating an authored U+FEFF prefix. Indentation after that prefix no longer leaves a second legacy banner and a broken image reference (#159).
 - Personal scaffolding normalizes the encoding BOM once and retains authored U+FEFF prefixes before a replacement header, including when migrating a lone managed hero (#159).

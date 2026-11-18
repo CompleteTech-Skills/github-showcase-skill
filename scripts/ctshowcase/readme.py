@@ -19,7 +19,7 @@ from .context import RepoContext
 from .detect import required_sections, standard
 from .errors import ArtFail, ConfigError, NeedsInput
 from .mdcode import (  # noqa: F401  (code_spans: re-exported for callers)
-    MANAGED_BLOCK_PATTERN, _image_entries, _outside_code, after_line_end, code_block_spans, code_spans, find_blocks,
+    MANAGED_BLOCK_PATTERN, _image_entries, _image_entries_at, _outside_code, after_line_end, code_block_spans, code_spans, find_blocks,
     html_block_spans, masked, top_level_heading_spans,
 )
 
@@ -815,10 +815,18 @@ def leading_banner_block(text: str, *, personal: bool = False) -> re.Match | Non
 
 
 def _personal_preamble_has_art(text: str) -> bool:
-    unmarked, _ = _strip_markers(text)
-    end = personal_header_end(unmarked)
-    return any(not _badge_or_logo(source, personal=True)
-               for _, source, _ in _image_entries(_outside_code(unmarked)[:end], unmarked))
+    # Classify visibility in the original document. Deleting marker blocks first
+    # can open an HTML block or turn an inline image into indented literal text.
+    markers = find_blocks(MARK, text)
+    starts = [marker.start() for marker in markers]
+    end = personal_header_end(text)
+    for offset, (_, source, _) in _image_entries_at(_outside_code(text)[:end], text):
+        index = bisect_right(starts, offset) - 1
+        if index >= 0 and offset < markers[index].end():
+            continue
+        if not _badge_or_logo(source, personal=True):
+            return True
+    return False
 
 
 def _personal_has_authored_hero(ctx: RepoContext, text: str, markers: list[re.Match]) -> bool:
@@ -1572,6 +1580,11 @@ def header_only(ctx: RepoContext, text: str, *, already_normalized: bool = False
             return m.group(0)  # G/H upgrades leave the other blocks as authored body.
         if b == "footer" and personal and not is_footer_copy(body, ctx.brand):
             return m.group(0)
+        if b == "nav" and personal and preserve_structure and body.strip():
+            # An in-place refresh must not erase prose merely wrapped in nav
+            # markers. The generated navigation is one bold-label/link row.
+            if not re.fullmatch(r"\*\*[^*\n]+\*\* · [^\n]+", body.strip("\n")):
+                return m.group(0)
         if b == "badges" and (preserve_structure or ctx.det["variant"] == "J"):
             fresh = badge_body(ctx, body)
             return m.group(0) if fresh == body else wrap(b, fresh)
@@ -1608,6 +1621,69 @@ def _source_offset_mapper(original: str, *, strip_bom: bool = True):
     def source_offset(index):
         return index + bom + bisect_left(dropped, index)
     return source_offset
+
+
+def personal_hero_source_spans(ctx: RepoContext, before: str, after: str) -> list[tuple[int, int, int, int]]:
+    """Prove unchanged inline seams in normalized text before restoring source bytes."""
+    old = [block for block in find_blocks(MARK, before)
+           if block.group(1) == "banner" and personal_generated_hero(ctx, block.group(2))
+           and not _block_on_separate_lines(before, block)]
+    current = [block for block in find_blocks(MARK, after) if block.group(1) == "banner"]
+    if len(old) != 1 or len(current) != 1:
+        return []
+    block = old[0]
+    if before[:block.start()] != after[:current[0].start()]:
+        return []
+    spans = [(0, block.start(), 0, block.start())] if block.start() else []
+    end = before.find("\n", block.end())
+    end = end + 1 if end >= 0 else len(before)
+    seam = before[block.end():end]
+    if seam.strip(" \t\n") and after.count(seam) == 1:
+        start = after.find(seam)
+        if (start >= current[0].end()
+                and _outside_code(before)[block.end():end] == _outside_code(after)[start:start + len(seam)]):
+            spans.append((start, start + len(seam), block.end(), end))
+    return spans
+
+
+def guard_personal_hero_context(ctx: RepoContext, original: str, updated: str, *, already_normalized: bool = False) -> None:
+    """Refuse an owned inline hero edit that changes an authored source seam."""
+    if original == updated:
+        return
+    before = original if already_normalized else normalize_text(original)
+    after = updated if already_normalized else normalize_text(updated)
+    inline = [block for block in find_blocks(MARK, before)
+              if block.group(1) == "banner" and personal_generated_hero(ctx, block.group(2))
+              and not _block_on_separate_lines(before, block)]
+    if not inline:
+        return
+    current = [block for block in find_blocks(MARK, after) if block.group(1) == "banner"]
+    old_offset = _source_offset_mapper(original, strip_bom=not already_normalized)
+    new_offset = _source_offset_mapper(updated, strip_bom=not already_normalized)
+    old_view, new_view = _outside_code(before), _outside_code(after)
+
+    def signatures(raw: str, view: str, fragment: str) -> Counter:
+        # Exact bytes include the authored line ending. Compare every occurrence,
+        # so an identical line elsewhere cannot hide a lost or reinterpreted seam.
+        width = len(normalize_line_endings(fragment))
+        result = Counter()
+        for match in re.finditer(re.escape(fragment), raw):
+            prefix = raw[:match.start()]
+            start = len(prefix if already_normalized else normalize_text(prefix))
+            result[view[start:start + width]] += 1
+        return result
+
+    for block in inline:
+        prefix = original[:old_offset(block.start())]
+        if len(current) != 1 or updated[:new_offset(current[0].start())] != prefix:
+            raise NeedsInput("intro-order", "Put the managed personal hero markers on their own lines before "
+                             "a refresh that would move the authored prefix.")
+        tail = original[old_offset(block.end()):]
+        ending = re.search(r"\r\n|[\r\n]", tail)
+        seam = tail[:ending.end()] if ending else tail
+        if seam.strip(" \t\r\n") and signatures(original, old_view, seam) != signatures(updated, new_view, seam):
+            raise NeedsInput("intro-order", "Put the managed personal hero markers on their own lines before "
+                             "a refresh that would change adjacent authored text or its line ending.")
 
 
 def _replace_blocks_in_source(original: str, normalized: str, sub) -> str:

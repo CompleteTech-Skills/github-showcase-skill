@@ -694,6 +694,8 @@ def cmd_readme(args):
             after = readme.header_only(ctx, before, already_normalized=True)
         else:
             after, removed = readme.upgrade(ctx, before, already_normalized=True, source_spans=source_spans)
+            if personal and not args.format_generated:
+                readme.guard_personal_hero_context(ctx, before, after, already_normalized=True)
             problems = preservation(before, after, removed)
             if problems:
                 return base("readme", ctx, result="fail", mode=mode, problems=problems[:20],
@@ -753,9 +755,13 @@ def cmd_readme(args):
         restored = after
     elif after != before:
         bom = readme.BOM if raw.startswith(readme.BOM) else ""
+        if personal and not source_spans:
+            source_spans = readme.personal_hero_source_spans(ctx, before, after)
         restored = bom + readme.restore_line_endings(raw, before, after, source_spans=source_spans)
     else:
         restored = raw
+    if personal and not args.format_generated:
+        readme.guard_personal_hero_context(ctx, raw, restored)
     changed = restored != raw
     badge_outputs = {}
     if getattr(ctx, "badge_files", None):
