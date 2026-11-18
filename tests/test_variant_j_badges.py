@@ -745,6 +745,28 @@ def test_header_keeps_same_line_authored_badge_markers(make_ctx, tmp_path):
 
 
 
+@pytest.mark.parametrize("edge", ["opening", "closing"])
+@pytest.mark.parametrize("ending", ["\n", "\r\n", "\r"])
+def test_upgrade_preserves_authored_prose_on_multiline_badge_boundaries(make_ctx, tmp_path, edge, ending):
+    ctx = profile_context(make_ctx, tmp_path)
+    before = readme.scaffold(ctx)
+    authored = "![Community](docs/images/badges/custom.svg)\n![License](docs/images/badges/hand-written.svg)"
+    managed = readme.wrap("badges", authored)
+    adjoining = ("Authored before " + managed if edge == "opening"
+                 else managed + " Authored warning: never overwrite docs/images/banner.png.")
+    before = before.replace(readme.wrap("badges", badge_block(before)), adjoining)
+    original = before.replace("\n", ending).encode("utf-8")
+    path = tmp_path / "README.md"
+    path.write_bytes(original)
+
+    profile_cli(ctx, tmp_path, "readme", "--mode", "upgrade", "--write")
+    written = path.read_bytes()
+    assert adjoining.replace("\n", ending).encode("utf-8") in written
+    retry = profile_cli(ctx, tmp_path, "readme", "--mode", "upgrade", "--write")
+    assert retry["result"] == "unchanged"
+    assert path.read_bytes() == written
+
+
 @pytest.mark.parametrize("mode", ["header", "upgrade"])
 def test_variant_j_preserves_foreign_profile_workflow_badge(make_ctx, tmp_path, mode):
     ctx = profile_context(make_ctx, tmp_path)

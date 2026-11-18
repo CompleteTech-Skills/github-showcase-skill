@@ -591,9 +591,14 @@ def cmd_readme(args):
         from ctshowcase.formatting import format_text, markdown_source_style
         encoding_bom = "\ufeff" if raw.startswith("\ufeff") else ""
         formatted = format_text(rd, path, encoding_bom + markdown_source_style(after, raw))
-        markers = [m.group(1) for m in readme.find_blocks(readme.MARK, after)]
-        if markers != [m.group(1) for m in readme.find_blocks(readme.MARK, formatted)]:
+        before_blocks = readme.find_blocks(readme.MARK, after)
+        formatted_blocks = readme.find_blocks(readme.MARK, formatted)
+        if [m.group(1) for m in before_blocks] != [m.group(1) for m in formatted_blocks]:
             raise ShowcaseError("formatter changed the README managed blocks", log="formatter-content",
+                                code=CHECK_FAILED)
+        formatted = readme.reseal_formatted_badges(formatted, before_blocks, formatted_blocks)
+        if formatted is None:
+            raise ShowcaseError("formatter changed the README badge ownership markers", log="formatter-content",
                                 code=CHECK_FAILED)
         if readme.bootstrap_state(after) == "pristine":
             formatted = readme.reseal_pristine(formatted)

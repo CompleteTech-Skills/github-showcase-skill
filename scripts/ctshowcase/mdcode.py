@@ -999,7 +999,7 @@ def masked(text: str) -> str:
     return "".join(out)
 
 
-MANAGED_BLOCK_PATTERN = re.compile(r"<!-- showcase:([a-z-]+):start -->\n?(.*?)\n?<!-- showcase:\1:end -->", re.S)
+MANAGED_BLOCK_PATTERN = re.compile(rf"<!-- showcase:([a-z-]+):start -->{LINE_END}?(.*?){LINE_END}?<!-- showcase:\1:end -->", re.S)
 _MANAGED_DELIMITER = re.compile(r"<!-- showcase:([a-z-]+):(start|end) -->")
 
 

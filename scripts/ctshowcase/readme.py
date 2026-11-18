@@ -20,7 +20,7 @@ MARK = MANAGED_BLOCK_PATTERN
 EMOJI = re.compile("[\U0001F000-\U0001FAFF☀-➿⬀-⯿️‍]")
 SHIELDS = "https://img.shields.io/badge/"
 GENERATED_BADGES = re.compile(r"<!-- showcase:badges:generated sha256=([0-9a-f]{64})"
-                              r"(?: replaces=([0-9a-f]{64}))? -->\r?\n(.*)", re.S)
+                              r"(?: replaces=([0-9a-f]{64}))? -->(?:\r\n|\r|\n)(.*)", re.S)
 BOM = "\ufeff"
 
 
@@ -984,9 +984,17 @@ def _unreemitted(lines: list[str], kept: Counter) -> list[str]:
     return out
 
 
-def _badge_blocks_need_in_place_refresh(markers: list[re.Match]) -> bool:
+def _block_on_separate_lines(text: str, block: re.Match) -> bool:
+    starts_line = block.start() == 0 or text[block.start() - 1] == "\n"
+    ends_line = text[block.end():block.end() + 1] in ("", "\n")
+    return starts_line and ends_line
+
+
+def _badge_blocks_need_in_place_refresh(text: str, markers: list[re.Match]) -> bool:
     badges = [m for m in markers if m.group(1) == "badges"]
-    return len(badges) > 1 or any(m.group(0) != wrap("badges", m.group(2)) for m in badges)
+    return len(badges) > 1 or any(
+        not _block_on_separate_lines(text, m) or m.group(0) != wrap("badges", m.group(2)) for m in badges
+    )
 
 
 def upgrade(ctx: RepoContext, text: str, *, already_normalized: bool = False) -> tuple[str, list[str]]:
@@ -997,7 +1005,7 @@ def upgrade(ctx: RepoContext, text: str, *, already_normalized: bool = False) ->
     rv = standard("readme-variants")
     if variant in ("G", "H"):
         return callout_only(ctx, text)
-    if variant == "J" and _badge_blocks_need_in_place_refresh(find_blocks(MARK, text)):
+    if variant == "J" and _badge_blocks_need_in_place_refresh(text, find_blocks(MARK, text)):
         return header_only(ctx, text, already_normalized=True), []
     body, blocks = _strip_markers(text)
     want_footer = footer_wanted(ctx)
@@ -1317,7 +1325,7 @@ def badge_sha(body: str) -> str:
     (four leading spaces make an indented code block) and normalises only line endings and the marker's
     separator newlines."""
     import hashlib
-    return hashlib.sha256(body.replace("\r\n", "\n").strip("\n").encode("utf-8")).hexdigest()
+    return hashlib.sha256(normalize_line_endings(body).strip("\n").encode("utf-8")).hexdigest()
 
 
 def pristine_block(body: str) -> str:
@@ -1343,6 +1351,27 @@ def bootstrap_state(text: str) -> str:
         return "none"
     body = text[marker.end():block.end(2)]
     return "pristine" if marker.group(1) and marker.group(1) == body_sha(body) else "edited"
+
+
+def reseal_formatted_badges(text: str, before: list[re.Match], after: list[re.Match]) -> str | None:
+    """Refresh proven ownership digests after an equivalent Markdown format."""
+    parts = []
+    offset = 0
+    for original, formatted in zip(before, after, strict=True):
+        if original.group(1) != "badges":
+            continue
+        marker = GENERATED_BADGES.fullmatch(original.group(2))
+        if marker is None or marker.group(1) != badge_sha(marker.group(3)):
+            continue
+        candidate = GENERATED_BADGES.fullmatch(formatted.group(2))
+        if candidate is None or candidate.group(1, 2) != marker.group(1, 2):
+            return None
+        start, end = candidate.span(1)
+        body_start = formatted.start(2)
+        parts.extend((text[offset:body_start + start], badge_sha(candidate.group(3))))
+        offset = body_start + end
+    parts.append(text[offset:])
+    return "".join(parts)
 
 
 def reseal_pristine(text: str) -> str | None:
@@ -1382,8 +1411,7 @@ def _header_region(text: str) -> tuple[int, list[re.Match], str | None] | None:
         name = block.group(1)
         if name not in {"banner", "nav", "badges", "tagline"} or name in seen:
             return None
-        if ((block.start() and text[block.start() - 1] != "\n")
-                or text[block.end():block.end() + 1] != "\n"):
+        if not _block_on_separate_lines(text, block):
             return None
         seen.add(name)
         blocks.append(block)
@@ -1434,7 +1462,7 @@ def bootstrap(ctx: RepoContext, text: str, *, already_normalized: bool = False) 
         auto = cased_title(ctx.repo, ctx.meta.get("description") or "")
         if old_title is None or old_title.strip() in (TEMPLATE_H1, auto, slug_title(ctx.repo)):
             # Carry an authored tagline forward under the same rule as an in-place refresh.
-            if variant == "J" and _badge_blocks_need_in_place_refresh(markers):
+            if variant == "J" and _badge_blocks_need_in_place_refresh(text, markers):
                 return header_only(ctx, text, already_normalized=True)
             blocks = {marker.group(1): marker.group(2) for marker in markers}
             old = blocks["tagline"]
