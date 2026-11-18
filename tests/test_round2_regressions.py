@@ -216,6 +216,54 @@ def test_action_prepare_foreign_and_drop(tmp_path):
     assert not (img / "banner.png").exists() and list(side["outputs"]) == ["card.svg"]
 
 
+@pytest.mark.parametrize("change", ["unrelated-record", "replaced-file", "live-record", "staged-record", "already-staged"])
+def test_action_removes_only_the_observed_foreign_artifact(tmp_path, change):
+    images = tmp_path / "docs/images"
+    images.mkdir(parents=True)
+    path = images / "banner.png"
+    sidecar = images / ".showcase.json"
+    data = {"inputs": {"owner": "Northwind-Trading", "repo": "template", "type": "template"},
+            "outputs": {"banner.png": {}, "card.svg": {}}}
+    staged = {"staged_description": {"text": "A proposed sentence."}}
+    if change == "already-staged":
+        data["outputs"]["banner.png"] = staged
+    sidecar.write_text(json.dumps(data), encoding="utf-8")
+    path.write_bytes(b"copied image")
+    helper = [sys.executable, str(ROOT / "scripts/action_prepare.py")]
+
+    def command(*args):
+        result = subprocess.run([*helper, *args], cwd=tmp_path, check=True, capture_output=True, text=True)
+        return result.stdout.strip()
+
+    key = command("foreign-key", "Northwind-Trading/project", path.name)
+    if change == "already-staged":
+        assert not key
+        command("drop", path.name)
+        assert path.read_bytes() == b"copied image" and json.loads(sidecar.read_bytes()) == data
+        return
+    assert len(key) == 64
+    if change == "unrelated-record":
+        # A different artifact can finish rendering and update summary metadata.
+        data["inputs"]["type"] = "workspace"
+        data["outputs"]["card.svg"] = {"description_sha256": "a" * 64}
+    elif change == "replaced-file":
+        path.write_bytes(b"current image")
+    elif change == "live-record":
+        data["outputs"]["banner.png"] = {"repository_id": "42"}
+    else:
+        data["outputs"]["banner.png"] = staged
+    sidecar.write_text(json.dumps(data), encoding="utf-8")
+    before = (path.read_bytes(), sidecar.read_bytes())
+
+    dropped = command("drop", path.name, key)
+    if change == "unrelated-record":
+        assert dropped == "true" and not path.exists()
+        assert json.loads(sidecar.read_bytes())["outputs"] == {"card.svg": data["outputs"]["card.svg"]}
+    else:
+        assert dropped == "false"
+        assert (path.read_bytes(), sidecar.read_bytes()) == before
+
+
 def test_action_treats_exempt_like_a_skip():
     s = (ROOT / "action.yml").read_text()
     assert '"$result" = "exempt"' in s and "--allow-few-chips" in s and "allow-unmeasured" in s

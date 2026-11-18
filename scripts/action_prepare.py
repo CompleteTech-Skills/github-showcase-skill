@@ -7,10 +7,12 @@
                                          whose sha256 is the one that sidecar recorded). A sidecar that only names
                                          another slug (a rename or transfer) prints "false" and keeps every file.
   action_prepare.py foreign OWNER/REPO NAME  check a canonical banner or card without removing the icon
+  action_prepare.py foreign-key OWNER/REPO NAME  capture the exact foreign art and record before rendering
   action_prepare.py staged             report whether local output still carries a staged proposal
   action_prepare.py staged-index       check staged sidecar blobs before a grouped Git commit
   action_prepare.py commit-index MODE INDEX SNAPSHOT REF MESSAGE [PATH...]  check an index copy and commit its tree
   action_prepare.py drop NAME            remove docs/images/NAME and its sidecar record (the sidecar too when empty)
+  action_prepare.py drop NAME KEY        remove the foreign art only if the captured file and record still match
   action_prepare.py summary META_JSON    append the describe and topics proposals to $GITHUB_STEP_SUMMARY
 """
 from __future__ import annotations
@@ -30,7 +32,10 @@ from tempfile import TemporaryFile
 # Keep direct and runpy entry points equivalent when the caller's CWD is a target checkout.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from ctshowcase.fingerprint import ART_NAMES, output_records, read_sidecar, replace_bytes, sidecar_lock  # noqa: E402
+from ctshowcase.config import canonical  # noqa: E402
+from ctshowcase.fingerprint import (  # noqa: E402
+    ART_NAMES, file_record, output_records, read_sidecar, replace_bytes, sidecar_lock,
+)
 
 IMAGES = Path("docs/images")
 SIDECAR = IMAGES / ".showcase.json"
@@ -49,19 +54,21 @@ def _recorded_ids(data: dict) -> set[str]:
             and record.get("repository_id") is not None}
 
 
-def foreign(full_name: str, artifact: str | None = None) -> bool:
+def foreign(full_name: str, artifact: str | None = None, *, data: dict | None = None) -> bool:
     """True only when the art provably came from another repository; then a copied icon is removed (decision 12).
 
     Proof is a template's sidecar (its recorded type is `template`, or it names the template repository) or a recorded
     repository id other than $GITHUB_REPOSITORY_ID. A sidecar that only names another slug is this repository's own
     art after a rename, a transfer or an org rename (the slug is not an identity): nothing is removed and the
     fingerprint, which changed with the slug, regenerates it. A template repository is never foreign to itself."""
-    data = _sidecar()
+    data = _sidecar() if data is None else data
     if os.environ.get("SHOWCASE_IS_TEMPLATE") == "true":
         return False
     rid = (os.environ.get("GITHUB_REPOSITORY_ID") or "").strip()
     if artifact is not None:
         record = output_records(data).get(artifact)
+        if isinstance(record, dict) and "staged_description" in record:
+            return False
         if rid and isinstance(record, dict) and not record.get("exempt"):
             artifact_id = record.get("repository_id")
             if artifact_id is not None:
@@ -339,14 +346,40 @@ def prepare_commit_index(index: Path, snapshot: Path, ref: str, message: str, pa
             lock.unlink(missing_ok=True)
 
 
-def drop(name: str) -> None:
+def _drop_key(name: str, data: dict) -> str | None:
+    """Identify the file and per-artifact record while their shared lock is held."""
+    path = IMAGES / name
+    outputs = data.get("outputs", {})
+    if not isinstance(outputs, dict) or (not data and (SIDECAR.exists() or SIDECAR.is_symlink())):
+        return None
+    record = outputs.get(name)
+    if name in outputs and (not isinstance(record, dict) or "staged_description" in record):
+        return None
+    if path.is_symlink() or (path.exists() and not path.is_file()):
+        return None
+    if name not in outputs and not path.is_file():
+        return None
+    identity = [name, file_record(path) if path.is_file() else None, record]
+    return hashlib.sha256(canonical(identity).encode("utf-8")).hexdigest()
+
+
+def foreign_key(full_name: str, name: str) -> str | None:
     with sidecar_lock(SIDECAR):
+        data = _sidecar()
+        return _drop_key(name, data) if foreign(full_name, name, data=data) else None
+
+
+def drop(name: str, expected: str | None = None) -> bool:
+    with sidecar_lock(SIDECAR):
+        data = _sidecar()
+        observed = _drop_key(name, data)
+        if observed is None or (expected is not None and observed != expected):
+            return False
         p = IMAGES / name
         if p.is_file():
             p.unlink()
-        data = _sidecar()
         if not data:
-            return
+            return True
         outs = dict(output_records(data))
         outs.pop(name, None)
         if outs:
@@ -354,6 +387,7 @@ def drop(name: str) -> None:
             replace_bytes(SIDECAR, (json.dumps(data, sort_keys=True, indent=1, ensure_ascii=False) + "\n").encode("utf-8"))
         else:
             SIDECAR.unlink()
+        return True
 
 
 def summary(meta: str) -> None:
@@ -409,12 +443,17 @@ if __name__ == "__main__":
     if sys.argv[1:] in (["staged-index"], ["staged-index", "icon-removal"]):
         print("true" if has_staged_index(allow_icon_removal=len(sys.argv) == 3) else "false")
         sys.exit(0)
-    if not (len(sys.argv) == 3 and sys.argv[1] in ("foreign", "drop", "summary")
-            or len(sys.argv) == 4 and sys.argv[1] == "foreign" and sys.argv[3] in ART_NAMES):
+    if not (len(sys.argv) == 3 and sys.argv[1] in ("foreign", "summary")
+            or len(sys.argv) in (3, 4) and sys.argv[1] == "drop" and sys.argv[2] in ART_NAMES
+            or len(sys.argv) == 4 and sys.argv[1] in ("foreign", "foreign-key") and sys.argv[3] in ART_NAMES):
         sys.exit(__doc__)
     if sys.argv[1] == "foreign":
         print("true" if foreign(*sys.argv[2:]) else "false")
+    elif sys.argv[1] == "foreign-key":
+        print(foreign_key(*sys.argv[2:]) or "")
     elif sys.argv[1] == "drop":
-        drop(sys.argv[2])
+        dropped = drop(*sys.argv[2:])
+        if len(sys.argv) == 4:
+            print("true" if dropped else "false")
     else:
         summary(sys.argv[2])

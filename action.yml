@@ -129,8 +129,8 @@ runs:
         # Only proof counts (a template's sidecar, or another repository id than GITHUB_REPOSITORY_ID): after a
         # rename or transfer the art and assets/icon.png are this repository's own and are kept.
         "${P[@]}" foreign "$GITHUB_REPOSITORY" > /dev/null
-        foreign_banner="$("${P[@]}" foreign "$GITHUB_REPOSITORY" banner.png)"
-        foreign_card="$("${P[@]}" foreign "$GITHUB_REPOSITORY" card.svg)"
+        foreign_banner="$("${P[@]}" foreign-key "$GITHUB_REPOSITORY" banner.png)"
+        foreign_card="$("${P[@]}" foreign-key "$GITHUB_REPOSITORY" card.svg)"
         # Exit 4 (needs-input: no description yet, a palette awaiting ct-std-v1.1), exit 2 (a family on hold) and
         # an "exempt" result are expected states, not failures: annotate, skip that output, keep the run green.
         skipped=0
@@ -147,9 +147,10 @@ runs:
           if [ "$rc" -eq 4 ] || [ "$rc" -eq 2 ] || [ "$result" = "exempt" ]; then
             echo "::warning title=CompleteTech Showcase::$kind skipped: $(python -c 'import json,sys;d=json.load(open(sys.argv[1]));print(d.get("error") or " ".join(d.get("logs") or []))' "$RUNNER_TEMP/art.json" 2>/dev/null)"
             skipped=1
-            if [ "$foreign" = "true" ]; then
-              "${P[@]}" drop "$file"
-              echo "::notice title=CompleteTech Showcase::removed the template's $file until this repository's own can be generated"
+            if [ -n "$foreign" ]; then
+              if [ "$("${P[@]}" drop "$file" "$foreign")" = "true" ]; then
+                echo "::notice title=CompleteTech Showcase::removed the template's $file until this repository's own can be generated"
+              fi
             fi
             return 0
           fi
