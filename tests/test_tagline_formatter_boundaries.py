@@ -273,8 +273,9 @@ def test_tagline_wrap_preserves_backslash_hard_break_parity(slashes):
     assert tagline.reseal(original, f"{stamp}\n{wrapped}") == (receipt(wrapped) if slashes % 2 == 0 else None)
 
 
-def test_markdown_tagline_can_requote_a_link_title_without_editing_it():
-    original_text = "Inspect [the guide](<docs/guide.md> 'Keep two  spaces') before publishing."
+@pytest.mark.parametrize("title", ["'Keep two  spaces'", "(Keep two  spaces)", '"Keep two  spaces"'])
+def test_markdown_tagline_can_requote_a_link_title_without_editing_it(title):
+    original_text = f"Inspect [the guide]( <docs/guide.md>   {title} ) before publishing."
     updated_text = 'Inspect [the guide](docs/guide.md "Keep two  spaces")\nbefore publishing.'
     original = receipt(f"**{original_text}**")
     updated = f"**{updated_text}**"
@@ -302,3 +303,40 @@ def test_a_literal_link_destination_cannot_be_reclassified_as_wrapped_prose(tmp_
     write_source(repo, receipt(edited), "\n")
     assert R2 in lint_report(repo, meta)["fails"]
     assert tagline.reseal(original, f"{stamp}\n{edited}") is None
+
+
+def test_tagline_wrap_keeps_an_opening_inline_tag_in_its_markdown_context(tmp_path):
+    repo, meta = target(tmp_path)
+    description = "<span> word here</span>"
+    original = receipt(f"**{description}**")
+    stamp = original.split("\n", 1)[0]
+    wrapped = "**<span>\nword here</span>**"
+    write_meta(meta, description)
+    write_source(repo, receipt(wrapped), "\n")
+    assert R2 not in lint_report(repo, meta)["fails"]
+    assert tagline.reseal(original, f"{stamp}\n{wrapped}") == receipt(wrapped)
+
+
+def test_indented_paragraph_continuation_is_not_an_indented_code_block():
+    description = "Read the published guide together."
+    original = receipt(f"**{description}**")
+    stamp = original.split("\n", 1)[0]
+    wrapped = "**Read the published\n    guide together.**"
+    separated = wrapped.replace("\n", "\n\n")
+    assert tagline.matches_description(receipt(wrapped), description)
+    assert tagline.reseal(original, f"{stamp}\n{wrapped}") == receipt(wrapped)
+    assert not tagline.matches_description(receipt(separated), description)
+
+
+@pytest.mark.parametrize("before,after", [
+    ('<> "details"', ' "details"'),
+    ('<docs/guide "details">', 'docs/guide "details"'),
+])
+def test_a_link_title_cannot_be_equated_with_part_of_the_target(before, after):
+    description = f"Read [guide]({before})."
+    original = receipt(f"**{description}**")
+    stamp = original.split("\n", 1)[0]
+    changed = f"**Read [guide]({after}).**"
+    assert tagline.matches_description(original, description)
+    assert not tagline.matches_description(receipt(changed), description)
+    assert tagline.reseal(original, f"{stamp}\n{changed}") is None
