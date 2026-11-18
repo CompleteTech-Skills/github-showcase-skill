@@ -386,6 +386,22 @@ def _recorded_tagline_digests(record: dict) -> set[str]:
     return digests
 
 
+def recorded_tagline(ctx, body: str) -> bool:
+    """Recognize an exact formatter-produced body with description provenance."""
+    checkout = ctx.repo_dir
+    if checkout is None:
+        return False
+    record = _readme_record(ctx, checkout / "README.md")
+    if tagline_digest(body.strip()) not in _recorded_tagline_digests(record):
+        return False
+    proposal = record.get("staged_description")
+    if isinstance(proposal, dict):
+        text = proposal.get("text")
+        return isinstance(text, str) and tagline_digest(text) == proposal.get("sha256")
+    description_digest = record.get("description_sha256")
+    return isinstance(description_digest, str) and re.fullmatch(r"[0-9a-f]{64}", description_digest) is not None
+
+
 def _matches_staged_readme(ctx, blocks: list[str], path: Path | None, record: dict) -> bool:
     info = record.get("staged_description")
     proposal = info.get("text") if isinstance(info, dict) else None
