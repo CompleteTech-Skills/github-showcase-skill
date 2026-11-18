@@ -69,7 +69,10 @@ def _rendered_unit(value: str) -> tuple[str, str] | None:
                 and inline_regions(value) == ((0, len(value)),)):
             return "markdown", inner
         return None
-    match = re.fullmatch(r'<p align="center">[ \t\n]*<b>(.*?)</b>[ \t\n]*</p>', value, re.S)
+    # One wrapper newline stays inside the HTML block; a blank line can end it
+    # and expose the remaining text to Markdown parsing.
+    margin = r"[ \t]*(?:\n[ \t]*)?"
+    match = re.fullmatch(rf'<p align="center">{margin}<b>(.*?)</b>{margin}</p>', value, re.S)
     return ("html", match.group(1)) if match is not None else None
 
 
@@ -85,7 +88,10 @@ def matches_description(body: str, description: str) -> bool:
     from .mdcode import tagline_reflow_key
 
     unit = _rendered_unit(value)
-    return unit is not None and tagline_reflow_key(unit[1]) == tagline_reflow_key(description)
+    if unit is None:
+        return False
+    markdown = unit[0] == "markdown"
+    return tagline_reflow_key(unit[1], markdown=markdown) == tagline_reflow_key(description, markdown=markdown)
 
 
 def reseal(original: str, formatted: str) -> str | None:
@@ -107,8 +113,10 @@ def reseal(original: str, formatted: str) -> str | None:
 
         old_unit = _rendered_unit(_visible_payload(before.group(2)))
         new_unit = _rendered_unit(_visible_payload(after.group(2)))
-        if (old_unit is None or new_unit is None or old_unit[0] != new_unit[0]
-                or tagline_reflow_key(old_unit[1]) != tagline_reflow_key(new_unit[1])):
+        if old_unit is None or new_unit is None or old_unit[0] != new_unit[0]:
+            return None
+        markdown = old_unit[0] == "markdown"
+        if tagline_reflow_key(old_unit[1], markdown=markdown) != tagline_reflow_key(new_unit[1], markdown=markdown):
             return None
     # Replace only the digest in the original transport representation.
     start = formatted.index("sha256=") + len("sha256=")

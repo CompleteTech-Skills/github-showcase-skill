@@ -245,3 +245,45 @@ def test_centered_tagline_retains_paragraph_after_hard_break(hard_break, paragra
     assert tagline.matches_description(original, description)
     assert not tagline.matches_description(original, changed)
     assert tagline.reseal(original, f"{stamp}\n{wrapper.format(changed)}") is None
+
+
+@pytest.mark.parametrize("edge", ["open", "close"])
+def test_centered_tagline_rejects_blank_wrapper_lines(edge):
+    description = "Follow *the instructions* today."
+    original_payload = f'<p align="center"><b>{description}</b></p>'
+    original = receipt(original_payload)
+    stamp = original.split("\n", 1)[0]
+    before, after = ('center">', "<b>") if edge == "open" else ("</b>", "</p>")
+    control = original_payload.replace(before + after, before + "\n  " + after)
+    changed = original_payload.replace(before + after, before + "\n \t\n" + after)
+    assert tagline.matches_description(receipt(control), description)
+    assert tagline.reseal(original, f"{stamp}\n{control}") == receipt(control)
+    assert not tagline.matches_description(receipt(changed), description)
+    assert tagline.reseal(original, f"{stamp}\n{changed}") is None
+
+
+@pytest.mark.parametrize("slashes", [1, 2, 3, 4])
+def test_tagline_wrap_preserves_backslash_hard_break_parity(slashes):
+    prefix = "Inspect " + "\\" * slashes
+    description = prefix + " a reproducible comparison."
+    original = receipt(f"**{description}**")
+    stamp = original.split("\n", 1)[0]
+    wrapped = f"**{prefix}\na reproducible comparison.**"
+    assert tagline.matches_description(receipt(wrapped), description) is (slashes % 2 == 0)
+    assert tagline.reseal(original, f"{stamp}\n{wrapped}") == (receipt(wrapped) if slashes % 2 == 0 else None)
+
+
+def test_markdown_tagline_can_requote_a_link_title_without_editing_it():
+    original_text = "Inspect [the guide](docs/guide.md 'Keep two  spaces') before publishing."
+    updated_text = 'Inspect [the guide](docs/guide.md "Keep two  spaces")\nbefore publishing.'
+    original = receipt(f"**{original_text}**")
+    updated = f"**{updated_text}**"
+    stamp = original.split("\n", 1)[0]
+    assert tagline.matches_description(receipt(updated), original_text)
+    assert tagline.reseal(original, f"{stamp}\n{updated}") == receipt(updated)
+    edited_title = updated.replace("two  spaces", "two\nspaces")
+    assert not tagline.matches_description(receipt(edited_title), original_text)
+    assert tagline.reseal(original, f"{stamp}\n{edited_title}") is None
+
+    html = '<p align="center"><b>{}</b></p>'
+    assert not tagline.matches_description(receipt(html.format(updated_text)), original_text)

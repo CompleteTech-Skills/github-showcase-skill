@@ -2154,15 +2154,17 @@ def _quote_continuation_view(text: str) -> str:
     return "".join(chars) if chars is not None else text
 
 
-def _inline_image_target(text: str, start: int) -> tuple[str, int] | None:
+def _inline_image_target(text: str, start: int, *, title_quotes: list[tuple[int, int]] | None = None) -> tuple[str, int] | None:
     """Read a Markdown destination and optional title after its opening parenthesis. Destination nesting deeper than
-    32 parentheses is no link (CommonMark's limit), which bounds each call and keeps the opener pass linear."""
+    32 parentheses is no link (CommonMark's limit), which bounds each call and keeps the opener pass linear.
+    Optionally collect the quote offsets of a title whose complete destination parsed successfully."""
     text = _source_view(text)
     global _DEST_STEPS
     original = text
     region = _span_at(_layout(text)[0], start)
     text = _quote_continuation_view(text)
     pos = start + 1
+    quoted_title = None
     while pos < len(text) and text[pos] in _LINK_SPACE:
         _DEST_STEPS += 1
         pos += 1
@@ -2212,6 +2214,7 @@ def _inline_image_target(text: str, start: int) -> tuple[str, int] | None:
         # so any Markdown inside those quotes remains rendered content.
         if pos == dest_end:
             return None
+        opening = pos
         end = ")" if text[pos] == "(" else text[pos]
         pos += 1
         _DEST_STEPS += 1  # one title lookup, not one step per character it passes over
@@ -2226,6 +2229,8 @@ def _inline_image_target(text: str, start: int) -> tuple[str, int] | None:
                 return None
         if _blank_between(text, pos, ends[at]) or _crosses_block(original, pos, ends[at], _fence_spans(original)):
             return None  # (c) a title may span soft line breaks, never a paragraph or block boundary (heading, list, fence)
+        if end != ")":
+            quoted_title = (opening, ends[at])
         title_close = pos = ends[at] + 1
         while pos < len(text) and text[pos] in _LINK_SPACE:
             _DEST_STEPS += 1
@@ -2236,6 +2241,8 @@ def _inline_image_target(text: str, start: int) -> tuple[str, int] | None:
         return None
     if region is None or pos >= region[1]:
         return None  # destination whitespace cannot join separate Markdown blocks either
+    if title_quotes is not None and quoted_title is not None:
+        title_quotes.append(quoted_title)
     return _destination_value(target), pos + 1
 
 
@@ -2382,24 +2389,37 @@ def _tagline_preformatted_spans(body, tokens, raw, link_literals):
         yield starts[0][1], len(body)
 
 
-def tagline_reflow_key(body: str) -> str:
+def tagline_reflow_key(body: str, *, markdown: bool = False) -> str:
     """Normalize prose wrapping outside syntax with meaningful source whitespace."""
     body = body.replace("\r\n", "\n").replace("\r", "\n")
     link_literals = _link_literal_spans(body)
     blocks = html_block_spans(body)
     tags = _HTMLTokens(masked(body), body).tags
-    opaque = [*inline_code_spans(body), *link_literals, *blocks, *tags]
+    raw = preformatted = ()
     if tags:
         raw = tuple(_raw_marker_text_spans(body, blocks, tags, _accepted_inline(body)[3]))
-        opaque.extend(raw)
-        opaque.extend(_tagline_preformatted_spans(body, tags, raw, link_literals))
+        preformatted = tuple(_tagline_preformatted_spans(body, tags, raw, link_literals))
+    opaque = [*inline_code_spans(body), *link_literals, *blocks, *tags, *raw, *preformatted]
+    lexical = body
+    if markdown and link_literals:
+        # Formatter quote choices can differ; keep the source title and target
+        # themselves opaque, and never treat literal HTML text as Markdown.
+        title_quotes = []
+        for start, _ in link_literals:
+            if all(_span_at(spans, start) is None for spans in (blocks, raw, preformatted)):
+                _inline_image_target(body, start, title_quotes=title_quotes)
+        if title_quotes:
+            chars = list(body)
+            for opening, closing in title_quotes:
+                chars[opening] = chars[closing] = '"'
+            lexical = "".join(chars)
     # Two-space or backslash hard breaks, paragraph breaks, and indented code
     # cannot be equated with ordinary wrapping.
-    # Try a space run only at its first byte. Retrying the greedy hard-break
-    # alternative at every space makes newline-free metadata quadratic.
+    # Try each run only at its first byte for bounded work. An unescaped
+    # backslash makes a hard break only at the end of an odd-length run.
     # A hard break and following blank line share a newline. Record both, so
     # the first match cannot hide the rest of a paragraph separator.
-    opaque.extend(m.span() for m in re.finditer(r"(?:(?<! ) {2,}|\\)\n", body))
+    opaque.extend(m.span() for m in re.finditer(r"(?:(?<! ) {2,}|(?<!\\)(?:\\\\)*\\)\n", body))
     opaque.extend(m.span() for m in re.finditer(r"\n(?:[ \t]*\n)+|(?m:^[ ]{4,}[^ \t\n])", body))
     parts = []
     cursor = 0
@@ -2408,7 +2428,7 @@ def tagline_reflow_key(body: str) -> str:
             continue
         if start > cursor:
             parts.append(re.sub(r"[ \t\n]+", " ", body[cursor:start]))
-        parts.append(body[max(cursor, start):end])
+        parts.append(lexical[max(cursor, start):end])
         cursor = end
     parts.append(re.sub(r"[ \t\n]+", " ", body[cursor:]))
     return "".join(parts).strip(" ")
