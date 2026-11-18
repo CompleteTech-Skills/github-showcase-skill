@@ -687,6 +687,8 @@ def scaffold(ctx: RepoContext, existing: str = "") -> str:
             _personal_banner_blocks(markers, retain=False)
         if _personal_has_authored_hero(ctx, normalized, markers):
             return header_only(ctx, existing, preserve_structure=True)
+        if any(marker.group(1) == "banner" for marker in markers):
+            existing = _sub_blocks(normalized, lambda marker: "" if marker.group(1) == "banner" else marker.group(0))
     order = required_sections(ctx.det, meta=ctx.meta)
     parts = [header(ctx)]
     co = callout(ctx)
@@ -784,9 +786,9 @@ def leading_banner_block(text: str) -> re.Match | None:
 
 def _personal_preamble_has_art(text: str) -> bool:
     unmarked, _ = _strip_markers(text)
-    preamble, _ = split_sections(unmarked)
+    end = personal_header_end(unmarked)
     return any(not _badge_or_logo(source, personal=True)
-               for _, source, _ in _image_entries(masked(unmarked)[:len(preamble)], unmarked))
+               for _, source, _ in _image_entries(masked(unmarked)[:end], unmarked))
 
 
 def _personal_has_authored_hero(ctx: RepoContext, text: str, markers: list[re.Match]) -> bool:
@@ -1205,7 +1207,7 @@ def upgrade(ctx: RepoContext, text: str, *, already_normalized: bool = False) ->
     if personal and _personal_has_authored_hero(ctx, text, markers):
         # Every personal variant preserves authored artwork and refreshes only existing owned blocks.
         return header_only(ctx, text, already_normalized=True, preserve_structure=True,
-                           retain_personal_banner=retain_personal_banner), []
+                           retain_personal_banner=retain_personal_banner, callout_refresh=variant in ("G", "H")), []
     if variant in ("G", "H"):
         return callout_only(ctx, text, retain_personal_banner=retain_personal_banner)
     if retain_personal_banner and any(block.group(1) == "banner" for block in markers):
@@ -1417,7 +1419,8 @@ def upgrade(ctx: RepoContext, text: str, *, already_normalized: bool = False) ->
 
 
 def header_only(ctx: RepoContext, text: str, *, already_normalized: bool = False,
-                preserve_structure: bool = False, retain_personal_banner: bool = False) -> str:
+                preserve_structure: bool = False, retain_personal_banner: bool = False,
+                callout_refresh: bool = False) -> str:
     """Replace only existing marker blocks (what the Action runs)."""
     original = text
     if not already_normalized:
@@ -1443,6 +1446,10 @@ def header_only(ctx: RepoContext, text: str, *, already_normalized: bool = False
 
     def sub(m):
         b, body = m.group(1), m.group(2)
+        if callout_refresh and b not in ("banner", "footer"):
+            return m.group(0)  # G/H upgrades leave the other blocks as authored body.
+        if b == "footer" and personal and not is_footer_copy(body, ctx.brand):
+            return m.group(0)
         if b == "badges" and (preserve_structure or ctx.det["variant"] == "J"):
             fresh = badge_body(ctx, body)
             return m.group(0) if fresh == body else wrap(b, fresh)

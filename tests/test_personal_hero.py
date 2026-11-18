@@ -493,13 +493,35 @@ def test_personal_callout_variant_keeps_authored_hero_block(tmp_path, variant):
     hero = '<p align="center">\n  <img src="custom.svg" alt="Authored hero" width="840">\n</p>'
     source = (f"<!-- showcase:banner:start -->\n{hero}\n<!-- showcase:banner:end -->\n\n"
               "> [!NOTE]\n> Synthetic callout.\n\n# Profile\n\nAuthored notes.\n")
+    authored_blocks = (
+        b"\n<!-- showcase:nav:start -->A personal navigation note.<!-- showcase:nav:end -->\r\n"
+        b"\r\n<!-- showcase:footer:start -->Authored footer credits.<!-- showcase:footer:end -->\r\n"
+    )
     path = tmp_path / "README.md"
-    path.write_bytes(source.encode("utf-8"))
+    path.write_bytes(source.encode("utf-8") + authored_blocks)
     result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--mode", "upgrade", "--variant", variant,
                      "--write")
     assert result.returncode == 0, result.stdout + result.stderr
     text = path.read_text(encoding="utf-8")
     assert hero in text and "assets/intro.svg" not in text and "docs/images/banner.png" not in text
+    assert authored_blocks in path.read_bytes()
+
+
+def test_personal_scaffold_does_not_reintroduce_an_owned_legacy_banner(tmp_path, intro_bytes):
+    meta = metadata(tmp_path)
+    put_intro(tmp_path, intro_bytes)
+    path = tmp_path / "README.md"
+    note = b"Keep this authored profile opening.  \r\n"
+    path.write_bytes(LEGACY_HERO.replace("\n", "\r\n").encode("utf-8") + note)
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--mode", "scaffold", "--variant", "J",
+                     "--write")
+    assert result.returncode == 0, result.stdout + result.stderr
+    refreshed = path.read_bytes()
+    assert refreshed.count(b"<!-- showcase:banner:start -->") == 1
+    assert b'src="assets/intro.svg"' in refreshed and b"docs/images/banner.png" not in refreshed
+    assert note in refreshed
+    lint = run_cli("--meta", meta, "--repo-dir", tmp_path, "lint", "readme", path, "--variant", "J")
+    assert "docs/images/banner.png" not in lint.stdout
 
 
 def _preserve_list_readme() -> str:

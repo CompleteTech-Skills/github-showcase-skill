@@ -162,3 +162,16 @@ def test_hero_lint_resolves_opening_badge_defined_below_the_first_section(tmp_pa
 
     path.write_bytes(prefix + hero + badge + body)
     assert not [failure for failure in lint_failures(tmp_path, meta, "G") if failure.startswith("D13 ")]
+
+
+@pytest.mark.parametrize("variant", ["G", "H"])
+@pytest.mark.parametrize("section", [b"Notes\n-----", b"  ## Notes", b"# Notes"])
+def test_body_image_after_visible_section_does_not_satisfy_intro(tmp_path, variant, section):
+    source = CALLOUT + b"# Profile\n\n" + section + b"\n\n![Body screenshot](screenshot.svg)\n"
+    meta = fixture_repo(tmp_path, source, None)
+    (tmp_path / "screenshot.svg").write_bytes(b'<svg xmlns="http://www.w3.org/2000/svg"/>')
+    before = snapshot(tmp_path)
+
+    result = generate(tmp_path, meta, "upgrade", variant, ())
+
+    assert_atomic_refusal(result, tmp_path, before, "needs-input:intro")
