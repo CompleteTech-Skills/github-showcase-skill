@@ -11,9 +11,11 @@ import xml.etree.ElementTree as ET
 from contextlib import ExitStack
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from typing import Mapping
 
 from .errors import CHECK_FAILED, NeedsInput, ShowcaseError
 from .fingerprint import WRITE_SCRATCH_PREFIX
+from .output_binding import OutputBinding, write_bound_outputs
 
 VALIDATOR_NAME = re.compile(r"(?:^|[:_-])(check|contracts|lint|test|typecheck|validate|format|verify)(?:$|[:_-])", re.I)
 SCRIPT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9:_-]*")
@@ -205,8 +207,12 @@ def write_formatted_outputs(outputs: list[tuple[Path, bytes]], *,
                             repo_root: Path | None = None,
                             snapshots: dict[Path, bytes | None] | None = None,
                             append_output: tuple[Path, bytes] | None = None,
-                            private: bool = False, private_metadata: set[Path] | None = None) -> None:
+                            private: bool = False, private_metadata: set[Path] | None = None,
+                            bindings: Mapping[Path, OutputBinding] | None = None) -> None:
     """Prepare every replacement on its destination filesystem, then publish or roll back the group."""
+    if bindings is not None:
+        return write_bound_outputs(outputs, bindings=bindings, repo_root=repo_root, snapshots=snapshots,
+                                   append_output=append_output, private=private, private_metadata=private_metadata)
     snapshots = snapshots or {}
     private_metadata = private_metadata or set()
     with ExitStack() as scratch:

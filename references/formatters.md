@@ -60,3 +60,28 @@ also retains its overflow/refusal rules. No budget is raised to hide warnings.
 SVG formatting uses Prettier's HTML parser when the target supplies no parser override. Showcase compares the output's XML
 structure to the original drawing. A Prettier ignore comment preserves the
 accessible title. To include SVGs in a later bare `prettier --check`, declare an override such as `{"overrides":[{"files":"*.svg","options":{"parser":"html"}}]}` in the target Prettier configuration. Other target formatting options continue to apply. The skill does not modify formatter configuration.
+
+
+## Bound output groups
+
+Internal callers that retain `capture_output_bindings(paths)` from their first
+preflight can pass that mapping as `bindings=` to `write_formatted_outputs`.
+This opt-in mode binds publication, rollback and cleanup to the originally
+inspected real directory objects. POSIX uses directory-relative descriptors;
+Windows uses native relative-handle acquisition, held directory guards and
+handle-relative content mutations.
+Unknown destinations, changed originals, links and substituted parents fail
+closed. A caller may omit an optional output without adding a new destination.
+The existing unbound writer retains its existing behavior.
+
+The writer prepares all bytes before replacing outputs and restores ordinary
+partial failures. If another writer replaces a published leaf, it preserves that
+leaf and retains recovery backups with an explicit `formatter-rollback` error.
+This is not an operating-system multi-file transaction, crash-recovery protocol,
+or a guarantee against arbitrary concurrent leaf writers, scratch-entry
+substitution between its identity check and removal, or inode reuse during the
+capture-to-write interval. Capture handles close before generation. If an
+actor renames an original directory, restored bytes remain in that original
+directory object; the writer does not reclaim the actor-controlled pathname.
+Native Windows behavior requires the Windows test job; POSIX race probes do not
+establish Windows runtime evidence.
