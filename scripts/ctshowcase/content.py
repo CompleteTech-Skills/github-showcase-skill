@@ -262,24 +262,25 @@ BARE_URL = re.compile(r"https?://[^\s<>()\[\]\"'`]+")
 IMG_EXT = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".avif", ".bmp", ".ico")
 
 
-def scan_lines(text: str) -> list[tuple[int, str | None, str | None]]:
-    """Return line numbers and comment-free projections for headings and links."""
+def scan_lines(text: str, *, markdown_only: bool = False) -> list[tuple[int, str | None, str | None]]:
+    """Return line numbers, a heading or Markdown projection, and an HTML/link inventory projection."""
     from .mdcode import _outside_code, code_block_spans
 
     text = text.replace("\r\n", "\n").replace("\r", "\n")
-    visible = _outside_code(text, mask_inline=False, mask_autolinks=False).split("\n")
-    masked = _outside_code(text, mask_autolinks=False).split("\n")
+    visible = _outside_code(text, mask_inline=markdown_only, mask_autolinks=False,
+                            collapse_comments=True, mask_html=markdown_only).split("\n")
+    masked = _outside_code(text, mask_autolinks=False, collapse_comments=True).split("\n")
     blocks = iter(code_block_spans(text))
     block = next(blocks, None)
     out, offset = [], 0
-    for n, (line, safe) in enumerate(zip(visible, masked), 1):
+    for n, (raw, line, safe) in enumerate(zip(text.split("\n"), visible, masked), 1):
         while block and offset >= block[1]:
             block = next(blocks, None)
         if block and block[0] <= offset < block[1]:
             out.append((n, None, None))
         else:
             out.append((n, line, safe))
-        offset += len(line) + 1
+        offset += len(raw) + 1
     return out
 
 
@@ -354,7 +355,7 @@ def _attrs(s: str) -> dict:
 def extract_links(text: str) -> list[dict]:
     """Every link and image target outside code: inline, reference definitions, HTML and bare URLs."""
     found = []
-    for n, _, masked in scan_lines(text):
+    for n, markdown, masked in scan_lines(text, markdown_only=True):
         if not masked:
             continue
         spans = []
@@ -362,11 +363,12 @@ def extract_links(text: str) -> list[dict]:
         def md(s: str, offset: int):
             for m in MD_LINK.finditer(s):
                 target = m.group(3).strip("<>")
-                found.append({"line": n, "target": target, "image": m.group(1) == "!", "alt": m.group(2),
+                alt = masked[offset + m.start(2):offset + m.end(2)]
+                found.append({"line": n, "target": target, "image": m.group(1) == "!", "alt": alt,
                               "syntax": "markdown"})
                 spans.append((offset + m.start(), offset + m.end()))
                 md(m.group(2), offset + m.start(2))
-        md(masked, 0)
+        md(markdown, 0)
         m = REF_DEF.match(masked)
         if m:
             found.append({"line": n, "target": m.group(2).strip("<>"), "image": False, "alt": m.group(1),
@@ -380,7 +382,7 @@ def extract_links(text: str) -> list[dict]:
                     found.append({"line": n, "target": target, "image": tag in ("img", "source", "image") or key == "src",
                                   "alt": a.get("alt"), "syntax": f"html-{tag}"})
             spans.append((m.start(), m.end()))
-        rest = list(masked)
+        rest = list(markdown)
         for a, b in spans:
             rest[a:b] = " " * (b - a)
         for m in BARE_URL.finditer("".join(rest)):

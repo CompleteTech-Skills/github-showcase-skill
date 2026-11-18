@@ -65,3 +65,56 @@ def test_cli_images_line_endings_and_reference_locations(tmp_path, ending):
         "status": "missing",
     }]
     assert readme.read_bytes() == authored
+
+
+@pytest.mark.parametrize("ending", [b"\n", b"\r\n", b"\r"])
+def test_cli_links_and_images_preserve_semantic_comment_spacing(tmp_path, ending):
+    readme = tmp_path / "README.md"
+    readme.write_bytes(ending.join([
+        b"# Hello <!-- abc --> world",
+        b"[Heading](#hello---world)",
+        b"",
+        b"<!-- inline -->[shot]: docs/images/reference.png",
+        b"",
+        b"```md",
+        b"![Fenced](docs/images/fenced.png)",
+        b"```",
+        b"",
+    ]))
+    result = run_cli("--repo-dir", tmp_path, "content", "links", "README.md")
+    assert result.returncode == 0, result.stderr
+    findings = json.loads(result.stdout)["findings"]
+    assert [(row["target"], row["status"]) for row in findings] == [
+        ("#hello---world", "ok"),
+        ("docs/images/reference.png", "broken"),
+    ]
+    result = run_cli("--repo-dir", tmp_path, "content", "images", "README.md")
+    assert result.returncode == 1, result.stderr
+    assert json.loads(result.stdout)["images"] == [{
+        "path": "docs/images/reference.png",
+        "referenced_from": ["README.md:4"],
+        "status": "missing",
+    }]
+
+
+def test_cli_images_distinguishes_html_tokens_from_markdown(tmp_path):
+    readme = tmp_path / "README.md"
+    readme.write_text(
+        '<pre>\n'
+        '`![Literal](docs/images/raw.png)`\n'
+        '`![Remote](https://example.org/raw.png)`\n'
+        '<img alt="Real HTML image" src="docs/images/html.png">\n'
+        '</pre>\n'
+        '\n'
+        'Intro <span title="`![Literal](docs/images/attribute.png)`">'
+        '![Real Markdown image](docs/images/markdown.png)</span>\n',
+        encoding="utf-8",
+    )
+    result = run_cli("--repo-dir", tmp_path, "content", "images", "README.md")
+    assert result.returncode == 1, result.stderr
+    report = json.loads(result.stdout)
+    assert [(row["path"], row["referenced_from"]) for row in report["images"]] == [
+        ("docs/images/html.png", ["README.md:4"]),
+        ("docs/images/markdown.png", ["README.md:7"]),
+    ]
+    assert report["remote"] == []

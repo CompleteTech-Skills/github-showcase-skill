@@ -1543,13 +1543,16 @@ def _fence_spans(text: str) -> tuple[tuple[int, int], ...]:
 
 
 @functools.lru_cache(maxsize=16)
-def _outside_code(text: str, mask_inline: bool = True, *, mask_autolinks: bool = True) -> str:
+def _outside_code(text: str, mask_inline: bool = True, *, mask_autolinks: bool = True,
+                  collapse_comments: bool = False, mask_html: bool = False) -> str:
     """Mask Markdown code, comments and autolinks without reading literal attribute backticks as code.
     Constructs are taken left to right, and inline code is looked for again after every HTML tag or comment, so a
     backtick inside an attribute or comment is literal and the next real code span still opens (CommonMark).
     `mask_inline=False` still lets inline code win precedence but leaves its characters readable (reference labels).
     Set `mask_autolinks=False` to retain autolink text for link inventories.
-    The result has the same length (and newline positions) as `text`."""
+    Set `mask_html=True` for Markdown-only scanning that also excludes HTML blocks and tag tokens.
+    By default this preserves source offsets. Set `collapse_comments=True` for a semantic projection
+    where each comment contributes one space at its start and retains its line endings."""
     text = _source_view(text)
     fences = _fence_spans(text)
     definitions = _definition_spans(text)  # decided before inline code: a definition destination's backtick is literal
@@ -1557,6 +1560,7 @@ def _outside_code(text: str, mask_inline: bool = True, *, mask_autolinks: bool =
     html_spans = html_block_spans(text)  # raw HTML blocks: tags there are never escaped by a backslash
     indexed_comments = _comment_matches(text, html_spans)
     out, pos = list(text), 0
+    comments = []
     tag = comment = raw_html = inline = dest = autolink = None
 
     def blank(a, b):
@@ -1623,11 +1627,26 @@ def _outside_code(text: str, mask_inline: bool = True, *, mask_autolinks: bool =
             pos = code[1]
         elif nxt is not None:
             if nxt is comment:
+                if collapse_comments:
+                    comments.append(nxt.span())
+                else:
+                    blank(*nxt.span())
+            elif mask_html:
                 blank(*nxt.span())
             pos = nxt.end()
         else:
             break
-    return "".join(out)
+    if mask_html:
+        for start, end in html_spans:
+            blank(start, end)
+    if not comments:
+        return "".join(out)
+    parts, pos = [], 0
+    for start, end in comments:
+        parts.extend(("".join(out[pos:start]), " ", "".join(_LINE_END.findall(text[start:end]))))
+        pos = end
+    parts.append("".join(out[pos:]))
+    return "".join(parts)
 
 
 _BLANK_LINE_AT = re.compile(_NL + rf"[ \t\x00]*(?:{_NL}|\Z)")  # a newline that starts a blank line (or ends the text)
