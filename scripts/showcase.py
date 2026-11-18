@@ -9,7 +9,8 @@ Usage: python3 scripts/showcase.py [--config PATH] [--repo-dir DIR] [--meta FILE
 Command groups: org {profile,about,pins,labels,health,doctor} · project {capture-query,normalize,copy-plan,readme,lint,
 estate-plan} · enterprise {snapshot-query,discover,snapshot,doctor,seat-check,diff,plan} · content {social,icon,links,
 linguist,actions,images,sidebar}. `content social` is the contract name for the social preview (`social-preview` is a
-hidden, deprecated alias); `org-banner` and `org-tile` are top-level generators.
+hidden, deprecated alias); `org-banner` and `org-tile` are top-level generators. `provenance {check,stamp,star}`
+(decision 25, a proposal) tells before a run whether a target was already showcased and records the run.
 """
 from __future__ import annotations
 
@@ -28,6 +29,8 @@ from ctshowcase import STANDARD, __version__  # noqa: E402
 from ctshowcase.errors import CHECK_FAILED, NEEDS_INPUT, OK, USAGE, ConfigError, ShowcaseError  # noqa: E402
 
 GENERATORS = {"banner", "card", "org-tile", "intro", "contact-sheet", "social-preview", "org-banner"}
+# commands whose default output is text (`--format json` for the JSON object): the generators and `provenance`
+TEXT_DEFAULT = GENERATORS | {"provenance"}
 # `enterprise` contract names (org/project/enterprise/content groups) that map onto the original action names
 ENTERPRISE_ALIASES = {"snapshot_query": "snapshot-query"}
 ENTERPRISE_ACTIONS = ("snapshot-query", "discover", "snapshot", "doctor", "seat-check", "diff", "plan")
@@ -1326,13 +1329,17 @@ def cmd_doctor(args):
     ctx = context(args, for_coverage=True)
     ctx.brand.check_owner(ctx.owner, allow_t3=True, repo=ctx.repo, verify_signoff=False)  # read-only: doctor.row shows R7 hold
     r = doctor.row(ctx)
+    from ctshowcase import provenance
+    prov = provenance.doctor_repo(ctx, args.meta)  # decision 25: a row of its own, never a cell or the done verdict
     fmt = args.doctor_format
     if fmt == "tsv":
         print(doctor.as_tsv(r, args.header))
     elif fmt == "md":
         print(doctor.as_md(r, args.header))
     else:
-        print(json.dumps(r, ensure_ascii=False))
+        print(json.dumps({**r, "provenance": prov}, ensure_ascii=False))
+    if fmt != "json":
+        print("Provenance (not a cell): " + json.dumps(prov, ensure_ascii=False), file=sys.stderr)
     if fmt != "json" and (r["tooling"]["formatters"] or r["tooling"]["validators"]):
         print("Tooling preflight (not run): " + json.dumps(r["tooling"], ensure_ascii=False), file=sys.stderr)
     return None, CHECK_FAILED if any(v == "fail" for v in r["cells"].values()) else OK
@@ -1373,6 +1380,9 @@ def cmd_enterprise(args):
         b = brand(args)
         res = Resolver.from_paths(b, args.registry, args.approved, args.approved_yaml, args.actions)  # CQ-03
         r = E.doctor(snap, E.desired(), b, load(args.baseline, "--baseline") if args.baseline else None, resolver=res)
+        from ctshowcase import provenance  # decision 25: the private estate stamp against this snapshot
+        r["provenance"] = provenance.doctor_local("enterprise", str(snap.get("slug") or ""), b, res,
+                                                  provenance.enterprise_stamp_dir(), snapshot=snap)
         return {"command": "enterprise", "action": act, **r, "logs": []}, CHECK_FAILED if r["result"] == "fail" else OK
     if act == "seat-check":
         r = E.seat_check(snap, args.user or E.desired().get("seat_free_user") or "romgenie")
@@ -1388,6 +1398,12 @@ def cmd_enterprise(args):
         from ctshowcase.org import append_jobs
         append_jobs(args.jobs, jobs)
     return {"command": "enterprise", "action": act, "result": "ok", "records": recs, "jobs": jobs, "logs": []}, OK
+
+
+def cmd_provenance(args):
+    """Decision 25 (PROPOSAL): `provenance check|stamp|star`; read-only toward GitHub."""
+    from ctshowcase import provenance
+    return provenance.cmd(args, brand)
 
 
 def cmd_config(args):
@@ -1695,6 +1711,8 @@ def parser() -> argparse.ArgumentParser:
     org.register(sub)
     project.register(sub)
     content.add_parser(sub, sys.modules.get(__name__))  # None when loaded by path: content finds showcase.py itself
+    from ctshowcase import provenance
+    provenance.register(sub, cmd_provenance)  # decision 25: run-once check, stamp and the local run ledger
     return p
 
 
@@ -1739,7 +1757,7 @@ def _main(argv=None) -> int:
     from ctshowcase import signoff
     signoff.set_file(getattr(args, "t3_signoff_file", None))
     if args.format is None:
-        args.format = "text" if args.command in GENERATORS else "json"
+        args.format = "text" if args.command in TEXT_DEFAULT else "json"
     try:
         obj, code = args.func(args)
     except ShowcaseError as exc:

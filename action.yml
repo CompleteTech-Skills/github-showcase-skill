@@ -202,6 +202,16 @@ runs:
           none)
             ;;
         esac
+        # Decision 25: record this run in the sidecar's provenance block, so it lands in the same commit as the art.
+        # A run that changed nothing writes nothing (never a commit just to bump the time). Offline: the metadata
+        # was captured above; CI never counts toward or prints the operator's star line.
+        prc=0
+        "${S[@]}" --format json provenance stamp "$GITHUB_REPOSITORY" --offline --no-star-prompt \
+          > "$RUNNER_TEMP/provenance.json" || prc=$?
+        cat "$RUNNER_TEMP/provenance.json"
+        if [ "$prc" -ne 0 ]; then
+          echo "::warning title=CompleteTech Showcase::provenance stamp skipped (exit $prc, see the log above)"
+        fi
         echo "skipped=$skipped" >> "$GITHUB_OUTPUT"
         echo "bootstrapped=$bootstrapped" >> "$GITHUB_OUTPUT"
         # Description and topic proposals for the people who own the About box (the Action never edits it).
