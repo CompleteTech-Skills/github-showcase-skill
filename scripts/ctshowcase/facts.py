@@ -7,6 +7,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
+from functools import cached_property
 from pathlib import Path
 
 try:
@@ -28,11 +30,24 @@ def _req_name(line: str) -> str | None:
     return m.group(1).lower() if m else None
 
 
+def captured_file_exists(files: object, name: str) -> bool:
+    if isinstance(files, list):
+        return name in files
+    if isinstance(files, dict):
+        value = files.get(name)
+        return value is True or isinstance(value, dict)
+    return False
+
+
 class RepoFacts:
-    def __init__(self, meta: dict | None = None, repo_dir: str | Path | None = None):
+    def __init__(self, meta: dict | None = None, repo_dir: str | Path | None = None, *,
+                 metadata_path: str | Path | None = None, metadata_output: str | Path | None = None):
         self.meta = meta or {}
         self.dir = Path(repo_dir) if repo_dir else None
+        self.metadata_path = Path(metadata_path) if metadata_path else None
+        self.metadata_output = Path(metadata_output) if metadata_output else None
         self._files: list[str] | None = None
+        self._documentation_files: list[str] | None = None
 
     # -- raw access ---------------------------------------------------------------------------------
     @property
@@ -44,38 +59,86 @@ class RepoFacts:
     def files(self) -> list[str]:
         if self._files is None:
             if self.dir is not None:
-                out = []
-                for base, dirs, names in os.walk(self.dir):
-                    dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS)
-                    rel = Path(base).relative_to(self.dir)
-                    for n in sorted(names):
-                        out.append((rel / n).as_posix() if str(rel) != "." else n)
-                self._files = out
+                self._files = self._checkout_files(SKIP_DIRS)
             else:
-                self._files = list(self.meta.get("files") or [])
+                captured = self.meta.get("files")
+                self._files = ([path for path in captured if isinstance(path, str)]
+                               if isinstance(captured, list) else [])
         return self._files
+
+    def _checkout_files(self, skip_dirs) -> list[str]:
+        out = []
+        for base, dirs, names in os.walk(self.dir):
+            dirs[:] = sorted(name for name in dirs if name not in skip_dirs)
+            relative = Path(base).relative_to(self.dir)
+            for name in sorted(names):
+                if not relative.parts and name == ".git":  # linked checkout pointer
+                    continue
+                path = (relative / name).as_posix()
+                if path not in self._scratch_metadata_paths:
+                    out.append(path)
+        return out
+
+    def documentation_files(self) -> list[str]:
+        """A checkout can contain authored files under build/ and dist/."""
+        if self.dir is None:
+            return self.files
+        if self._documentation_files is None:
+            self._documentation_files = self._checkout_files(SKIP_DIRS - {"build", "dist"})
+        return self._documentation_files
+
+    @cached_property
+    def _scratch_metadata_paths(self) -> set[str]:
+        root = self.dir.resolve()
+        captured = self.meta.get("files")
+        scratch = set()
+        for explicit_path in (self.metadata_path, self.metadata_output):
+            if explicit_path is None:
+                continue
+            path = explicit_path.parent.resolve() / explicit_path.name
+            if not path.is_relative_to(root):
+                continue
+            name = path.relative_to(root).as_posix()
+            if path.is_file() and not captured_file_exists(captured, name) and not self._git_tracks(name):
+                scratch.add(name)
+        return scratch
+
+    def _git_tracks(self, name: str) -> bool:
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(self.dir), "ls-files", "--error-unmatch", "--", f":(literal){name}"],
+                capture_output=True, timeout=10,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return False
+        return result.returncode == 0
+
+    @property
+    def manifests(self) -> dict:
+        captured = self.meta.get("manifests")
+        return captured if isinstance(captured, dict) else {}
 
     def read(self, rel: str) -> str | None:
         if self.dir is not None:
             p = self.dir / rel
-            if p.is_file():
+            if self.is_file(rel):
                 try:
                     return p.read_text(encoding="utf-8", errors="replace")
                 except OSError:
                     return None
             return None
-        manifests = self.meta.get("manifests") or {}
-        return manifests.get(rel)
+        text = self.manifests.get(rel)
+        return text if isinstance(text, str) else None
 
     def exists(self, rel: str) -> bool:
         if self.dir is not None:
-            return (self.dir / rel).exists()
+            return Path(rel).as_posix() not in self._scratch_metadata_paths and (self.dir / rel).exists()
         return rel in set(self.files) or any(f.startswith(rel.rstrip("/") + "/") for f in self.files)
 
     def is_file(self, rel: str) -> bool:
         """Require positive file evidence; an incomplete tree can still contain a known blob."""
         if self.dir is not None:
-            return (self.dir / rel).is_file()
+            return Path(rel).as_posix() not in self._scratch_metadata_paths and (self.dir / rel).is_file()
         files = self.meta.get("files")
         if not isinstance(files, list):
             return False
@@ -106,7 +169,7 @@ class RepoFacts:
 
     def requirements(self) -> list[str]:
         names = []
-        for f in self.root_files() or [m for m in (self.meta.get("manifests") or {})]:
+        for f in self.root_files() or self.manifests:
             if re.fullmatch(r"requirements[^/]*\.txt", f):
                 for line in (self.read(f) or "").splitlines():
                     n = _req_name(line)
@@ -185,7 +248,7 @@ class RepoFacts:
     def readme(self) -> str | None:
         if self.dir is not None:
             for n in ("README.md", "readme.md", "Readme.md"):
-                if (self.dir / n).is_file():
+                if self.is_file(n):
                     return (self.dir / n).read_text(encoding="utf-8", errors="replace")
             return None
         return self.meta.get("readme_head")

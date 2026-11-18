@@ -223,7 +223,9 @@ def plan_sidecars(ctx, *entries: tuple[Path, dict, bool], adjacent: bool = False
         if info is not None:
             record = dict(record, staged_description=info)
         if inputs is None:
-            inputs = fp.inputs(ctx.meta, ctx.repo_dir)
+            metadata_path = getattr(getattr(ctx, "facts", None), "metadata_path", None)
+            inputs = fp.inputs(ctx.meta, ctx.repo_dir, same_owner=lambda a, b: ctx.brand.resolver().same(a, b),
+                               metadata_path=metadata_path)
         planned[sidecar] = fp.update_sidecar(data, inputs, ctx.brand.sha256, name, record,
                                              summarize=summarize and info is None and "exempt" not in record)
     return planned

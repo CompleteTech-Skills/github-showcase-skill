@@ -24,7 +24,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from ctshowcase import STANDARD, __version__  # noqa: E402
-from ctshowcase.errors import CHECK_FAILED, NEEDS_INPUT, OK, USAGE, ShowcaseError  # noqa: E402
+from ctshowcase.errors import CHECK_FAILED, NEEDS_INPUT, OK, USAGE, ConfigError, ShowcaseError  # noqa: E402
 
 GENERATORS = {"banner", "card", "org-tile", "intro", "contact-sheet", "social-preview", "org-banner"}
 # `enterprise` contract names (org/project/enterprise/content groups) that map onto the original action names
@@ -127,7 +127,8 @@ def context(args, b=None, *, for_coverage=False):
     from ctshowcase.staged import prepare
     proposal_meta, staged = prepare(meta, getattr(args, "description", None))
     ctx = RepoContext(b, meta if args.command == "readme" else proposal_meta, rd,
-                      type_override=getattr(args, "type_override", None), for_coverage=for_coverage)
+                      type_override=getattr(args, "type_override", None), for_coverage=for_coverage,
+                      metadata_path=args.meta)
     if staged is not None or getattr(args, "format_generated", False):
         ctx.meta_path = Path(args.meta).resolve() if args.meta else None
     if getattr(args, "format_generated", False):
@@ -925,31 +926,60 @@ def cmd_labels(args):
 
 
 def cmd_meta(args):
+    from ctshowcase import config as C
     from ctshowcase import meta as M
+    from ctshowcase.context import same_repository
     from ctshowcase.detect import detect
     from ctshowcase.facts import RepoFacts
+    try:
+        b = brand(args, prefer_lock=True)
+    except ShowcaseError:
+        if args.from_gh:
+            raise
+        b = None
+    rd = None
     if args.from_gh:
         owner = args.from_gh.split("/")[0]
-        status = brand(args, prefer_lock=True).owner_status(owner)
+        status = b.owner_status(owner)
         if status in ("excluded", "hold", "t3"):
             # raises Refused (exit 2); --allow-t3 only after an approved t3-metadata or t3-signoff row
-            brand(args, prefer_lock=True).check_owner(owner, allow_t3=args.allow_t3, repo=args.from_gh.split("/")[1] if "/" in args.from_gh else None)
+            b.check_owner(owner, allow_t3=args.allow_t3, repo=args.from_gh.split("/")[1] if "/" in args.from_gh else None)
         m = M.from_gh(args.from_gh)
     else:
         rd = repo_dir(args)
         m = M.merged(args.meta, str(rd) if rd else None)
-    m["detected"] = detect(m, RepoFacts(m, None if args.from_gh else repo_dir(args)))
+    resolver = b.resolver() if b else None
+    facts = RepoFacts(m, rd, metadata_path=args.meta, metadata_output=args.out)
+    unread_override = False
+    override = {}
+    override_errors = (ConfigError, OSError, ValueError, RecursionError)
+    if C.yaml is not None:
+        override_errors += (C.yaml.YAMLError,)
     try:
-        b = brand(args, prefer_lock=True)
-        m["detected"]["family"] = b.org(m["owner"]).get("family")
-        m["detected"]["owner_status"] = b.owner_status(m["owner"])
-    except ShowcaseError:
-        pass
+        override = (C.load_repo_override(rd, facts=facts)[0] if rd
+                    else C.override_from_manifests(m.get("manifests"), m.get("files")))
+    except override_errors:
+        # Preserve the capture on the stdlib-only Action step and for invalid
+        # config. A later config-aware command reports the exact failure.
+        unread_override = True
+    if override.get("for") and not same_repository(override["for"], m["owner"], m["repo"], resolver):
+        override = {}
+    m["detected"] = detect(m, facts, override, type_override=args.type_override,
+                           same_owner=resolver.same if resolver else None)
+    if unread_override:
+        m["detected"].pop("suggestion", None)
+    if b:
+        try:
+            m["detected"]["family"] = b.org(m["owner"]).get("family")
+            m["detected"]["owner_status"] = b.owner_status(m["owner"])
+        except ShowcaseError:
+            pass
     text = json.dumps(m, sort_keys=True, indent=1, ensure_ascii=False) + "\n"
     if args.out:
         Path(args.out).write_text(text, encoding="utf-8")
+        suggestion = m["detected"].get("suggestion")
         return {"command": "meta", "owner": m["owner"], "repo": m["repo"], "result": "ok", "out": args.out,
-                "detected": m["detected"], "logs": []}, OK
+                "detected": m["detected"], "logs": [suggestion] if suggestion else []}, OK
     sys.stdout.write(text)
     return None, OK
 
@@ -960,8 +990,9 @@ def cmd_fingerprint(args):
     rd = repo_dir(args)
     m = merged(args.meta, str(rd) if rd else None)
     out_dir = (rd or Path(".")) / args.out_dir if not Path(args.out_dir).is_absolute() else Path(args.out_dir)
-    inp = fp.inputs(m, rd)
-    f = fp.fingerprint(inp, fp.config_sha256())
+    b = brand(args, prefer_lock=True) if args.config else None
+    inp = fp.inputs(m, rd, same_owner=b.resolver().same if b else None, metadata_path=args.meta)
+    f = fp.fingerprint(inp, fp.config_sha256(b))
     selected = None
     if args.outputs is not None or args.readme is not None:
         selected = {fp.ART_RECORDS[kind] for kind in (args.outputs or "").split(",") if kind in fp.ART_RECORDS}
@@ -1146,7 +1177,7 @@ def cmd_adopt(args):
     else:
         m = M.from_gh(args.slug)
     rd = Path(args.repo_dir) if args.repo_dir and not args.no_repo_dir else None
-    ctx = RepoContext(b, m, rd, type_override=getattr(args, "type_override", None))
+    ctx = RepoContext(b, m, rd, type_override=getattr(args, "type_override", None), metadata_path=args.meta)
     if ctx.style.get("hold") or b.resolver().family_hold(ctx.owner):
         # STANDARD §12.5 #4: a family on hold gets only the decision 18 footer (as `org labels` refuses it): no
         # settings, topics, label, security or social-preview jobs
@@ -1294,7 +1325,7 @@ def parser() -> argparse.ArgumentParser:
                         "--meta file describes)")
     p.add_argument("--no-repo-dir", action="store_true", help="ignore --repo-dir; use --meta facts only")
     p.add_argument("--meta", help="metadata JSON (scratch format, gh api output or `meta` output)")
-    p.add_argument("--type", dest="type_override", metavar="TYPE", help="§5.4 type to use instead of detection (when the file tree is not available); logged")
+    p.add_argument("--type", dest="type_override", metavar="TYPE", help="§5.4 type to use instead of automatic detection, including for low-confidence results")
     p.add_argument("--format", choices=("json", "text"), default=None, help="output style")
     p.add_argument("--quiet", action="store_true")
     p.add_argument("--allow-t3", action="store_true",

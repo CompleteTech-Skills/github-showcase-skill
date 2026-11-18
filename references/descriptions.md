@@ -14,7 +14,7 @@ The GitHub description (About box) of every in-scope repository. `showcase.py de
 | D6 | No en dash (U+2013), no em dash (U+2014), no emoji (Extended_Pictographic); no leading, trailing or double spaces. |
 | D7 | No version numbers (`\bv?\d+\.\d+(\.\d+)*\b`). |
 | D8 | Not made only of the slug's words (hyphens as spaces, case-insensitive) plus a, an, and, for, of, the, tool. |
-| V1 | Voice by type. `agent-skills`, `cli`, `library`, `api`, `mcp-server`, `bot`, `discord-bot`, `plugin`, `chrome-extension`, `security-check`, `template`, `infrastructure`, `hardware` and `workspace` start with one of the verbs below. `website` starts `Source for `. `game` starts `PRODUCT: play `. `fork` starts `Fork of `. Repositories about to be archived and `backup` start `Archived: `. All other types start with a word that is neither one of those verbs nor A, An, The, This. |
+| V1 | Voice by type. `agent-skills`, `cli`, `library`, `api`, `mcp-server`, `bot`, `discord-bot`, `plugin`, `chrome-extension`, `security-check`, `template`, `infrastructure`, `hardware`, `documentation` and `workspace` start with one of the verbs below. `website` starts `Source for `. `game` starts `PRODUCT: play `. `fork` starts `Fork of `. Repositories about to be archived and `backup` start `Archived: `. All other types start with a word that is neither one of those verbs nor A, An, The, This. |
 | P1 | The `PRODUCT: ` prefix (PRODUCT = the README H1) is used only for type `game` and for T3 Pick-Your-AI repositories. |
 | B1 | Contains `CompleteTech LLC` if and only if `BRAND_ASSETS.md` exists at the repository root. Never a `(CompleteTech LLC skill)` suffix. |
 | X1 | No disclaimer. Third-party disclaimers go only in the README, and only for the repositories that need one. |
@@ -34,7 +34,7 @@ The GitHub description (About box) of every in-scope repository. `showcase.py de
 | Type | Template |
 |---|---|
 | `agent-skills` | `VERB [branded CompleteTech LLC] ARTIFACTS FOR WHOM / FROM WHAT[, QUALIFIER].` |
-| `cli`, `library`, `api`, `mcp-server`, `bot`, `discord-bot`, `plugin`, `chrome-extension`, `template`, `infrastructure`, `hardware`, `workspace` | `VERB OBJECT CONTEXT[, KEY PROPERTY].` |
+| `cli`, `library`, `api`, `mcp-server`, `bot`, `discord-bot`, `plugin`, `chrome-extension`, `template`, `infrastructure`, `hardware`, `documentation`, `workspace` | `VERB OBJECT CONTEXT[, KEY PROPERTY].` |
 | `security-check`, CVE slug | `Check PRODUCT versions for CVE-ID (SHORT TITLE), offline and dependency-free.` SHORT TITLE is the text between `CVE-ID · ` and the next ` · ` in the existing README subtitle; if absent, drop the parenthesis. PRODUCT is the product name as written in the README subtitle or first paragraph, else the slug tokens before `-cve-` in title case. |
 | `security-check`, `ISSUE-check` slug | `Check PRODUCT versions for ISSUE NAME exposure, offline and dependency-free.` |
 | `website` | `Source for FQDN, WHAT THE SITE OFFERS.` |

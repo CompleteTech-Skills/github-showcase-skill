@@ -10,6 +10,7 @@ from pathlib import Path
 from . import REFERENCES, ROOT
 from .color import best_fg
 from .errors import ConfigError, NeedsInput, Refused, ShowcaseError
+from .facts import RepoFacts, captured_file_exists
 from .schema import validate
 
 try:  # pyyaml is optional for stdlib-only commands (meta, fingerprint)
@@ -280,22 +281,36 @@ def lock_in_sync(brand: Brand) -> bool:
 REPO_CONFIG_NAMES = (".github/showcase.yml", ".github/showcase.yaml")
 
 
-def load_repo_override(repo_dir: str | Path | None) -> tuple[dict, str | None]:
+def load_repo_override(repo_dir: str | Path | None, *, facts: RepoFacts | None = None) -> tuple[dict, str | None]:
     """Return (override, sha256-of-file|None). Colours and fonts are rejected by the schema."""
     if not repo_dir:
         return {}, None
+    facts = facts if facts is not None else RepoFacts(repo_dir=repo_dir)
     for name in REPO_CONFIG_NAMES:
-        p = Path(repo_dir) / name
-        if p.is_file():
-            data = p.read_bytes()
-            return parse_repo_override(name, data.decode("utf-8")), hashlib.sha256(data).hexdigest()
+        if facts.is_file(name):
+            data = (Path(repo_dir) / name).read_bytes()
+            try:
+                text = data.decode("utf-8")
+            except UnicodeDecodeError:
+                raise ConfigError(f"{name}: repository override must be UTF-8") from None
+            return parse_repo_override(name, text), hashlib.sha256(data).hexdigest()
     return {}, None
 
 
 def parse_repo_override(name: str, text: str) -> dict:
     """One repository override file's text, parsed and checked against repo-config.schema.json (colours and fonts are
     rejected). Shared by the checkout and the metadata-only path (`manifests`), so both read the same override."""
-    obj = load_yaml_text(text) or {}
+    if yaml is None:
+        raise ConfigError("PyYAML is required for this command (pip install -r requirements.txt)")
+    try:
+        obj = load_yaml_text(text)
+        if obj is None:
+            # An empty YAML document has no node or a zero-width implicit null node.
+            node = yaml.compose(text, Loader=yaml.SafeLoader)
+            if node is None or node.start_mark.index == node.end_mark.index:
+                obj = {}
+    except (yaml.YAMLError, RecursionError):
+        raise ConfigError(f"{name}: repository override contains invalid YAML") from None
     if not isinstance(obj, dict):
         raise ConfigError(f"{name} must be a mapping")
     schema = json.loads((REFERENCES / "repo-config.schema.json").read_text(encoding="utf-8"))
@@ -305,10 +320,18 @@ def parse_repo_override(name: str, text: str) -> dict:
     return obj
 
 
-def override_from_manifests(manifests: dict | None) -> dict:
+def override_from_manifests(manifests: object, files: object = None) -> dict:
     """The repository override captured in metadata (`meta --from-gh` manifests), first of REPO_CONFIG_NAMES found."""
+    if manifests is None:
+        manifests = {}
+    if not isinstance(manifests, dict):
+        raise ConfigError("metadata manifests must be a mapping")
     for name in REPO_CONFIG_NAMES:
-        text = (manifests or {}).get(name)
-        if isinstance(text, str) and text.strip():
+        if name in manifests:
+            text = manifests[name]
+            if not isinstance(text, str):
+                raise ConfigError(f"{name}: captured override must be text")
             return parse_repo_override(name, text)
+        if captured_file_exists(files, name):
+            raise ConfigError(f"{name}: captured override contents unavailable")
     return {}
