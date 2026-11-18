@@ -178,29 +178,30 @@ def _update_head(ref: str, parent: str, commit: str, subject: str,
     command = ["git", "update-ref", "-m", f"commit: {subject}", "--stdin"]
     # A dereferencing update of HEAD locks both HEAD and its current branch.
     option = "option no-deref\n" if ref == "HEAD" else ""
+    # Git's stdin protocol needs LF even on Windows, where text pipes translate newlines.
     with (
         TemporaryFile(mode="w+t", encoding="utf-8", errors="replace") as errors,
         ThreadPoolExecutor(max_workers=1) as reader,
-        subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=errors, text=True) as transaction,
+        subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=errors) as transaction,
     ):
         try:
-            transaction.stdin.write(f"{option}update HEAD {commit} {parent}\nprepare\n")
+            transaction.stdin.write(f"{option}update HEAD {commit} {parent}\nprepare\n".encode("ascii"))
             transaction.stdin.flush()
             prepared = reader.submit(transaction.stdout.readline).result(timeout=30)
-            if prepared != "prepare: ok\n":
+            if prepared.rstrip(b"\r\n") != b"prepare: ok":
                 transaction.communicate(timeout=30)
                 if _head_ref() != ref or _ref_oid("HEAD") != parent:
                     return False
                 errors.seek(0)
                 raise RuntimeError(f"Could not prepare the Git ref update: {errors.read().strip()}")
             if _head_ref() != ref:
-                transaction.communicate("abort\n", timeout=30)
+                transaction.communicate(b"abort\n", timeout=30)
                 return False
             # Keep index.lock present while installing the checked index. If
             # Git fails to commit, restore the former index under the same lock.
             os.replace(snapshot, index)
             try:
-                transaction.communicate("commit\n", timeout=30)
+                transaction.communicate(b"commit\n", timeout=30)
                 if transaction.returncode:
                     errors.seek(0)
                     raise RuntimeError(f"Could not commit the Git ref update: {errors.read().strip()}")

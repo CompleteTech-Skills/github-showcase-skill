@@ -1079,6 +1079,8 @@ change = os.environ["SHOWCASE_TEST_CONCURRENT_CHANGE"]
 class ObserveRefUpdate(subprocess.Popen):
     def __init__(self, argv, *args, **kwargs):
         self.ref_transaction = argv[:2] == ["git", "update-ref"] and "--stdin" in argv
+        if self.ref_transaction:
+            assert not any(kwargs.get(key) for key in ("text", "universal_newlines", "encoding", "errors"))
         if self.ref_transaction and change == "head":
             parent = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
             tree = subprocess.check_output(["git", "rev-parse", f"{parent}^{{tree}}"], text=True).strip()
@@ -1090,7 +1092,7 @@ class ObserveRefUpdate(subprocess.Popen):
         super().__init__(argv, *args, **kwargs)
 
     def communicate(self, input=None, timeout=None):
-        if self.ref_transaction and input == "commit\n":
+        if self.ref_transaction and input == b"commit\n":
             assert Path(".git/index.lock").is_file()
             if change == "locked-branch":
                 attempt = original_run(["git", "symbolic-ref", "HEAD", "refs/heads/competing"],
@@ -1099,7 +1101,7 @@ class ObserveRefUpdate(subprocess.Popen):
             if change == "ref-failure":
                 candidate = original_run(["git", "show", ":README.md"], check=True, capture_output=True).stdout
                 Path("failed-ref-candidate").write_bytes(candidate)
-                output = super().communicate("abort\n", timeout)
+                output = super().communicate(b"abort\n", timeout)
                 self.returncode = 1
                 return output
         return super().communicate(input, timeout)
