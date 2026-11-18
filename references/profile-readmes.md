@@ -159,6 +159,8 @@ scaffold, header and upgrade refresh existing marker blocks in place, including 
 Running scaffold again on a personal README with a managed hero and nav refreshes the existing layout in place.
 A full G or H upgrade with authored artwork refreshes only an owned hero or a
 recognized generated footer. Authored footer, navigation and body bytes stay in place.
+In-place upgrades account for replaced lines only inside a verified owned hero;
+the authored-content and size shrink checks still apply.
 A G or H README with multiple managed hero blocks needs review before refresh.
 Without authored artwork or a leading managed hero, those variants require and emit the intro too.
 Their scaffold follows the same callout layout and preservation check as an

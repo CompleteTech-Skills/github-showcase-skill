@@ -1208,6 +1208,21 @@ def _badge_blocks_need_in_place_refresh(text: str, markers: list[re.Match]) -> b
     )
 
 
+def _header_upgrade(ctx: RepoContext, text: str, **kwargs) -> tuple[str, list[str]]:
+    after = header_only(ctx, text, already_normalized=True, **kwargs)
+    removed: list[str] = []
+    if personal_profile(ctx):
+        prior = [m for m in find_blocks(MARK, text) if m.group(1) == "banner"]
+        current = [m for m in find_blocks(MARK, after) if m.group(1) == "banner"]
+        if len(prior) == len(current):
+            for old, new in zip(prior, current, strict=True):
+                if old.group(2) != new.group(2) and personal_generated_hero(ctx, old.group(2)):
+                    # Only replaced lines from a verified owned hero are exempt from the shrink guard.
+                    removed += _unreemitted(source_lines(old.group(2)),
+                                            Counter(ln.strip() for ln in source_lines(new.group(2))))
+    return after, removed
+
+
 def upgrade(ctx: RepoContext, text: str, *, already_normalized: bool = False) -> tuple[str, list[str]]:
     """Return (new text, header lines removed); callers run preservation checks before writing."""
     if not already_normalized:
@@ -1219,14 +1234,14 @@ def upgrade(ctx: RepoContext, text: str, *, already_normalized: bool = False) ->
     markers = find_blocks(MARK, text) if personal or variant == "J" else []
     if personal and _personal_has_authored_hero(ctx, text, markers):
         # Every personal variant preserves authored artwork and refreshes only existing owned blocks.
-        return header_only(ctx, text, already_normalized=True, preserve_structure=True,
-                           retain_personal_banner=retain_personal_banner, callout_refresh=variant in ("G", "H")), []
+        return _header_upgrade(ctx, text, preserve_structure=True,
+                               retain_personal_banner=retain_personal_banner, callout_refresh=variant in ("G", "H"))
     if variant in ("G", "H"):
         return callout_only(ctx, text, retain_personal_banner=retain_personal_banner)
     if retain_personal_banner and any(block.group(1) == "banner" for block in markers):
-        return header_only(ctx, text, already_normalized=True, retain_personal_banner=True), []
+        return _header_upgrade(ctx, text, retain_personal_banner=True)
     if variant == "J" and _badge_blocks_need_in_place_refresh(text, markers):
-        return header_only(ctx, text, already_normalized=True), []
+        return _header_upgrade(ctx, text)
     body, blocks = _strip_markers(text)
     want_footer = footer_wanted(ctx)
     removed: list[str] = []
