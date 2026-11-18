@@ -2367,8 +2367,8 @@ def _images(text: str, document: str) -> list[tuple[str, str]]:
     return [(alt, source) for alt, source, _ in _image_entries(text, document)]
 
 
-_TAGLINE_PRE_OPEN = re.compile(rf"<(pre|listing)(?={HTML_SPACE}|/?>)", re.I | re.A)
-_TAGLINE_PRE_CLOSE = re.compile(rf"</(pre|listing){HTML_SPACE}*>", re.I | re.A)
+_TAGLINE_PRE_OPEN = re.compile(rf"<(code|pre|listing)(?={HTML_SPACE}|/?>)", re.I | re.A)
+_TAGLINE_PRE_CLOSE = re.compile(rf"</(code|pre|listing){HTML_SPACE}*>", re.I | re.A)
 
 
 def _tagline_preformatted_spans(body, tokens, raw, link_literals):
@@ -2391,11 +2391,11 @@ def _tagline_preformatted_spans(body, tokens, raw, link_literals):
 def tagline_reflow_key(body: str, *, markdown: bool = False) -> tuple[tuple[str, str | tuple[str, str | None]], ...]:
     """Normalize prose wrapping outside syntax with meaningful source whitespace."""
     body = body.replace("\r\n", "\n").replace("\r", "\n")
-    # The bold markers keep an initial inline tag in paragraph context.
-    # Analyze that real context, then compare only the payload between them.
-    first, last = (2, len(body) + 2) if markdown else (0, len(body))
-    if markdown:
-        body = f"**{body}**"
+    # Analyze actual paragraph or HTML context before projecting the payload.
+    # Markdown backticks inside the HTML wrapper cannot hide a real HTML tag.
+    opening, closing = ("**", "**") if markdown else ("<p><b>", "</b></p>")
+    first, last = len(opening), len(opening) + len(body)
+    body = opening + body + closing
     link_literals = _link_literal_spans(body)
     blocks = html_block_spans(body)
     tags = _HTMLTokens(masked(body), body).tags
@@ -2403,7 +2403,10 @@ def tagline_reflow_key(body: str, *, markdown: bool = False) -> tuple[tuple[str,
     if tags:
         raw = tuple(_raw_marker_text_spans(body, blocks, tags, _accepted_inline(body)[3]))
         preformatted = tuple(_tagline_preformatted_spans(body, tags, raw, link_literals))
-    opaque = [*inline_code_spans(body), *code_block_spans(body), *link_literals, *blocks, *tags, *raw, *preformatted]
+    # The outer HTML block supplies lexical context. Its ordinary prose still
+    # soft-wraps, while nested literal tags and later raw blocks stay opaque.
+    literal_blocks = blocks if markdown else tuple(span for span in blocks if span[0] >= first)
+    opaque = [*inline_code_spans(body), *code_block_spans(body), *link_literals, *literal_blocks, *tags, *raw, *preformatted]
     links = []
     if markdown and link_literals:
         # Compare destination and title separately. Flattening their source

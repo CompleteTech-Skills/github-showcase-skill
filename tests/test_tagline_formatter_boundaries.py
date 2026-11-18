@@ -340,3 +340,22 @@ def test_a_link_title_cannot_be_equated_with_part_of_the_target(before, after):
     assert tagline.matches_description(original, description)
     assert not tagline.matches_description(receipt(changed), description)
     assert tagline.reseal(original, f"{stamp}\n{changed}") is None
+
+
+@pytest.mark.parametrize("description", [
+    "Inspect `<span title='start` one  two'>text</span>.",
+    "Inspect <code>one  two</code>.",
+])
+@pytest.mark.parametrize("replacement", [" ", "\n"], ids=["space", "newline"])
+def test_centered_raw_html_keeps_literal_attribute_and_code_space(tmp_path, description, replacement):
+    repo, meta = target(tmp_path)
+    wrapper = '<p align="center"><b>{}</b></p>'
+    original = receipt(wrapper.format(description))
+    changed = wrapper.format(description.replace("one  two", f"one{replacement}two"))
+    stamp = original.split("\n", 1)[0]
+    write_meta(meta, description)
+    write_source(repo, original, "\n")
+    assert R2 not in lint_report(repo, meta)["fails"]
+    write_source(repo, receipt(changed), "\n")
+    assert R2 in lint_report(repo, meta)["fails"]
+    assert tagline.reseal(original, f"{stamp}\n{changed}") is None
