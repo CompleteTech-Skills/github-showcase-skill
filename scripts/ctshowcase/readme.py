@@ -1378,6 +1378,8 @@ def header_only(ctx: RepoContext, text: str, *, already_normalized: bool = False
     if not already_normalized:
         text = normalize_text(text)
     personal = personal_profile(ctx)
+    if personal and not preserve_structure and not retain_personal_banner:
+        preserve_structure = _personal_has_authored_hero(ctx, text, find_blocks(MARK, text))
     gen = {"nav": nav_line(ctx), "footer": footermod.markup(ctx.brand)}
     if not personal:
         gen["banner"] = banner_html(ctx)

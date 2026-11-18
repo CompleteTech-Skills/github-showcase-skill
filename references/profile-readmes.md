@@ -137,7 +137,7 @@ Personal header refresh migrates only the exact legacy generated banner body
 can identify the same profile. Authored hero bodies and unmarked artwork
 stay owned by their author, including Markdown reference images whose definitions
 appear later in the document. For personal READMEs with authored artwork,
-scaffold and upgrade refresh existing marker blocks only, including variants G and H.
+scaffold, header and upgrade refresh existing marker blocks in place, including variants G and H.
 A G or H README with multiple managed hero blocks needs review before refresh.
 Without authored artwork or a leading managed hero, those variants require and emit the intro too.
 The managed block keeps its `showcase:banner` name

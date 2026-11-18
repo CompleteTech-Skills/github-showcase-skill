@@ -682,14 +682,15 @@ def test_personal_upgrade_adds_intro_and_preserves_authored_leading_badge(tmp_pa
     assert LEADING_BUILD_BADGE in updated and b"Authored profile notes." in updated
 
 
-def test_personal_authored_marked_hero_keeps_mixed_ending_seam(tmp_path):
+@pytest.mark.parametrize("mode", ["header", "upgrade"])
+def test_personal_authored_marked_hero_keeps_mixed_ending_seam(tmp_path, mode):
     meta = metadata(tmp_path)
     path = tmp_path / "README.md"
     source = (b'\xef\xbb\xbf<!-- showcase:banner:start -->\r\n<p align="center">\n'
               b'  <img src="custom.svg" alt="Owned artwork">\r\n</p>\n<!-- showcase:banner:end -->'
               b'\r\n\n\r\n\r\n# Profile\r\n\r\nAuthored notes.  \n')
     path.write_bytes(source)
-    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--mode", "upgrade", "--write")
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--mode", mode, "--write")
     assert result.returncode == 0, result.stdout + result.stderr
     assert path.read_bytes() == source
 
