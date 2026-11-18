@@ -13,6 +13,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from . import footer as footermod
+from . import tagline as taglinemod
 from .context import RepoContext
 from .detect import required_sections, standard
 from .errors import ArtFail, ConfigError, NeedsInput
@@ -27,10 +28,6 @@ SHIELDS = "https://img.shields.io/badge/"
 GENERATED_BADGES = re.compile(r"<!-- showcase:badges:generated sha256=([0-9a-f]{64})"
                               r"(?: replaces=([0-9a-f]{64}))? -->(?:\r\n|\r|\n)(.*)", re.S)
 BOM = "\ufeff"
-# A complete formatting unit may be generated. Multiple bold spans or inner HTML are authored.
-GENERATED_TAGLINE = re.compile(
-    r'(?:\*\*(?=\S)(?:[^*\r\n]|\*(?!\*))+(?<=\S)\*\*|<p align="center"><b>(?=\S)[^<\r\n]+(?<=\S)</b></p>)'
-)
 MANAGED_NOTICE = re.compile(r"\b(?:generated\s+by|do\s+not\s+edit)\b", re.I)
 HTML_COMMENT = re.compile(r"<!--.*?(?:-->|\Z)", re.S)
 
@@ -511,26 +508,29 @@ def lead(ctx: RepoContext, banner: str, nav: str) -> list[str]:
 
 
 def inherited_tagline(ctx: RepoContext, body: str, text: str) -> bool:
-    """True when the tagline block `body` of README `text` came from the template this repository was generated from
-    (never another repository's line is kept): it is one of meta template_taglines (the template's tagline when this
-    repository was generated, and today); only when those are unknown, an untouched (pristine) template body stands in
-    as the proof. The template repository's own tagline is never inherited."""
+    """Only exact captured template payloads prove inheritance.
+
+    A pristine template-body receipt does not cover the independent tagline.
+    Invalid tagline receipts always remain authored, including on template copies.
+    """
     if ctx.meta.get("is_template"):
         return False
-    known = [x.strip() for x in ctx.meta.get("template_taglines") or [] if isinstance(x, str) and x.strip()]
-    return body.strip() in known if known else bootstrap_state(text) == "pristine"
+    value = taglinemod.inherited_payload(body)
+    if value is None:
+        return False
+    known = [taglinemod.inherited_payload(x) for x in ctx.meta.get("template_taglines") or []
+             if isinstance(x, str) and x.strip()]
+    return value in known
 
 
 def tagline_body(ctx: RepoContext, existing: str | None = None, text: str = "") -> str:
-    """The tagline block body, decided in this one place for header(), bootstrap(), upgrade() and header_only().
-    R2: the tagline is the description. Without one (logged needs-input:description) the block keeps `existing`, the
-    body it holds now in README `text`, unless that is inherited (guardrail 6: improve, never erase); nothing to keep
-    gives an empty block, never "****". A block with a custom body stays intact when the description changes."""
+    """Refresh verified generated content; preserve ambiguous legacy or edited text."""
     desc = (ctx.meta.get("description") or "").strip()
     if desc:
-        if existing and existing.strip() and not GENERATED_TAGLINE.fullmatch(existing):
+        if existing and existing.strip() and taglinemod.payload(existing) is None:
             return existing
-        return f'<p align="center"><b>{desc}</b></p>' if ctx.det["variant"] == "F" else f"**{desc}**"
+        payload = f'<p align="center"><b>{desc}</b></p>' if ctx.det["variant"] == "F" else f"**{desc}**"
+        return taglinemod.generated(payload)
     ctx.log("needs-input:description")
     if existing is None or not existing.strip() or inherited_tagline(ctx, existing, text):
         return ""
@@ -1260,10 +1260,9 @@ def upgrade(ctx: RepoContext, text: str, *, already_normalized: bool = False) ->
                      and bootstrap_state(text) == "pristine")
 
     def is_header_line(ln: str) -> bool:
-        s_ = ln.strip()
         if HEADER_LINE.match(ln) or "docs/images/banner.png" in ln:
             return not personal or not any(_badge_or_logo(source) for _, source, _ in _image_entries(masked(ln), ln))
-        return old_tag is None and bool(desc) and s_ in (f"**{desc}**", f"<p align=\"center\"><b>{desc}</b></p>", f"<b>{desc}</b>")
+        return False
 
     # group the preamble into units: centred HTML blocks and <picture> blocks are classified as a whole
     units: list[list[str]] = []
@@ -1289,8 +1288,8 @@ def upgrade(ctx: RepoContext, text: str, *, already_normalized: bool = False) ->
             is_hdr = is_header_line(ln) or bold
             if preserve:  # additive only: just an old nav line is replaced
                 is_hdr = s_.startswith("**") and " · " in s_ and not "".join(keep_pre).strip()
-            elif bold and not is_header_line(ln) and not desc:
-                if carry or fallback_only:
+            elif bold and not is_header_line(ln):
+                if desc or carry or fallback_only:
                     # Keep additional bold lines and text that the pristine-template fallback would empty.
                     keep_pre.append(ln)
                     continue
@@ -1610,6 +1609,21 @@ def bootstrap_state(text: str) -> str:
     return "pristine" if marker.group(1) and marker.group(1) == body_sha(body) else "edited"
 
 
+def reseal_formatted_taglines(text: str, before: list[re.Match], after: list[re.Match]) -> str | None:
+    """The caller verified Markdown content; retain every block's ownership state."""
+    replacements = []
+    for original, formatted in zip(before, after, strict=True):
+        if original.group(1) != "tagline":
+            continue
+        body = taglinemod.reseal(original.group(2), formatted.group(2))
+        if body is None:
+            return None
+        replacements.append((*formatted.span(2), body))
+    for start, end, body in reversed(replacements):
+        text = text[:start] + body + text[end:]
+    return text
+
+
 def reseal_formatted_badges(ctx: RepoContext, text: str, before: list[re.Match], after: list[re.Match]) -> str | None:
     """Reseal generated badges and reject formatter changes that claim authored badges."""
     def legacy(body: str) -> bool:
@@ -1857,8 +1871,19 @@ def preservation(before: str, after: str, removed: list[str], *, ctx: RepoContex
     old_taglines = [m for m in find_blocks(MARK, before) if m.group(1) == "tagline"]
     new_taglines = [m for m in find_blocks(MARK, after) if m.group(1) == "tagline"]
     replace_tagline = (len(old_taglines) == len(new_taglines) == 1
-                       and GENERATED_TAGLINE.fullmatch(old_taglines[0].group(2))
-                       and GENERATED_TAGLINE.fullmatch(new_taglines[0].group(2)))
+                       and taglinemod.payload(old_taglines[0].group(2)) is not None
+                       and taglinemod.payload(new_taglines[0].group(2)) is not None)
+    remaining_taglines = Counter(normalize_line_endings(m.group(2)) for m in new_taglines)
+    for block in old_taglines:
+        body = normalize_line_endings(block.group(2))
+        if not body.strip() or taglinemod.payload(body) is not None:
+            continue
+        if remaining_taglines[body]:
+            remaining_taglines[body] -= 1
+        elif ctx is not None and inherited_tagline(ctx, body, before) and remaining_taglines[""]:
+            remaining_taglines[""] -= 1
+        else:
+            problems.append("lost authored tagline block")
 
     def omit_owned_tagline(m):
         return wrap("tagline", "") if m.group(1) == "tagline" else m.group(0)

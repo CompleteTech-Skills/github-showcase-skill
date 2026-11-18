@@ -1,4 +1,5 @@
 """Variant J must derive badges and retain authored badges through refreshes."""
+import hashlib
 import json
 import os
 import re
@@ -236,16 +237,34 @@ def profile_cli(ctx, tmp_path, *args, expected_code=0):
     return json.loads(result.stdout)
 
 
-def test_real_template_bootstrap_replaces_inherited_badge(make_ctx, tmp_path):
+@pytest.mark.parametrize("owned_tagline", [False, True], ids=["legacy-tagline", "generated-tagline"])
+def test_real_template_bootstrap_replaces_inherited_badge(make_ctx, tmp_path, owned_tagline):
     ctx = profile_context(make_ctx, tmp_path)
     text = (ROOT / "tests/fixtures/template-README.md").read_text(encoding="utf-8")
+    tagline = next(m for m in readme.find_blocks(readme.MARK, text) if m.group(1) == "tagline")
+    inherited = tagline.group(2)
+    if owned_tagline:
+        # Keep the legacy badge fixture, with explicit proof for this separately generated tagline.
+        digest = hashlib.sha256(inherited.encode()).hexdigest()
+        receipt = f"<!-- showcase:tagline:generated sha256={digest} -->\n{inherited}"
+        text = text[:tagline.start(2)] + receipt + text[tagline.end(2):]
     (tmp_path / "README.md").write_text(text, encoding="utf-8")
     profile_cli(ctx, tmp_path, "readme", "--bootstrap", "--write")
     actual = (tmp_path / "README.md").read_text(encoding="utf-8")
     assert "type-Template-" not in badge_block(actual)
     assert "type-GitHub%20profile-" in badge_block(actual)
     assert "license-MIT-" in badge_block(actual)
-    assert not any("badge" in f for f in profile_cli(ctx, tmp_path, "lint", "readme")["fails"])
+    actual_tagline = next(m.group(2) for m in readme.find_blocks(readme.MARK, actual) if m.group(1) == "tagline")
+    if owned_tagline:
+        marker, payload = actual_tagline.split("\n", 1)
+        assert payload == f"**{ctx.meta['description']}**"
+        assert marker == f"<!-- showcase:tagline:generated sha256={hashlib.sha256(payload.encode()).hexdigest()} -->"
+        assert profile_cli(ctx, tmp_path, "lint", "readme")["fails"] == []
+    else:
+        # The independent template-body receipt cannot prove ownership of a legacy tagline.
+        assert actual_tagline == inherited
+        assert profile_cli(ctx, tmp_path, "lint", "readme", expected_code=1)["fails"] == [
+            "R2 bold tagline must equal the GitHub description"]
 
 
 # GFM evidence (GitHub Markdown API, mode gfm):

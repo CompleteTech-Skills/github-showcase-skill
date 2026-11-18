@@ -567,6 +567,7 @@ def format_text(repo_dir: Path | None, destination: Path, text: str) -> str:
 def match_formatted_managed_blocks(repo_dir: Path, path: Path, before: str, after: str) -> str:
     """Compare an old managed block with the same content under the pinned formatter."""
     from .readme import MARK, find_blocks, normalize_text
+    from .tagline import normalize as normalize_tagline
 
     def unique_blocks(text, *, keep_offsets=False):
         seen = {}
@@ -588,6 +589,9 @@ def match_formatted_managed_blocks(repo_dir: Path, path: Path, before: str, afte
     replacements = []
     for name in names:
         a, b = previous.get(name), current.get(name)
+        if name == "tagline" and normalize_tagline(original[name].group(2)) != normalize_tagline(candidate[name].group(2)):
+            # Formatter equivalence cannot overrule exact authored-tagline preservation.
+            continue
         if a and b and a.group(2) == b.group(2):
             start, end = candidate[name].span(2)
             replacements.append((start, end, original[name].group(2)))
