@@ -1667,11 +1667,6 @@ def preservation(before: str, after: str, removed: list[str], *, ctx: RepoContex
     def omit_owned_tagline(m):
         return wrap("tagline", "") if m.group(1) == "tagline" else m.group(0)
 
-    if replace_tagline:
-        # Generated output must not count as a surviving copy of the same authored line.
-        before = _sub_blocks(before, omit_owned_tagline)
-        after = _sub_blocks(after, omit_owned_tagline)
-
     def omit_owned_badges(m):
         nonlocal brand
         body = m.group(2)
@@ -1700,6 +1695,11 @@ def preservation(before: str, after: str, removed: list[str], *, ctx: RepoContex
         offset = block.end()
     comparison.append(before[offset:])
     before = "".join(comparison)
+    if replace_tagline:
+        # Badge spans belong to the original source; use them before changing
+        # tagline lengths. Generated output cannot stand in for authored text.
+        before = _sub_blocks(before, omit_owned_tagline)
+        after = _sub_blocks(after, omit_owned_tagline)
     before_lines = (line.strip(" \t") for line in source_lines(before))
     b_lines = Counter(line for line in before_lines if line and not line.startswith("<!-- showcase:"))
     for r in removed:

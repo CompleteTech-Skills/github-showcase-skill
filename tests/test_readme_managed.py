@@ -53,6 +53,51 @@ def test_generated_replacement_cannot_count_as_authored_line():
     assert f"lost line: **{NEW}**" in readme.preservation(before, after, [])
 
 
+@pytest.mark.parametrize("ending", ["\n", "\r\n", "\r"])
+@pytest.mark.parametrize("tagline_first", [False, True])
+def test_tagline_refresh_keeps_badge_offsets_and_authored_lines(ending, tagline_first):
+    tagline = readme.wrap("tagline", f"**{OLD}**")
+    badges = readme.wrap("badges", "[![Authored badge](badge.svg)](guide.md)")
+    blocks = (tagline, badges) if tagline_first else (badges, tagline)
+    before = ("\n".join(blocks) + f"\n**{NEW}**\nKeep this authored line.\n").replace("\n", ending)
+    after = before.replace(f"**{OLD}**", f"**{NEW}**", 1)
+    assert readme.preservation(before, after, []) == []
+    assert "lost line: Keep this authored line." in readme.preservation(
+        before, after.replace(f"Keep this authored line.{ending}", ""), [],
+    )
+    assert f"lost line: **{NEW}**" in readme.preservation(
+        before, after.rsplit(f"**{NEW}**{ending}", 1)[0] + f"Keep this authored line.{ending}", [],
+    )
+
+
+@pytest.mark.parametrize("ending", ["\n", "\r\n", "\r"])
+def test_default_write_refreshes_tagline_before_badges(tmp_path, ending):
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    meta = tmp_path / "meta.json"
+    write_meta(meta, OLD)
+    args = ("--meta", meta, "--repo-dir", checkout, "readme", "--write")
+    initial = run_cli(*args)
+    assert initial.returncode == 0, initial.stderr
+    path = checkout / "README.md"
+    before = path.read_text(encoding="utf-8")
+    blocks = {m.group(1): m.group(0) for m in readme.find_blocks(readme.MARK, before)}
+    before = before.replace(blocks["tagline"], "", 1).replace(
+        blocks["badges"], blocks["tagline"] + "\n\n" + blocks["badges"], 1,
+    )
+    before += f"\n**{NEW}**\nKeep this authored line.\n"
+    path.write_bytes(before.replace("\n", ending).encode("utf-8"))
+    write_meta(meta, NEW)
+    result = run_cli(*args)
+    assert result.returncode == 0, result.stdout
+    assert "readme-shrink" not in json.loads(result.stdout)["logs"]
+    after = path.read_bytes().decode("utf-8")
+    assert readme.wrap("tagline", f"**{NEW}**").replace("\n", ending) in after
+    assert after.count(f"**{NEW}**") == 2
+    assert f"Keep this authored line.{ending}" in after
+    assert after == after.replace("\r\n", "\n").replace("\r", "\n").replace("\n", ending)
+
+
 def test_tagline_marker_example_is_not_owned():
     fence = chr(96) * 3
     example = f"{fence}html\n" + readme.wrap("tagline", f"**{OLD}**") + f"\n{fence}\n"
