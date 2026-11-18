@@ -2299,7 +2299,7 @@ def _markdown_images(text: str, document: str) -> list[tuple[str, str, int, int]
     return sources
 
 
-def _image_entries(text: str, document: str) -> list[tuple[str, str, bool]]:
+def _image_entries(text: str, document: str, *, source_order: bool = False) -> list[tuple[str, str, bool]]:
     """Read HTML and Markdown images, excluding Markdown-looking text in HTML attributes."""
     text, document = _parse_views(text, document)
     parser = _HTMLTokens(text, document)
@@ -2327,13 +2327,14 @@ def _image_entries(text: str, document: str) -> list[tuple[str, str, bool]]:
         return _span_at(spans, start) is not None
     def in_link_literal(start):
         return _span_at(link_spans, start) is not None
-    result = [(written_alt(alt, start), source, False) for alt, source, start, end in markdown
+    result = [(start, (written_alt(alt, start), source, False)) for alt, source, start, end in markdown
               if not in_definition(start) and not inside(tags, start, end) and not in_link_literal(start)]
     kept = set(tags)
-    result += [(alt, source, True) for alt, source, start, end in parser.images
+    result += [(start, (alt, source, True)) for alt, source, start, end in parser.images
                if (start, end) in kept and not in_definition(start) and not in_link_literal(start)]
-    return result
-
+    if source_order:
+        result.sort(key=lambda entry: entry[0])
+    return [image for _, image in result]
 
 
 def _images(text: str, document: str) -> list[tuple[str, str]]:

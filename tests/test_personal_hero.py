@@ -405,3 +405,92 @@ def test_personal_bootstrap_missing_intro_refuses_before_writes(tmp_path):
     assert result.returncode == 4 and "needs-input:intro" in result.stdout, result.stdout + result.stderr
     assert path.read_bytes() == source.encode("utf-8")
     assert not (tmp_path / "CONTRIBUTING.md").exists()
+
+
+@pytest.mark.parametrize("variant", ["G", "H"])
+def test_hero_less_personal_callout_requires_intro_before_writes(tmp_path, variant):
+    meta = metadata(tmp_path)
+    path = tmp_path / "README.md"
+    source = b"\xef\xbb\xbf> Legacy note\r\n\r\n# Profile\n\nAuthored notes.  \r\n"
+    path.write_bytes(source)
+    records = tmp_path / "records.jsonl"
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--mode", "upgrade", "--variant", variant,
+                     "--badges", "local", "--records", records, "--write")
+    assert result.returncode == 4 and "needs-input:intro" in result.stdout, result.stdout + result.stderr
+    assert path.read_bytes() == source
+    assert not records.exists() and not (tmp_path / "docs").exists()
+
+
+@pytest.mark.parametrize("variant", ["G", "H"])
+def test_hero_less_personal_callout_adds_verified_intro(tmp_path, intro_bytes, variant):
+    meta = metadata(tmp_path)
+    put_intro(tmp_path, intro_bytes)
+    path = tmp_path / "README.md"
+    source = b"> Legacy note\r\n\r\n# Profile\n\nAuthored notes.  \r\n"
+    path.write_bytes(b"\xef\xbb\xbf" + source)
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--mode", "upgrade", "--variant", variant,
+                     "--badges", "local", "--write")
+    assert result.returncode == 0, result.stdout + result.stderr
+    updated = path.read_bytes()
+    assert updated.startswith(b"\xef\xbb\xbf<!-- showcase:banner:start -->")
+    assert updated.count(b'src="assets/intro.svg"') == 1
+    assert source in updated
+
+
+@pytest.mark.parametrize("variant", ["G", "H", "J"])
+@pytest.mark.parametrize("destination", ["custom.svg", "docs/images/banner.png"])
+def test_personal_upgrade_preserves_reference_hero_without_intro(tmp_path, variant, destination):
+    meta = metadata(tmp_path)
+    path = tmp_path / "README.md"
+    source = (b"> Legacy note\r\n\r\n![Authored hero][art]\n\n"
+              + f"[art]: {destination}\r\n\r\n".encode("utf-8")
+              + b"# Profile\n\nAuthored notes.  \r\n")
+    path.write_bytes(source)
+    result = run_cli("--meta", meta, "--repo-dir", tmp_path, "readme", "--mode", "upgrade", "--variant", variant,
+                     "--write")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert path.read_bytes().startswith(source)
+    assert b'assets/intro.svg' not in path.read_bytes()
+
+
+@pytest.mark.parametrize("target", ["assets/other.svg", "assets/intro.svg.backup.svg"])
+def test_personal_lint_requires_intro_image_source(tmp_path, intro_bytes, target):
+    meta = metadata(tmp_path)
+    put_intro(tmp_path, intro_bytes)
+    args = ("--meta", meta, "--repo-dir", tmp_path)
+    scaffold = run_cli(*args, "readme", "--mode", "scaffold", "--badges", "local", "--write")
+    assert scaffold.returncode == 0, scaffold.stdout + scaffold.stderr
+    path = tmp_path / "README.md"
+    (tmp_path / "assets" / "intro.svg").rename(tmp_path / target)
+    source = path.read_text(encoding="utf-8")
+    source = source.replace('src="assets/intro.svg" alt="', f'src="{target}" alt="assets/intro.svg ')
+    path.write_text(source, encoding="utf-8")
+    result = run_cli(*args, "lint", "readme", path)
+    fails = json.loads(result.stdout)["fails"]
+    assert any("hero must open" in failure for failure in fails), fails
+    assert "D13 the hero must be the first image (assets/intro.svg)" in fails
+
+
+def test_personal_preserve_unchanged_keeps_managed_intro_in_place(tmp_path, intro_bytes):
+    import yaml
+    from conftest import ROOT
+
+    meta = metadata(tmp_path)
+    put_intro(tmp_path, intro_bytes)
+    args = ("--meta", meta, "--repo-dir", tmp_path)
+    scaffold = run_cli(*args, "readme", "--mode", "scaffold", "--badges", "local", "--write")
+    assert scaffold.returncode == 0, scaffold.stdout + scaffold.stderr
+    path = tmp_path / "README.md"
+    source = path.read_bytes() + b"\n## Notes\n\n" + b"Long authored profile notes.\n" * 600
+    path.write_bytes(source)
+    config = yaml.safe_load((ROOT / "references" / "brand.yaml").read_text(encoding="utf-8"))
+    config["readme"]["preserve_banner"] = "unchanged"
+    brand = tmp_path / "brand.yaml"
+    brand.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    (tmp_path / "assets" / "intro.svg").unlink()
+    facts = json.loads(meta.read_text(encoding="utf-8"))
+    facts["description"] = "Updated synthetic profile description."
+    meta.write_text(json.dumps(facts), encoding="utf-8")
+    result = run_cli("--config", brand, *args, "readme", "--mode", "upgrade", "--badges", "local", "--write")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert path.read_bytes() == source.replace(b"Show synthetic public projects.", b"Updated synthetic profile description.")

@@ -16,7 +16,7 @@ from . import footer as footermod
 from .context import RepoContext
 from .detect import required_sections, standard
 from .errors import ConfigError, NeedsInput
-from .mdcode import MANAGED_BLOCK_PATTERN, after_line_end, code_block_spans, code_spans, find_blocks, masked  # noqa: F401  (code_spans: re-exported for callers)
+from .mdcode import MANAGED_BLOCK_PATTERN, _image_entries, after_line_end, code_block_spans, code_spans, find_blocks, masked  # noqa: F401  (code_spans: re-exported for callers)
 
 MARK = MANAGED_BLOCK_PATTERN
 EMOJI = re.compile("[\U0001F000-\U0001FAFF☀-➿⬀-⯿️‍]")
@@ -748,7 +748,13 @@ def leading_banner_block(text: str) -> re.Match | None:
     return None
 
 
-def callout_only(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
+def _personal_preamble_has_art(text: str) -> bool:
+    unmarked, _ = _strip_markers(text)
+    preamble, _ = split_sections(unmarked)
+    return bool(_image_entries(masked(unmarked)[:len(preamble)], unmarked))
+
+
+def callout_only(ctx: RepoContext, text: str, *, retain_personal_banner: bool = False) -> tuple[str, list[str]]:
     """Variants G and H (§7.4): the hero banner block, then the callout (unless one is already there), then the body
     unchanged, then the decision 18 footer. Nothing else changes. Watching-org forks never reach here (`readme`
     exempts them). Review q27 "Full CompleteTech treatment" (brand.yaml readme.fork_readme: full) means the fork
@@ -766,8 +772,13 @@ def callout_only(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
     body = text
     lead_banner = ""
     leading = leading_banner_block(text)
+    personal = personal_intro_applies(ctx)
+    banner_gap = "\n\n"
     if leading:  # our banner block is already on top (a re-run): keep it, look for the callout below
-        body = text[leading.end():].lstrip("\n")
+        remainder = text[leading.end():]
+        body = remainder.lstrip("\n")
+        if personal and body != remainder:
+            banner_gap = remainder[:len(remainder) - len(body)]
     first = next((ln for ln in source_lines(body) if ln.strip()), "")
     out = body
     if not first.lstrip().startswith(">"):
@@ -777,21 +788,25 @@ def callout_only(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
             co = None  # the H callout needs the archive date and reason from the registry
             ctx.log("needs-input:archive-callout")
         if co:
-            out = co + "\n\n" + body.lstrip("\n")
+            out = co + "\n\n" + (body if personal and not leading else body.lstrip("\n"))
     replaced_hero: list[str] = []
     if ctx.art_status()["banner"] is None:
         lead_banner = wrap("banner", banner_html(ctx)) + "\n\n"  # decision 13: the hero banner opens G and H too
     elif leading:
         hero_body = leading.group(2)
-        if personal_intro_applies(ctx) and personal_generated_hero(ctx, hero_body):
+        if personal and not retain_personal_banner and personal_generated_hero(ctx, hero_body):
             new_hero = banner_html(ctx)
-            lead_banner = wrap("banner", new_hero) + "\n\n"
+            lead_banner = wrap("banner", new_hero) + banner_gap
             # Count only generated lines that the replacement does not carry again.
             replaced_hero = list((Counter(ln for ln in source_lines(hero_body) if ln.strip())
                                   - Counter(source_lines(new_hero))).elements())
         else:
-            lead_banner = leading.group(0) + "\n\n"
-    out = lead_banner + out.lstrip("\n")
+            lead_banner = leading.group(0) + banner_gap
+    elif personal and not retain_personal_banner and not _personal_preamble_has_art(text) and not any(
+        block.group(1) == "banner" for block in find_blocks(MARK, text)
+    ):
+        lead_banner = wrap("banner", banner_html(ctx)) + "\n\n"
+    out = lead_banner + (out if personal and not leading else out.lstrip("\n"))
     removed: list[str] = list(replaced_hero)
     if footer_wanted(ctx):
         had_footer = False
@@ -1102,16 +1117,18 @@ def upgrade(ctx: RepoContext, text: str, *, already_normalized: bool = False) ->
         text = normalize_text(text)
     variant = ctx.det["variant"]
     rv = standard("readme-variants")
+    personal = personal_profile(ctx)
+    retain_personal_banner = personal and ctx.preserve_unchanged() and preserved(ctx, text)
     if variant in ("G", "H"):
-        return callout_only(ctx, text)
-    if variant == "J" and _badge_blocks_need_in_place_refresh(text, find_blocks(MARK, text)):
+        return callout_only(ctx, text, retain_personal_banner=retain_personal_banner)
+    markers = find_blocks(MARK, text) if personal or variant == "J" else []
+    if retain_personal_banner and any(block.group(1) == "banner" for block in markers):
+        return header_only(ctx, text, already_normalized=True, retain_personal_banner=True), []
+    if variant == "J" and _badge_blocks_need_in_place_refresh(text, markers):
         return header_only(ctx, text, already_normalized=True), []
-    if personal_profile(ctx):
-        heroes = [m.group(2) for m in find_blocks(MARK, text) if m.group(1) == "banner"]
-        unmarked, _ = _strip_markers(text)
-        preamble, _ = split_sections(unmarked)
-        authored_art = re.search(r"<(?:img|picture)\b|!\[[^\]]*\]\(", masked(preamble), re.I)
-        if any(not personal_generated_hero(ctx, body) for body in heroes) or authored_art:
+    if personal:
+        heroes = [m.group(2) for m in markers if m.group(1) == "banner"]
+        if any(not personal_generated_hero(ctx, body) for body in heroes) or _personal_preamble_has_art(text):
             # Personal artwork and its surrounding authored content stay in place. Refresh only owned blocks.
             return header_only(ctx, text, already_normalized=True), []
     body, blocks = _strip_markers(text)
@@ -1317,7 +1334,8 @@ def upgrade(ctx: RepoContext, text: str, *, already_normalized: bool = False) ->
     return "\n\n".join(x for x in out if x) + "\n", removed
 
 
-def header_only(ctx: RepoContext, text: str, *, already_normalized: bool = False) -> str:
+def header_only(ctx: RepoContext, text: str, *, already_normalized: bool = False,
+                retain_personal_banner: bool = False) -> str:
     """Replace only existing marker blocks (what the Action runs)."""
     if not already_normalized:
         text = normalize_text(text)
@@ -1347,11 +1365,14 @@ def header_only(ctx: RepoContext, text: str, *, already_normalized: bool = False
             new = tagline_body(ctx, body, text)
             return m.group(0) if not desc and new == body else wrap(b, re.sub(r"\n{3,}", "\n\n", new))
         if b == "banner" and personal:
-            return wrap(b, banner_html(ctx)) if personal_generated_hero(ctx, body) else m.group(0)
+            if not retain_personal_banner and personal_generated_hero(ctx, body):
+                return wrap(b, banner_html(ctx))
+            return m.group(0)
         if b in gen:
             return wrap(b, re.sub(r"\n{3,}", "\n\n", gen[b]))
         return m.group(0)
-    return license_block(ctx, reorder_lead(ctx, _sub_blocks(text, sub)))
+    refreshed = _sub_blocks(text, sub)
+    return license_block(ctx, refreshed if retain_personal_banner else reorder_lead(ctx, refreshed))
 
 
 def _seam(left: str, right: str) -> str:

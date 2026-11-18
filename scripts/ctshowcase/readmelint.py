@@ -212,6 +212,7 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
     preserve = preserved(ctx, text)
     unchanged = preserve and ctx.preserve_unchanged()
     hero = hero_path(ctx)
+    personal = hero == "assets/intro.svg"
     # §7.1 order (q57 `nav`): hero banner, then the nav line; "Nav line first" (readme.nav_first) puts the nav on top
     navs = lines
     if not nav_first(ctx) and not unchanged:
@@ -234,7 +235,17 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
         else:
             warns.append("preserve: §7.0 additive-only README under the hero banner (q57 pres); R2 tagline and R7 H2 "
                          "order are n/a")
-    if imgs:
+    if personal:
+        parsed = _image_entries(_outside_code(plain), plain, source_order=True)
+        if not unchanged:
+            if not parsed:
+                fails.append("D13 no banner image")
+            elif not _is_personal_hero(parsed[0], hero):
+                fails.append(f"D13 the hero must be the first image ({hero})")
+        pictures = re.finditer(r"<picture\b[^>]*>.*?</picture\s*>", _outside_code(plain), re.I | re.S)
+        if any(_has_personal_hero(picture.group(0), hero) for picture in pictures):
+            fails.append("D13 banner must be a plain <img>, not <picture>")
+    elif imgs:
         _, first = imgs[0]
         if hero not in first and not unchanged:
             fails.append(f"D13 the hero must be the first image ({hero})")
@@ -347,13 +358,25 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
     return _result(path, fails, warns, incomplete)
 
 
+def _is_personal_hero(image: tuple[str, str, bool], hero: str) -> bool:
+    _, target, html = image
+    return html and unquote(target).removeprefix("./") == hero
+
+
+def _has_personal_hero(text: str, hero: str) -> bool:
+    return any(_is_personal_hero(image, hero) for image in _image_entries(_outside_code(text), text))
+
+
 def _lead_banner_lines(lines: list[str], hero: str = "docs/images/banner.png") -> int | None:
     """How many leading non-blank lines the hero banner takes (`<p align="center">`, the banner `<img>`, `</p>`, or one
     line holding it), or None when the README does not open with it."""
-    if len(lines) >= 3 and lines[0].strip() == '<p align="center">' and hero in lines[1] \
+    def has_hero(line):
+        return _has_personal_hero(line, hero) if hero == "assets/intro.svg" else hero in line
+
+    if len(lines) >= 3 and lines[0].strip() == '<p align="center">' and has_hero(lines[1]) \
             and lines[2].strip() == "</p>":
         return 3
-    if lines and hero in lines[0]:
+    if lines and has_hero(lines[0]):
         return 1
     return None
 
