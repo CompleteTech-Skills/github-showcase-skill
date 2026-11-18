@@ -131,9 +131,11 @@ def test_cli_scaffold_formatter_boundary_reflow_is_owned_and_r2_compliant(
 
 @ENDINGS
 @pytest.mark.parametrize("sidecar", [False, True], ids=["no-sidecar", "unrelated-sidecar"])
-def test_verified_outer_blank_lines_and_soft_wraps_match_without_sidecar_authority(tmp_path, ending, sidecar):
+@pytest.mark.parametrize("blank", ["", " \t"], ids=["empty", "space-tab"])
+def test_verified_outer_blank_lines_and_soft_wraps_match_without_sidecar_authority(tmp_path, ending, sidecar, blank):
     repo, meta = target(tmp_path)
-    payload = "\n**Compare synthetic\nNorthwind values offline.**\n"
+    visible = "**Compare synthetic\nNorthwind values offline.**"
+    payload = f"{blank}\n{visible}\n{blank}"
     body = receipt(payload).replace("\n", ending)
     write_source(repo, normalize(body), ending)
     if sidecar:
@@ -143,6 +145,10 @@ def test_verified_outer_blank_lines_and_soft_wraps_match_without_sidecar_authori
                                     "outputs": {}}), encoding="utf-8")
     assert assert_receipt(body) == payload
     assert tagline.payload(body) == payload
+    assert tagline.inherited_payload(body) == visible
+    original = receipt(f"**{DESCRIPTION}**")
+    stamp = original.split("\n", 1)[0]
+    assert tagline.reseal(original, f"{stamp}\n{payload}") == receipt(payload)
     report = lint_report(repo, meta)
     assert R2 not in report["fails"], report
     assert tagline.matches_description(body, DESCRIPTION)
@@ -206,3 +212,22 @@ def test_verified_receipt_does_not_allow_nonblank_outer_whitespace(payload):
     assert assert_receipt(body) == payload
     assert tagline.payload(body) == payload
     assert not tagline.matches_description(body, DESCRIPTION)
+
+
+@pytest.mark.parametrize("element", ["pre", "textarea"])
+def test_verified_tagline_keeps_preformatted_html_whitespace(tmp_path, element):
+    repo, meta = target(tmp_path)
+    description = f"Examine <{element}>one  two</{element}> now."
+    changed = description.replace("one  two", "one\ntwo")
+    write_meta(meta, description)
+    write_source(repo, receipt(f"**{description}**"), "\n")
+    assert R2 not in lint_report(repo, meta)["fails"]
+    write_source(repo, receipt(f"**{changed}**"), "\n")
+    assert R2 in lint_report(repo, meta)["fails"]
+
+    for wrapper in ("**{}**", '<p align="center"><b>{}</b></p>'):
+        original = receipt(wrapper.format(description))
+        stamp = original.split("\n", 1)[0]
+        assert tagline.matches_description(original, description)
+        assert not tagline.matches_description(receipt(wrapper.format(changed)), description)
+        assert tagline.reseal(original, f"{stamp}\n{wrapper.format(changed)}") is None

@@ -38,10 +38,20 @@ def payload(body: str) -> str | None:
     return match.group(2)
 
 
+def _visible_payload(value: str) -> str:
+    lines = value.split("\n")
+    start, end = 0, len(lines)
+    while start < end and not lines[start].strip(" \t"):
+        start += 1
+    while start < end and not lines[end - 1].strip(" \t"):
+        end -= 1
+    return "\n".join(lines[start:end])
+
+
 def visible(body: str) -> str | None:
     """Read the verified body without outer blank lines added by a formatter."""
     verified = payload(body)
-    return verified.strip("\n") if verified is not None else None
+    return _visible_payload(verified) if verified is not None else None
 
 
 def inherited_payload(body: str) -> str | None:
@@ -95,8 +105,8 @@ def reseal(original: str, formatted: str) -> str | None:
     if before.group(2) != after.group(2):
         from .mdcode import tagline_reflow_key
 
-        old_unit = _rendered_unit(before.group(2).strip("\n"))
-        new_unit = _rendered_unit(after.group(2).strip("\n"))
+        old_unit = _rendered_unit(_visible_payload(before.group(2)))
+        new_unit = _rendered_unit(_visible_payload(after.group(2)))
         if (old_unit is None or new_unit is None or old_unit[0] != new_unit[0]
                 or tagline_reflow_key(old_unit[1]) != tagline_reflow_key(new_unit[1])):
             return None

@@ -2361,11 +2361,38 @@ def _images(text: str, document: str) -> list[tuple[str, str]]:
     return [(alt, source) for alt, source, _ in _image_entries(text, document)]
 
 
+_TAGLINE_PRE_OPEN = re.compile(rf"<(pre|listing)(?={HTML_SPACE}|/?>)", re.I | re.A)
+_TAGLINE_PRE_CLOSE = re.compile(rf"</(pre|listing){HTML_SPACE}*>", re.I | re.A)
+
+
+def _tagline_preformatted_spans(body, tokens, raw, link_literals):
+    """Preserve preformatted text between real tags, even within a paragraph."""
+    starts = []
+    for start, end in tokens:
+        if _span_at(raw, start) is not None or _span_at(link_literals, start) is not None:
+            continue
+        if match := _TAGLINE_PRE_OPEN.match(body, start, end):
+            starts.append((match[1].lower(), end))
+        elif starts and (match := _TAGLINE_PRE_CLOSE.fullmatch(body, start, end)):
+            if match[1].lower() == starts[-1][0]:
+                _, opening_end = starts.pop()
+                if not starts:
+                    yield opening_end, start
+    if starts:
+        yield starts[0][1], len(body)
+
+
 def tagline_reflow_key(body: str) -> str:
     """Normalize prose wrapping outside syntax with meaningful source whitespace."""
     body = body.replace("\r\n", "\n").replace("\r", "\n")
-    opaque = [*inline_code_spans(body), *_link_literal_spans(body), *html_block_spans(body)]
-    opaque.extend(_HTMLTokens(masked(body), body).tags)
+    link_literals = _link_literal_spans(body)
+    blocks = html_block_spans(body)
+    tags = _HTMLTokens(masked(body), body).tags
+    opaque = [*inline_code_spans(body), *link_literals, *blocks, *tags]
+    if tags:
+        raw = tuple(_raw_marker_text_spans(body, blocks, tags, _accepted_inline(body)[3]))
+        opaque.extend(raw)
+        opaque.extend(_tagline_preformatted_spans(body, tags, raw, link_literals))
     # Two-space or backslash hard breaks, paragraph breaks, and indented code
     # cannot be equated with ordinary wrapping.
     # Try a space run only at its first byte. Retrying the greedy hard-break
