@@ -12,9 +12,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    # The complete personal-hero CLI suite exceeded 45 minutes on macOS; earlier Windows runs reached 56 minutes.
+    # Earlier full suites hit 45 minutes on macOS and 60 minutes on Windows before the final CLI cases.
     # Budget for the additional preservation cases and cleanup without dropping any tests.
-    timeout-minutes: ${{ matrix.os == 'windows-latest' && 90 || 75 }}
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 120 || 75 }}
     steps:
       - uses: actions/checkout@v4
         with:
