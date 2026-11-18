@@ -189,11 +189,12 @@ def record_art_exemption(ctx, kind: str, out: str | None, reason: str) -> None:
             or ctx.style.get("hold") or ctx.watching_status() == "hold:watching-non-fork"
             or reason not in ART_EXEMPTIONS):
         return
-    canonical = ctx.repo_dir.resolve() / "docs" / "images" / ART_RECORDS[kind]
-    if out is not None and Path(out).resolve() != canonical:
+    root = ctx.repo_dir.resolve()
+    canonical = root / "docs" / "images" / ART_RECORDS[kind]
+    if not canonical.parent.resolve().is_relative_to(root) or (out is not None and Path(out).resolve() != canonical):
         return
     with lock_outputs(ctx, canonical):
-        if canonical.exists() or canonical.is_symlink():
+        if not canonical.parent.resolve().is_relative_to(root) or canonical.exists() or canonical.is_symlink():
             return
         previous = output_records(read_sidecar(canonical.parent)).get(canonical.name)
         if isinstance(previous, dict) and "staged_description" in previous:
@@ -637,6 +638,17 @@ def cmd_readme(args):
             if problems:
                 return base("readme", ctx, result="fail", mode=mode, problems=problems[:20],
                             logs=ctx.logs + ["readme-shrink"]), CHECK_FAILED
+    from ctshowcase.fingerprint import bytes_record, has_staged_outputs
+    from ctshowcase.staged import (
+        check_outputs, lock_outputs, plan_sidecars, protected_auxiliary, record_output, tagline_blocks, tagline_digest,
+    )
+
+    staged = getattr(ctx, "staged_description", None) is not None
+    captured_description = str(ctx.meta.get("description") or "")
+    tagline = readme.tagline_body(ctx).strip() if args.write and (staged or captured_description.strip()) else ""
+    # Identify generated blocks before the formatter can reflow their Markdown.
+    planned_taglines = tagline_blocks(after) if tagline else []
+    tagline_indices = [index for index, body in enumerate(planned_taglines) if body == tagline]
     if args.format_generated:
         from ctshowcase.formatting import format_text, markdown_source_style
         encoding_bom = "\ufeff" if raw_readme.startswith("\ufeff") else ""
@@ -672,12 +684,6 @@ def cmd_readme(args):
                                         code=CHECK_FAILED)
                 drawing = formatted
             badge_outputs[rel] = drawing.encode("utf-8")
-    from ctshowcase.fingerprint import bytes_record, has_staged_outputs
-    from ctshowcase.staged import (
-        check_outputs, lock_outputs, plan_sidecars, protected_auxiliary, record_output, tagline_blocks, tagline_digest,
-    )
-
-    staged = getattr(ctx, "staged_description", None) is not None
     report = (Path(args.records),) if staged and args.records and changed else ()
     capture = getattr(ctx, "meta_path", None)
     change_records = []
@@ -695,10 +701,22 @@ def cmd_readme(args):
             outputs.append((path, after.encode("utf-8")))
             if contrib_new is not None:
                 outputs.append((contrib_path, contrib_new.encode("utf-8")))
-        tagline = readme.tagline_body(ctx).strip() if staged or str(ctx.meta.get("description") or "").strip() else ""
-        record_tagline = tagline and tagline in tagline_blocks(after)
+        rendered_taglines = tagline_blocks(after) if tagline_indices and args.format_generated else planned_taglines
+        if len(rendered_taglines) != len(planned_taglines):
+            raise ShowcaseError("formatter changed the README tagline markers", log="formatter-content",
+                                code=CHECK_FAILED)
+        matched_taglines = [rendered_taglines[index] for index in tagline_indices]
+        reflowed = any(body != tagline for body in matched_taglines)
+        tagline_record = {}
+        if matched_taglines and (staged or reflowed):
+            digests = sorted({tagline_digest(body) for body in matched_taglines})
+            tagline_record["tagline_sha256"] = digests[0]
+            if len(digests) > 1:
+                tagline_record["tagline_sha256s"] = digests
+            if not staged:
+                tagline_record["description_sha256"] = tagline_digest(captured_description)
         destinations = [target for target, _ in outputs]
-        if record_tagline and path not in destinations:
+        if matched_taglines and path not in destinations:
             destinations.append(path)
         output_locks = lock_outputs(ctx, path, *destinations, auxiliary=report) if report else lock_outputs(
             ctx, path, *destinations)
@@ -723,9 +741,11 @@ def cmd_readme(args):
                     if current != original:
                         raise ShowcaseError("README inputs changed during formatting", log="formatter-source-changed",
                                             code=CHECK_FAILED)
-                extra = {"tagline_sha256": tagline_digest(tagline)} if staged and record_tagline else {}
                 rendered_readme = after.encode("utf-8") if changed else original_readme or b""
-                planned = plan_sidecars(ctx, (path, bytes_record(rendered_readme, **extra), False)) if record_tagline else {}
+                planned = (
+                    plan_sidecars(ctx, (path, bytes_record(rendered_readme, **tagline_record), reflowed))
+                    if matched_taglines else {}
+                )
                 if capture is not None:
                     ensure_distinct_outputs(capture, *planned)
                 for sidecar in planned:
@@ -751,14 +771,14 @@ def cmd_readme(args):
                                             private=staged, private_metadata=private_metadata, append_output=append_output)
             else:
                 rendered_readme = after.encode("utf-8") if changed else original_readme or b""
-                if staged and record_tagline:
-                    record_output(ctx, path, bytes_record(rendered_readme, tagline_sha256=tagline_digest(tagline)))
+                if staged and matched_taglines:
+                    record_output(ctx, path, bytes_record(rendered_readme, **tagline_record))
                 for target, data in outputs:
                     if target == contrib_path and not staged:
                         target.write_text(contrib_new, encoding="utf-8")
                     else:
                         write_artifact(ctx, target, data)
-                if not staged and record_tagline:
+                if not staged and matched_taglines:
                     record_output(ctx, path, bytes_record(rendered_readme))
     if change_records and not (args.format_generated and args.write):
         if staged and not args.write:

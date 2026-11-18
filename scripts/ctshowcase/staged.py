@@ -172,16 +172,20 @@ def check_outputs(ctx, *paths: Path, auxiliary: tuple[Path, ...] = (), adjacent:
                 raise ShowcaseError("staged output must be a regular file", log="staged-description:path")
         if any(_live_social_output(path) for path in paths):
             raise ShowcaseError("staged output must not replace a live social preview", log="staged-description:path")
-    root = Path(ctx.repo_dir).resolve() if ctx.repo_dir else None
+    declared_root = Path(os.path.abspath(ctx.repo_dir)) if ctx.repo_dir else None
+    root = declared_root.resolve() if declared_root else None
     real_paths = []
     for path in (*paths, *auxiliary):
         resolved = path.resolve()
         if (path.name.casefold() == fp.SIDECAR.casefold()
                 or any(_aliases(resolved, sidecar) for sidecar in real_sidecars)):
             raise ShowcaseError("render output overlaps its showcase sidecar", log="staged-description:path")
-        if root and path.absolute().is_relative_to(root) and (path.is_symlink() or not resolved.is_relative_to(root)):
-            raise ShowcaseError("render output must not write through a link outside the checkout",
-                                log="staged-description:path")
+        if root is not None and (path.is_symlink() or not resolved.is_relative_to(root)):
+            lexical = Path(os.path.abspath(path))
+            if (lexical.is_relative_to(declared_root) or lexical.is_relative_to(root)
+                    or any(parent.resolve() == root for parent in lexical.parents)):
+                raise ShowcaseError("render output must not write through a link outside the checkout",
+                                    log="staged-description:path")
         if any(_aliases(resolved, other) for other in real_paths):
             raise ShowcaseError("render output paths must be distinct", log="staged-description:path")
         real_paths.append(resolved)
@@ -267,26 +271,39 @@ def tagline_blocks(text: str) -> list[str]:
     from .mdcode import find_blocks
     from .readme import MARK, normalize_text
 
-    return [m.group(2).strip() for m in find_blocks(MARK, normalize_text(text)) if m.group(1) == "tagline"]
+    source = normalize_text(text.replace("\r\n", "\n").replace("\r", "\n"))
+    return [m.group(2).strip() for m in find_blocks(MARK, source) if m.group(1) == "tagline"]
 
 
 def tagline_digest(body: str) -> str:
     return hashlib.sha256(body.encode("utf-8")).hexdigest()
 
 
-def _matches_staged_readme(ctx, blocks: list[str], path: Path | None) -> bool:
+def _readme_record(ctx, path: Path | None) -> dict:
     if path is None or ctx.repo_dir is None:
-        return False
+        return {}
     outputs = fp.output_records(fp.read_sidecar(ctx.repo_dir / "docs/images"))
     record = outputs.get("README.md")
-    info = record.get("staged_description") if isinstance(record, dict) else None
+    return record if isinstance(record, dict) else {}
+
+
+def _recorded_tagline_digests(record: dict) -> set[str]:
+    multiple = record.get("tagline_sha256s")
+    digests = {value for value in multiple if isinstance(value, str)} if isinstance(multiple, list) else set()
+    if isinstance(single := record.get("tagline_sha256"), str):
+        digests.add(single)
+    return digests
+
+
+def _matches_staged_readme(ctx, blocks: list[str], path: Path | None, record: dict) -> bool:
+    info = record.get("staged_description")
     proposal = info.get("text") if isinstance(info, dict) else None
     if not isinstance(proposal, str) or not proposal.strip():
         return False
-    digest = record.get("tagline_sha256")
-    if digest is not None:
-        return any(tagline_digest(block) == digest for block in blocks)
-    if record.get("sha256") != fp.file_record(path)["sha256"]:
+    digests = _recorded_tagline_digests(record)
+    if digests:
+        return any(tagline_digest(block) in digests for block in blocks)
+    if path is None or record.get("sha256") != fp.file_record(path)["sha256"]:
         return False
     staged = copy.copy(ctx)
     staged.meta = dict(ctx.meta, description=proposal)
@@ -303,7 +320,16 @@ def tagline_drift(ctx, text: str, path: Path | None = None) -> bool:
     blocks = tagline_blocks(text)
     if not blocks:
         return False
-    if not str(ctx.meta.get("description") or "").strip():
-        return _matches_staged_readme(ctx, blocks, path)
-    forms = tagline_forms(ctx)
-    return any(block not in forms for block in blocks)
+    captured = str(ctx.meta.get("description") or "")
+    if not captured.strip():
+        return _matches_staged_readme(ctx, blocks, path, _readme_record(ctx, path))
+    different = set(blocks).difference(tagline_forms(ctx))
+    if not different:
+        return False
+    # Formatter output can reflow a generated tagline. The recorded digest
+    # applies only to the description that produced that formatter input.
+    record = _readme_record(ctx, path)
+    staged = record.get("staged_description")
+    rendered_description = staged.get("sha256") if isinstance(staged, dict) else record.get("description_sha256")
+    return (rendered_description != tagline_digest(captured)
+            or not {tagline_digest(block) for block in different}.issubset(_recorded_tagline_digests(record)))

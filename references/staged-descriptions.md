@@ -20,6 +20,9 @@ outside the target checkout, the sidecar is placed beside that output; metadata-
 rendering uses that location too. README dry runs report the proposal without
 writing a sidecar. `readme --write` records the proposal when the resulting
 README has a managed tagline with that text, including an already-current tagline.
+With `--format-generated`, provenance ties the digest of each reflowed generated
+tagline to its source description. Doctor uses the same proof for wrapped text,
+and a live refresh clears the staged record for the refreshed tagline.
 Explicit report and change-record destinations must stay outside the files the
 Action commits. The capture, output and provenance destinations must be distinct.
 Staged social previews default to `assets/.showcase-staging/social-preview.png`.

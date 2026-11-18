@@ -1211,3 +1211,118 @@ def test_sidecar_lock_is_shared_across_process_temp_directories(tmp_path):
     with child:
         assert child.wait(timeout=15) == 0
         assert entered.exists()
+
+
+def test_reflowed_taglines_record_exact_bodies_and_follow_the_live_capture(tmp_path, monkeypatch):
+    import action_prepare
+    import showcase
+    from ctshowcase import readme
+    from ctshowcase.staged import tagline_blocks, tagline_digest
+
+    checkout = tmp_path / "repo"
+    checkout.mkdir()
+    path = checkout / "README.md"
+    path.write_text("# Synthetic documentation\n\n" + readme.wrap("tagline", "**Old.**") + "\n\n"
+                    "## Details\n\n" + readme.wrap("tagline", "**Another old.**") + "\n", encoding="utf-8")
+    meta_path = tmp_path / "metadata.json"
+    meta = meta_dict(description="")
+    proposed = "Route synthetic support requests across multiple teams and keep queue ownership visible."
+
+    def capture(description):
+        meta["description"] = description
+        meta_path.write_text(json.dumps(meta), encoding="utf-8")
+
+    def reflow(root, target, source):
+        if target != path:
+            return source
+        parts, offset = [], 0
+        blocks = [block for block in readme.find_blocks(readme.MARK, source) if block.group(1) == "tagline"]
+        for index, block in enumerate(blocks):
+            words = block.group(2).split(" ")
+            boundary = 4 + index
+            parts.extend((source[offset:block.start(2)], " ".join(words[:boundary]), "\n", " ".join(words[boundary:])))
+            offset = block.end(2)
+        return "".join([*parts, source[offset:]])
+
+    def recorded():
+        return read_sidecar(checkout / "docs/images")["outputs"]["README.md"]
+
+    def drift():
+        result = run_cli("--meta", meta_path, "--repo-dir", checkout, "doctor", "--format", "json")
+        return "description-drift:readme" in json.loads(result.stdout)["logs"]
+
+    monkeypatch.setattr("ctshowcase.formatting.format_text", reflow)
+    monkeypatch.chdir(checkout)
+    args = ["--meta", str(meta_path), "--repo-dir", str(checkout), "readme", "--mode", "header",
+            "--variant", "A", "--write", "--format-generated"]
+    capture("")
+    assert showcase.main([*args, "--description", proposed]) == 0
+    expected = {tagline_digest(body) for body in tagline_blocks(path.read_text(encoding="utf-8"))}
+    assert len(expected) == 2
+    assert set(recorded()["tagline_sha256s"]) == expected
+    assert recorded()["staged_description"]["text"] == proposed
+    assert action_prepare.has_staged_outputs()
+    assert drift()
+
+    capture(proposed)
+    assert not drift()
+    assert action_prepare.has_staged_outputs()
+
+    live = "Keep the live help queue available and route each synthetic request to the owner."
+    capture(live)
+    assert drift()
+    assert showcase.main(args) == 0
+    assert not action_prepare.has_staged_outputs()
+    assert not drift()
+
+    (checkout / "docs/images/.showcase.json").unlink()
+    assert showcase.main(args) == 0
+    assert not drift()
+    assert recorded()["description_sha256"] == tagline_digest(live)
+    edited = path.read_text(encoding="utf-8").replace("owner.**", "maintainer.**", 1)
+    path.write_text(edited, encoding="utf-8")
+    assert drift()
+
+
+def test_exempt_card_does_not_write_provenance_through_an_external_image_directory(tmp_path):
+    checkout = tmp_path / "repo"
+    docs = checkout / "docs"
+    docs.mkdir(parents=True)
+    external = tmp_path / "shared-images"
+    external.mkdir()
+    try:
+        (docs / "images").symlink_to(external, target_is_directory=True)
+    except (OSError, NotImplementedError) as error:
+        pytest.skip(f"directory links unavailable: {error}")
+    capture = tmp_path / "capture.json"
+    capture.write_text(json.dumps(meta_dict(repo=".github")), encoding="utf-8")
+
+    result = run_cli("--meta", capture, "--repo-dir", checkout, "--format", "json", "card")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout)["result"] == "exempt"
+    assert list(external.iterdir()) == []
+
+
+@pytest.mark.parametrize("explicit_output", [False, True])
+def test_staged_card_rejects_output_outside_an_aliased_checkout(tmp_path, explicit_output):
+    checkout = tmp_path / "repo"
+    docs = checkout / "docs"
+    docs.mkdir(parents=True)
+    external = tmp_path / "shared-images"
+    external.mkdir()
+    alias = tmp_path / "checkout-alias"
+    try:
+        alias.symlink_to(checkout, target_is_directory=True)
+        (docs / "images").symlink_to(external, target_is_directory=True)
+    except (OSError, NotImplementedError) as error:
+        pytest.skip(f"directory links unavailable: {error}")
+    capture = tmp_path / "capture.json"
+    capture.write_text(json.dumps(meta_dict()), encoding="utf-8")
+
+    target = checkout if explicit_output else alias
+    output = ("--out", alias / "docs/images/custom.svg") if explicit_output else ()
+    result = run_cli("--meta", capture, "--repo-dir", target, "--format", "json", "card",
+                     "--description", "Route synthetic requests.", *output)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "staged-description:path" in json.loads(result.stdout)["logs"]
+    assert list(external.iterdir()) == []
