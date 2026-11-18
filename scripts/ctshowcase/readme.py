@@ -438,8 +438,9 @@ def inherited_tagline(ctx: RepoContext, body: str, text: str) -> bool:
 
 
 def tagline_body(ctx: RepoContext, existing: str | None = None, text: str = "") -> str:
-    """Refresh verified generated content; preserve ambiguous legacy or edited text."""
-    desc = (ctx.meta.get("description") or "").strip()
+    """Render captured or staged text only into verified generated content."""
+    staged = getattr(ctx, "staged_description", None)
+    desc = (staged["text"] if staged else ctx.meta.get("description") or "").strip()
     if desc:
         if existing and existing.strip() and taglinemod.payload(existing) is None:
             return existing

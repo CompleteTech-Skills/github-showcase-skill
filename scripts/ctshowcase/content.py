@@ -2553,6 +2553,7 @@ def add_parser(sub, cli=None):
                                                     "social-preview), plus the browser upload job")
     a.add_argument("--out")
     a.add_argument("--title")
+    a.add_argument("--description", help="render a staged description and record its provenance")
     a.add_argument("--key-chip", action="append", default=[])
     a.add_argument("--chip", action="append", default=[])
     a.add_argument("--icon")
@@ -2674,7 +2675,7 @@ def _ctx(args, cli, resolver):
     return ctx
 
 
-def _finish(args, obj: dict, code: int):
+def _finish(args, obj: dict, code: int, *, checkout: Path | None = None):
     jobs = list(obj.get("jobs") or []) + ([obj["job"]] if obj.get("job") else [])
     from .signoff import stamp
     stamp(jobs)  # before any serialization (--jobs, --report)
@@ -2688,8 +2689,15 @@ def _finish(args, obj: dict, code: int):
         obj["jobs_file"] = str(args.jobs)
     if getattr(args, "report", None):
         p = Path(args.report)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps(obj, indent=1, ensure_ascii=False, default=str) + "\n", encoding="utf-8")
+        payload = json.dumps(obj, indent=1, ensure_ascii=False, default=str) + "\n"
+        if obj.get("staged_description"):
+            from .fingerprint import replace_bytes
+            from .staged import protected_auxiliary
+            with protected_auxiliary(Path(args.meta) if args.meta else None, checkout, p):
+                replace_bytes(p, payload.encode("utf-8"), private=True, preserve_mode=False)
+        else:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(payload, encoding="utf-8")
     return obj, code
 
 
@@ -2703,6 +2711,14 @@ def cmd_content(args, cli=None):
     resolver = _resolver(args, cli)
     head = {"command": "content", "action": act}
     if act == "social":
+        if args.description is not None and args.report:
+            from .staged import check_auxiliary
+            check_auxiliary(Path(args.meta) if args.meta else None, cli.repo_dir(args), Path(args.report))
+        if args.job and args.description is not None:
+            from .staged import prepare
+            prepare({}, args.description)
+            raise ShowcaseError("render from captured metadata to emit a social preview upload job",
+                                log="staged-description:upload")
         owner, srepo, _ = _owner_repo(args, cli, None)
         if owner:
             resolver.check_owner(owner, allow_hold=args.allow_hold, repo=srepo)
@@ -2718,7 +2734,7 @@ def cmd_content(args, cli=None):
                 obj["logs"] = list(obj.get("logs") or []) + ["needs-input:social-login"]
                 job = None
             obj["job"] = job
-        return _finish(args, obj, code)
+        return _finish(args, obj, code, checkout=cli.repo_dir(args))
     if act in ("links", "images"):
         rd = cli.repo_dir(args)
         if rd is None:

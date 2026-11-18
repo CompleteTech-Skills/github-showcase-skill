@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Commit and push regenerated showcase files. Used only by action.yml (spec A7).
-# Usage: action_commit.sh "<commit message>" <pr|fail>
+# Usage: action_commit.sh "<commit message>" <pr|fail> [action_prepare.py path]
 # Stages only docs/images/, README.md and CONTRIBUTING.md, plus the removal of assets/icon.png when the prepare step
 # deleted a copied template icon (decision 12); does nothing when the index is clean.
 # SHOWCASE_DRY_RUN=1 commits locally and prints what would be pushed, without any network call.
 set -euo pipefail
 msg="${1:?commit message required}"
 on_protected="${2:-pr}"
+prepare="${3:-}"
 git config user.name "github-actions[bot]"
 git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 paths=()
@@ -17,23 +18,58 @@ done
 # stage the deletion on its own: only when the tracked icon is missing from the checkout, and never an edit to it.
 icon_removed="$(git ls-files --deleted -- assets/icon.png)"
 [ "${#paths[@]}" -eq 0 ] && [ -z "$icon_removed" ] && { echo "showcase: nothing to stage"; exit 0; }
-if [ "${#paths[@]}" -gt 0 ]; then
-  git add -- "${paths[@]}"
+ref="$(git symbolic-ref --quiet --no-recurse HEAD)" || ref=HEAD
+branch="${ref#refs/heads/}"
+if [ -n "$prepare" ]; then
+  # Hold the render lock while staging and validating the private index.
+  # Advance the checked parent and install the candidate only on success.
+  index="$(git rev-parse --path-format=absolute --git-path index)"
+  snapshot="$(mktemp "$(dirname -- "$index")/showcase-index.XXXXXXXX")"
+  trap 'rm -f -- "$snapshot" "$snapshot.lock"' EXIT
+  icon_mode=keep-icon
+  [ -z "$icon_removed" ] || icon_mode=icon-removal
+  commit="$(python "$prepare" commit-index "$icon_mode" "$index" "$snapshot" "$ref" "$msg" "${paths[@]}")"
+  case "$commit" in
+    blocked)
+      echo "::warning title=CompleteTech Showcase::commit skipped while unpublished staged output or conflicting index changes are present"
+      exit 0
+      ;;
+    changed)
+      echo "::warning title=CompleteTech Showcase::commit skipped because HEAD or the caller's Git index changed"
+      exit 0
+      ;;
+    busy)
+      echo "::warning title=CompleteTech Showcase::commit skipped because a Git operation is in progress"
+      exit 0
+      ;;
+    hooks)
+      echo "::warning title=CompleteTech Showcase::commit skipped because local Git commit hooks are configured"
+      exit 0
+      ;;
+    unchanged)
+      echo "showcase: no changes"
+      exit 0
+      ;;
+  esac
+else
+  if [ "${#paths[@]}" -gt 0 ]; then
+    git add -- "${paths[@]}"
+  fi
+  if [ -n "$icon_removed" ]; then
+    git rm -q --cached -- assets/icon.png
+  fi
+  if git diff --cached --quiet; then
+    echo "showcase: no changes"
+    exit 0
+  fi
+  git commit -q -m "$msg"
+  commit="$(git rev-parse HEAD)"
 fi
-if [ -n "$icon_removed" ]; then
-  git rm -q --cached -- assets/icon.png
-fi
-if git diff --cached --quiet; then
-  echo "showcase: no changes"
-  exit 0
-fi
-git commit -q -m "$msg"
-branch="$(git rev-parse --abbrev-ref HEAD)"
 if [ "${SHOWCASE_DRY_RUN:-0}" = "1" ]; then
-  echo "showcase: dry run; would push $(git rev-parse --short HEAD) to $branch"
+  echo "showcase: dry run; would push $(git rev-parse --short "$commit") to $branch"
   exit 0
 fi
-if git push origin "HEAD:$branch"; then
+if git push origin "$commit:$ref"; then
   echo "showcase: pushed to $branch"
   exit 0
 fi
@@ -41,7 +77,7 @@ case "$on_protected" in
   pr)
     # showcase/regenerate is owned by this bot: overwrite it outright (a lease needs a remote-tracking ref that a
     # fresh checkout does not have, so --force-with-lease would be rejected once the branch exists).
-    git push --force origin "HEAD:refs/heads/showcase/regenerate"
+    git push --force origin "$commit:refs/heads/showcase/regenerate"
     open_prs="$(gh pr list --head showcase/regenerate --base "$branch" --state open --json number --jq length 2>/dev/null || echo 0)"
     if [ "${open_prs:-0}" != "0" ]; then
       echo "showcase: pull request already open for showcase/regenerate (updated)"

@@ -43,7 +43,7 @@ def _prepare_and_commit(repo):
     assert p.stdout.strip() == "true", p.stdout + p.stderr
     (repo / "docs" / "images" / "banner.png").write_bytes(b"own banner")  # the regenerated art
     p = run_bash((ROOT / "scripts" / "action_commit.sh").read_text(encoding="utf-8"),
-                 "docs: regenerate [skip ci]", "fail", cwd=repo, env=ENV)
+                 "docs: regenerate [skip ci]", "fail", str(ROOT / "scripts" / "action_prepare.py"), cwd=repo, env=ENV)
     assert p.returncode == 0, p.stdout + p.stderr
 
 
@@ -73,3 +73,76 @@ def test_own_icon_is_kept_and_unstaged_edits_untouched(tmp_path):
     _prepare_and_commit(repo)
     assert (repo / "assets" / "icon.png").is_file()
     assert _git(repo, "status", "--porcelain").splitlines() == [" M assets/icon.png"]  # a modification is never staged
+
+
+def test_grouped_action_refuses_an_unrelated_gitlink_hidden_by_diff_config(tmp_path):
+    repo = tmp_path / "repo"
+    _template_copy(repo)
+    first = _git(repo, "rev-parse", "HEAD").strip()
+    link = "vendor/component"
+    _git(repo, "update-index", "--add", "--cacheinfo", f"160000,{first},{link}")
+    _git(repo, "commit", "-qm", "add a gitlink")
+    parent = _git(repo, "rev-parse", "HEAD").strip()
+    _git(repo, "update-index", "--cacheinfo", f"160000,{parent},{link}")
+    _git(repo, "config", "diff.ignoreSubmodules", "all")
+    assert _git(repo, "diff", "--cached", "--name-only") == ""
+    assert _git(repo, "diff", "--cached", "--ignore-submodules=none", "--name-only").splitlines() == [link]
+    index = repo / ".git" / "index"
+    before = index.read_bytes()
+    readme = repo / "README.md"
+    readme.write_text("# Updated showcase\n", encoding="utf-8")
+
+    result = run_bash('bash "$1" Synthetic fail "$2"', str(ROOT / "scripts" / "action_commit.sh"),
+                      str(ROOT / "scripts" / "action_prepare.py"), cwd=repo, env=ENV)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "conflicting index changes" in result.stdout
+    assert _git(repo, "rev-parse", "HEAD").strip() == parent
+    assert index.read_bytes() == before
+    assert readme.read_text(encoding="utf-8") == "# Updated showcase\n"
+
+
+def test_grouped_action_refuses_abandoned_write_scratch(tmp_path, monkeypatch):
+    import action_prepare
+    from ctshowcase.fingerprint import WRITE_SCRATCH_PREFIX
+
+    repo = tmp_path / "repo"
+    _template_copy(repo)
+    monkeypatch.chdir(repo)
+    parent = _git(repo, "rev-parse", "HEAD")
+    index = repo / ".git/index"
+    before = index.read_bytes()
+    interrupted = """
+import os
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from ctshowcase.formatting import write_formatted_outputs
+
+write_bytes = Path.write_bytes
+def stop_during_preparation(path, contents):
+    write_bytes(path, contents)
+    if path.name == "output":
+        os._exit(17)
+
+Path.write_bytes = stop_during_preparation
+write_formatted_outputs([(Path("docs/images/.showcase.json"), b"An unfinished staged write")], private=True)
+"""
+    render = subprocess.run([sys.executable, "-c", interrupted, str(ROOT / "scripts")], cwd=repo)
+    assert render.returncode == 17
+    scratch, = list((repo / "docs/images").glob(f"{WRITE_SCRATCH_PREFIX}*/output"))
+    assert action_prepare.has_staged_outputs()
+
+    result = run_bash('bash "$1" Synthetic fail "$2"', str(ROOT / "scripts/action_commit.sh"),
+                      str(ROOT / "scripts/action_prepare.py"), cwd=repo, env=ENV)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "commit skipped" in result.stdout
+    assert _git(repo, "rev-parse", "HEAD") == parent and index.read_bytes() == before
+    assert scratch.read_bytes() == b"An unfinished staged write"
+
+    _git(repo, "add", "--", str(scratch))
+    scratch.unlink()
+    (scratch.parent / "original").unlink()
+    scratch.parent.rmdir()
+    assert not action_prepare.has_staged_outputs()
+    assert action_prepare.has_staged_index()

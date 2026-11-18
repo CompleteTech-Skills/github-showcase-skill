@@ -44,7 +44,7 @@ inputs:
 
 outputs:
   changed:
-    description: "true when the inputs fingerprint differs from docs/images/.showcase.json"
+    description: "true when selected showcase outputs need a refresh"
     value: ${{ steps.fp.outputs.changed }}
   fingerprint:
     description: "sha256 of the canonical showcase inputs"
@@ -87,7 +87,12 @@ runs:
     - id: fp
       if: steps.meta.outputs.skip != 'true'
       shell: bash
-      run: python3 "$GITHUB_ACTION_PATH/scripts/showcase.py" --meta "$RUNNER_TEMP/meta.json" --repo-dir . fingerprint --github-output
+      env:
+        SHOWCASE_OUTPUTS: ${{ inputs.outputs }}
+        SHOWCASE_README: ${{ inputs.readme }}
+      run: >-
+        python3 "$GITHUB_ACTION_PATH/scripts/showcase.py" --meta "$RUNNER_TEMP/meta.json" --repo-dir .
+        fingerprint --github-output --outputs "$SHOWCASE_OUTPUTS" --readme "$SHOWCASE_README"
 
     - if: steps.meta.outputs.skip != 'true' && (steps.fp.outputs.changed == 'true' || inputs.force == 'true')
       uses: actions/setup-python@v5
@@ -123,13 +128,15 @@ runs:
         # a new repository) must never show under this repository's name. Decide once, before anything is written.
         # Only proof counts (a template's sidecar, or another repository id than GITHUB_REPOSITORY_ID): after a
         # rename or transfer the art and assets/icon.png are this repository's own and are kept.
-        foreign="$("${P[@]}" foreign "$GITHUB_REPOSITORY")"
+        "${P[@]}" foreign "$GITHUB_REPOSITORY" > /dev/null
+        foreign_banner="$("${P[@]}" foreign-key "$GITHUB_REPOSITORY" banner.png)"
+        foreign_card="$("${P[@]}" foreign-key "$GITHUB_REPOSITORY" card.svg)"
         # Exit 4 (needs-input: no description yet, a palette awaiting ct-std-v1.1), exit 2 (a family on hold) and
         # an "exempt" result are expected states, not failures: annotate, skip that output, keep the run green.
         skipped=0
         art() {
-          local kind="$1" file="$2"; shift 2
-          local rc=0 result
+          local kind="$1" file="$2" foreign="$3"; shift 3
+          local rc=0 result dropped
           "${S[@]}" --format json "$kind" --out "docs/images/$file" "$@" > "$RUNNER_TEMP/art.json" || rc=$?
           cat "$RUNNER_TEMP/art.json"
           result="$(python -c 'import json,sys;print(json.load(open(sys.argv[1])).get("result",""))' "$RUNNER_TEMP/art.json" 2>/dev/null || true)"
@@ -140,9 +147,11 @@ runs:
           if [ "$rc" -eq 4 ] || [ "$rc" -eq 2 ] || [ "$result" = "exempt" ]; then
             echo "::warning title=CompleteTech Showcase::$kind skipped: $(python -c 'import json,sys;d=json.load(open(sys.argv[1]));print(d.get("error") or " ".join(d.get("logs") or []))' "$RUNNER_TEMP/art.json" 2>/dev/null)"
             skipped=1
-            if [ "$foreign" = "true" ]; then
-              "${P[@]}" drop "$file"
-              echo "::notice title=CompleteTech Showcase::removed the template's $file until this repository's own can be generated"
+            if [ -n "$foreign" ]; then
+              dropped="$("${P[@]}" drop "$file" "$foreign")" || return $?
+              if [ "$dropped" = "true" ]; then
+                echo "::notice title=CompleteTech Showcase::removed the template's $file until this repository's own can be generated"
+              fi
             fi
             return 0
           fi
@@ -150,10 +159,10 @@ runs:
         }
         # Bash 3.2 treats an empty array as unset under nounset; expand only when populated.
         if [[ ",$SHOWCASE_OUTPUTS," == *",banner,"* ]]; then
-          art banner banner.png --allow-few-chips ${extra[@]+"${extra[@]}"}
+          art banner banner.png "$foreign_banner" --allow-few-chips ${extra[@]+"${extra[@]}"}
         fi
         if [[ ",$SHOWCASE_OUTPUTS," == *",card,"* ]]; then
-          art card card.svg --png "$RUNNER_TEMP/card.png" ${extra[@]+"${extra[@]}"}
+          art card card.svg "$foreign_card" --png "$RUNNER_TEMP/card.png" ${extra[@]+"${extra[@]}"}
         fi
         # A held repository (exit 2: a watching-org repository that is neither a fork nor `.github`) keeps its
         # README untouched until someone decides; like a held art family, that skips the output and keeps the run green.
@@ -204,7 +213,15 @@ runs:
         GH_TOKEN: ${{ inputs.token }}
         SHOWCASE_COMMIT_MESSAGE: ${{ inputs.commit-message }}
         SHOWCASE_ON_PROTECTED: ${{ inputs.on-protected }}
-      run: bash "$GITHUB_ACTION_PATH/scripts/action_commit.sh" "$SHOWCASE_COMMIT_MESSAGE" "$SHOWCASE_ON_PROTECTED"
+      run: |
+        set -euo pipefail
+        staged="$(python "$GITHUB_ACTION_PATH/scripts/action_prepare.py" staged)"
+        if [ "$staged" = "true" ]; then
+          echo "::warning title=CompleteTech Showcase::commit skipped while unpublished staged output is present"
+          exit 0
+        fi
+        bash "$GITHUB_ACTION_PATH/scripts/action_commit.sh" "$SHOWCASE_COMMIT_MESSAGE" "$SHOWCASE_ON_PROTECTED" \
+          "$GITHUB_ACTION_PATH/scripts/action_prepare.py"
 
     # Lint after the commit, so a first run always lands the bootstrap and the new art. On the bootstrap run, and
     # while an output is skipped, findings are warnings; afterwards a failing check fails the run.

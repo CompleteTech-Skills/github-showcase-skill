@@ -13,6 +13,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from .errors import CHECK_FAILED, NeedsInput, ShowcaseError
+from .fingerprint import WRITE_SCRATCH_PREFIX
 
 VALIDATOR_NAME = re.compile(r"(?:^|[:_-])(check|contracts|lint|test|typecheck|validate|format|verify)(?:$|[:_-])", re.I)
 SCRIPT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9:_-]*")
@@ -203,9 +204,11 @@ def _file_state(path: Path) -> tuple[int, ...] | None:
 def write_formatted_outputs(outputs: list[tuple[Path, bytes]], *,
                             repo_root: Path | None = None,
                             snapshots: dict[Path, bytes | None] | None = None,
-                            append_output: tuple[Path, bytes] | None = None) -> None:
+                            append_output: tuple[Path, bytes] | None = None,
+                            private: bool = False, private_metadata: set[Path] | None = None) -> None:
     """Prepare every replacement on its destination filesystem, then publish or roll back the group."""
     snapshots = snapshots or {}
+    private_metadata = private_metadata or set()
     with ExitStack() as scratch:
         prepared = []
         for destination, data in outputs + ([append_output] if append_output else []):
@@ -217,7 +220,7 @@ def write_formatted_outputs(outputs: list[tuple[Path, bytes]], *,
             if append and initial is not None and initial[-1] != 1:
                 raise ShowcaseError("formatted output cannot replace a hard-linked records queue", log="formatter-output")
             path.parent.mkdir(parents=True, exist_ok=True)
-            working = Path(scratch.enter_context(tempfile.TemporaryDirectory(dir=path.parent)))
+            working = Path(scratch.enter_context(tempfile.TemporaryDirectory(dir=path.parent, prefix=WRITE_SCRATCH_PREFIX)))
             replacement = working / "output"
             backup = working / "original"
             previous = None
@@ -239,9 +242,10 @@ def write_formatted_outputs(outputs: list[tuple[Path, bytes]], *,
                     backup.write_bytes(previous)
                     backup.chmod(stat.S_IMODE(initial[2]))
             replacement.write_bytes((previous or b"") + data if append else data)
-            if initial is not None:
-                mode = stat.S_IMODE(initial[2])
-                replacement.chmod(mode)
+            if destination in private_metadata or (private and initial is None):
+                replacement.chmod(0o600)
+            elif initial is not None:
+                replacement.chmod(stat.S_IMODE(initial[2]))
             if destination in snapshots and previous != snapshots[destination]:
                 raise ShowcaseError("README inputs changed during formatting", log="formatter-source-changed",
                                     code=CHECK_FAILED)
