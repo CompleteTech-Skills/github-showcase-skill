@@ -700,8 +700,10 @@ def scaffold(ctx: RepoContext, existing: str = "", *, already_normalized: bool =
             # A leading U+FEFF in this view is authored, not the removed encoding BOM.
             # Keep it before the replacement header instead of moving it into About.
             authored_prefix = normalized[:len(normalized) - len(normalized.lstrip(BOM))]
-            existing = _sub_blocks(normalized[len(authored_prefix):],
+            # Recognize blocks before the prefix removal can turn following spaces into indented code.
+            existing = _sub_blocks(normalized,
                                    lambda marker: "" if marker.group(1) == "banner" else marker.group(0))
+            existing = existing[len(authored_prefix):]
     order = required_sections(ctx.det, meta=ctx.meta)
     parts = [header(ctx)]
     co = callout(ctx)
