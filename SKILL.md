@@ -186,16 +186,16 @@ labels --emit-yml
 labels --plan [--references] [--records FILE] [--gh] [--jobs FILE] [--allow-hold]
 banner [--out docs/images/banner.png] [--scale 2] [--icon PATH] [--subtitle TEXT]
        [--key-chip TEXT]... [--chip TEXT]... [--category TEXT] [--allow-unmeasured] [--allow-hold]
-       [--allow-few-chips] [--png-budget 300000]
+       [--allow-few-chips] [--png-budget 300000] [--format-generated]
 card [--out docs/images/card.svg] [--png PATH] [--icon PATH] [--allow-unmeasured] [--allow-hold]
-     [--key-chip TEXT]... [--chip TEXT]...
+     [--key-chip TEXT]... [--chip TEXT]... [--format-generated]
 org-banner --org OWNER --out PATH [--illustration PATH]
 org-tile --org OWNER [--avatar PATH] [--illustration PATH] [--out PATH] [--png PATH]
 intro (--profile CompleteDotTech | --org OWNER) [--name TEXT] [--eyebrow TEXT] [--tagline TEXT]
       [--chip key:TEXT] [--chip attr:TEXT]... [--mark PATH] [--height 320|360] [--static] [--out assets/intro.svg]
 footer [--check README.md [--online]] [--org OWNER] [--raw]
 readme [--mode auto|scaffold|upgrade|header] [--variant auto|A|B|C|D|E|F|G|H|I|J]
-       [--write] [--diff] [--records FILE] [--bootstrap]
+       [--write] [--diff] [--records FILE] [--bootstrap] [--format-generated]
 lint svg --kind intro|card|tile|plate|divider FILE...
 lint readme [README.md] [--variant auto]
 lint banner [docs/images/banner.png]
@@ -351,3 +351,7 @@ These user decisions outrank `STANDARD.md` (`ct-std-v1`). Full text: [references
 ## Network Boundary
 
 Generation, checking and planning are local. The only network calls are the read-only `gh api` GETs of `meta --from-gh`, `labels --plan`, `adopt` and opt-in `org labels ORG --repos-from-gh` (paginated repository and label discovery, plus repository file trees), the read-only GraphQL queries of `enterprise discover` and `enterprise snapshot` (api.github.com), the opt-in link and image checks of `content links --online` and `content images --online` (the hosts the checked files link to, cached and rate-limited), the font download of `fonts --fetch`, and the two read-only HEAD requests of `footer --check --online` (raw.githubusercontent.com), each run only when asked. The skill posts no metadata or run data anywhere else. The composite Action is the only component that pushes, and only into the repository it runs in.
+
+### Target formatter and validator preflight
+
+`doctor --format json` reports the target repository's formatter configuration and declared validators in `tooling`, with each command marked `not run`. `readme --format-generated`, `banner --format-generated`, and `card --format-generated` opt into the installed, pinned target Prettier before writing generated text. Missing, unpinned or incompatible tooling returns `needs-input:formatter`; discovered commands are never run. README preservation still applies after formatting. See [Target formatting and validation](references/formatters.md).
