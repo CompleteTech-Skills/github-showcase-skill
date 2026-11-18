@@ -1,5 +1,6 @@
 """Native-adjudicated full-reference precedence and destination escape regressions."""
 import base64
+import hashlib
 import json
 import shutil
 import subprocess
@@ -65,10 +66,19 @@ def test_cli_marker_example_survives_refresh(checkout, mode):
 
 
 @pytest.mark.parametrize("mode", ["header", "upgrade"])
-def test_cli_real_marker_after_nested_description_remains_active(checkout, mode):
-    source = f"[a [nested] text][{LABEL}] {REAL}" + DEFINITION
+@pytest.mark.parametrize("owned", [False, True], ids=["authored", "generated"])
+def test_cli_real_marker_after_nested_description_remains_active(checkout, mode, owned):
+    payload = "**REAL MARKER**"
+    body = payload
+    if owned:
+        digest = hashlib.sha256(payload.encode()).hexdigest()
+        body = f"<!-- showcase:tagline:generated sha256={digest} -->\n{payload}"
+    real = REAL.replace(payload, body)
+    source = f"[a [nested] text][{LABEL}] {real}" + DEFINITION
     path, args = insert(checkout, source, remove_tagline=True)
     before = path.read_bytes()
+    assert [m.group(2) for m in readme.find_blocks(readme.MARK, before.decode())
+            if m.group(1) == "tagline"] == [body]
     result = run_cli(*args, "readme", "--mode", mode, "--variant", "C", "--write")
     if mode == "upgrade":
         # Refreshing the active marker would lose its authored line prefix; the shrink guard must refuse.
@@ -77,7 +87,10 @@ def test_cli_real_marker_after_nested_description_remains_active(checkout, mode)
         assert path.read_bytes() == before
     else:
         assert result.returncode == 0, result.stdout + result.stderr
-        assert b"**REAL MARKER**" not in path.read_bytes()
+        if owned:
+            assert payload.encode() not in path.read_bytes()
+        else:
+            assert source.encode() in path.read_bytes()
 
 
 @pytest.mark.parametrize("example,expected", [(EXAMPLE, []), (REAL, ["**REAL MARKER**"])])
