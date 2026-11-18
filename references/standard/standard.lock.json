@@ -64,6 +64,7 @@
    "template",
    "infrastructure",
    "hardware",
+   "documentation",
    "workspace"
   ],
   "verbs": [
@@ -200,6 +201,56 @@
    "via",
    "vs"
   ],
+  "type_sections": {
+   "documentation": [
+    [
+     "About",
+     "R"
+    ],
+    [
+     "Documentation",
+     "R"
+    ],
+    [
+     "License",
+     "R"
+    ]
+   ],
+   "mobile-app": [
+    [
+     "About",
+     "R"
+    ],
+    [
+     "Install",
+     "R"
+    ],
+    [
+     "Features",
+     "R"
+    ],
+    [
+     "Platforms",
+     "R"
+    ],
+    [
+     "Quick Start",
+     "R"
+    ],
+    [
+     "Build",
+     "O"
+    ],
+    [
+     "Status",
+     "O"
+    ],
+    [
+     "License",
+     "R"
+    ]
+   ]
+  },
   "variants": {
    "A": [
     [
@@ -743,10 +794,28 @@
    "github-profile",
    "infrastructure",
    "hardware",
+   "documentation",
    "workspace"
   ]
  },
  "types": {
+  "dataset_confident_share": 0.6,
+  "dataset_exclude_dirs": [
+   "planning",
+   ".planning",
+   ".github",
+   "node_modules",
+   "vendor",
+   "dist",
+   "build"
+  ],
+  "dataset_exclude_files": [
+   "package.json",
+   "package-lock.json",
+   "tsconfig.json",
+   "composer.json",
+   "composer.lock"
+  ],
   "deps": {
    "api": [
     "fastapi",
@@ -781,6 +850,19 @@
     "streamlit"
    ]
   },
+  "documentation_exclude_dirs": [
+   "planning",
+   ".planning",
+   ".github",
+   "node_modules",
+   "vendor"
+  ],
+  "documentation_exclude_files": [
+   ".gitignore",
+   ".gitattributes",
+   ".editorconfig",
+   "CODEOWNERS"
+  ],
   "domain_tlds": [
    "com",
    "tech",
@@ -800,6 +882,17 @@
   ],
   "research_owner": "CompleteTech-LLC-AI-Research",
   "security_owner": "CompleteTech-Security",
+  "showcase_artifact_paths": [
+   "docs/images/.showcase.json",
+   "docs/images/banner.png",
+   "docs/images/card.svg",
+   "docs/images/card.png",
+   "docs/images/intro.svg",
+   "assets/intro.svg",
+   "assets/icon.png",
+   "assets/social-preview.png",
+   "assets/social-preview.jpg"
+  ],
   "standard": "ct-std-v1",
   "types": {
    "agent-skills": {
@@ -834,6 +927,11 @@
    "discord-bot": {
     "category": "Discord bot",
     "variant": "C"
+   },
+   "documentation": {
+    "category": "Documentation",
+    "variant": "C",
+    "variant_private": "I"
    },
    "fork": {
     "category": null,

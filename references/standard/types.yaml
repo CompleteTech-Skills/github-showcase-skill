@@ -12,6 +12,18 @@ deps:
   bot: [python-telegram-bot, slack_bolt, slack-bolt, "@slack/bolt", telegraf, tmi.js]
   web-app: [react, next, vue, svelte, astro, streamlit]
   api: [fastapi, flask, express]
+# Planning and issue exports are administration, not repository datasets.
+dataset_exclude_dirs: [planning, .planning, .github, node_modules, vendor, dist, build]
+dataset_exclude_files: [package.json, package-lock.json, tsconfig.json, composer.json, composer.lock]
+# Generated showcase assets are outputs, not evidence of repository type.
+showcase_artifact_paths: [docs/images/.showcase.json, docs/images/banner.png, docs/images/card.svg,
+                          docs/images/card.png, docs/images/intro.svg, assets/intro.svg, assets/icon.png,
+                          assets/social-preview.png, assets/social-preview.jpg]
+# Repository administration files that do not stop a tree counting as documentation-only (`docs-only`).
+documentation_exclude_dirs: [planning, .planning, .github, node_modules, vendor]
+documentation_exclude_files: [.gitignore, .gitattributes, .editorconfig, CODEOWNERS]
+# Rule 24 is low confidence (logged `type-suggestion:dataset:dataset-near-threshold`) below this data share.
+dataset_confident_share: 0.6
 types:
   fork:             {variant: G, category: null}
   backup:           {variant: H, category: null}
@@ -36,4 +48,5 @@ types:
   research:         {variant: D, category: Research}
   tutorial:         {variant: C, category: Tutorial}
   dataset:          {variant: D, category: Dataset}
+  documentation:    {variant: C, variant_private: I, category: Documentation}
   workspace:        {variant: C, variant_private: I, category: Workspace}

@@ -44,7 +44,7 @@ def override_icon(text: str) -> str | None:
     return None
 
 
-def inputs(meta: dict, repo_dir: str | Path | None) -> dict:
+def inputs(meta: dict, repo_dir: str | Path | None, *, same_owner=None, metadata_path: str | Path | None = None) -> dict:
     rd = Path(repo_dir) if repo_dir else None
     override = None
     icon = None
@@ -61,7 +61,7 @@ def inputs(meta: dict, repo_dir: str | Path | None) -> dict:
     try:  # the detected type picks the README variant and the eyebrow: a new type (code landed) regenerates
         from .detect import detect
         from .facts import RepoFacts
-        type_ = detect(meta, RepoFacts(meta, rd))["type"]
+        type_ = detect(meta, RepoFacts(meta, rd, metadata_path=metadata_path), same_owner=same_owner)["type"]
     except Exception:  # noqa: BLE001 - the fingerprint must never fail the stdlib-only Action step
         type_ = None
     return {"owner": meta.get("owner"), "repo": meta.get("repo"), "type": type_, "description": meta.get("description") or "",

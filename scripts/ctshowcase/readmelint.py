@@ -10,7 +10,7 @@ from . import footer as footermod
 from . import mdcode
 from .mdcode import find_inline_code  # noqa: F401 (compatibility re-export)
 from .context import RepoContext
-from .detect import standard
+from .detect import required_sections, standard
 from .readme import BANNER_BLOCK, EMOJI, MARK, is_footer_like, masked, normalize_text, nav_first, preserved, source_lines, split_sections
 
 from .mdcode import (  # noqa: F401 (compatibility re-exports)
@@ -181,7 +181,6 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
     # also accept unnormalized source; this view never reaches a README writer.
     text = normalize_text(raw.decode("utf-8", errors="replace")).replace("\r", "\n")
     variant = variant if variant and variant != "auto" else ctx.det["variant"]
-    rv = standard("readme-variants")
     if len(raw) >= 512_000:
         fails.append("R7 size >= 500 KiB")
     if variant in ("G", "H"):
@@ -284,12 +283,13 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
         warns.append("tagline not checked (no description in meta)")
     # H2 order, License last
     pre, sections = split_sections(plain)
-    order = [h for h, _ in rv["variants"].get(variant, [])]
+    section_rows = required_sections(ctx.det, variant, meta=ctx.meta)
+    order = [h for h, _ in section_rows]
     # "License" and "Licensing" are one slot: a private repository reads "## License" (proprietary) even in variant F
     lic_slot = next((h for h in order if h in ("License", "Licensing")), "License")
     names = [EMOJI.sub("", h).strip() for h, _ in sections]
     names = [lic_slot if n in ("License", "Licensing") else n for n in names]
-    req = [h for h, r in rv["variants"].get(variant, []) if r == "R"]
+    req = [h for h, r in section_rows if r == "R"]
     pos = [order.index(n) for n in names if n in order]
     if pos != sorted(pos) and not preserve:
         fails.append("R7 H2 order does not follow the variant")
@@ -327,7 +327,7 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
         if source:
             _local(path, source, fails, example=is_html and "examples" in source)
     body = _outside_code(plain)
-    ph = re.search(rv["placeholder_regex"], body)
+    ph = re.search(standard("readme-variants")["placeholder_regex"], body)
     if ph or re.search(r"<…>|<\.\.\.>", body):
         fails.append(f"R7 placeholder text: {ph.group(0) if ph else '<…>'}")
     if EMOJI.search(plain):

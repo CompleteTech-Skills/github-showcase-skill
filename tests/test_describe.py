@@ -55,3 +55,9 @@ def test_needs_writer_never_composes():
     r = propose("", slug="netscaler-cve-2026-19489-check", type_="security-check", has_brand_assets=False)
     assert r["action"] == "needs-writer" and "text" not in r
     assert r["template"].startswith("Check <Product> versions for CVE-") and r["slots_known"]["id"] == "2026-19489"
+
+
+def test_documentation_keeps_the_workspace_description_voice():
+    args = {"slug": "northwind-handbook", "type_": "documentation", "has_brand_assets": False}
+    assert rules("Read maintainer setup instructions.", **args)["V1"] == "pass"
+    assert rules("Maintainer setup instructions.", **args)["V1"] == "fail"
