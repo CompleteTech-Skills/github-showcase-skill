@@ -1212,12 +1212,16 @@ def _header_upgrade(ctx: RepoContext, text: str, **kwargs) -> tuple[str, list[st
     after = header_only(ctx, text, already_normalized=True, **kwargs)
     removed: list[str] = []
     if personal_profile(ctx):
-        prior = [m for m in find_blocks(MARK, text) if m.group(1) == "banner"]
-        current = [m for m in find_blocks(MARK, after) if m.group(1) == "banner"]
-        if len(prior) == len(current):
+        for kind in ("banner", "footer"):
+            prior = [m for m in find_blocks(MARK, text) if m.group(1) == kind]
+            current = [m for m in find_blocks(MARK, after) if m.group(1) == kind]
+            if len(prior) != len(current):
+                continue
             for old, new in zip(prior, current, strict=True):
-                if old.group(2) != new.group(2) and personal_generated_hero(ctx, old.group(2)):
-                    # Only replaced lines from a verified owned hero are exempt from the shrink guard.
+                owned = (personal_generated_hero(ctx, old.group(2)) if kind == "banner"
+                         else is_footer_copy(old.group(2), ctx.brand))
+                if old.group(2) != new.group(2) and owned:
+                    # Only replaced lines from verified generated blocks are exempt from the shrink guard.
                     removed += _unreemitted(source_lines(old.group(2)),
                                             Counter(ln.strip() for ln in source_lines(new.group(2))))
     return after, removed
