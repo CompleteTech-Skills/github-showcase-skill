@@ -335,6 +335,13 @@ def _items(node: dict, labels: dict) -> list[dict]:
     return items
 
 
+def markers(model: dict) -> set[str]:
+    """The pill markers the chart draws: `fork`, `archived` and `private` (a 'private work' note)."""
+    lanes = [model["personal"], *model["orgs"], *[o for e in model["enterprises"] for o in e["orgs"]]]
+    out = {k for n in lanes if n for rp in n["repos"] for k in ("fork", "archived") if rp[k]}
+    return out | ({"private"} if any("private" in n["notes"] for n in lanes if n) else set())
+
+
 def layout(model: dict, brand, fonts: Fonts, *, width: int = W_DEFAULT, avatar: str | None = None) -> Chart:
     if not W_MIN <= width <= W_MAX:
         raise ArtFail("chart-width", str(width))
@@ -472,12 +479,16 @@ def layout(model: dict, brand, fonts: Fonts, *, width: int = W_DEFAULT, avatar: 
         lx += 14
     lx += 4
     lx += dr.text(key, labels["language"], 12, lx, base, muted) + 26
-    lx += dr.fork_icon(lx, base - 4, muted, 1.0) + 8
-    lx += dr.text(key, labels["fork"], 12, lx, base, muted) + 26
-    lx += dr.archive_icon(lx, base - 4, muted, 1.0) + 8
-    lx += dr.text(key, labels["archived"], 12, lx, base, muted) + 26
-    lx += dr.lock_icon(lx, base - 4, muted, 1.0) + 8
-    lx += dr.text(key, labels["legend_private"], 12, lx, base, muted) + 26
+    marks = markers(model)  # explain only the markers this chart draws
+    if "fork" in marks:
+        lx += dr.fork_icon(lx, base - 4, muted, 1.0) + 8
+        lx += dr.text(key, labels["fork"], 12, lx, base, muted) + 26
+    if "archived" in marks:
+        lx += dr.archive_icon(lx, base - 4, muted, 1.0) + 8
+        lx += dr.text(key, labels["archived"], 12, lx, base, muted) + 26
+    if "private" in marks:
+        lx += dr.lock_icon(lx, base - 4, muted, 1.0) + 8
+        lx += dr.text(key, labels["legend_private"], 12, lx, base, muted) + 26
     if model["roles"]:
         for role in ("owner", "member"):
             if role in model["roles"]:

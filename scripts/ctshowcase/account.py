@@ -27,6 +27,8 @@ from .errors import CHECK_FAILED, OK, NeedsInput, ShowcaseError
 SCHEMA = "account-chart/v1"
 ACTIONS = ("capture-query", "capture", "render")
 HIDE = ("forks", "archived")
+# left out by default; `render --show VALUE` brings each back
+SHOW = ("all-orgs", "private-work", ".github")
 LOGIN_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$")
 SLUG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,62}$")
 REPO_RE = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
@@ -483,8 +485,13 @@ def _host(url: str) -> str:
 
 
 def build(snap: dict, brand, *, resolver=None, flags: dict | None = None, allow_t3: bool = False,
-          hide: tuple | list = (), private: str = "note") -> tuple[dict, list[str]]:
-    """The chart model from a validated snapshot, after the estate gates, and the logs of everything left out."""
+          hide: tuple | list = (), show: tuple | list = ()) -> tuple[dict, list[str]]:
+    """The chart model from a validated snapshot, after the estate gates, and the logs of everything left out.
+
+    By default the chart leaves out organizations with no public repository to show, the 'private work' pill and
+    repositories named `.github`; `show` brings each back (`all-orgs`, `private-work`, `.github`). `hide` drops forks
+    or archived repositories. An organization whose inventory is not completely observed is always shown, so a
+    missing capture is never mistaken for an organization without public repositories."""
     from .org import Estate, _t3_granted, _t3_held
     r = resolver or brand.resolver()
     estate = Estate(brand, r, flags=flags or {})
@@ -494,27 +501,45 @@ def build(snap: dict, brand, *, resolver=None, flags: dict | None = None, allow_
     login = snap["account"]["login"]
     r.check_owner(login, allow_t3=allow_t3)  # an excluded or HOLD account refuses (exit 2)
     counts = {"public": 0, "named": 0, "withheld": 0, "hidden": 0, "not_public": 0, "organizations": 0,
-              "enterprises": 0, "omitted_orgs": 0, "incomplete_orgs": 0}
+              "enterprises": 0, "omitted_orgs": 0, "incomplete_orgs": 0, "orgs_without_public": 0, "hidden_by": {}}
+    hidden_categories: set[str] = set()  # categories survive omission; omitted orgs never add repository counts
     languages: dict[str, int] = {}
+
+    def hidden_reason(rp: dict) -> str | None:
+        """Why a render option leaves this repository out, if one does (the estate gates are separate)."""
+        if ".github" not in show and rp["name"].lower() == ".github":
+            return ".github"
+        if "forks" in hide and rp["fork"]:
+            return "forks"
+        if "archived" in hide and rp["archived"]:
+            return "archived"
+        return None
+
+    def repo_withheld(full: str, held: bool) -> bool:
+        """Apply the estate gates and their diagnostics without changing repository counts."""
+        if held:
+            return True
+        if _t3_held(estate, full, allow_t3):
+            logs.append(f"t3-signoff:{full}")  # a repository withdrawn from a wildcard grant stays unnamed
+            return True
+        if estate.exposure(full):
+            logs.append("exposure-withheld")  # never logged by name (q24)
+            return True
+        return False
 
     def gate_repos(owner: str, repos: list[dict], held: bool) -> list[dict]:
         out = []
         for rp in repos:
             full = f"{owner}/{rp['name']}"
             counts["public"] += 1
-            if held:
+            if repo_withheld(full, held):
                 counts["withheld"] += 1
                 continue
-            if _t3_held(estate, full, allow_t3):
-                logs.append(f"t3-signoff:{full}")  # a repository withdrawn from a wildcard grant stays unnamed
-                counts["withheld"] += 1
-                continue
-            if estate.exposure(full):
-                logs.append("exposure-withheld")  # never logged by name (q24)
-                counts["withheld"] += 1
-                continue
-            if ("forks" in hide and rp["fork"]) or ("archived" in hide and rp["archived"]):
+            reason = hidden_reason(rp)
+            if reason:
+                hidden_categories.add(reason)
                 counts["hidden"] += 1
+                counts["hidden_by"][reason] = counts["hidden_by"].get(reason, 0) + 1
                 continue
             counts["named"] += 1
             if rp["language"]:
@@ -527,7 +552,7 @@ def build(snap: dict, brand, *, resolver=None, flags: dict | None = None, allow_
             return ["held"]
         if status != "complete":
             return [status]
-        out = ["private"] if not_public and private == "note" else []
+        out = ["private"] if not_public and "private-work" in show else []
         if not named and not public and not out:
             out.append("empty")
         return out
@@ -547,7 +572,20 @@ def build(snap: dict, brand, *, resolver=None, flags: dict | None = None, allow_
             logs.append(f"t3-signoff:{lg}")  # T3 work waits for co-owner sign-off (decision 12)
             counts["omitted_orgs"] += 1
             return None
+        status = _capture_state(o, lg)
+        observed = status in ("complete", "partial")
+        repos = o["repositories"] if observed else []
         held = st == "hold" or r.family_hold(lg)
+        reasons = [hidden_reason(rp) for rp in repos]
+        if status == "complete" and "all-orgs" not in show and not (held and repos) and all(reasons):
+            # completely observed and nothing public to show (none at all, only private work, or only repositories a
+            # render option hides): left off unless --show all-orgs. HOLD public work stays withheld, not hidden.
+            # Withholding diagnostics survive omission, but only permitted repos supply hidden categories.
+            hidden_categories.update(reason for rp, reason in zip(repos, reasons)
+                                     if not repo_withheld(f"{lg}/{rp['name']}", held) and reason)
+            logs.append(f"no-public:{lg}")
+            counts["orgs_without_public"] += 1
+            return None
         if held:
             logs.append(f"hold:{lg}")
         style, neutral, family = org_style(brand, lg)
@@ -559,9 +597,6 @@ def build(snap: dict, brand, *, resolver=None, flags: dict | None = None, allow_
         name = (row.get("display_name") if row.get("known") else None) or o["name"] or lg
         eyebrow, short = _eyebrow(style, row, neutral)
         mark = brand.asset(row.get("mark")) if row.get("known") and row.get("mark") else None
-        status = _capture_state(o, lg)
-        observed = status in ("complete", "partial")
-        repos = o["repositories"] if observed else []
         not_public = o["not_public"] if observed else None
         named = gate_repos(lg, repos, held)
         counts["not_public"] += not_public or 0
@@ -676,7 +711,8 @@ def build(snap: dict, brand, *, resolver=None, flags: dict | None = None, allow_
         desc += ". " + ". ".join(evidence) + ". Counts cover observed data only; this map is incomplete"
     model = {"account": account, "personal": personal, "enterprises": enterprises, "orgs": standalone, "counts": counts,
              "roles": roles, "legend_languages": legend or ["default"], "title": title, "desc": desc,
-             "captured": snap["captured"], "viewer": snap.get("viewer"), "coverage": coverage, "evidence": evidence}
+             "captured": snap["captured"], "viewer": snap.get("viewer"), "coverage": coverage, "evidence": evidence,
+             "show": sorted(show), "hide": sorted(hide), "hidden_categories": sorted(hidden_categories)}
     return model, sorted(set(logs))
 
 
@@ -723,13 +759,20 @@ def markdown(model: dict, files: dict) -> str:
     facts = [f"{c['named']} public repositories across "
              + (f"{c['enterprises']} enterprise{'s' if c['enterprises'] != 1 else ''} and " if c["enterprises"] else "")
              + f"{c['organizations']} organization{'s' if c['organizations'] != 1 else ''}"]
-    if c["not_public"]:
+    private_work = "private-work" in model.get("show", ())
+    if c["not_public"] and private_work:
         facts.append(f"{c['not_public']} private or internal repositories are counted, never named")
     if c["withheld"]:
         facts.append(f"{c['withheld']} public repositories are withheld (on hold, awaiting co-owner sign-off or under "
                      "exposure review)")
-    if c["hidden"]:
-        facts.append(f"{c['hidden']} forks or archived repositories are hidden from this render")
+    hidden_categories = model.get("hidden_categories", c.get("hidden_by") or {})
+    left_out = [text for on, text in ((c.get("orgs_without_public"), "organizations with no public repositories shown"),
+                                      (".github" in hidden_categories, "`.github` repositories"),
+                                      ("forks" in hidden_categories, "forks"),
+                                      ("archived" in hidden_categories, "archived repositories")) if on]
+    if left_out:  # what the render options leave out, without counts
+        facts.append("Not shown: " + (", ".join(left_out[:-1]) + " and " + left_out[-1] if len(left_out) > 1
+                                      else left_out[0]))
     if c["omitted_orgs"]:
         facts.append(f"{c['omitted_orgs']} organizations are outside this map (excluded, awaiting sign-off or merged)")
     if model.get("evidence"):
@@ -760,7 +803,7 @@ def markdown(model: dict, files: dict) -> str:
             extra.append("on hold: its repositories are not named")
         if node.get("capture_status", "complete") != "complete":
             extra.append(_coverage_text(node["capture_status"]))
-        if node["not_public"]:
+        if node["not_public"] and private_work:
             extra.append(f"{node['not_public']} private or internal, not named")
         if not node["repos"] and not extra:
             extra.append("no public repositories" if not node["public"] else "no repositories shown")
@@ -801,9 +844,11 @@ def register(sub) -> None:
                    help="render: PNG pixels per px (default 2; lowered automatically above 120 megapixels)")
     s.add_argument("--hide", action="append", choices=HIDE, default=[], help="render: leave forks or archived "
                                                                              "repositories out (repeatable)")
-    s.add_argument("--private", choices=("note", "omit"), default="note",
-                   help="render: note (default) shows a 'private work' pill where an owner has non-public repositories "
-                        "(never a name or a count); omit leaves it out")
+    s.add_argument("--show", action="append", choices=SHOW, default=[],
+                   help="render: also show what is left out by default (repeatable): all-orgs (organizations with no "
+                        "public repository to show), private-work (a 'private work' pill where an owner has non-public "
+                        "repositories, never a name, and the private counts in the Markdown), .github (repositories "
+                        "named .github)")
     s.add_argument("--avatar", help="render: the account's avatar image (default: its brand mark, else a monogram)")
     s.add_argument("--no-png", action="store_true", help="render: skip the HD PNG")
     s.add_argument("--mmdc", nargs="?", const="mmdc", metavar="PATH",
@@ -834,10 +879,16 @@ def _sources(args, brand, model: dict | None = None) -> list[Path]:
     if root:
         paths += [root / "registry/estate.yaml", *[root / "decisions" / name for name in
                   ("approved.tsv", "APPROVED_ACTIONS.yaml", "estate-actions.json", "decisions.json")]]
+    # Configuration declares source ownership even when a lane or asset is not rendered. Protect those paths in
+    # the first preflight, before visibility or consent gates can remove nodes from the chart model.
+    paths += [brand.asset(row.get("mark")) for row in (brand.raw.get("orgs") or {}).values() if row.get("mark")]
+    assets = brand.raw.get("brand_assets") or {}
+    paths += [brand.asset(assets.get(key)) for key in
+              ("logo_light", "logo_dark", "logo_dark_candidate", "mark_dark", "mark_light", "bulb_dark") if assets.get(key)]
+    paths += [brand.font_file(key) for key in brand.raw.get("fonts") or {}]
     if model is not None:
         nodes = [model["account"], model["personal"], *model["orgs"], *[o for e in model["enterprises"] for o in e["orgs"]]]
         paths += [n["mark"] for n in nodes if n.get("mark")]
-        paths += [brand.font_file(key) for key in brand.raw.get("fonts") or {}]
     if getattr(args, "mmdc", None):
         paths.append(Path(shutil.which(args.mmdc) or args.mmdc))
     return [Path(path) for path in paths if path is not None]
@@ -944,7 +995,7 @@ def render(args):
     resolver = Resolver.from_paths(brand, args.registry, args.approved, args.approved_yaml, args.actions)
     flags = load_flags(args.decisions or _default_decisions())
     model, logs = build(snap, brand, resolver=resolver, flags=flags, allow_t3=t3_signed_off(), hide=tuple(args.hide),
-                        private=args.private)
+                        show=tuple(args.show))
     sources = _sources(args, brand, model)
     _check_outputs(planned, sources)
     if args.avatar and not Path(args.avatar).is_file():
