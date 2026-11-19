@@ -34,7 +34,7 @@ Decision 21 is already applied here: every surface ships as **one dark file** us
 | S12 | No `feTurbulence` or `feDisplacementMap`. |
 | S14 | Nothing animates under or through a filter. Glow comes from radial-gradient fills, not `feGaussianBlur`. |
 | S15 | Nothing in the image is meant to be clicked or copied. Every link, contact detail and number shown in the image is repeated as real Markdown next to it. |
-| S16 | No liveness labels, no hand-typed numbers, no vanity stats. Counts that change (repository or org totals) go in Markdown, not in images: the account chart names repositories but leaves every count to its Markdown block. |
+| S16 | No liveness labels, no hand-typed numbers, no vanity stats. Counts that change (repository or org totals) go in Markdown, not in images: the account chart names repositories but leaves every map count to its Markdown block. The account-chart extension has two scoped exceptions, computed from its supplied capture and repeated in Markdown (S15): stars for a non-fork repository with more than 10, and language shares in its colour key and summary SVG. They do not claim current/live measurements or relax capture, privacy or consent gates. |
 
 ## 4. Animation
 

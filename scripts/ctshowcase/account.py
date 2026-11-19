@@ -28,11 +28,15 @@ SCHEMA = "account-chart/v1"
 ACTIONS = ("capture-query", "capture", "render")
 HIDE = ("forks", "archived")
 # left out by default; `render --show VALUE` brings each back
-SHOW = ("all-orgs", "private-work", ".github")
+SHOW = ("all-orgs", "private-work", ".github", "external-forks")
 LOGIN_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$")
 SLUG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,62}$")
 REPO_RE = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+COLOUR_RE = re.compile(r"#[0-9A-Fa-f]{6}")  # a linguist colour as GitHub reports it
+PARENT_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/[A-Za-z0-9._-]{1,100}$")  # a fork's upstream OWNER/NAME
+STAR_MIN = 10  # a non-fork repository shows its stars when it has more than this
+MIN_SHARE = 0.01  # a language with at least this share of the code gets its own entry in the colour key
 MAX_PAGES = 200
 NOT_PUBLIC_KEYS = ("private", "isPrivate", "visibility")
 ROLES = ("owner", "member")
@@ -111,14 +115,52 @@ def _paged(run, name: str, path: tuple, **variables) -> tuple[dict, list | None,
     return first or {}, nodes, "partial"
 
 
+def _count_or_none(value) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
+
+
+def _code(node: dict) -> dict:
+    """Bytes per language of one repository (GitHub linguist), and the bytes past the first page as `code_other`."""
+    langs = node.get("languages")
+    if not isinstance(langs, dict):
+        return {}
+    sizes: dict[str, int] = {}
+    for edge in langs.get("edges") or []:
+        name, size = _dig(edge, ("node", "name")), _count_or_none(edge.get("size") if isinstance(edge, dict) else None)
+        if isinstance(name, str) and name and size is not None:
+            sizes[name] = sizes.get(name, 0) + size
+    out: dict = {"code": dict(sorted(sizes.items()))}
+    total = _count_or_none(langs.get("totalSize"))
+    if total is not None and total > sum(sizes.values()):
+        out["code_other"] = total - sum(sizes.values())
+    return out
+
+
+def _colours(nodes) -> dict[str, str]:
+    """GitHub's linguist colour of each language the nodes report: the fallback beside brand.yaml `languages`."""
+    out = {}
+    for node in nodes or []:
+        for edge in _dig(node, ("languages", "edges")) or []:
+            name, colour = _dig(edge, ("node", "name")), _dig(edge, ("node", "color"))
+            if isinstance(name, str) and name and isinstance(colour, str) and COLOUR_RE.fullmatch(colour):
+                out[name] = colour.upper()
+    return out
+
+
 def _repo(node: dict) -> dict | None:
     name = node.get("name")
     if not isinstance(name, str) or not REPO_RE.match(name):
         return None
     lang = (node.get("primaryLanguage") or {}).get("name") if isinstance(node.get("primaryLanguage"), dict) else None
+    stars = _count_or_none(node.get("stargazerCount"))
+    fork = bool(node.get("isFork"))
+    parent = _dig(node, ("parent", "nameWithOwner"))
     return {"name": name, "description": " ".join(str(node.get("description") or "").split()),
             "language": lang if isinstance(lang, str) and lang else None,
-            "fork": bool(node.get("isFork")), "archived": bool(node.get("isArchived"))}
+            "fork": fork, "archived": bool(node.get("isArchived")),
+            # a fork's upstream; None when GitHub reports none (deleted or not visible), so ownership is unproven
+            **({"parent": parent if isinstance(parent, str) and PARENT_RE.match(parent) else None} if fork else {}),
+            **({"stars": stars} if stars is not None else {}), **_code(node)}
 
 
 def _repos(nodes) -> list[dict]:
@@ -165,18 +207,32 @@ def capture_reads(login: str | None = None) -> dict:
                     "named; `account-chart capture` runs these reads and writes the snapshot."}
 
 
-def _check_capture_owner(resolver, login: str, allow_t3: bool) -> None:
-    """Use the shared owner and sign-off gates before a query can return repository data."""
+def _chart_hold(resolver, login: str) -> bool:
+    """Chart-only holds follow the same current/former-owner identities as the estate gates."""
+    cfg = (resolver.brand.raw.get("chart") or {}) if resolver.brand else {}
+    return any(resolver.same(login, owner) for owner in cfg.get("hold") or ())
+
+
+def chart_labels(brand) -> dict:
+    """Keep pre-language-share operator configs usable with neutral labels for the new key entries."""
+    return {"no_language": "No language", "other_languages": "Other languages", **brand.raw["chart"]["labels"]}
+
+
+def _check_capture_owner(resolver, login: str, allow_t3: bool, allow_hold: bool = False) -> None:
+    """Use the shared owner and sign-off gates before a query can return repository data. Only organization
+    reads may receive the scoped HOLD allowance; a root account remains refused."""
     from .errors import Refused
-    resolver.check_owner(login, allow_t3=allow_t3)
-    if resolver.family_hold(login):
+    resolver.check_owner(login, allow_t3=allow_t3, allow_hold=allow_hold)
+    if resolver.family_hold(login) and not allow_hold:
         raise Refused(f"{login} is on HOLD", log="hold")
     if resolver.is_placeholder(login):
         raise Refused(f"{login} is a merged placeholder", log="exempt")
+    if not allow_hold and _chart_hold(resolver, login):
+        raise Refused(f"{login} is on HOLD", log="hold")
 
 
 def capture(login: str | None = None, run=None, today: str | None = None, *, brand=None, resolver=None,
-            allow_t3: bool = False, flags: dict | None = None) -> dict:
+            allow_t3: bool = False, flags: dict | None = None, allow_hold: bool = False) -> dict:
     """Run the reads and return an account-chart/v1 snapshot (public repository names, non-public counts)."""
     from .config import load_brand, t3_signed_off
     from .errors import Refused
@@ -201,7 +257,8 @@ def capture(login: str | None = None, run=None, today: str | None = None, *, bra
     # Recheck before every page as well: a changed/withdrawn consent record does not authorize another read.
     def guarded(name, **variables):
         owner = variables.get("org") or variables.get("login") or login
-        _check_capture_owner(resolver, owner, allow_t3)
+        org_allowance = allow_hold and name == "account_org"
+        _check_capture_owner(resolver, owner, allow_t3, org_allowance)
         data = run(name, **variables)
         # Repository queries request login on every page. Discovery queries currently omit source identity;
         # preserve that protocol, but validate an identity whenever supplied before accumulating any nodes.
@@ -223,7 +280,7 @@ def capture(login: str | None = None, run=None, today: str | None = None, *, bra
                 raise Refused("capture response identity does not match the requested source",
                               log="usage:capture-identity")
             if field == "login":
-                _check_capture_owner(resolver, actual, allow_t3)
+                _check_capture_owner(resolver, actual, allow_t3, org_allowance)
         return data
 
     first, nodes, repo_status = _paged(guarded, "account_user", ("user", "repositories"), login=login)
@@ -236,16 +293,36 @@ def capture(login: str | None = None, run=None, today: str | None = None, *, bra
     _check_capture_owner(resolver, actual, allow_t3)
     repo_status = _repository_status(repo_status, user, nodes)
     notes: list[str] = []
+    colours: dict[str, str] = {}  # language -> GitHub linguist colour, from retained repository nodes only
+
+    def parent_withheld(full):
+        owner = full.partition("/")[0]
+        status = resolver.owner_status(owner)
+        org_allowance = allow_hold and not resolver.same(owner, login) and any(
+            resolver.same(owner, org) for org in logins.values())
+        held = status == "hold" or resolver.family_hold(owner) or _chart_hold(resolver, owner)
+        return (status == "excluded" or resolver.is_placeholder(owner) or (held and not org_allowance)
+                or _t3_held(estate, full, allow_t3) or estate.exposure(full))
+
     def safe_repos(owner, raw):
         kept = []
-        for repo in _repos(raw):
+        # Keep the same last-node/name ordering as _repos, together with the raw language facts that belong to it.
+        # A withheld or discarded node must not add a language or overwrite a permitted repository's colour.
+        indexed = {repo["name"].lower(): (repo, node) for node in raw or [] if (repo := _repo(node)) is not None}
+        for repo, node in sorted(indexed.values(), key=lambda pair: (pair[0]["name"].lower(), pair[0]["name"])):
             full = f"{owner}/{repo['name']}"
             if _t3_held(estate, full, allow_t3):
                 notes.append("t3-signoff:repository-withheld")
             elif estate.exposure(full):
                 notes.append("exposure-withheld")
             else:
+                if repo.get("parent") and parent_withheld(repo["parent"]):
+                    # Removing the optional fact preserves unknown upstream ownership. Null would instead claim
+                    # GitHub returned no parent; the render logs the missing fact and uses its external-fork fallback.
+                    repo.pop("parent")
+                    notes.extend(("fork-parent-withheld", "needs-input:fork-parents"))
                 kept.append(repo)
+                colours.update(_colours([node]))
         return kept
 
     _, org_nodes, org_status = _paged(guarded, "account_orgs", ("user", "organizations"), login=login)
@@ -274,7 +351,7 @@ def capture(login: str | None = None, run=None, today: str | None = None, *, bra
     for key in sorted(logins):
         o = logins[key]
         try:
-            _check_capture_owner(resolver, o, allow_t3)
+            _check_capture_owner(resolver, o, allow_t3, allow_hold)
         except Refused as exc:
             notes.append(f"{exc.log}:{o}")
             orgs.append({"login": o, "name": "", "member": key in member_of, "role": None, "captured": False,
@@ -311,7 +388,7 @@ def capture(login: str | None = None, run=None, today: str | None = None, *, bra
     return {"schema": SCHEMA, "std": STANDARD, "captured": today or date.today().isoformat(), "viewer": viewer,
             "account": acct, "repositories": captured_repos, "not_public": _not_public(user), "coverage": coverage,
             "enterprises": sorted(enterprises, key=lambda e: (e["name"].casefold(), e["slug"])),
-            "organizations": orgs, "notes": sorted(set(notes))}
+            "organizations": orgs, "language_colors": dict(sorted(colours.items())), "notes": sorted(set(notes))}
 
 
 def snapshot_text(snap: dict) -> str:
@@ -336,9 +413,26 @@ def _clean_repos(items, where: str) -> list[dict]:
             if k in r and r[k] not in (False, "public", "PUBLIC", None):
                 raise ShowcaseError(f"snapshot: {where} names a repository that is not public; refused",
                                     log="privacy:not-public-repository")
+        extra: dict = {}
+        if "parent" in r:  # a fork's upstream: OWNER/NAME, or null when GitHub reported none
+            if r["parent"] is not None and not (isinstance(r["parent"], str) and PARENT_RE.match(r["parent"])):
+                raise _bad(f"{where}: {r['name']}.parent must be OWNER/NAME or null")
+            extra["parent"] = r["parent"]
+        if r.get("stars") is not None:  # optional: snapshots before stars were captured carry none
+            if _count_or_none(r["stars"]) is None:
+                raise _bad(f"{where}: {r['name']}.stars must be a non-negative integer")
+            extra["stars"] = r["stars"]
+        if r.get("code") is not None:  # bytes per language, optional for the same reason
+            code, other = r["code"], r.get("code_other", 0)
+            if (not isinstance(code, dict) or _count_or_none(other) is None
+                    or not all(isinstance(k, str) and k and _count_or_none(v) is not None for k, v in code.items())):
+                raise _bad(f"{where}: {r['name']}.code must map languages to byte counts")
+            extra["code"] = dict(sorted(code.items()))
+            if other:
+                extra["code_other"] = other
         out.append({"name": r["name"], "description": " ".join(str(r.get("description") or "").split()),
                     "language": r.get("language") if isinstance(r.get("language"), str) and r.get("language") else None,
-                    "fork": bool(r.get("fork")), "archived": bool(r.get("archived"))})
+                    "fork": bool(r.get("fork")), "archived": bool(r.get("archived")), **extra})
     return sorted(out, key=lambda r: (r["name"].lower(), r["name"]))
 
 
@@ -410,12 +504,17 @@ def validate(snap) -> dict:
     repos = _clean_repos(snap.get("repositories") or [], "account")
     not_public = _count(snap.get("not_public"), "account")
     observed = coverage["repositories"] in ("complete", "partial")
+    colours = snap.get("language_colors") or {}
+    if not isinstance(colours, dict) or not all(isinstance(k, str) and k and isinstance(v, str) and COLOUR_RE.fullmatch(v)
+                                                for k, v in colours.items()):
+        raise _bad("language_colors must map languages to #RRGGBB colours")
     return {"schema": SCHEMA, "std": snap.get("std") or STANDARD, "captured": captured, "coverage": coverage,
             "viewer": snap.get("viewer") if isinstance(snap.get("viewer"), str) else None,
             "account": {"login": acct["login"], **{k: " ".join(str(acct.get(k) or "").split())
                                                    for k in ("name", "company", "location", "website")}},
             "repositories": repos if observed else [], "not_public": not_public if observed else None,
             "enterprises": sorted(ents, key=lambda e: (e["name"].casefold(), e["slug"])), "organizations": orgs,
+            "language_colors": {k: v.upper() for k, v in sorted(colours.items())},
             "notes": [n for n in snap.get("notes") or [] if isinstance(n, str)]}
 
 
@@ -485,7 +584,7 @@ def _host(url: str) -> str:
 
 
 def build(snap: dict, brand, *, resolver=None, flags: dict | None = None, allow_t3: bool = False,
-          hide: tuple | list = (), show: tuple | list = ()) -> tuple[dict, list[str]]:
+          hide: tuple | list = (), show: tuple | list = (), allow_hold: bool = False) -> tuple[dict, list[str]]:
     """The chart model from a validated snapshot, after the estate gates, and the logs of everything left out.
 
     By default the chart leaves out organizations with no public repository to show, the 'private work' pill and
@@ -495,22 +594,36 @@ def build(snap: dict, brand, *, resolver=None, flags: dict | None = None, allow_
     from .org import Estate, _t3_granted, _t3_held
     r = resolver or brand.resolver()
     estate = Estate(brand, r, flags=flags or {})
-    cfg = brand.raw["chart"]
-    labels = cfg["labels"]
+    labels = chart_labels(brand)
     logs: list[str] = list(snap.get("notes") or [])
     login = snap["account"]["login"]
-    r.check_owner(login, allow_t3=allow_t3)  # an excluded or HOLD account refuses (exit 2)
+    _check_capture_owner(r, login, allow_t3)  # --allow-hold admits organization lanes, never a refused root account
     counts = {"public": 0, "named": 0, "withheld": 0, "hidden": 0, "not_public": 0, "organizations": 0,
               "enterprises": 0, "omitted_orgs": 0, "incomplete_orgs": 0, "orgs_without_public": 0, "hidden_by": {}}
     hidden_categories: set[str] = set()  # categories survive omission; omitted orgs never add repository counts
     languages: dict[str, int] = {}
+    code: dict[str, int] = {}  # bytes per language across the named repositories that are not forks
+    code_other = [0, False]    # bytes past the captured languages, and whether any named non-fork lacks sizes
+
+    # a fork is the account's own when its upstream belongs to the account or to one of the snapshot's organizations
+    own = [login, *(o["login"] for o in snap["organizations"]), *(lg for e in snap["enterprises"] for lg in e["organizations"])]
+
+    def external_fork(rp: dict) -> bool:
+        if not rp["fork"]:
+            return False
+        if "parent" not in rp:
+            logs.append("needs-input:fork-parents")  # a snapshot from before parents were captured: capture again
+        upstream = (rp.get("parent") or "").partition("/")[0]
+        return not (upstream and any(r.same(upstream, o) for o in own))
 
     def hidden_reason(rp: dict) -> str | None:
         """Why a render option leaves this repository out, if one does (the estate gates are separate)."""
         if ".github" not in show and rp["name"].lower() == ".github":
             return ".github"
-        if "forks" in hide and rp["fork"]:
+        if "forks" in hide and rp["fork"]:  # an explicit --hide forks names the broader category
             return "forks"
+        if "external-forks" not in show and external_fork(rp):
+            return "external-forks"
         if "archived" in hide and rp["archived"]:
             return "archived"
         return None
@@ -542,9 +655,17 @@ def build(snap: dict, brand, *, resolver=None, flags: dict | None = None, allow_
                 counts["hidden_by"][reason] = counts["hidden_by"].get(reason, 0) + 1
                 continue
             counts["named"] += 1
-            if rp["language"]:
-                languages[rp["language"]] = languages.get(rp["language"], 0) + 1
-            out.append({**rp, "full_name": full, "url": f"https://github.com/{full}"})
+            languages[rp["language"] or ""] = languages.get(rp["language"] or "", 0) + 1  # "" = no language
+            if not rp["fork"]:  # the code share counts the account's own code: never a fork's
+                if "code" in rp:
+                    for lang, size in rp["code"].items():
+                        code[lang] = code.get(lang, 0) + size
+                    code_other[0] += rp.get("code_other", 0)
+                else:
+                    code_other[1] = True  # a snapshot from before sizes were captured: no percentages
+            stars = rp.get("stars")
+            out.append({**rp, "full_name": full, "url": f"https://github.com/{full}",
+                        "star_count": stars if not rp["fork"] and isinstance(stars, int) and stars > STAR_MIN else None})
         return out
 
     def notes_for(named: list, public: int, not_public: int, held: bool, status: str) -> list[str]:
@@ -568,14 +689,20 @@ def build(snap: dict, brand, *, resolver=None, flags: dict | None = None, allow_
             logs.append(f"placeholder:{lg}")
             counts["omitted_orgs"] += 1
             return None
-        if st == "t3" and not (allow_t3 and _t3_granted(lg)):
+        if "t3" in r.owner_statuses(lg) and not (allow_t3 and _t3_granted(lg)):
             logs.append(f"t3-signoff:{lg}")  # T3 work waits for co-owner sign-off (decision 12)
             counts["omitted_orgs"] += 1
             return None
         status = _capture_state(o, lg)
         observed = status in ("complete", "partial")
         repos = o["repositories"] if observed else []
-        held = st == "hold" or r.family_hold(lg)
+        # the estate's HOLD (owner status or a family with `hold: true`), or the chart's own `chart.hold` list
+        on_hold = st == "hold" or r.family_hold(lg) or _chart_hold(r, lg)
+        if on_hold and not allow_hold:
+            logs.append(f"hold:{lg}")  # a HOLD org is left off the chart whole; --allow-hold shows it like any org
+            counts["omitted_orgs"] += 1
+            return None
+        held = False  # only with --allow-hold does a HOLD org get here, and then its public repositories are named
         reasons = [hidden_reason(rp) for rp in repos]
         if status == "complete" and "all-orgs" not in show and not (held and repos) and all(reasons):
             # completely observed and nothing public to show (none at all, only private work, or only repositories a
@@ -586,8 +713,8 @@ def build(snap: dict, brand, *, resolver=None, flags: dict | None = None, allow_
             logs.append(f"no-public:{lg}")
             counts["orgs_without_public"] += 1
             return None
-        if held:
-            logs.append(f"hold:{lg}")
+        if on_hold:
+            logs.append(f"hold-allowed:{lg}")
         style, neutral, family = org_style(brand, lg)
         row = brand.org(lg)
         if not row.get("known"):
@@ -688,7 +815,7 @@ def build(snap: dict, brand, *, resolver=None, flags: dict | None = None, allow_
 
     roles = sorted({n["role"] for n in standalone + [x for e in enterprises for x in e["orgs"]] if n["role"]} |
                    {e["role"] for e in enterprises if e["role"]})
-    legend = [k for k, _ in sorted(languages.items(), key=lambda kv: (-kv[1], kv[0]))[:3]]
+    legend, code_share = _legend(languages, code, code_other, labels, logs)
     n_orgs = counts["organizations"]
     title = f"GitHub account map of {name} (@{login})"
     parts = ["personal repositories"]
@@ -710,10 +837,35 @@ def build(snap: dict, brand, *, resolver=None, flags: dict | None = None, allow_
     if evidence:
         desc += ". " + ". ".join(evidence) + ". Counts cover observed data only; this map is incomplete"
     model = {"account": account, "personal": personal, "enterprises": enterprises, "orgs": standalone, "counts": counts,
-             "roles": roles, "legend_languages": legend or ["default"], "title": title, "desc": desc,
+             "roles": roles, "legend": legend, "code_share": code_share, "title": title, "desc": desc,
+             "language_colors": snap.get("language_colors") or {},
              "captured": snap["captured"], "viewer": snap.get("viewer"), "coverage": coverage, "evidence": evidence,
              "show": sorted(show), "hide": sorted(hide), "hidden_categories": sorted(hidden_categories)}
     return model, sorted(set(logs))
+
+
+def _legend(languages: dict, code: dict, code_other: list, labels: dict, logs: list) -> tuple[list[dict], list[dict]]:
+    """The colour key and the code share.
+
+    Each key entry is {name, language (whose colour the dot takes; None draws the default grey), share}: every
+    primary language a named repository shows as a pill dot, and any language with MIN_SHARE of the code, ordered by
+    share then name; the rest of the code as one "Other languages" entry; and "No language" when a named repository
+    has none. Shares count the bytes of the named repositories that are not forks. A snapshot captured before sizes
+    were recorded gives names without shares (logged `needs-input:language-sizes`)."""
+    total = sum(code.values()) + code_other[0]
+    sized = total > 0 and not code_other[1]
+    if code_other[1]:
+        logs.append("needs-input:language-sizes")  # capture again: this snapshot predates per-language sizes
+    share = {k: v / total for k, v in code.items()} if sized else {}
+    keyed = {k for k in languages if k} | {k for k, s in share.items() if s >= MIN_SHARE}
+    entries = sorted(({"name": k, "language": k, "share": share.get(k, 0.0) if sized else None} for k in keyed),
+                     key=lambda e: (-(e["share"] or 0), e["name"].casefold(), e["name"]))
+    other = (sum(s for k, s in share.items() if k not in keyed) + code_other[0] / total) if sized else 0
+    if other > 0:
+        entries.append({"name": labels["other_languages"], "language": None, "share": other})
+    if "" in languages:
+        entries.append({"name": labels["no_language"], "language": None, "share": None})
+    return entries, [e for e in entries if e["share"]]
 
 
 def _initials(name: str) -> str:
@@ -744,7 +896,7 @@ def alt_text(model: dict) -> str:
             f"the list below repeats each one as a link.")
 
 
-def markdown(model: dict, files: dict) -> str:
+def markdown(model: dict, files: dict, *, summary_key: list[dict] | None = None) -> str:
     """The README block for the chart: the image (linking to the full-resolution PNG), the counts, and every repository
     in the map as a link, grouped like the tree."""
     c = model["counts"]
@@ -768,23 +920,33 @@ def markdown(model: dict, files: dict) -> str:
     hidden_categories = model.get("hidden_categories", c.get("hidden_by") or {})
     left_out = [text for on, text in ((c.get("orgs_without_public"), "organizations with no public repositories shown"),
                                       (".github" in hidden_categories, "`.github` repositories"),
+                                      ("external-forks" in hidden_categories,
+                                       "forks of repositories outside this account"),
                                       ("forks" in hidden_categories, "forks"),
                                       ("archived" in hidden_categories, "archived repositories")) if on]
     if left_out:  # what the render options leave out, without counts
         facts.append("Not shown: " + (", ".join(left_out[:-1]) + " and " + left_out[-1] if len(left_out) > 1
                                       else left_out[0]))
     if c["omitted_orgs"]:
-        facts.append(f"{c['omitted_orgs']} organizations are outside this map (excluded, awaiting sign-off or merged)")
+        facts.append(f"{c['omitted_orgs']} organizations are outside this map (excluded, on HOLD, awaiting sign-off or "
+                     "merged)")
     if model.get("evidence"):
         facts.append("Counts cover observed data only; this map is incomplete")
     out += ["<sub>" + ". ".join(facts) + f". Captured {model['captured']}. Mermaid source: "
             f"<a href=\"{files['mmd']}\">{files['mmd']}</a>.</sub>", ""]
+    if model.get("code_share"):  # S15: the percentages in the image's colour key, repeated as text
+        from .chart import percent
+        shares = [f"{_md(e['name'])} {percent(e['share'])}" for e in model["code_share"]]
+        out += ["<sub>Code across the repositories shown, excluding forks: "
+                + (", ".join(shares[:-1]) + " and " + shares[-1] if len(shares) > 1 else shares[0]) + ".</sub>", ""]
     if model.get("evidence"):
         out += [f"- {_md(item)}." for item in model["evidence"]] + [""]
     out += ["<details>", "<summary>Every repository in this map</summary>", ""]
 
     def repo_line(rp: dict) -> str:
         tags = [t for t, on in (("fork", rp["fork"]), ("archived", rp["archived"])) if on]
+        if rp.get("star_count"):
+            tags.insert(0, f"{rp['star_count']:,} stars")
         line = f"- [`{rp['name']}`]({rp['url']})"
         if tags:
             line += " <sub>" + ", ".join(tags) + "</sub>"
@@ -823,6 +985,15 @@ def markdown(model: dict, files: dict) -> str:
         for org in model["orgs"]:
             out += lane(org, "####")
     out += ["</details>", ""]
+    if files.get("summary"):  # the closing visual: the code's languages in the intro's design
+        from .chart import percent
+        entries = summary_key if summary_key is not None else model.get("code_share") or []
+        shares = ", ".join(f"{e['name']} {percent(e['share'])}" for e in entries)
+        alt = f"{acct['name']}: the languages of the code in this map, excluding forks: {shares}"
+        if entries != model.get("code_share"):
+            out += ["<sub>Summary key (smaller entries combined): "
+                    + ", ".join(f"{_md(e['name'])} {percent(e['share'])}" for e in entries) + ".</sub>", ""]
+        out += ['<p align="center">', f'  <img src="{files["summary"]}" alt="{_attr(alt)}" width="100%">', "</p>", ""]
     return "\n".join(out)
 
 
@@ -851,6 +1022,9 @@ def register(sub) -> None:
                         "named .github)")
     s.add_argument("--avatar", help="render: the account's avatar image (default: its brand mark, else a monogram)")
     s.add_argument("--no-png", action="store_true", help="render: skip the HD PNG")
+    s.add_argument("--static-summary", action="store_true",
+                   help="render: write NAME-summary.svg as its settled frame, without motion (for a page that already "
+                        "shows an animated intro: S11 allows one animated asset per page)")
     s.add_argument("--mmdc", nargs="?", const="mmdc", metavar="PATH",
                    help="render: also render NAME.mermaid.png from the Mermaid source with mermaid-cli (optional; "
                         "browser output, not byte-deterministic)")
@@ -861,6 +1035,10 @@ def register(sub) -> None:
                        ("--actions", "decisions/estate-actions.json")):
         s.add_argument(flag, help=f"capture, render: {what} for the org resolver (default: the bundle's)")
     s.add_argument("--allow-t3", action="store_true", default=argparse.SUPPRESS, help="T3 orgs after co-owner sign-off")
+    s.add_argument("--allow-hold", action="store_true",
+                   help="capture, render: include organizations on HOLD (owner status or a family with `hold: true`): "
+                        "capture reads their repositories and render shows them like any organization. By default a "
+                        "HOLD organization is left off the chart entirely")
     s.set_defaults(func=cmd_account_chart)
 
 
@@ -958,7 +1136,7 @@ def cmd_account_chart(args):
         states = _check_outputs([Path(args.out)], sources)  # a refused destination causes no network reads
         resolver = Resolver.from_paths(brand, args.registry, args.approved, args.approved_yaml, args.actions)
         snap = capture(args.login, brand=brand, resolver=resolver, allow_t3=t3_signed_off(),
-                       flags=load_flags(args.decisions or _default_decisions()))
+                       flags=load_flags(args.decisions or _default_decisions()), allow_hold=args.allow_hold)
         _write_outputs({Path(args.out): snapshot_text(snap).encode("utf-8")}, sources, states)
         n = sum(len(o["repositories"]) for o in snap["organizations"]) + len(snap["repositories"])
         return {"command": "account-chart", "action": "capture", "owner": snap["account"]["login"], "result": "ok",
@@ -985,7 +1163,7 @@ def render(args):
     files = {"mmd": f"{args.name}.mmd", "svg": f"{args.name}.svg", "md": f"{args.name}.md"}
     if not args.no_png:
         files["png"] = f"{args.name}.png"
-    planned = [out_dir / name for name in files.values()]
+    planned = [out_dir / name for name in files.values()] + [out_dir / f"{args.name}-summary.svg"]
     if args.mmdc:
         planned.append(out_dir / f"{args.name}.mermaid.png")
     brand = load_brand(getattr(args, "config", None))
@@ -995,7 +1173,7 @@ def render(args):
     resolver = Resolver.from_paths(brand, args.registry, args.approved, args.approved_yaml, args.actions)
     flags = load_flags(args.decisions or _default_decisions())
     model, logs = build(snap, brand, resolver=resolver, flags=flags, allow_t3=t3_signed_off(), hide=tuple(args.hide),
-                        show=tuple(args.show))
+                        show=tuple(args.show), allow_hold=args.allow_hold)
     sources = _sources(args, brand, model)
     _check_outputs(planned, sources)
     if args.avatar and not Path(args.avatar).is_file():
@@ -1004,15 +1182,26 @@ def render(args):
     laid = chart.layout(model, brand, fonts, width=args.width, avatar=args.avatar)
     svg = chart.svg(laid, fonts)
     lint = svglint.lint_bytes("chart", svg.encode("utf-8"), str(out_dir / files["svg"]))
+    from . import summary
+    summary_svg, summary_key = summary.build_with_key(brand, fonts, model, static=args.static_summary)
+    slint = None
+    if summary_svg is None:
+        logs.append("summary-skipped:no-code-shares")  # no per-language sizes to show (an older snapshot, or no code)
+    else:
+        files["summary"] = f"{args.name}-summary.svg"
+        slint = svglint.lint_bytes("intro", summary_svg.encode("utf-8"), str(out_dir / files["summary"]))
+        if slint["result"] != "PASS":
+            return {"command": "account-chart", "action": "render", "owner": model["account"]["login"], "result": "fail",
+                    "lint": lint, "summary_lint": slint, "logs": sorted(set(logs))}, CHECK_FAILED
     mmd, minfo = chart.mermaid(model, brand)
-    md = markdown(model, files)
+    md = markdown(model, files, summary_key=summary_key)
     if minfo["bytes"] > 50_000:
         logs.append(f"mermaid-size:{minfo['bytes']}")  # over Mermaid's default maxTextSize: GitHub may refuse to draw it
     if minfo["edges"] + minfo["invisible_links"] > 500:
         logs.append(f"mermaid-edges:{minfo['edges'] + minfo['invisible_links']}")  # over Mermaid's default maxEdges
     res = {"command": "account-chart", "action": "render", "owner": model["account"]["login"], "result": "ok",
            "counts": model["counts"], "size": {"width": laid.w, "height": laid.h}, "lint": lint, "mermaid": minfo,
-           "coverage": model["coverage"], "evidence": model["evidence"]}
+           "coverage": model["coverage"], "evidence": model["evidence"], "summary_lint": slint}
     if lint["result"] != "PASS":
         return {**res, "result": "fail", "logs": sorted(set(logs))}, CHECK_FAILED
     if resolver.registry:  # defence in depth: the snapshot names public repositories only; check against the estate too
@@ -1022,11 +1211,14 @@ def render(args):
                  for rp in n["repos"]]
         scope["public_names"] |= {rp["name"].lower() for rp in named}
         scope["public_texts"] = list(scope["public_texts"]) + [rp["description"] for rp in named if rp["description"]]
-        hits = sorted(set(public_leaks(mmd, scope) + public_leaks(md, scope) + public_leaks(svg, scope)))
+        hits = sorted(set(public_leaks(mmd, scope) + public_leaks(md, scope) + public_leaks(svg, scope)
+                          + (public_leaks(summary_svg, scope) if summary_svg else [])))
         logs += slog
         if hits:
             return {**res, "result": "fail", "leaks": hits, "logs": sorted(set(logs))}, CHECK_FAILED
     outputs = {out_dir / files[key]: data.encode("utf-8") for key, data in (("mmd", mmd), ("svg", svg), ("md", md))}
+    if summary_svg is not None:
+        outputs[out_dir / files["summary"]] = summary_svg.encode("utf-8")
     if not args.no_png:
         scale = chart.png_scale(laid, args.scale)
         if scale != args.scale:

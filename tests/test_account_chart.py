@@ -233,11 +233,19 @@ def test_an_excluded_account_is_refused(brand, tmp_path):
     assert r.returncode == 2 and out["result"] == "refused"
 
 
-def test_a_hold_org_is_shown_but_never_names_its_repositories(brand):
-    m, logs = build(brand, with_orgs(org("TouchedByAnAgent", "northwind-held-a", "northwind-held-b")))
-    node = m["orgs"][0]
-    assert node["held"] and node["repos"] == [] and node["notes"] == ["held"]
-    assert "hold:TouchedByAnAgent" in logs and m["counts"]["withheld"] == 2
+def test_a_hold_org_is_left_off_unless_allow_hold(brand):
+    """User decision (2026-11-18): a HOLD org is not on the chart at all by default; --allow-hold shows it normally."""
+    d = with_orgs(org("TouchedByAnAgent", "northwind-held-a", "northwind-held-b"), org("Northwind-Games", "arcade"))
+    m, logs = build(brand, d)
+    assert [o["login"] for o in m["orgs"]] == ["Northwind-Games"] and "hold:TouchedByAnAgent" in logs
+    assert m["counts"]["omitted_orgs"] == 1 and m["counts"]["withheld"] == 0
+    md = A.markdown(m, {"mmd": "a.mmd", "svg": "a.svg", "md": "a.md"})
+    mmd, _ = C.mermaid(m, brand)
+    assert not any(x in md + mmd for x in ("TouchedByAnAgent", "northwind-held", "on hold"))
+    m, logs = build(brand, d, allow_hold=True)
+    held = next(o for o in m["orgs"] if o["login"] == "TouchedByAnAgent")
+    assert not held["held"] and [rp["name"] for rp in held["repos"]] == ["northwind-held-a", "northwind-held-b"]
+    assert "hold-allowed:TouchedByAnAgent" in logs and "hold:TouchedByAnAgent" not in logs
 
 
 def test_exposure_flagged_repositories_are_withheld_without_their_name(brand):
@@ -266,7 +274,9 @@ def test_defaults_leave_out_private_work_github_repositories_and_orgs_without_pu
     m, logs = build(brand, base())
     assert not any("private" in n["notes"] for n in lanes(m))  # no 'private work' pill by default
     assert not any(rp["name"] == ".github" for n in lanes(m) for rp in n["repos"])
-    assert m["counts"]["hidden_by"] == {".github": 1}
+    # terminal-theme forks an outside repository: hidden; vector-search-lab forks a Northwind repository: shown
+    assert m["counts"]["hidden_by"] == {".github": 1, "external-forks": 1}
+    assert "northwind-dev/terminal-theme" not in names(m) and "Northwind-Labs/vector-search-lab" in names(m)
     assert {o["login"] for o in m["orgs"]} == {"Northwind-Games"}  # Community (private only) and Sandbox (empty) left off
     assert {"no-public:Northwind-Community", "no-public:Northwind-Sandbox"} <= set(logs)
     assert m["counts"]["orgs_without_public"] == 2 and m["counts"]["organizations"] == 4
@@ -275,8 +285,8 @@ def test_defaults_leave_out_private_work_github_repositories_and_orgs_without_pu
 
 
 def test_show_brings_back_each_default(brand):
-    m, logs = build(brand, base(), show=("all-orgs", "private-work", ".github"))
-    assert "private" in m["personal"]["notes"]
+    m, logs = build(brand, base(), show=("all-orgs", "private-work", ".github", "external-forks"))
+    assert "private" in m["personal"]["notes"] and "northwind-dev/terminal-theme" in names(m)
     assert any(rp["name"] == ".github" for n in lanes(m) for rp in n["repos"])
     by = {o["login"]: o for o in m["orgs"]}
     assert set(by) == {"Northwind-Community", "Northwind-Games", "Northwind-Sandbox"}
@@ -287,7 +297,8 @@ def test_show_brings_back_each_default(brand):
 
 
 def test_an_org_whose_only_public_repository_is_hidden_is_left_off(brand):
-    d = with_orgs(org("Northwind-Labs", ".github"), org("Northwind-Games", "arcade", fork=True))
+    # the fork's upstream is another org of the account, so it is the account's own fork and shown by default
+    d = with_orgs(org("Northwind-Labs", ".github"), org("Northwind-Games", "arcade", fork=True, parent="Northwind-Labs/arc"))
     m, logs = build(brand, d)
     assert [o["login"] for o in m["orgs"]] == ["Northwind-Games"]
     assert "no-public:Northwind-Labs" in logs
@@ -305,15 +316,18 @@ def test_an_org_without_complete_capture_is_never_left_off(brand):
     assert not any(x.startswith("no-public:") for x in logs)
 
 
-def test_a_hold_org_with_public_repositories_stays_and_one_without_is_left_off(brand):
-    m, logs = build(brand, with_orgs(org("TouchedByAnAgent", "northwind-held")))
-    assert m["orgs"][0]["notes"] == ["held"]
-    m, logs = build(brand, with_orgs(org("TouchedByAnAgent")))
-    assert m["orgs"] == [] and "no-public:TouchedByAnAgent" in logs and "hold:TouchedByAnAgent" not in logs
+def test_the_chart_hold_list_works_like_hold_for_the_chart_only(brand):
+    """`chart.hold` (user, 2026-11-18: the romgenie archive and following orgs) hides them like HOLD on the chart,
+    and changes nothing else: their brand family is not on HOLD."""
+    assert brand.raw["chart"]["hold"] == ["romgenie-archive-repostiory", "romgenie-following-repos"]
+    assert not brand.resolver().family_hold("romgenie-following-repos")
+    d = with_orgs(org("romgenie-following-repos", "northwind-watched"), org("romgenie-archive-repostiory", "old-tool"))
+    m, logs = build(brand, d)
+    assert m["orgs"] == [] and {"hold:romgenie-following-repos", "hold:romgenie-archive-repostiory"} <= set(logs)
+    m, _ = build(brand, d, allow_hold=True)
+    assert {o["login"] for o in m["orgs"]} == {"romgenie-following-repos", "romgenie-archive-repostiory"}
     m, logs = build(brand, with_orgs(org("TouchedByAnAgent")), show=("all-orgs",))
-    assert m["orgs"][0]["held"] and m["orgs"][0]["notes"] == ["held"]
-    assert m["orgs"][0]["public"] == m["counts"]["withheld"] == 0
-    assert "hold:TouchedByAnAgent" in logs and "no-public:TouchedByAnAgent" not in logs
+    assert m["orgs"] == [] and "hold:TouchedByAnAgent" in logs  # HOLD precedes --show all-orgs
 
 
 def test_an_enterprise_stays_when_none_of_its_orgs_has_public_repositories(brand, tmp_path):
@@ -376,15 +390,18 @@ def _digests(folder):
     return {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(folder.iterdir())}
 
 
-def test_render_writes_four_deterministic_files_that_pass_lint(tmp_path):
+def test_render_writes_five_deterministic_files_that_pass_lint(tmp_path):
     r1, out = render(tmp_path, None, out="a")
     r2, _ = render(tmp_path, None, out="b")
     assert r1.returncode == 0 and r2.returncode == 0, r1.stdout + r1.stderr
-    assert out["result"] == "ok" and out["lint"]["result"] == "PASS"
+    assert out["result"] == "ok" and out["lint"]["result"] == "PASS" and out["summary_lint"]["result"] == "PASS"
     a, b = _digests(tmp_path / "a"), _digests(tmp_path / "b")
-    assert set(a) == {"account-chart.mmd", "account-chart.svg", "account-chart.png", "account-chart.md"}
+    assert set(a) == {"account-chart.mmd", "account-chart.svg", "account-chart.png", "account-chart.md",
+                      "account-chart-summary.svg"}
     assert a == b  # S07: byte-identical
     assert svglint.lint_file("chart", tmp_path / "a" / "account-chart.svg")["result"] == "PASS"
+    summary = svglint.lint_file("intro", tmp_path / "a" / "account-chart-summary.svg")
+    assert summary["result"] == "PASS" and summary["animated"]
     w, h = out["size"]["width"], out["size"]["height"]
     assert out["size"]["png"] == [w * 2, h * 2]
     svg = (tmp_path / "a" / "account-chart.svg").read_text(encoding="utf-8")
@@ -399,13 +416,17 @@ def test_markdown_repeats_every_named_repository_as_a_link_with_the_counts(brand
         assert f"(https://github.com/{full})" in md
     assert f"{out['counts']['named']} public repositories across 1 enterprise and 4 organizations" in md
     assert "private or internal" not in md  # private work is shown only on request
-    assert "Not shown: organizations with no public repositories shown and `.github` repositories" in md
-    assert "/.github)" not in md and "Northwind-Sandbox" not in md
+    assert ("Not shown: organizations with no public repositories shown, `.github` repositories and forks of "
+            "repositories outside this account") in md
+    assert "/.github)" not in md and "Northwind-Sandbox" not in md and "/terminal-theme)" not in md
     assert 'href="account-chart.svg"' in md  # without a PNG the image links to the SVG
+    assert "<sub>Code across the repositories shown, excluding forks: Python " in md  # S15: the key's percentages
+    assert "`support-triage-agent`](https://github.com/Northwind-Trading-Co/support-triage-agent) <sub>128 stars</sub>" in md
+    assert md.rstrip().endswith("</p>") and 'src="account-chart-summary.svg"' in md  # the closing summary visual
     r, out = render(tmp_path, None, "--no-png", "--show", "all-orgs", "--show", "private-work", "--show", ".github",
-                    out="all")
+                    "--show", "external-forks", out="all")
     md = (tmp_path / "all" / "account-chart.md").read_text(encoding="utf-8")
-    assert r.returncode == 0 and "Not shown" not in md and "/.github)" in md
+    assert r.returncode == 0 and "Not shown" not in md and "/.github)" in md and "/terminal-theme)" in md
     assert "11 private or internal repositories are counted, never named" in md
     assert "across 1 enterprise and 6 organizations" in md
 
@@ -493,3 +514,109 @@ def test_mmdc_runs_at_natural_size(tmp_path, monkeypatch):
     cmd = seen["cmd"]
     assert cmd[cmd.index("-s") + 1] == "3" and cmd[cmd.index("-b") + 1] == "#0F172A"
     assert cmd[cmd.index("-p") + 1] == "puppeteer.json"
+
+
+# =====================================================================================================
+# language shares, stars, fork upstreams and the summary SVG (user requests, 2026-11-18)
+# =====================================================================================================
+def test_capture_records_sizes_stars_upstreams_and_colours():
+    def node(name, *, fork=False, parent=None, stars=0, langs=()):
+        return {"name": name, "description": "", "isFork": fork, "isArchived": False, "stargazerCount": stars,
+                "primaryLanguage": {"name": langs[0][0]} if langs else None,
+                "parent": {"nameWithOwner": parent} if parent else None,
+                "languages": {"totalSize": sum(s for _, s, _ in langs) + 50,
+                              "edges": [{"size": s, "node": {"name": n, "color": c}} for n, s, c in langs]}}
+
+    def run(name, **v):
+        if name == "account_viewer":
+            return {"viewer": {"login": "northwind-dev"}}
+        if name == "account_user":
+            nodes = [node("app", stars=42, langs=(("Go", 900, "#00add8"), ("Shell", 100, "#89e051"))),
+                     node("theme", fork=True, parent="someone-else/theme", langs=(("Lua", 10, "#000080"),)),
+                     node("gone", fork=True)]
+            return {"user": {"login": "northwind-dev", "all": {"totalCount": 3}, "public": {"totalCount": 3},
+                             "repositories": {"nodes": nodes, "pageInfo": {"hasNextPage": False}}}}
+        if name in ("account_orgs", "account_enterprises"):
+            key = "user" if name == "account_orgs" else "viewer"
+            conn = "organizations" if name == "account_orgs" else "enterprises"
+            return {key: {conn: {"nodes": [], "pageInfo": {"hasNextPage": False}}}}
+        raise AssertionError(name)
+    snap = A.capture(None, run=run, today="2026-11-18")
+    repos = {r["name"]: r for r in snap["repositories"]}
+    assert repos["app"]["stars"] == 42 and repos["app"]["code"] == {"Go": 900, "Shell": 100}
+    assert repos["app"]["code_other"] == 50 and "parent" not in repos["app"]
+    assert repos["theme"]["parent"] == "someone-else/theme" and repos["gone"]["parent"] is None
+    assert snap["language_colors"] == {"Go": "#00ADD8", "Lua": "#000080", "Shell": "#89E051"}
+    assert A.validate(json.loads(A.snapshot_text(snap)))["repositories"] == snap["repositories"]
+
+
+@pytest.mark.parametrize("mutate", [lambda r: r.update(stars=-1), lambda r: r.update(code={"Go": "9"}),
+                                    lambda r: r.update(code={"Go": 1}, code_other=-2),
+                                    lambda r: r.update(parent="not a slug")])
+def test_malformed_sizes_stars_and_upstreams_are_refused(mutate):
+    d = base()
+    mutate(d["organizations"][0]["repositories"][0])
+    with pytest.raises(ShowcaseError):
+        A.validate(d)
+    d = base()
+    d["language_colors"] = {"Go": "blue"}
+    with pytest.raises(ShowcaseError):
+        A.validate(d)
+
+
+def test_code_share_counts_named_repositories_that_are_not_forks(brand):
+    d = with_orgs(org("Northwind-Labs", "a", code={"Python": 600, "Shell": 4}),
+                  org("Northwind-Games", "b", code={"Go": 390, "Python": 0}, code_other=6),
+                  org("Northwind-Archive", "c", fork=True, parent="Northwind-Labs/c", code={"Rust": 5000}),
+                  org("Northwind-Sandbox", ".github", code={"HTML": 9000}))
+    d["repositories"] = []
+    m, logs = build(brand, d)
+    share = {e["name"]: e["share"] for e in m["legend"]}
+    # 1000 bytes: forks and the hidden .github are not counted; Shell (0.4%) folds into Other with code_other
+    assert share == {"Python": 0.6, "Go": 0.39, "Other languages": 0.01}
+    assert [e["name"] for e in m["code_share"]] == ["Python", "Go", "Other languages"]
+    assert C.percent(0.6) == "60.0%" and C.percent(0.0004) == "<0.1%" and C.percent(0) == ""
+    old = with_orgs(org("Northwind-Labs", "a"))  # a snapshot from before sizes were captured
+    m, logs = build(brand, old)
+    assert "needs-input:language-sizes" in logs and all(e["share"] is None for e in m["legend"])
+
+
+def test_stars_show_only_on_non_forks_with_more_than_ten(brand):
+    d = with_orgs(org("Northwind-Labs", "popular", stars=128), org("Northwind-Games", "quiet", stars=10),
+                  org("Northwind-Archive", "forked", fork=True, parent="Northwind-Labs/popular", stars=500))
+    d["repositories"] = []
+    m, _ = build(brand, d)
+    stars = {rp["name"]: rp["star_count"] for n in lanes(m) for rp in n["repos"]}
+    assert stars == {"popular": 128, "quiet": None, "forked": None}
+    mmd, _ = C.mermaid(m, brand)
+    assert "popular · 128 stars" in mmd and "quiet ·" not in mmd
+    assert [C.stars_text(n) for n in (42, 1000, 1234, 15400)] == ["42", "1k", "1.2k", "15k"]
+
+
+def test_external_forks_are_hidden_by_default(brand):
+    d = with_orgs(org("Northwind-Labs", "own-fork", fork=True, parent="Northwind-Games/tool"),
+                  org("Northwind-Games", "tool", "outside-fork", fork=False))
+    d["organizations"][1]["repositories"][1].update(fork=True, parent="someone-else/outside")
+    d["repositories"] = []
+    m, logs = build(brand, d)
+    assert names(m) == {"Northwind-Labs/own-fork", "Northwind-Games/tool"}
+    assert m["counts"]["hidden_by"] == {"external-forks": 1} and "needs-input:fork-parents" not in logs
+    m, _ = build(brand, d, show=("external-forks",))
+    assert "Northwind-Games/outside-fork" in names(m)
+    old = with_orgs(org("Northwind-Labs", "keep"), org("Northwind-Games", "legacy-fork", fork=True))  # no parent key
+    old["repositories"] = []
+    m, logs = build(brand, old)
+    assert names(m) == {"Northwind-Labs/keep"} and "needs-input:fork-parents" in logs
+
+
+def test_summary_svg_is_an_intro_kind_asset_animated_or_static(brand):
+    from ctshowcase import summary
+    from ctshowcase.typeset import Fonts
+    m, _ = build(brand, base())
+    fonts = Fonts(brand)
+    animated, still = summary.build(brand, fonts, m), summary.build(brand, fonts, m, static=True)
+    a, s = svglint.lint_bytes("intro", animated.encode()), svglint.lint_bytes("intro", still.encode())
+    assert a["result"] == "PASS" and a["animated"] and s["result"] == "PASS" and not s["animated"]
+    assert 'viewBox="0 0 1280 360"' in animated and "prefers-reduced-motion" in animated
+    assert summary.build(brand, fonts, m) == animated  # deterministic
+    assert summary.build(brand, fonts, build(brand, with_orgs(org("Northwind-Labs", "a")))[0]) is None  # no sizes

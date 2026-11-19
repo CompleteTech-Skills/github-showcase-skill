@@ -19,11 +19,12 @@ import re
 from PIL import Image, ImageDraw
 
 from .banner import canvas_nodes
+from .card import star_path
 from .chips import eyebrow_track
 from .color import best_fg, contrast, hexstr, mix, rgb
 from .errors import ArtFail
 from .iconbox import corner_ground
-from .scene import SS, Circle, Clip, Grid, Linear, Picture, PngRenderer, Rect, Scene, Shadow, Stroke, Text, to_svg
+from .scene import SS, Circle, Clip, Grid, Linear, Picture, PngRenderer, Poly, Rect, Scene, Shadow, Stroke, Text, to_svg
 from .tile import rounded
 from .typeset import Fonts, ntos
 
@@ -41,7 +42,24 @@ PILLS_DX = 28                  # card to the first pill
 ENT_PAD = 20
 ENT_GAP = 18                   # enterprise card to its first lane
 FOOT_H = 52
+LEGEND_ROW = 26                 # legend row pitch
 PILL_FONT = "mono-medium"
+STAR_SIZE = 11.5                # the star count on a pill
+
+
+def percent(share: float | None) -> str:
+    """A code share as the colour key shows it: one decimal, '<0.1%' for a trace, '' for none."""
+    if not share:
+        return ""
+    return f"{share * 100:.1f}%" if share >= 0.0005 else "<0.1%"
+
+
+def stars_text(n: int) -> str:
+    """A star count as a pill shows it: 42, 1.2k, 15k."""
+    if n < 1000:
+        return str(n)
+    k = n / 1000
+    return f"{k:.1f}".rstrip("0").rstrip(".") + "k" if k < 10 else f"{round(k)}k"
 MAX_PNG_PIXELS = 120_000_000
 BIG = 4_000_000                # device pixels above which a rounded rect is painted without a full supersampled mask
 
@@ -105,7 +123,8 @@ class _Draw:
         self.brand, self.fonts, self.model = brand, fonts, model
         self.cfg = brand.raw["chart"]
         self.labels = self.cfg["labels"]
-        self.langs = brand.raw.get("languages") or {}
+        # brand.yaml's linguist colours first; GitHub's own colour (captured) for a language brand.yaml does not list
+        self.langs = {**(model.get("language_colors") or {}), **(brand.raw.get("languages") or {})}
         self.fg: list = []
         acct = model["account"]["style"]
         self.ground = canvas_colour(acct)
@@ -276,6 +295,8 @@ class _Draw:
             w = self.fonts.width(self.model["account"]["style"]["fonts"]["card_body"], item["text"], 12)
             return 14 + (12 + 7 if item["icon"] else 0) + w + 14
         w = 14 + 9 + 9 + self.fonts.width(PILL_FONT, item["name"], PILL_SIZE) + 14
+        if item.get("star_count"):
+            w += 12 + 4 + self.fonts.width(PILL_FONT, stars_text(item["star_count"]), STAR_SIZE) + 8
         return w + 20 * (item["fork"] + item["archived"])
 
     def pill(self, x: float, y: float, item: dict, style: dict) -> None:
@@ -300,6 +321,11 @@ class _Draw:
         cap = self.fonts.face(PILL_FONT).cap * PILL_SIZE
         tx = x + 30
         tx += self.text(PILL_FONT, item["name"], PILL_SIZE, tx, cy + cap / 2, tok["title"], opacity=op) + 8
+        if item.get("star_count"):  # a non-fork with more than 10 stars (user decision, beside S16)
+            self.fg.append(Poly(star_path(tx + 6, cy, 6.2), self.cfg["junction"], op))
+            tx += 12 + 4
+            tx += self.text(PILL_FONT, stars_text(item["star_count"]), STAR_SIZE, tx, cy + cap / 2, tok["title"],
+                            opacity=op) + 8
         if item["fork"]:
             tx += self.fork_icon(tx, cy, muted, op) + 8
         if item["archived"]:
@@ -468,17 +494,24 @@ def layout(model: dict, brand, fonts: Fonts, *, width: int = W_DEFAULT, avatar: 
                 wires.append(Circle(x1, cy, 3.5, fill=cfg["junction"]))
     dr.fg[0:0] = wires  # under every card and frame
 
-    # -- legend and brand line ------------------------------------------------------------------------
+    # -- legend: the language colour key, the markers drawn, then the brand line ------------------------
     y += 20
     base = y + 16
     lx = M
     key = fk["card_body"]
     muted = cfg["muted"]
-    for lang in model["legend_languages"]:
-        dr.dot(lx + 5, base - 4, lang)
-        lx += 14
-    lx += 4
-    lx += dr.text(key, labels["language"], 12, lx, base, muted) + 26
+    for entry in model["legend"]:  # the colour key with each language's share of the code, wrapping across rows
+        name = f"{entry['name']} {percent(entry['share'])}".strip()
+        w = 14 + fonts.width(key, name, 12)
+        if lx > M and lx + w > right:
+            base += LEGEND_ROW
+            lx = M
+        dr.dot(lx + 5, base - 4, entry["language"])
+        dr.text(key, name, 12, lx + 14, base, muted)
+        lx += w + 22
+    if model["legend"]:
+        base += LEGEND_ROW + 4  # the markers go on their own row under the colour key
+        lx = M
     marks = markers(model)  # explain only the markers this chart draws
     if "fork" in marks:
         lx += dr.fork_icon(lx, base - 4, muted, 1.0) + 8
@@ -496,8 +529,9 @@ def layout(model: dict, brand, fonts: Fonts, *, width: int = W_DEFAULT, avatar: 
     s = brand.strings
     line = f"{s['company']} · {s['tagline']}"
     lw = fonts.width(key, line, 12)
-    if lx + 40 + lw <= right:
-        dr.text(key, line, 12, right - lw, base, muted)
+    if lx > M and lx + 40 + lw > right:
+        base += LEGEND_ROW  # no room beside the markers: the brand line takes its own row
+    dr.text(key, line, 12, right - lw, base, muted)
     H = max(480, math.ceil(base + FOOT_H))
     bg = canvas_nodes(dict(st, canvas=_canvas(st)), W, H)
     return Chart(W, H, bg, dr.fg, model["title"], model["desc"], st)
@@ -659,7 +693,8 @@ def mermaid(model: dict, brand) -> tuple[str, dict]:
                 ids.append(f'{rid}(["{_mq(it["text"])}"])')
                 add("note", rid)
                 continue
-            suffix = "".join(f" · {labels[k].lower()}" for k in ("fork", "archived") if it[k])
+            suffix = (f" · {stars_text(it['star_count'])} stars" if it.get("star_count") else "") + \
+                "".join(f" · {labels[k].lower()}" for k in ("fork", "archived") if it[k])
             ids.append(f'{rid}(["{_mq(it["name"] + suffix)}"])')
             add("repo", rid)
             lc = _cls("l_", it["language"] or "default")
@@ -723,7 +758,7 @@ def mermaid(model: dict, brand) -> tuple[str, dict]:
         defs.append(f"    classDef {name} fill:{ft['plate_low']},stroke:{ft['accent']},stroke-width:1.5px,color:{ft['title']}")
     defs.append(f"    classDef repo fill:{repo_fill},stroke:{_solid(tok['edge']['color'], 0.6, ground)},stroke-width:1px,"
                 f"color:{tok['title']},font-family:monospace")
-    lang_colours = brand.raw.get("languages") or {}
+    lang_colours = {**(model.get("language_colors") or {}), **(brand.raw.get("languages") or {})}
     for name in sorted(langs):
         defs.append(f"    classDef {name} stroke:{lang_colours.get(langs[name], lang_colours.get('default'))}")
     defs.append("    classDef fork stroke-dasharray:5 3")

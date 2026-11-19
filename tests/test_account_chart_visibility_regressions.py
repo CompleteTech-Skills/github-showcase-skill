@@ -187,8 +187,9 @@ def test_show_all_orgs_restores_lane_without_restoring_filtered_repositories(bra
 
 @pytest.mark.parametrize(("repos", "hide", "categories"), FILTER_CASES)
 def test_restoring_each_visibility_option_removes_its_omission_category(brand, repos, hide, categories):
+    # every default-hidden category restored, including external forks (hidden by default since 2026-11-18)
     model, logs = A.build(A.validate(snapshot(repos, not_public=9)), brand,
-                         show=("all-orgs", "private-work", ".github"))
+                         show=("all-orgs", "private-work", ".github", "external-forks"))
     assert len(model["orgs"]) == 1 and model["orgs"][0]["notes"] == ["private"]
     assert model["counts"]["named"] == model["counts"]["public"] == len(repos)
     assert model["counts"]["hidden"] == 0 and model["counts"]["hidden_by"] == {}
@@ -230,39 +231,53 @@ def test_hold_precedes_visibility_filters_without_leaking_repository_names(kind,
         raw["orgs"]["Northwind-Trading-Co"]["family"] = "touchedbyanagent"
     brand = Brand(raw, source_brand.path)
     model, logs = A.build(A.validate(snapshot(repos)), brand, hide=hide)
-    assert len(model["orgs"]) == 1
-    node = model["orgs"][0]
-    assert node["held"] and node["notes"] == ["held"] and node["repos"] == []
-    assert model["counts"]["withheld"] == model["counts"]["public"] == len(repos)
-    assert model["counts"]["named"] == model["counts"]["hidden"] == model["counts"]["orgs_without_public"] == 0
-    assert model["counts"]["hidden_by"] == {} and logs == ["hold:Northwind-Trading-Co"]
+    # user decision (2026-11-18): a HOLD organization is left off the chart whole, before any visibility filter, unless
+    # --allow-hold; it was previously kept as an "on hold" lane
+    assert model["orgs"] == [] and logs == ["hold:Northwind-Trading-Co"]
+    assert model["counts"]["omitted_orgs"] == 1
+    assert model["counts"]["public"] == model["counts"]["withheld"] == model["counts"]["named"] == 0
+    assert model["counts"]["hidden"] == model["counts"]["orgs_without_public"] == 0 and model["counts"]["hidden_by"] == {}
     md = A.markdown(model, FILES)
     mmd, _ = C.mermaid(model, brand)
-    assert "on hold" in md and "Not shown:" not in md
+    assert "on hold" not in md and "Not shown:" not in md and "Northwind-Trading-Co" not in md + mmd
     rendered = md + mmd + "\n".join(logs)
     for rp in repos:
         assert rp["name"] not in rendered
+
+
+def test_allow_hold_shows_a_hold_org_like_any_other():
+    source_brand = load_brand()
+    raw = copy.deepcopy(source_brand.raw)
+    raw["owners"]["hold"].append("Northwind-Trading-Co")
+    brand = Brand(raw, source_brand.path)
+    model, logs = A.build(A.validate(snapshot((VISIBLE, GITHUB))), brand, allow_hold=True)
+    node = model["orgs"][0]
+    assert not node["held"] and node["notes"] == [] and [rp["name"] for rp in node["repos"]] == [VISIBLE["name"]]
+    assert "hold-allowed:Northwind-Trading-Co" in logs and model["counts"]["hidden_by"] == {".github": 1}
 
 
 @pytest.mark.parametrize(("rp", "extra"), [pytest.param(GITHUB, (), id="github"),
                                           pytest.param(FORK, ("--hide", "forks"), id="fork"),
                                           pytest.param(ARCHIVE, ("--hide", "archived"), id="archive")])
 @pytest.mark.parametrize("restored", [False, True], ids=["default", "show-all"])
-def test_cli_hold_retention_and_unnamed_outputs(tmp_path, rp, extra, restored):
+def test_cli_hold_leaves_the_org_off_and_never_names_it(tmp_path, rp, extra, restored):
+    # user decision (2026-11-18): HOLD leaves the org off every output unless --allow-hold (previously an "on hold" lane)
     captured = tmp_path / "snapshot.json"
     captured.write_text(json.dumps(snapshot((rp,), login="TouchedByAnAgent")), encoding="utf-8")
     output = tmp_path / "output"
-    show = ("--show", "all-orgs", "--show", "private-work", "--show", ".github") if restored else ()
+    show = ("--show", "all-orgs", "--show", "private-work", "--show", ".github", "--show", "external-forks") \
+        if restored else ()
     result = run_cli("account-chart", "render", "--snapshot", captured, "--out-dir", output, "--no-png", *extra, *show)
     assert result.returncode == 0, result.stdout + result.stderr
     report = json.loads(result.stdout)
-    assert report["counts"]["organizations"] == 1
-    assert report["counts"]["public"] == report["counts"]["withheld"] == 1
-    assert report["counts"]["named"] == report["counts"]["hidden"] == report["counts"]["orgs_without_public"] == 0
+    assert report["counts"]["organizations"] == 0 and report["counts"]["omitted_orgs"] == 1
+    assert report["counts"]["public"] == report["counts"]["withheld"] == report["counts"]["named"] == 0
+    assert report["counts"]["hidden"] == report["counts"]["orgs_without_public"] == 0
     assert "hold:TouchedByAnAgent" in report["logs"] and "no-public:TouchedByAnAgent" not in report["logs"]
     assert report["lint"]["result"] == "PASS"
     rendered = "\n".join(path.read_text(encoding="utf-8") for path in sorted(output.iterdir()))
-    assert "on hold" in rendered and rp["name"] not in rendered and rp["name"] not in result.stdout
+    assert "on hold" not in rendered and "TouchedByAnAgent" not in rendered
+    assert rp["name"] not in rendered and rp["name"] not in result.stdout
 
 
 @pytest.mark.parametrize("status", ["uncaptured", "failed", "partial", "unknown"])

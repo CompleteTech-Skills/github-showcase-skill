@@ -11,52 +11,334 @@
   "website": "https://northwind.example"
  },
  "repositories": [
-  {"name": "dotfiles", "description": "Synthetic shell setup for the Northwind demo account.", "language": "Shell", "fork": false, "archived": false},
-  {"name": "northwind-dev", "description": "Synthetic profile README.", "language": null, "fork": false, "archived": false},
-  {"name": "terminal-theme", "description": "Synthetic fork of a colour scheme.", "language": "Lua", "fork": true, "archived": false}
+  {
+   "name": "dotfiles",
+   "description": "Synthetic shell setup for the Northwind demo account.",
+   "language": "Shell",
+   "fork": false,
+   "archived": false,
+   "code": {
+    "Shell": 3600
+   }
+  },
+  {
+   "name": "northwind-dev",
+   "description": "Synthetic profile README.",
+   "language": null,
+   "fork": false,
+   "archived": false,
+   "code": {}
+  },
+  {
+   "name": "terminal-theme",
+   "description": "Synthetic fork of a colour scheme.",
+   "language": "Lua",
+   "fork": true,
+   "archived": false,
+   "code": {
+    "Lua": 2100,
+    "Shell": 400
+   },
+   "parent": "upstream-themes/terminal-theme"
+  }
  ],
  "not_public": 2,
  "enterprises": [
-  {"slug": "northwind-holdings", "name": "Northwind Holdings", "role": "owner",
-   "organizations": ["Northwind-Archive", "Northwind-Labs", "Northwind-Trading-Co"]}
+  {
+   "slug": "northwind-holdings",
+   "name": "Northwind Holdings",
+   "role": "owner",
+   "organizations": [
+    "Northwind-Archive",
+    "Northwind-Labs",
+    "Northwind-Trading-Co"
+   ]
+  }
  ],
  "organizations": [
-  {"login": "Northwind-Archive", "name": "Northwind Archive", "member": true, "role": "owner", "captured": true,
+  {
+   "login": "Northwind-Archive",
+   "name": "Northwind Archive",
+   "member": true,
+   "role": "owner",
+   "captured": true,
    "repositories": [
-    {"name": "legacy-erp", "description": "Synthetic retired ERP adapters.", "language": "C#", "fork": false, "archived": true},
-    {"name": "legacy-storefront", "description": "Synthetic retired storefront.", "language": "PHP", "fork": false, "archived": true}
-   ], "not_public": 0},
-  {"login": "Northwind-Community", "name": "Northwind Community", "member": true, "role": "member", "captured": true,
-   "repositories": [], "not_public": 3},
-  {"login": "Northwind-Games", "name": "Northwind Games", "member": true, "role": "member", "captured": true,
+    {
+     "name": "legacy-erp",
+     "description": "Synthetic retired ERP adapters.",
+     "language": "C#",
+     "fork": false,
+     "archived": true,
+     "code": {
+      "C#": 41500,
+      "Shell": 400
+     }
+    },
+    {
+     "name": "legacy-storefront",
+     "description": "Synthetic retired storefront.",
+     "language": "PHP",
+     "fork": false,
+     "archived": true,
+     "code": {
+      "PHP": 19900,
+      "Shell": 400
+     }
+    }
+   ],
+   "not_public": 0
+  },
+  {
+   "login": "Northwind-Community",
+   "name": "Northwind Community",
+   "member": true,
+   "role": "member",
+   "captured": true,
+   "repositories": [],
+   "not_public": 3
+  },
+  {
+   "login": "Northwind-Games",
+   "name": "Northwind Games",
+   "member": true,
+   "role": "member",
+   "captured": true,
    "repositories": [
-    {"name": "arcade-hub", "description": "Synthetic browser arcade.", "language": "JavaScript", "fork": false, "archived": false},
-    {"name": "tile-puzzle", "description": "Synthetic sliding-tile puzzle.", "language": "GDScript", "fork": false, "archived": false}
-   ], "not_public": 0},
-  {"login": "Northwind-Labs", "name": "Northwind Labs", "member": true, "role": "owner", "captured": true,
+    {
+     "name": "arcade-hub",
+     "description": "Synthetic browser arcade.",
+     "language": "JavaScript",
+     "fork": false,
+     "archived": false,
+     "code": {
+      "JavaScript": 16400,
+      "Shell": 400
+     },
+     "stars": 11
+    },
+    {
+     "name": "tile-puzzle",
+     "description": "Synthetic sliding-tile puzzle.",
+     "language": "GDScript",
+     "fork": false,
+     "archived": false,
+     "code": {
+      "GDScript": 11700,
+      "Shell": 400
+     }
+    }
+   ],
+   "not_public": 0
+  },
+  {
+   "login": "Northwind-Labs",
+   "name": "Northwind Labs",
+   "member": true,
+   "role": "owner",
+   "captured": true,
    "repositories": [
-    {"name": "demand-model", "description": "Synthetic demand forecasting model.", "language": "Python", "fork": false, "archived": false},
-    {"name": "edge-scanner", "description": "Synthetic barcode scanner firmware.", "language": "C++", "fork": false, "archived": true},
-    {"name": "forecasting-notebooks", "description": "Synthetic forecasting notebooks.", "language": "Jupyter Notebook", "fork": false, "archived": false},
-    {"name": "vector-search-lab", "description": "Synthetic fork of a vector search library.", "language": "Rust", "fork": true, "archived": false}
-   ], "not_public": 2},
-  {"login": "Northwind-Sandbox", "name": "Northwind Sandbox", "member": true, "role": "owner", "captured": true,
-   "repositories": [], "not_public": 0},
-  {"login": "Northwind-Trading-Co", "name": "Northwind Trading Co.", "member": true, "role": "owner", "captured": true,
+    {
+     "name": "demand-model",
+     "description": "Synthetic demand forecasting model.",
+     "language": "Python",
+     "fork": false,
+     "archived": false,
+     "code": {
+      "Python": 26300,
+      "Shell": 400
+     }
+    },
+    {
+     "name": "edge-scanner",
+     "description": "Synthetic barcode scanner firmware.",
+     "language": "C++",
+     "fork": false,
+     "archived": true,
+     "code": {
+      "C++": 14800,
+      "Shell": 400
+     }
+    },
+    {
+     "name": "forecasting-notebooks",
+     "description": "Synthetic forecasting notebooks.",
+     "language": "Jupyter Notebook",
+     "fork": false,
+     "archived": false,
+     "code": {
+      "Jupyter Notebook": 57900,
+      "Shell": 400
+     },
+     "stars": 17
+    },
+    {
+     "name": "vector-search-lab",
+     "description": "Synthetic fork of a vector search library.",
+     "language": "Rust",
+     "fork": true,
+     "archived": false,
+     "code": {
+      "Rust": 33200,
+      "Shell": 400
+     },
+     "stars": 64,
+     "parent": "Northwind-Trading-Co/vector-search"
+    }
+   ],
+   "not_public": 2
+  },
+  {
+   "login": "Northwind-Sandbox",
+   "name": "Northwind Sandbox",
+   "member": true,
+   "role": "owner",
+   "captured": true,
+   "repositories": [],
+   "not_public": 0
+  },
+  {
+   "login": "Northwind-Trading-Co",
+   "name": "Northwind Trading Co.",
+   "member": true,
+   "role": "owner",
+   "captured": true,
    "repositories": [
-    {"name": ".github", "description": "Synthetic org profile and health files.", "language": null, "fork": false, "archived": false},
-    {"name": "catalog-api", "description": "Synthetic product catalog API.", "language": "TypeScript", "fork": false, "archived": false},
-    {"name": "customer-portal", "description": "Synthetic customer self-service portal.", "language": "Vue", "fork": false, "archived": false},
-    {"name": "invoice-renderer", "description": "Synthetic invoice PDF renderer.", "language": "Go", "fork": false, "archived": false},
-    {"name": "order-desk", "description": "Synthetic order desk for the support team.", "language": "TypeScript", "fork": false, "archived": false},
-    {"name": "returns-portal", "description": "Synthetic returns and refunds portal.", "language": "Svelte", "fork": false, "archived": false},
-    {"name": "shipping-rates", "description": "Synthetic carrier rate shopping service.", "language": "Python", "fork": false, "archived": false},
-    {"name": "support-triage-agent", "description": "Synthetic support triage agent for the Northwind demo.", "language": "Python", "fork": false, "archived": false},
-    {"name": "warehouse-sync", "description": "Synthetic warehouse inventory sync.", "language": "Rust", "fork": false, "archived": false},
-    {"name": "northwind-cve-2026-00001-check", "description": "Synthetic CVE check used by the estate fixtures.", "language": "Python", "fork": false, "archived": false},
-    {"name": "loyalty-points", "description": "Synthetic loyalty points ledger.", "language": "Kotlin", "fork": false, "archived": false},
-    {"name": "pos-terminal", "description": "Synthetic point-of-sale terminal app.", "language": "Swift", "fork": false, "archived": false}
-   ], "not_public": 4}
+    {
+     "name": ".github",
+     "description": "Synthetic org profile and health files.",
+     "language": null,
+     "fork": false,
+     "archived": false,
+     "code": {}
+    },
+    {
+     "name": "catalog-api",
+     "description": "Synthetic product catalog API.",
+     "language": "TypeScript",
+     "fork": false,
+     "archived": false,
+     "code": {
+      "Shell": 400,
+      "TypeScript": 27450
+     },
+     "stars": 9
+    },
+    {
+     "name": "customer-portal",
+     "description": "Synthetic customer self-service portal.",
+     "language": "Vue",
+     "fork": false,
+     "archived": false,
+     "code": {
+      "Shell": 400,
+      "Vue": 18360
+     }
+    },
+    {
+     "name": "invoice-renderer",
+     "description": "Synthetic invoice PDF renderer.",
+     "language": "Go",
+     "fork": false,
+     "archived": false,
+     "code": {
+      "Go": 21800,
+      "Shell": 400
+     }
+    },
+    {
+     "name": "order-desk",
+     "description": "Synthetic order desk for the support team.",
+     "language": "TypeScript",
+     "fork": false,
+     "archived": false,
+     "code": {
+      "Shell": 400,
+      "TypeScript": 39100
+     },
+     "stars": 42
+    },
+    {
+     "name": "returns-portal",
+     "description": "Synthetic returns and refunds portal.",
+     "language": "Svelte",
+     "fork": false,
+     "archived": false,
+     "code": {
+      "Shell": 400,
+      "Svelte": 12940
+     }
+    },
+    {
+     "name": "shipping-rates",
+     "description": "Synthetic carrier rate shopping service.",
+     "language": "Python",
+     "fork": false,
+     "archived": false,
+     "code": {
+      "Python": 9480,
+      "Shell": 400
+     }
+    },
+    {
+     "name": "support-triage-agent",
+     "description": "Synthetic support triage agent for the Northwind demo.",
+     "language": "Python",
+     "fork": false,
+     "archived": false,
+     "code": {
+      "Python": 48210,
+      "Shell": 400
+     },
+     "stars": 128
+    },
+    {
+     "name": "warehouse-sync",
+     "description": "Synthetic warehouse inventory sync.",
+     "language": "Rust",
+     "fork": false,
+     "archived": false,
+     "code": {
+      "Rust": 30920,
+      "Shell": 400
+     }
+    },
+    {
+     "name": "northwind-cve-2026-00001-check",
+     "description": "Synthetic CVE check used by the estate fixtures.",
+     "language": "Python",
+     "fork": false,
+     "archived": false,
+     "code": {
+      "Python": 4210,
+      "Shell": 400
+     }
+    },
+    {
+     "name": "loyalty-points",
+     "description": "Synthetic loyalty points ledger.",
+     "language": "Kotlin",
+     "fork": false,
+     "archived": false,
+     "code": {
+      "Kotlin": 15720,
+      "Shell": 400
+     }
+    },
+    {
+     "name": "pos-terminal",
+     "description": "Synthetic point-of-sale terminal app.",
+     "language": "Swift",
+     "fork": false,
+     "archived": false,
+     "code": {
+      "Shell": 400,
+      "Swift": 22630
+     }
+    }
+   ],
+   "not_public": 4
+  }
  ],
- "notes": []
+ "notes": [],
+ "language_colors": {}
 }

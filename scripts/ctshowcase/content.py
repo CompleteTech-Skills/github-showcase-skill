@@ -2815,7 +2815,13 @@ def social_job(ctx, resolver: Resolver | None, out: str) -> dict | None:
         resolver = ctx.brand.resolver()
     # Re-check at the planning boundary, including direct library callers, so a T3
     # grant is scoped to this repository and registered for provenance stamping.
-    if resolver.owner_status(ctx.owner) == "t3":
+    # Explicit adapters may expose the legacy status-only protocol. Preserve
+    # their selection (including falsey adapters) and fail closed on their holds.
+    statuses_for = getattr(resolver, "owner_statuses", None)
+    statuses = statuses_for(ctx.owner) if statuses_for is not None else {resolver.owner_status(ctx.owner)}
+    if "excluded" in statuses or "hold" in statuses:
+        return None
+    if "t3" in statuses:
         resolver.check_owner(ctx.owner, repo=ctx.repo)
     full = f"{current_login(resolver, ctx.owner)}/{ctx.repo}"
     steps = [f"Open https://github.com/{full}/settings (the General page).",

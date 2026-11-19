@@ -8,7 +8,7 @@ flowchart LR
     acct ---> me
     subgraph me_r [" "]
         direction LR
-        me_r1(["dotfiles"]) ~~~ me_r2(["northwind-dev"]) ~~~ me_r3(["terminal-theme · fork"])
+        me_r1(["dotfiles"]) ~~~ me_r2(["northwind-dev"])
     end
     me --> me_r
     me ~~~ me_r1
@@ -18,8 +18,8 @@ flowchart LR
     e1 --> e1o1
     subgraph e1o1_r [" "]
         direction LR
-        e1o1_r1(["catalog-api"]) ~~~ e1o1_r2(["customer-portal"]) ~~~ e1o1_r3(["invoice-renderer"]) ~~~ e1o1_r4(["loyalty-points"]) ~~~ e1o1_r5(["northwind-cve-2026-00001-check"]) ~~~ e1o1_r6(["order-desk"])
-        e1o1_r7(["pos-terminal"]) ~~~ e1o1_r8(["returns-portal"]) ~~~ e1o1_r9(["shipping-rates"]) ~~~ e1o1_r10(["support-triage-agent"]) ~~~ e1o1_r11(["warehouse-sync"])
+        e1o1_r1(["catalog-api"]) ~~~ e1o1_r2(["customer-portal"]) ~~~ e1o1_r3(["invoice-renderer"]) ~~~ e1o1_r4(["loyalty-points"]) ~~~ e1o1_r5(["northwind-cve-2026-00001-check"]) ~~~ e1o1_r6(["order-desk · 42 stars"])
+        e1o1_r7(["pos-terminal"]) ~~~ e1o1_r8(["returns-portal"]) ~~~ e1o1_r9(["shipping-rates"]) ~~~ e1o1_r10(["support-triage-agent · 128 stars"]) ~~~ e1o1_r11(["warehouse-sync"])
     end
     e1o1 --> e1o1_r
     e1o1 ~~~ e1o1_r1
@@ -36,7 +36,7 @@ flowchart LR
     e1 --> e1o3
     subgraph e1o3_r [" "]
         direction LR
-        e1o3_r1(["demand-model"]) ~~~ e1o3_r2(["edge-scanner · archived"]) ~~~ e1o3_r3(["forecasting-notebooks"]) ~~~ e1o3_r4(["vector-search-lab · fork"])
+        e1o3_r1(["demand-model"]) ~~~ e1o3_r2(["edge-scanner · archived"]) ~~~ e1o3_r3(["forecasting-notebooks · 17 stars"]) ~~~ e1o3_r4(["vector-search-lab · fork"])
     end
     e1o3 --> e1o3_r
     e1o3 ~~~ e1o3_r1
@@ -46,7 +46,7 @@ flowchart LR
     hub --> o1
     subgraph o1_r [" "]
         direction LR
-        o1_r1(["arcade-hub"]) ~~~ o1_r2(["tile-puzzle"])
+        o1_r1(["arcade-hub · 11 stars"]) ~~~ o1_r2(["tile-puzzle"])
     end
     o1 --> o1_r
     o1 ~~~ o1_r1
@@ -65,7 +65,6 @@ flowchart LR
     classDef l_javascript stroke:#F1E05A
     classDef l_jupyter_notebook stroke:#DA5B0B
     classDef l_kotlin stroke:#A97BFF
-    classDef l_lua stroke:#000080
     classDef l_php stroke:#4F5D95
     classDef l_python stroke:#3572A5
     classDef l_rust stroke:#DEA584
@@ -82,7 +81,7 @@ flowchart LR
     class e1 enterprise
     class me,e1o1 f_completetech
     class e1o2,e1o3,o1 f_neutral
-    class me_r1,me_r2,me_r3,e1o1_r1,e1o1_r2,e1o1_r3,e1o1_r4,e1o1_r5,e1o1_r6,e1o1_r7,e1o1_r8,e1o1_r9,e1o1_r10,e1o1_r11,e1o2_r1,e1o2_r2,e1o3_r1,e1o3_r2,e1o3_r3,e1o3_r4,o1_r1,o1_r2 repo
+    class me_r1,me_r2,e1o1_r1,e1o1_r2,e1o1_r3,e1o1_r4,e1o1_r5,e1o1_r6,e1o1_r7,e1o1_r8,e1o1_r9,e1o1_r10,e1o1_r11,e1o2_r1,e1o2_r2,e1o3_r1,e1o3_r2,e1o3_r3,e1o3_r4,o1_r1,o1_r2 repo
     class e1o3_r2 l_cpp
     class e1o2_r1 l_csharp
     class me_r2 l_default
@@ -91,7 +90,6 @@ flowchart LR
     class o1_r1 l_javascript
     class e1o3_r3 l_jupyter_notebook
     class e1o1_r4 l_kotlin
-    class me_r3 l_lua
     class e1o2_r2 l_php
     class e1o1_r5,e1o1_r9,e1o1_r10,e1o3_r1 l_python
     class e1o1_r11,e1o3_r4 l_rust
@@ -100,7 +98,7 @@ flowchart LR
     class e1o1_r7 l_swift
     class e1o1_r1,e1o1_r6 l_typescript
     class e1o1_r2 l_vue
-    class me_r3,e1o3_r4 fork
+    class e1o3_r4 fork
     class e1o2_r1,e1o2_r2,e1o3_r2 archived
     style me_r fill:#081B33,stroke:#0B3F65,stroke-width:1px
     style e1o1_r fill:#081B33,stroke:#0B3F65,stroke-width:1px

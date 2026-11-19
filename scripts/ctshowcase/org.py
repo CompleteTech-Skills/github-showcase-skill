@@ -377,7 +377,7 @@ def _t3_held(estate: Estate, full: str, allow_t3: bool) -> bool:
     if "/" not in (full or ""):
         return False
     owner, _, name = full.partition("/")
-    if estate.resolver.owner_status(owner) == "t3" and not (allow_t3 and _t3_granted(owner, name)):
+    if "t3" in estate.resolver.owner_statuses(owner) and not (allow_t3 and _t3_granted(owner, name)):
         return True
     return _t3_moved_held(estate, full, allow_t3)
 
@@ -402,8 +402,8 @@ def _t3_moved_held(estate: Estate, full: str, allow_t3: bool) -> bool:
         # name needs the record too (tests/test_t3_signoff_require.py::test_pending_rename_is_gated_on_the_emitted_name)
         if name.lower() == full.partition("/")[2].lower():
             return False
-        return r.owner_status(owner) == "t3" and not (allow_t3 and _t3_granted(owner, name))
-    return r.owner_status(owner) == "t3" and not (allow_t3 and _t3_granted(owner, name))
+        return "t3" in r.owner_statuses(owner) and not (allow_t3 and _t3_granted(owner, name))
+    return "t3" in r.owner_statuses(owner) and not (allow_t3 and _t3_granted(owner, name))
 
 
 def _pin_signoff(estate: Estate, login: str, pin: str, allow_t3: bool) -> str | None:
@@ -412,7 +412,7 @@ def _pin_signoff(estate: Estate, login: str, pin: str, allow_t3: bool) -> str | 
     regrant this is the regrant, so a pin job never carries a wildcard grant that no longer authorizes that
     repository. None without --allow-t3 or for an org that is not T3."""
     r = estate.resolver
-    if not allow_t3 or r.owner_status(login) != "t3":
+    if not allow_t3 or "t3" not in r.owner_statuses(login):
         return None
     from . import signoff
     rec = signoff.record(login, pin, r.aliases(login))
@@ -428,7 +428,7 @@ def _t3_repo_refusal(estate: Estate, login: str, name: str, allow_t3: bool) -> s
     owners that are not T3. Callers log `t3-signoff:<code>:<login>/<name>`
     (tests/test_t3_signoff_require.py::test_wildcard_grant_with_a_repo_withdrawal_holds_that_repo_in_profile_and_pins)."""
     r = estate.resolver
-    if not allow_t3 or not name or r.owner_status(login) != "t3":
+    if not allow_t3 or not name or "t3" not in r.owner_statuses(login):
         return None
     from . import signoff
     rec, why = signoff.evaluate([login, *r.aliases(login)], name)
@@ -1189,7 +1189,7 @@ def user_slice(estate: Estate, login: str, *, allow_t3: bool = False) -> tuple[d
             st = r.owner_status(o)
             if r.is_placeholder(o) or st == "excluded":
                 continue  # q71: placeholder orgs are left out
-            if st == "t3" and not (allow_t3 and _t3_granted(o)):
+            if "t3" in r.owner_statuses(o) and not (allow_t3 and _t3_granted(o)):
                 logs.append(f"t3-signoff:{o}")
                 continue
             try:
@@ -1701,7 +1701,7 @@ def _estate_list_targets(estate: Estate, nodes: list[dict], *, allow_t3: bool = 
         node = by_name.get(ent["name"].lower())
         if node is None:
             continue  # created later: its own plan, after a re-capture, adds the item with the union then
-        if signoffs is not None and r.owner_status(key) == "t3":  # list id -> the record that admitted this T3 org
+        if signoffs is not None and "t3" in r.owner_statuses(key):  # list id -> the record that admitted this T3 org
             from . import signoff
             rec = signoff.record(key, None, r.aliases(key))
             if rec is not None and rec.get("id"):
@@ -1719,7 +1719,7 @@ def star_list_plan(estate: Estate, org: str, *, lists_capture: dict | None = Non
     out = _star_list_plan(estate, org, lists_capture=lists_capture, repo_ids=repo_ids, planned_new=planned_new,
                           allow_t3=allow_t3)
     login = estate.resolver.canonical(org)
-    if out.get("jobs") and estate.resolver.owner_status(login) == "t3":
+    if out.get("jobs") and "t3" in estate.resolver.owner_statuses(login):
         # This public planner can be called without cmd_org's earlier owner gate.
         # Its read-only eligibility checks do not register the granting record,
         # so resolve it here before stamping jobs targeting the personal account.
@@ -1818,14 +1818,14 @@ def _star_list_plan(estate: Estate, org: str, *, lists_capture: dict | None = No
                    note=f"Add {f} to '{name}', keeping its {len(have)} other list(s) and every estate star "
                         "List that also takes it (union; never unstar).")
         from . import signoff
-        if r.owner_status(f.split("/")[0]) == "t3":  # a T3 favorite carries its own record (signoff.stamp_source)
+        if "t3" in r.owner_statuses(f.split("/")[0]):  # a T3 favorite carries its own record (signoff.stamp_source)
             signoff.stamp_source(item, f, r.aliases(f.split("/")[0]))
         added = sorted(i for i in targets.get(f.lower(), set()) - have - {list_id} if i in list_signoffs)
         # Every grant the job needs is kept: the T3 favorite's own record (stamped above), the List org's record when
         # that org is T3 (the destination of this item job), and the record of each newly added T3 destination List.
         # One grant never suppresses another; the ids are kept in signoff_id/signoff_ids (signoff.stamp_associations), and approval_id is left as the job had it.
         sids = [item["signoff_id"]] if "signoff_id" in item else []
-        if r.owner_status(login) == "t3":
+        if "t3" in r.owner_statuses(login):
             own = signoff.record(login, None, r.aliases(login))
             if own and own.get("id"):
                 sids.append(str(own["id"]))
@@ -2019,7 +2019,7 @@ def labels_plan(estate: Estate, org: str, *, allow_t3: bool = False, checkouts: 
         current_owner, current_name = full.split("/", 1)
         from .config import t3_signed_off
         if ((allow_t3 or t3_signed_off()) and not estate.resolver.same(current_owner, login)
-                and estate.resolver.owner_status(current_owner) == "t3"):
+                and "t3" in estate.resolver.owner_statuses(current_owner)):
             # An approved pending transfer whose label jobs target the T3 org that
             # holds the repository today passes that org's gate (--allow-t3 and its record; check_owner also
             # registers the grant that stamps signoff_id on these jobs). The org gate above only saw LOGIN.
