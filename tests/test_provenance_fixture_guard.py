@@ -28,9 +28,18 @@ AUDIT_CHILD = f"import sys; sys.audit('socket.connect',None,('synthetic.invalid'
     ("import os,subprocess,sys; os.environ['PYTHONPATH']=''; "
      f"subprocess.run([sys.executable,'-c',\"print('{SENTINEL}')\"],check=True)",
      ("subprocess.Popen",)),
+    ("import os,subprocess,sys; os.putenv('PYTHONPATH',''); "
+     f"subprocess.run([sys.executable,'-c',\"print('{SENTINEL}')\"],check=True)",
+     ("subprocess.Popen",)),
+    ("import os,subprocess,sys; os.unsetenv('PYTHONPATH'); "
+     f"subprocess.run([sys.executable,'-c',\"print('{SENTINEL}')\"],check=True)",
+     ("subprocess.Popen",)),
     ("import os,subprocess,sys; env=dict(os.environ); env['pythonpath']=env.pop('PYTHONPATH'); "
      f"subprocess.run([sys.executable,'-c',{AUDIT_CHILD!r}],env=env,check=True)",
      ("subprocess.Popen", "socket.connect")),
+    ("import os,subprocess,sys; env=dict(os.environ); env.pop('CONTRACT_TRIPWIRE'); "
+     f"subprocess.run([sys.executable,'-c',\"import os; os.system('echo {SENTINEL}')\"],env=env,check=True)",
+     ("os.system",)),
     ("import subprocess,sys; "
      f"sys.audit('subprocess.Popen',sys.executable,subprocess.list2cmdline({PYTHON_CHILD}),None,None); "
      f"print('{SENTINEL}')", ("subprocess.Popen",)),
@@ -39,7 +48,8 @@ AUDIT_CHILD = f"import sys; sys.audit('socket.connect',None,('synthetic.invalid'
     ("import sys; sys.audit('os.startfile/2','synthetic-unopened-file',None,None,None,None); "
      f"print('{SENTINEL}')", ("os.startfile/2",)),
 ], ids=["shell", "exec", "spawn", "python-without-site", "python-without-guard-path",
-        "mutated-parent-guard-path", "case-sensitive-guard-path", "windows-command-line-audit",
+        "mutated-parent-guard-path", "native-putenv", "native-unsetenv", "case-sensitive-guard-path",
+        "fixed-tripwire-path", "windows-command-line-audit",
         "windows-startfile-audit", "windows-startfile-2-audit"])
 def test_fixture_refuses_native_launch_before_execution(tmp_path, code, events):
     box = Sandbox(tmp_path)
@@ -56,6 +66,19 @@ def test_fixture_preserves_a_guarded_python_child(tmp_path):
     box = Sandbox(tmp_path)
     code = ("import subprocess,sys; "
             f"subprocess.run([sys.executable,'-B','-c',\"print('{SENTINEL}')\"],check=True)")
+    result = subprocess.run([sys.executable, "-c", code], cwd=box.repo, env=box.env,
+                            capture_output=True, text=True, encoding="utf-8", timeout=20)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == SENTINEL
+    box.no_network()
+
+
+@pytest.mark.parametrize("operation", ["os.putenv('PYTHONPATH','')", "os.unsetenv('PYTHONPATH')"])
+def test_fixture_preserves_an_explicit_guarded_environment_after_native_change(tmp_path, operation):
+    box = Sandbox(tmp_path)
+    child = f"import sys; assert 'sitecustomize' in sys.modules; print('{SENTINEL}')"
+    code = (f"import os,subprocess,sys; {operation}; "
+            f"subprocess.run([sys.executable,'-c',{child!r}],env=dict(os.environ),check=True)")
     result = subprocess.run([sys.executable, "-c", code], cwd=box.repo, env=box.env,
                             capture_output=True, text=True, encoding="utf-8", timeout=20)
     assert result.returncode == 0, result.stderr
