@@ -14,8 +14,8 @@ Missing inputs, exemptions and owner-controlled work remain visible; nothing in 
    `brand add-org` ([brand onboarding](brand-onboarding.md)) and set `<BRAND_CONFIG>` to it. Set
    `<ESTATE_ROOT>` only if you keep a private registry (layout: `examples/estate/`), and never commit it. Leave
    either empty and the agent proposes the onboarding dry run at STOP 1 instead of guessing.
-3. Adjust the options, including BRAND_IDENTITY (logo PNG, label, display name, footer and tier) and
-   BRAND_COLORS (CompleteTech's palette by default; set your own canvas, ink and accent hex), and replace the single final TARGET line. TARGET stays the last line of the prompt, below
+3. Adjust the options, including BRAND_IDENTITY (logo PNG, label, display name, footer and tier),
+   BRAND_CONTACT (website, socials, public email, location, tagline and brand topic) and BRAND_COLORS (CompleteTech's palette by default; set your own canvas, ink and accent hex), and replace the single final TARGET line. TARGET stays the last line of the prompt, below
    every rule, restriction and option. Existing scoped authorization is reusable; STOP 1 asks only for an
    unresolved gate, and STOP 2 is the existing per-family pilot gate.
 4. Send it to the agent. `SKILL.md` and the referenced command contracts remain authoritative if they change.
@@ -111,7 +111,11 @@ after it. Rebuild the appropriate prefix for every invocation; do not let one re
   and ask the operator to confirm or replace them before the dry run. BRAND_COLORS never edits an existing
   family row, and BRAND_IDENTITY never replaces an existing org row or mark: if an owner already has a row and
   either option differs from it, report the conflict at STOP 1 and propose a new family or org in
-  BRAND_CONFIG instead. Then
+  BRAND_CONFIG instead. BRAND_CONTACT values are public proposals only: they fill the org About payload
+  (website as `blog`, email, location), the profile social badge row (at most 5) and the personal
+  `social_accounts` plan (add only, at most 4) as writer jobs or `readme --diff` proposals, and BRAND_TOPIC
+  answers `needs-input:brand-topic`. Use only values the operator supplies for this owner, never
+  CompleteTech's; an email needs the operator's explicit approval to be public. Then
   show the `S brand add-family ...` or `S brand add-org ...` dry run against BRAND_CONFIG
   (`references/brand-onboarding.md`). Never invent colours, legal wording or affiliation, and never write to
   the shipped `references/brand.yaml` of a shared install. Repeat with `--write` only after approval. A new
@@ -436,6 +440,13 @@ print(f"keyed {src} -> {out} box={box} ground=#{''.join(f'{v:02X}' for v in grou
   - TIER: ask (T1, T1-user, T2, T2-R or T3; T3 still needs the sign-off record)
   - FOOTER: ask (yes, no or hold)
   - LOGO: none (absolute path to an authorized PNG mark; none = family wordmark fallback)
+- BRAND_CONTACT (operator-set; public values only; none = left out, never CompleteTech's):
+  - WEBSITE: none (https URL; the org About `blog` field and the website badge)
+  - SOCIALS: none (up to 4 profile URLs, such as X, LinkedIn, Mastodon, Bluesky or YouTube)
+  - EMAIL: none (public contact; needs explicit approval to publish)
+  - LOCATION: none (as shown on the org or profile About)
+  - TAGLINE: none (one line for the profile intro)
+  - BRAND_TOPIC: none (lowercase topic for this owner's repositories)
 - BRAND_COLORS (operator-set; CompleteTech defaults shown; six-digit hex; used only for a new family at
   STOP 1, never to recolour an existing row):
   - CANVAS: #0F172A (must be dark, decision 21)
