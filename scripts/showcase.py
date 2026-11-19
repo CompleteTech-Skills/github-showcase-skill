@@ -1416,7 +1416,7 @@ def cmd_config(args):
     crops = C.write_crops(b) if args.crop and not errs else None  # NeedsInput (exit 4) until the boxes are measured
     if args.write_lock:
         # LF on every OS: the committed locks are LF, and a CRLF rewrite on Windows would change every line
-        C.LOCK.write_text(C.lock_text(b.raw), encoding="utf-8", newline="\n")
+        C.lock_path(b).write_text(C.lock_text(b.raw), encoding="utf-8", newline="\n")  # beside the selected config
         STANDARD_LOCK.write_text(standard_lock_text(), encoding="utf-8", newline="\n")
     in_sync = C.lock_in_sync(b) and STANDARD_LOCK.is_file() and STANDARD_LOCK.read_text(encoding="utf-8") == standard_lock_text()
     ok = not errs and in_sync
