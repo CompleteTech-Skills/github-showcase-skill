@@ -20,8 +20,11 @@ def lint_reference(make_ctx, tmp_path, usage, definitions, files=None):
     original = next(m.group(2) for m in readme.MARK.finditer(text) if m.group(1) == "badges")
     type_badge = next(line for line in original.splitlines() if "badge/type-" in line)
     text = text.replace(original, type_badge + "\n" + usage)
-    # References may be defined outside the header, before the required final footer.
-    text = text.replace("<!-- showcase:footer:start -->", definitions + "\n\n<!-- showcase:footer:start -->")
+    # References may be outside the header without splitting the required credit/footer pair.
+    final_block = "<!-- showcase:credit:start -->"
+    if final_block not in text:
+        final_block = "<!-- showcase:footer:start -->"
+    text = text.replace(final_block, definitions + "\n\n" + final_block)
     path = tmp_path / "README.md"
     path.write_text(text, encoding="utf-8")
     return readmelint.lint(ctx, path)
