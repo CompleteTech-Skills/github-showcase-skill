@@ -278,7 +278,7 @@ LICENSE, NOTICE or COPYING file.
 <!-- showcase:footer:end -->
 ```
 
-The credit block (decision 25, a proposal) follows the footer directly and ends the README. `footer --check` and `lint readme` fail with `fail:credit-missing` or `fail:credit-drift` without it, and `readme` (header mode too) adds it to an old footer in one regeneration:
+The credit block (decision 25, a proposal) follows the footer directly and ends the README. Where the footer is exempt (`exempt:footer`: the org row says `footer: false`, or the owner has no row), the credit block alone ends the README; a held footer, T3 without sign-off and refused owners get neither. `footer --check` and `lint readme` fail with `fail:credit-missing` or `fail:credit-drift` without it, and `readme` (header mode too) adds it to an old footer in one regeneration:
 
 ```html
 <!-- showcase:credit:start -->

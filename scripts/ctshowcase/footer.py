@@ -1,5 +1,5 @@
 """Decision 18 footer: the exact markup, wrapped in marker comments (spec A6.5), and the decision 25 credit block
-that follows it."""
+that follows it, or ends a README on its own when the footer is exempt (`exempt:footer`)."""
 from __future__ import annotations
 
 import re
@@ -117,6 +117,20 @@ def check(brand, readme_text: str) -> tuple[str, list[str]]:
     if not credit_matches(brand, credit):
         return "fail:credit-drift", logs
     return st, logs
+
+
+def credit_check(brand, readme_text: str) -> tuple[str, list[str]]:
+    """The credit alone, for a README whose decision 18 footer is exempt (`exempt:footer`: the org row says
+    `footer: false`, or the owner has no row): pass | fail:credit-missing | fail:credit-drift. The credit block must
+    end the README. A config without an `attribution` row has no credit to check and passes."""
+    if attribution(brand) is None:
+        return "pass", []
+    _, credit = split_credit(readme_text)
+    if credit is None:
+        return "fail:credit-missing", []
+    if not credit_matches(brand, credit):
+        return "fail:credit-drift", []
+    return "pass", []
 
 
 def _check_footer_impl(brand, readme_text: str) -> tuple[str, list[str]]:

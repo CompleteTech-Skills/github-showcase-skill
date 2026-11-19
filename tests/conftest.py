@@ -170,6 +170,17 @@ def _isolated_signoff_state():
         signoff.restore(run)
 
 
+def without_exact_credit(text: str, brand=None) -> str:
+    """`text` without its trailing decision 25 credit block, after asserting that block is exactly the configured
+    credit: the one place the skill's publisher may appear in an outside owner's output (the user, 2026-11-18)."""
+    from ctshowcase import footer
+    from ctshowcase.config import load_brand
+    rest, credit = footer.split_credit(text)
+    if credit is not None:
+        assert footer.credit_matches(brand or load_brand(), credit), credit
+    return rest
+
+
 def footer_then_credit(text: str) -> bool:
     """The decision 18 footer ends the README, followed only by the decision 25 credit block."""
     from ctshowcase import footer

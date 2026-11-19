@@ -512,6 +512,8 @@ def cmd_footer(args):
             raise ShowcaseError("--org does not match the repository metadata", log="usage")
         b.check_owner(ctx.owner, repo=ctx.repo)
         reason = ctx.footer_status()
+        if reason == "exempt:footer":
+            return _credit_only(args, b, {"command": "footer", "owner": ctx.owner, "repo": ctx.repo}, reason)
         if reason:
             result = "exempt" if reason.startswith("exempt") else "hold"
             return {"command": "footer", "owner": ctx.owner, "repo": ctx.repo,
@@ -527,7 +529,7 @@ def cmd_footer(args):
             if fv == "hold":
                 return {"command": "footer", "owner": args.org, "result": "hold", "logs": ["hold"]}, OK
             if fv is False:
-                return {"command": "footer", "owner": args.org, "result": "exempt", "logs": ["exempt:footer"]}, OK
+                return _credit_only(args, b, {"command": "footer", "owner": args.org}, "exempt:footer")
     if args.online and not args.check:
         raise ShowcaseError("--online goes with --check README.md", log="usage")
     if args.check:
@@ -547,6 +549,23 @@ def cmd_footer(args):
         return {"command": "footer", "result": "ok", "markup": footer.block(b), "logs": []}, OK
     print(footer.block(b))
     return None, OK
+
+
+def _credit_only(args, b, out: dict, reason: str):
+    """`footer` for an owner whose decision 18 footer is exempt: the footer is still exempt, but the decision 25 credit
+    applies (the user, 2026-11-18). --check checks the credit alone; otherwise the result stays `exempt` and carries
+    the credit block to append."""
+    from ctshowcase import footer
+    if args.online and not args.check:
+        raise ShowcaseError("--online goes with --check README.md", log="usage")
+    if args.check:
+        p = Path(args.check)
+        text = p.read_text(encoding="utf-8") if p.is_file() else ""
+        st, logs = footer.credit_check(b, text)
+        # a compliant README keeps the established `exempt` result; a missing or drifted credit fails (exit 1)
+        return (dict(out, file=str(p), result="exempt" if st == "pass" else st, logs=[reason, *logs]),
+                OK if st == "pass" else CHECK_FAILED)
+    return dict(out, result="exempt", credit=footer.credit_block(b), logs=[reason]), OK
 
 
 def _authored_footer_refusal(ctx, text):

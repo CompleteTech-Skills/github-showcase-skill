@@ -32,9 +32,19 @@ def test_footer_doctor_agreement(brand, tmp_path, owner, repo, fork, footer, exp
     actual = json.loads(checked.stdout)
     cells = json.loads(row.stdout)["cells"]
     assert cells["footer"].split(":")[0] == expected
-    assert actual["result"].split(":")[0] == {"n/a": "exempt"}.get(expected, expected)
-    if expected == "n/a":
+    # decision 25: an exempt footer still needs the skill credit; this README has neither
+    if expected == "n/a" and not fork:
+        assert actual["result"] == "fail:credit-missing"
+    else:
+        assert actual["result"].split(":")[0] == {"n/a": "exempt"}.get(expected, expected)
+    if expected == "n/a" and fork:
         assert checked.returncode == 0
+    elif expected == "n/a":
+        assert checked.returncode == 1
+        from ctshowcase import footer as footermod
+        readme.write_text("# Synthetic test\n\n" + footermod.credit_block(brand) + "\n", encoding="utf-8")
+        again = run_cli(*common, "footer", "--check", readme)
+        assert again.returncode == 0 and json.loads(again.stdout)["result"] == "exempt", again.stdout
     elif expected == "fail":
         assert checked.returncode == 1
 
@@ -81,7 +91,7 @@ def test_repository_footer_rechecks_scoped_consent(brand, tmp_path, grant_scope,
 
 
 @pytest.mark.parametrize("owner,repo,fork,footer,visibility,expected,check_result", [
-    ("LibreEvolve", "sample", False, False, "public", "n/a", "exempt"),
+    ("LibreEvolve", "sample", False, False, "public", "n/a", "fail"),  # decision 25: exempt footer, credit missing
     ("Northwind-Trading-Co", "sample", False, True, "private", "unknown", "fail"),
     ("Northwind-Trading-Co", "sample", False, "hold", "public", "hold", "hold"),
     ("romgenie-following-repos", "sample", True, False, "public", "n/a", "exempt"),

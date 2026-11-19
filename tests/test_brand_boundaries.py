@@ -34,7 +34,9 @@ def assert_independent_family(owner, row):
 
 def assert_no_complete_tech_leak(owner, text):
     import re
-    assert not re.search(r"completetech|CompleteDotTech|005ADD", text, re.I), owner
+    from conftest import without_exact_credit
+    # the exact skill credit names the tool's publisher on every target; nothing else may
+    assert not re.search(r"completetech|CompleteDotTech|005ADD", without_exact_credit(text), re.I), owner
 
 
 def context(brand, owner, **meta):

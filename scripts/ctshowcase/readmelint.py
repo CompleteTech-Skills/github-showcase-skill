@@ -199,6 +199,10 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
             st, _ = footermod.check(ctx.brand, text)
             if st != "pass":
                 fails.append(f"D18 footer {st}")
+        elif ctx.footer_status() == "exempt:footer":  # decision 25: the credit ends the README without a footer
+            st, _ = footermod.credit_check(ctx.brand, text)
+            if st != "pass":
+                fails.append(f"D25 credit {st}")
         return _result(path, fails, warns, incomplete)
     parts = []
     offset = 0
@@ -326,6 +330,10 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
             fails.append(f"D18 footer {st}")
         elif _extra_footer(text):
             fails.append("D18 footer fail:duplicate")
+    elif ctx.footer_status() == "exempt:footer":  # decision 25: the credit ends the README without a footer
+        st, _ = footermod.credit_check(ctx.brand, text)
+        if st != "pass":
+            fails.append(f"D25 credit {st}")
     # alt text, local images
     for alt, source, is_html in images:
         if not alt.strip():

@@ -55,7 +55,8 @@ def pending_footer(brand, tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("owner,explicit", [(OWNER, None), (ALIAS, None), (ALIAS, OWNER), (OWNER, ALIAS)])
 @pytest.mark.parametrize("footer,expected,cell,code", [
-    (False, "exempt", "n/a", 0), ("hold", "hold", "hold", 0), (True, "fail:missing", "fail", 1),
+    # decision 25 (the user, 2026-11-18): an exempt footer still needs the skill credit, so a README without it fails
+    (False, "fail:credit-missing", "n/a", 1), ("hold", "hold", "hold", 0), (True, "fail:missing", "fail", 1),
 ])
 def test_pending_footer_matches_doctor(pending_footer, owner, explicit, footer, expected, cell, code):
     common, readme, target = pending_footer(owner=owner, footer=footer)

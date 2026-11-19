@@ -985,6 +985,9 @@ def profile_readme(estate: Estate, org: str, data: dict, *, banner: str | None =
     # upstream forks (decision 18), not the profile README the estate writes for it.
     if row.get("footer", True) is True or estate.resolver.owner_status(login) == "watching":
         out += [footermod.block(estate.brand), ""]
+    elif row.get("footer", True) is False and footermod.credit_block(estate.brand):
+        # decision 25 (the user, 2026-11-18): an exempt footer still ends with the skill credit; `footer: hold` waits
+        out += [footermod.credit_block(estate.brand), ""]
     return "\n".join(out).rstrip() + "\n", badges
 
 

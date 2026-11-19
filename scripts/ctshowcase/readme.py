@@ -587,6 +587,14 @@ def footer_wanted(ctx) -> bool:
     return False
 
 
+def credit_wanted(ctx) -> bool:
+    """Decision 25 skill credit wanted: wherever the footer is, and also where the footer alone is exempt
+    (`exempt:footer`: the org row says `footer: false`, or the owner has no row; the user, 2026-11-18). The credit names
+    the tool, not the target, so every managed README carries it. A held, T3-unsigned or watching-org README gets
+    neither, and a config without an `attribution` row has no credit."""
+    return ctx.footer_status() in (None, "exempt:footer") and footermod.credit_block(ctx.brand) is not None
+
+
 def callout(ctx) -> str | None:
     if ctx.det["variant"] == "I" or (not ctx.public and ctx.det["variant"] in "ABCDE"):
         who = "Touched By An Agent" if ctx.same_owner("TouchedByAnAgent") else ctx.company
@@ -620,6 +628,8 @@ def scaffold(ctx: RepoContext, existing: str = "") -> str:
         parts.append(f"## {lic[0]}\n\n{managed_license(lic[1])}")
     if footer_wanted(ctx):
         parts.append(footermod.block(ctx.brand))
+    elif credit_wanted(ctx):  # exempt footer: the credit still ends the README
+        parts.append(footermod.credit_block(ctx.brand))
     return "\n\n".join(parts) + "\n"
 
 
@@ -748,6 +758,9 @@ def callout_only(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
                 else:
                     rest.append(ln)
             removed = rest
+    elif credit_wanted(ctx) and not footermod.credit_matches(ctx.brand, footermod.split_credit(out)[1]):
+        out = drop_own_credit(out)  # decision 25: never twice; only our own credit block is replaced
+        out = out.rstrip("\n") + "\n\n" + footermod.credit_block(ctx.brand) + "\n"
     return out, removed
 
 
@@ -1194,6 +1207,8 @@ def upgrade(ctx: RepoContext, text: str, *, already_normalized: bool = False) ->
                 out.append(f"## {lic[0]}\n\n{managed_license(lic[1])}")
         if want_footer:
             out.append(footermod.block(ctx.brand))
+        elif credit_wanted(ctx):
+            out.append(footermod.credit_block(ctx.brand))
         return "\n\n".join(x for x in out if x) + "\n", removed
     else:
         if carry:  # an unmarked tagline with no description: it moves into the block (the move is not a lost line)
@@ -1237,6 +1252,8 @@ def upgrade(ctx: RepoContext, text: str, *, already_normalized: bool = False) ->
             out.append(f"## {lic[0]}\n\n{managed_license(lic[1])}")
     if want_footer:
         out.append(footermod.block(ctx.brand))
+    elif credit_wanted(ctx):  # exempt footer: the credit still ends the README
+        out.append(footermod.credit_block(ctx.brand))
     for b in ("template-body", "checklist"):  # inserted in reverse: the checklist stays above the body
         if b in blocks:
             out.insert(1 if not preserve else 1, wrap(b, blocks[b]))
@@ -1282,7 +1299,13 @@ def header_only(ctx: RepoContext, text: str, *, already_normalized: bool = False
         return m.group(0)
     if preserve_structure:
         return _replace_blocks_in_source(original, text, sub)
-    return license_block(ctx, reorder_lead(ctx, _sub_blocks(text, sub)))
+    out = license_block(ctx, reorder_lead(ctx, _sub_blocks(text, sub)))
+    # Decision 25 with an exempt footer: a managed README (it has our banner or nav block) gains the credit once,
+    # at the end, as an old footer does above. Never twice, and never on a README the skill does not manage.
+    if (credit is not None and not has_credit and ctx.footer_status() == "exempt:footer" and credit_wanted(ctx)
+            and any(m.group(1) in ("banner", "nav") for m in find_blocks(MARK, out))):
+        out = out.rstrip("\n") + "\n\n" + wrap("credit", credit) + "\n"
+    return out
 
 
 def _replace_blocks_in_source(original: str, normalized: str, sub) -> str:

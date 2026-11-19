@@ -159,13 +159,19 @@ change, and nothing here outranks decisions 1 to 24.
     - **Pre-run check.** `provenance check TARGET` answers `never`, `fresh` (skip unless `--force`), `stale` (rerun
       only the surfaces in `changed[]`), `untracked` (showcased before stamps existed; offer the stamp-only backfill)
       or `foreign` (excluded owner, T3 without sign-off, watching-org fork; never suggest running).
-    - **Credit wording.** Directly after the decision 18 footer, in its own `showcase:credit` marker block (never
+    - **Credit wording.** Directly after the decision 18 footer, or ending the README on its own where the footer
+      is exempt, in its own `showcase:credit` marker block (never
       inside the footer, whose markup stays byte-identical and stays the only `<picture>`): a hidden
       `<!-- generated-by: github-showcase-skill v=<version> std=ct-std-v1 -->` marker and the visible line *README
       styled with [github-showcase-skill](https://github.com/CompleteTech-Skills/github-showcase-skill) by
       CompleteTech LLC · [Get the skill](https://github.com/CompleteTech-Skills/github-showcase-skill#quick-start)*, rendered from `attribution` in `brand.yaml`. Repository READMEs, org profile READMEs and the
-      personal profile README carry it; the Enterprise has no README and gets none. `footer --check` and `lint
-      readme` require it, and one regeneration adds it to an old footer. Optional and off by default: a
+      personal profile README carry it; the Enterprise has no README and gets none. The credit names the tool, not the
+      target, so it is independent of the footer: an owner whose footer is exempt (`exempt:footer`: its row says
+      `footer: false`, or it has no row in the selected config) still gets the credit, with no footer. A held footer
+      (`footer: hold`), an excluded or HOLD owner, a T3 owner without sign-off and a watching-org repository get
+      neither. `footer --check` and `lint readme` require it (`fail:credit-missing`, `fail:credit-drift`; for an
+      exempt footer `lint readme` reports `D25 credit …`), and one regeneration adds it to an old footer or, for an
+      exempt footer, to a managed README. Optional and off by default: a
       `github-showcase-skill` topic proposed by `provenance stamp --propose-topic` as a writer job that needs approval.
     - **Star thresholds** (confirmed 2026-11-18: runs 5, 10, 15, ...). The operator's ledger (`~/.config/github-showcase-skill/state.json`,
       `%APPDATA%\github-showcase-skill\state.json` on Windows, `$SHOWCASE_STATE_DIR` to override) counts completed
@@ -179,7 +185,9 @@ change, and nothing here outranks decisions 1 to 24.
       telemetry.
 
     **Confirmed by the user (2026-11-18):** the Enterprise stamp beside the snapshot, the credit wording with the
-    *Get the skill* install prompt, the star asks at runs 5, 10, 15, ..., and the no-timestamp-only-commit rule as
+    *Get the skill* install prompt, that CompleteTech LLC's name appears as the skill credit on every target
+    (including owners whose footer is exempt and owners with no brand row, whose identity otherwise stays their own),
+    the star asks at runs 5, 10, 15, ..., and the no-timestamp-only-commit rule as
     written above (a run that changes nothing writes nothing; the first stamp of an unstamped target is the one
     stamp-only write). **Still to confirm:** the repository, org and profile stamp locations, and `provenance stamp`
     as the one counted command.

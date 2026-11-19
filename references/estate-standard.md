@@ -33,7 +33,7 @@ Every in-scope repository gets the same elements, as its variant allows:
 8. **Topics** from a closed vocabulary, with exactly one brand topic.
 9. **Namespaced issue labels**, one colour per namespace.
 10. **Org-level branding**: avatar, banner, profile README, default community files and pins.
-11. **The CompleteTech LLC footer** as the last block of every README (decision 18), followed only by the skill's credit block (decision 25, a proposal).
+11. **The CompleteTech LLC footer** as the last block of every README (decision 18), followed only by the skill's credit block (decision 25, a proposal). Where the footer is exempt (`footer: false`, or an owner with no row), the credit block alone ends the README.
 
 Never use emoji anywhere: descriptions, topics, labels, READMEs or profiles. Never use superlatives or marketing claims the code does not back up.
 

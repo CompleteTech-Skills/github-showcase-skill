@@ -5,7 +5,7 @@ import json
 import pytest
 import yaml
 
-from conftest import run_cli
+from conftest import run_cli, without_exact_credit
 
 OWNER = "Pick-Your-AI"
 ALIAS = "Northwind-AI-Alias"
@@ -61,7 +61,7 @@ def test_cli_unaffiliated_foreign_profile_stays_in_own_identity(inputs, tmp_path
     assert result.returncode == 0, result.stdout + result.stderr
     payload = json.loads(result.stdout)
     assert payload["leaks"] == []
-    text = (out / "profile" / "README.md").read_text(encoding="utf-8")
+    text = without_exact_credit((out / "profile" / "README.md").read_text(encoding="utf-8"))
     for forbidden in FORBIDDEN:
         assert forbidden.lower() not in text.lower()
         assert forbidden.lower() not in json.dumps(payload["data"]).lower()
@@ -153,7 +153,7 @@ def test_cli_negated_or_incidental_affiliation_is_not_a_grant(inputs, tmp_path, 
     inputs[1]["orgs"][OWNER]["profile"]["description"] += " " + denial
     result, out = generate(tmp_path, inputs)
     assert result.returncode == 0, result.stdout + result.stderr
-    text = (out / "profile" / "README.md").read_text(encoding="utf-8")
+    text = without_exact_credit((out / "profile" / "README.md").read_text(encoding="utf-8"))
     assert all(forbidden.lower() not in text.lower() for forbidden in FORBIDDEN)
 
 
@@ -161,7 +161,7 @@ def test_cli_current_registry_description_overrides_brand_affiliation(inputs, tm
     inputs[0]["orgs"][OWNER]["description"] = "Inspect records. Steward: CompleteTech LLC."
     result, out = generate(tmp_path, inputs)
     assert result.returncode == 0
-    text = (out / "profile" / "README.md").read_text(encoding="utf-8")
+    text = without_exact_credit((out / "profile" / "README.md").read_text(encoding="utf-8"))
     assert all(forbidden.lower() not in text.lower() for forbidden in FORBIDDEN)
 
 
