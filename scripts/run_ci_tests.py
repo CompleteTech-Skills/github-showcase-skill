@@ -41,8 +41,15 @@ def child(report, files, collect_only):
     import pytest
 
     inventory = Inventory()
-    arguments = ["-q", *(["--collect-only"] if collect_only else []), *files]
-    code = int(pytest.main(arguments, plugins=[inventory]))
+    # Pytest stages cache directories beside its cache target. Keep those
+    # directories outside collected source and separate for every invocation,
+    # so a finishing worker cannot remove a directory another worker is scanning.
+    with tempfile.TemporaryDirectory(prefix="showcase-pytest-cache-") as cache_root:
+        if Path(cache_root).resolve().is_relative_to(ROOT):
+            raise ValueError("pytest cache must be outside collected source; select an external temporary directory")
+        arguments = ["-q", "-o", f"cache_dir={Path(cache_root) / 'cache'}",
+                     *(["--collect-only"] if collect_only else []), *files]
+        code = int(pytest.main(arguments, plugins=[inventory]))
     # Deliberately after pytest.main: early os._exit(0), cleanup exceptions and
     # interrupted runs cannot leave a completed receipt for the parent to accept.
     with report.open("x", encoding="utf-8") as stream:

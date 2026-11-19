@@ -28,6 +28,9 @@ jobs:
         if: runner.os == 'Windows'
         # Expose native fixture/setup failures before the long full run; all cases still run in the full inventory.
         run: python -m pytest -q tests/test_provenance_git_transport.py tests/test_provenance_contract_independent.py
+      - name: Verify Windows CI runner fixtures
+        if: runner.os == 'Windows'
+        run: python -m pytest -q tests/test_pytest_worker_guard.py tests/test_ci_cache_isolation.py
       - name: Run the full test suite
         # Full inventory, whole-file batches, two ordinary local pytest processes.
         run: python scripts/run_ci_tests.py
