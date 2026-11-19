@@ -6,6 +6,7 @@ import socket
 
 import pytest
 import showcase
+from conftest import ROOT
 
 from ctshowcase import account
 
@@ -29,7 +30,7 @@ def offline(tmp_path, monkeypatch):
     monkeypatch.setattr(account, "_gh", blocked)
 
 
-def render(tmp_path, capsys, name, *, static=False):
+def render(tmp_path, capsys, name, *, static=False, config=None):
     snapshot = tmp_path / "capture.json"
     snapshot.write_text(json.dumps({
         "schema": "account-chart/v1", "captured": "2026-11-18", "not_public": 0,
@@ -38,7 +39,8 @@ def render(tmp_path, capsys, name, *, static=False):
                          {"name": "synthetic-b", "language": "Rust", "code": {"Rust": 2000}}],
         "organizations": [], "enterprises": []}), encoding="utf-8")
     out = tmp_path / "out"
-    args = ["account-chart", "render", "--snapshot", str(snapshot), "--out-dir", str(out), "--no-png"]
+    args = ["--config", str(config)] if config else []
+    args += ["account-chart", "render", "--snapshot", str(snapshot), "--out-dir", str(out), "--no-png"]
     if static:
         args.append("--static-summary")
     code = showcase.main(args)
@@ -53,6 +55,7 @@ def test_long_name_keeps_chart_and_omits_only_summary(tmp_path, capsys, static):
     assert "summary-skipped:type-does-not-fit" in result["logs"]
     assert result["summary_lint"] is None
     assert not (out / "account-chart-summary.svg").exists()
+    assert not any(path.endswith("account-chart-summary.svg") for path in result["outputs"])
     for suffix in (".svg", ".mmd", ".md"):
         assert (out / f"account-chart{suffix}").stat().st_size > 0
     md = (out / "account-chart.md").read_text(encoding="utf-8")
@@ -68,3 +71,15 @@ def test_fitting_name_still_writes_summary(tmp_path, capsys):
     assert result["summary_lint"]["result"] == "PASS"
     assert (out / "account-chart-summary.svg").exists()
     assert "account-chart-summary.svg" in (out / "account-chart.md").read_text(encoding="utf-8")
+
+
+def test_overlong_eyebrow_omits_only_summary(tmp_path, capsys):
+    raw = json.loads((ROOT / "references/brand.lock.json").read_text(encoding="utf-8"))
+    raw["chart"]["labels"]["account"] = "Personal repositories, enterprises and organizations of this account"
+    config = tmp_path / "synthetic-brand.json"
+    config.write_text(json.dumps(raw), encoding="utf-8")
+    code, result, out = render(tmp_path, capsys, SHORT, config=config)
+    assert code == 0 and result["result"] == "ok", result
+    assert "summary-skipped:type-does-not-fit" in result["logs"]
+    assert not (out / "account-chart-summary.svg").exists()
+    assert (out / "account-chart.svg").stat().st_size > 0

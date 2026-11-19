@@ -1190,8 +1190,9 @@ def render(args):
     except ArtFail as exc:
         if exc.element != "summary-type":
             raise
-        # The chart lays out any account name; only the fixed-width summary has a smaller type ladder. Leave the
-        # optional summary out rather than lose the whole chart, and never cut the name or shrink it below the summary type ladder.
+        # The summary's fixed 1280px plate has a smaller type ladder than the chart, so an eyebrow or name the chart
+        # can still set may not fit it. Leave only the optional summary out rather than lose the whole chart; the
+        # name is never cut or set below the ladder. A name the chart itself cannot set still fails (art-fail:chart-name).
         summary_svg, summary_key, skipped = None, [], "summary-skipped:type-does-not-fit"
     slint = None
     if summary_svg is None:
