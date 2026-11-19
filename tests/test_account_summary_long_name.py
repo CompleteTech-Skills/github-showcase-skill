@@ -75,7 +75,8 @@ def test_fitting_name_still_writes_summary(tmp_path, capsys):
 
 def test_overlong_eyebrow_omits_only_summary(tmp_path, capsys):
     raw = json.loads((ROOT / "references/brand.lock.json").read_text(encoding="utf-8"))
-    raw["chart"]["labels"]["account"] = "Personal repositories, enterprises and organizations of this account"
+    # About twice the summary's smallest eyebrow width, yet still within the default 2400px chart's own ladder.
+    raw["chart"]["labels"]["account"] = " ".join(["Personal repositories, enterprises and organizations of this account"] * 2)
     config = tmp_path / "synthetic-brand.json"
     config.write_text(json.dumps(raw), encoding="utf-8")
     code, result, out = render(tmp_path, capsys, SHORT, config=config)

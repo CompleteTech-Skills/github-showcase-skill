@@ -8,7 +8,7 @@
 | `NAME.svg` | The compositor render: the same tree in the banner and card design, outlined text, GitHub-safe (`lint svg --kind chart`). |
 | `NAME.png` | The same scene rasterized at `--scale` (2 by default): the high-definition picture. |
 | `NAME.md` | The README block: the image (linking to the PNG), the counts the image leaves out, and every repository as a link. |
-| `NAME-summary.svg` | The closing visual in the profile intro's design: the account's mark with gold circuit traces, and the code's languages as a bar and key with percentages (`lint svg --kind intro`). Written when the snapshot has per-language sizes. |
+| `NAME-summary.svg` | The closing visual in the profile intro's design: the account's mark with gold circuit traces, and the code's languages as a bar and key with percentages (`lint svg --kind intro`). Written when the snapshot has per-language sizes and the eyebrow and name fit its type ladder (`summary-skipped:no-code-shares` or `summary-skipped:type-does-not-fit` otherwise). |
 | `NAME.mermaid.png` | Only with `--mmdc`: the Mermaid source drawn by mermaid-cli at natural size. |
 
 ## Commands
