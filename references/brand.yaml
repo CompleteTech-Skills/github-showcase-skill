@@ -65,6 +65,17 @@ operator:
   login: CompleteDotTech                                       # the operator's own user account
   repo_template: CompleteTech-LLC/completetech-repo-template   # `new OWNER/NAME` default --template
   repo_template_title: CompleteTech Repo Template              # the template README's H1, replaced on bootstrap
+  steward: {name: Timothy Wayne Gregg, email: Timothy.Gregg@complete.tech}   # Projects board README contact line
+  projects:                                                    # GitHub Projects boards (project.py, STANDARD §13)
+    reference: Pick-Your-AI/1                                  # the Workstream Overview board every board copies
+    template_owner: CompleteTech-LLC
+    template_name: CompleteTech LLC
+    template_description: "Template for CompleteTech organization workstream boards: fields, views and workflows only, no items."
+    estate_name: CompleteTech Estate
+    estate_title: CompleteTech — Estate
+    estate_description: Cross-organization roll-up of CompleteTech LLC initiatives, health and target dates, updated weekly.
+    estate_purpose: CompleteTech LLC initiatives               # "This board rolls up … and top-level features"
+    setup_summary: Board set up from the CompleteTech workstream template.
   profile:                                                     # org profile and About wording (org.py)
     family: completetech                                       # the operator's own family
     member_line: A CompleteTech LLC organization               # affiliation sentence, T1 orgs

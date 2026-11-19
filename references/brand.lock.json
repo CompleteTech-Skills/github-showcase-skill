@@ -610,8 +610,23 @@
    "steward_line": "Steward: CompleteTech LLC",
    "x_handle": "CompleteTechLLC"
   },
+  "projects": {
+   "estate_description": "Cross-organization roll-up of CompleteTech LLC initiatives, health and target dates, updated weekly.",
+   "estate_name": "CompleteTech Estate",
+   "estate_purpose": "CompleteTech LLC initiatives",
+   "estate_title": "CompleteTech — Estate",
+   "reference": "Pick-Your-AI/1",
+   "setup_summary": "Board set up from the CompleteTech workstream template.",
+   "template_description": "Template for CompleteTech organization workstream boards: fields, views and workflows only, no items.",
+   "template_name": "CompleteTech LLC",
+   "template_owner": "CompleteTech-LLC"
+  },
   "repo_template": "CompleteTech-LLC/completetech-repo-template",
-  "repo_template_title": "CompleteTech Repo Template"
+  "repo_template_title": "CompleteTech Repo Template",
+  "steward": {
+   "email": "Timothy.Gregg@complete.tech",
+   "name": "Timothy Wayne Gregg"
+  }
  },
  "orgs": {
   "AI-Ascension": {

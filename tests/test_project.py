@@ -108,7 +108,7 @@ def test_short_description_rules():
                 "Fill {name} in.", "y" * 121 + "."):
         assert any(c["result"] == "fail" for c in PJ.short_description_checks(bad)), bad
     for role in ("template", "estate"):
-        assert all(c["result"] == "pass" for c in PJ.short_description_checks(PJ.DESC[role]))
+        assert all(c["result"] == "pass" for c in PJ.short_description_checks(PJ.projects_cfg()[f"{role}_description"]))
 
 
 # ----------------------------------------------------------------------------------------------- copy-plan
@@ -253,7 +253,7 @@ def test_template_role(brand):
     plan = PJ.copy_plan("CompleteTech-LLC", role="template", copied=cap_of("copy-capture.json", "CompleteTech-LLC"),
                         resolver=resolver(brand))
     ids = [j["id"] for j in plan["jobs"]]
-    assert plan["title"] == PJ.TEMPLATE_TITLE and plan["short_description"] == PJ.DESC["template"]
+    assert plan["title"] == PJ.TEMPLATE_TITLE and plan["short_description"] == brand.operator()["projects"]["template_description"]
     mark = ids.index(next(i for i in ids if i.endswith("-mark-template")))
     assert all(not j.get("argv") or j["kind"] == "browser" or i <= mark
                for i, j in enumerate(plan["jobs"]) if j["kind"] != "browser")  # mark-template is the last API job

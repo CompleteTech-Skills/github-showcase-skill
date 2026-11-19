@@ -445,6 +445,58 @@
     "repo_template_title": {
      "type": "string"
     },
+    "steward": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "name",
+      "email"
+     ],
+     "description": "The contact named on Projects board READMEs. Absent: the contact line is left out (needs-input:steward).",
+     "properties": {
+      "name": {
+       "type": "string"
+      },
+      "email": {
+       "type": "string"
+      }
+     }
+    },
+    "projects": {
+     "type": "object",
+     "additionalProperties": false,
+     "description": "GitHub Projects boards: reference board, template owner and Estate board wording. Absent: needs-input.",
+     "properties": {
+      "reference": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9-]*/[0-9]+$"
+      },
+      "template_owner": {
+       "type": "string"
+      },
+      "template_name": {
+       "type": "string"
+      },
+      "template_description": {
+       "type": "string"
+      },
+      "estate_name": {
+       "type": "string"
+      },
+      "estate_title": {
+       "type": "string"
+      },
+      "estate_description": {
+       "type": "string"
+      },
+      "estate_purpose": {
+       "type": "string"
+      },
+      "setup_summary": {
+       "type": "string"
+      }
+     }
+    },
     "profile": {
      "type": "object",
      "additionalProperties": false,

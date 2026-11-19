@@ -5,7 +5,9 @@ the capture query, normalizes a captured board into the template spec, checks a 
 the board README, and plans writer jobs (`{id, phase, kind, repo|org, approval_id?, argv, note}`; `browser` jobs for
 UI-only settings). Rules it never bends: no `--drafts` and no items in a copy; nothing is deleted (projects, fields,
 items, views, workflows); every mutation is printed inline (`-f query='mutation …'` with literal values or `-f`
-variables); only read queries load from a file (`-F query=@file`); Pick-Your-AI (T3) is read, never changed.
+variables); only read queries load from a file (`-F query=@file`); a T3 reference board is read, never changed.
+The operator's own account, reference board, template owner, Estate board names and steward contact come from the
+brand config's `operator:` block (`login`, `steward`, `projects`); a config without them is needs-input.
 """
 from __future__ import annotations
 
@@ -21,17 +23,41 @@ from .errors import CHECK_FAILED, OK, NeedsInput, Refused, ShowcaseError
 from .resolver import Resolver, read_command
 
 PHASE = "6.3"
-USER_LOGIN = "CompleteDotTech"
-REFERENCE = ("Pick-Your-AI", 1)
-TEMPLATE_OWNER = "CompleteTech-LLC"
 TEMPLATE_TITLE = "TEMPLATE — Workstream Portfolio"
-ESTATE_TITLE = "CompleteTech — Estate"
-STEWARD = ("Timothy Wayne Gregg", "Timothy.Gregg@complete.tech")
 SHORT_MAX = 120
 ANCHOR, CYCLE_DAYS, CYCLES = "2026-11-02", 14, 3
-DESC = {"org": "{name} workstreams: what is in flight, what is next and what has shipped, updated weekly.",
-        "template": "Template for CompleteTech organization workstream boards: fields, views and workflows only, no items.",
-        "estate": "Cross-organization roll-up of CompleteTech LLC initiatives, health and target dates, updated weekly."}
+DESC = {"org": "{name} workstreams: what is in flight, what is next and what has shipped, updated weekly."}
+
+
+def _default_operator() -> dict:
+    from .config import load_brand
+    return load_brand(prefer_lock=True).operator()
+
+
+def operator(resolver: Resolver | None = None) -> dict:
+    """The selected config's `operator:` block (the resolver's brand), else the default config's (library callers)."""
+    brand = getattr(resolver, "brand", None)
+    return brand.operator() if brand is not None else _default_operator()
+
+
+def projects_cfg(resolver: Resolver | None = None, op: dict | None = None) -> dict:
+    """`operator.projects`: `reference` (OWNER/NUMBER, the board every org board is copied from), `template_owner`,
+    `template_name`, `template_description`, `estate_name`, `estate_title`, `estate_description`, `estate_purpose`
+    and `setup_summary`."""
+    return dict(((op if op is not None else operator(resolver)).get("projects")) or {})
+
+
+def _need(cfg: dict, key: str, what: str):
+    """A required `operator.projects` value, or needs-input:projects-<key> (exit 4): never another operator's."""
+    value = cfg.get(key)
+    if not value:
+        raise NeedsInput("projects-" + key.replace("_", "-"), f"set operator.projects.{key} in the brand config ({what})")
+    return value
+
+
+def _reference(cfg: dict) -> tuple[str, int] | None:
+    m = re.match(r"^([A-Za-z0-9-]+)/(\d+)$", str(cfg.get("reference") or ""))
+    return (m.group(1), int(m.group(2))) if m else None
 
 # §13.4 workstream kinds: the same eight colours in every org
 KINDS = [("Product", "Product / Build", "BLUE"), ("Research", "Research / Discovery", "PURPLE"),
@@ -174,22 +200,29 @@ def _stamp_owner_jobs(jobs: list[dict], owner: str) -> None:
             signoff.stamp_associations(job, [str(rec["id"])])
 
 
-def is_user(owner: str) -> bool:
-    return owner in ("@me", USER_LOGIN) or owner.lower() == USER_LOGIN.lower()
+def is_user(owner: str, login: str | None = None) -> bool:
+    """`@me`, or the operator's own account (`login`, default `operator.login` of the default config)."""
+    login = _default_operator().get("login") if login is None else login
+    return owner == "@me" or bool(login and owner) and owner.lower() == login.lower()
 
 
-def project_url(owner: str, number) -> str:
-    base = f"https://github.com/users/{USER_LOGIN}" if is_user(owner) else f"https://github.com/orgs/{owner}"
-    return f"{base}/projects/{number}"
+def project_url(owner: str, number, login: str | None = None) -> str:
+    login = _default_operator().get("login") if login is None else login
+    if is_user(owner, login):
+        if not login:
+            raise NeedsInput("operator-login", "a personal board needs the operator's own account: set operator.login "
+                                               "in the brand config")
+        return f"https://github.com/users/{login}/projects/{number}"
+    return f"https://github.com/orgs/{owner}/projects/{number}"
 
 
-def _slug(owner: str) -> str:
-    return "me" if is_user(owner) else owner
+def _slug(owner: str, login: str | None = None) -> str:
+    return "me" if is_user(owner, login) else owner
 
 
 def _gate_target(resolver: Resolver, owner: str, *, allow_t3: bool = False) -> str:
     """Targets of a write: never T3 without sign-off, never excluded or HOLD. Returns the resolved login."""
-    if is_user(owner):
+    if is_user(owner, operator(resolver).get("login") or ""):
         return "@me"
     st = resolver.owner_status(owner)
     if st == "excluded":
@@ -208,20 +241,23 @@ def _gate_target(resolver: Resolver, owner: str, *, allow_t3: bool = False) -> s
 # =====================================================================================================
 # capture-query
 # =====================================================================================================
-REFERENCE_BOARD = ("pick-your-ai", 1)  # §13: the Workstream Overview board every org board is copied from
-
-
-def capture_query(owner: str, number: int, *, rel_to: Path | None = None) -> dict:
+def capture_query(owner: str, number: int, *, rel_to: Path | None = None, op: dict | None = None) -> dict:
     """The read-only capture for OWNER/NUMBER (§4.1): GraphQL primary, REST for integer field ids, gh as a cross-check."""
     if not re.match(r"^[A-Za-z0-9-]+$|^@me$", owner or "") or int(number) < 1:
         raise ShowcaseError("capture-query needs --owner LOGIN and --number N", log="usage")
-    user = is_user(owner)
-    login = USER_LOGIN if owner == "@me" else owner
+    op = _default_operator() if op is None else op
+    me = op.get("login") or ""
+    user = is_user(owner, me)
+    if owner == "@me" and not me:
+        raise NeedsInput("operator-login", "capture-query --owner @me needs operator.login in the brand config")
+    login = me if owner == "@me" else owner
     base = f"users/{login}" if user else f"orgs/{owner}"
-    # the reference board (Pick-Your-AI/1) is saved RAW where scripts/writer.py reads its node ids (PROJECT_CAPTURE);
+    # the reference board (`operator.projects.reference`) is saved RAW where scripts/writer.py reads its node ids (PROJECT_CAPTURE);
     # its normalized spec goes beside it, so the writer's T3 node-id check sees every id the capture returned
-    ref = (owner.lower(), int(number)) == REFERENCE_BOARD
-    name = "workstream-overview" if ref else re.sub(r"[^a-z0-9]+", "-", f"{_slug(owner)}-{number}".lower())
+    # §13: the reference (Workstream Overview) board every org board is copied from (`operator.projects.reference`)
+    reference = _reference(projects_cfg(op=op))
+    ref = reference is not None and (owner.lower(), int(number)) == (reference[0].lower(), reference[1])
+    name = "workstream-overview" if ref else re.sub(r"[^a-z0-9]+", "-", f"{_slug(owner, me)}-{number}".lower())
     gql = read_command("project_capture_user" if user else "project_capture", rel_to=rel_to,
                        **({"login": login} if user else {"org": owner}), number=int(number))
     capture_out = f"registry/projects/{name}.template.json" if ref else f"registry/projects/{name}.capture.json"
@@ -433,22 +469,26 @@ def _opt_name(o) -> str:
 
 def readme(org: str, display_name: str, number, view_numbers: dict, *, fields: list[dict] | None = None,
            repositories: list[str] | None = None, out_of_scope: str | None = None, reviewed: str | None = None,
-           views: list[dict] | None = None, estate: bool = False) -> tuple[str, list[str]]:
-    """Fill the §13.7 template. Every {…} is filled; a missing view number is needs-input (exit 4)."""
+           views: list[dict] | None = None, estate: bool = False, op: dict | None = None) -> tuple[str, list[str]]:
+    """Fill the §13.7 template. Every {…} is filled; a missing view number is needs-input (exit 4). The Estate wording,
+    the Estate home link and the contact line come from `op` (the `operator:` block; default config's when omitted):
+    no steward configured leaves the contact out (`needs-input:steward`)."""
+    op = _default_operator() if op is None else op
     views = views or (ESTATE_VIEWS if estate else VIEWS)
     logs = []
     missing = [v["name"] for v in views if not view_numbers.get(v["name"])]
     if missing:
         raise NeedsInput("view-numbers", f"view numbers missing for {', '.join(missing)}: capture the board after the "
                                          "copy (project capture-query) and pass it with --copied")
-    base = project_url(org, number)
+    base = project_url(org, number, op.get("login") or "")
     if not out_of_scope:
         out_of_scope = ("work tracked on another organization's board" if not estate
                         else "tasks; each organization's board holds those")
         logs.append("default:out-of-scope")
     purpose = (f"This board tracks {display_name} work across its workstreams: what is in flight, what is next and what "
                f"has shipped. It does not track {out_of_scope.rstrip('.')}." if not estate else
-               "This board rolls up CompleteTech LLC initiatives and top-level features from every in-scope "
+               f"This board rolls up {_need(projects_cfg(op=op), 'estate_purpose', 'what the Estate board rolls up')} "
+               "and top-level features from every in-scope "
                f"organization, with their health and target dates. It does not track {out_of_scope.rstrip('.')}.")
     lines = ["## Purpose", purpose, "", "## Views", "| View | Answers |", "|---|---|"]
     for v in views:
@@ -483,10 +523,17 @@ def readme(org: str, display_name: str, number, view_numbers: dict, *, fields: l
               "archived after one month.", "", "## Cadence",
               ("A status update every Monday, after the organization updates. " if estate else
                "A status update every Friday. ") + "Cycles are two weeks long and start on Monday.", "", "## Links"]
-    home = f"https://github.com/{USER_LOGIN}" if estate else f"https://github.com/{org}"
+    if estate and not op.get("login"):
+        raise NeedsInput("operator-login", "the Estate board README links the operator's own account: set "
+                                           "operator.login in the brand config")
+    home = f"https://github.com/{op['login']}" if estate else f"https://github.com/{org}"
     links = [f"[{display_name} on GitHub]({home})"]
     links += [f"[{r}](https://github.com/{r})" for r in repositories or []]
-    links.append(f"Contact: {STEWARD[0]}, {STEWARD[1]}")
+    steward = op.get("steward") or {}
+    if steward.get("name") and steward.get("email"):
+        links.append(f"Contact: {steward['name']}, {steward['email']}")
+    else:
+        logs.append("needs-input:steward")
     lines += [" · ".join(links), "", f"Last reviewed: {reviewed or date.today().isoformat()}"]
     text = "\n".join(lines) + "\n"
     errs = text_checks(text)
@@ -716,7 +763,7 @@ def view_body(want: dict, spec: dict) -> tuple[dict, list[str]]:
 def brand_display_name(resolver: Resolver | None, owner: str | None) -> str | None:
     """The org's brand.yaml `display_name`, under any of its logins (CQ-03); None when the org has no brand row. The
     raw login is never a display name (a not-yet-approved rename target has no row and must not be titled by its login)."""
-    if resolver is None or not owner or is_user(owner):
+    if resolver is None or not owner or is_user(owner, operator(resolver).get("login") or ""):
         return None
     row = resolver.brand_org(owner, strict=False)
     return row.get("display_name") if row.get("known") else None
@@ -978,10 +1025,18 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
         resolver = Resolver(brand)
         brand._resolver = resolver  # keep nested Brand lookups on the same committed identity view
     owner = _gate_target(resolver, target, allow_t3=allow_t3)
-    src = source or (f"{REFERENCE[0]}/{REFERENCE[1]}" if role == "template" else None)
+    op = operator(resolver)
+    me = op.get("login") or ""
+    pcfg = projects_cfg(op=op)
+    reference = _reference(pcfg)
+    ref_src = f"{reference[0]}/{reference[1]}" if reference else None
+    src = source or (ref_src if role == "template" else None)
     logs, jobs, reads, pending, files = [], [], [], [], {}
     if not src:
-        src = f"{REFERENCE[0]}/{REFERENCE[1]}"
+        if not ref_src:
+            raise NeedsInput("projects-reference", "no --source and no operator.projects.reference in the brand config "
+                                                   "(the board to copy from, OWNER/NUMBER)")
+        src = ref_src
         if copied is None:  # stage 2 creates nothing, so only the copy itself is a fallback
             logs.append("fallback:direct-copy (no template number given; §13.9 fallback)")
     m = re.match(r"^([A-Za-z0-9-]+)/(\d+)$", src)
@@ -996,15 +1051,19 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
             # never the raw login (CompleteTech-TCG before its rename is approved has no brand row): exit 4, append nothing
             raise NeedsInput("display-name", f"{owner} has no display_name in references/brand.yaml (add the org row, its "
                                              "former_slugs, or pass --display-name); nothing was planned")
-        name = {"template": "CompleteTech LLC", "estate": "CompleteTech Estate"}[role]
-    title = title or {"template": TEMPLATE_TITLE, "estate": ESTATE_TITLE}.get(role) or f"{name} — Workstreams"
-    short = DESC[role].format(name=name)
+        name = _need(pcfg, f"{role}_name", f"the {role} board's display name")
+    title = title or {"template": TEMPLATE_TITLE,
+                      "estate": pcfg.get("estate_title") if role == "estate" else None}.get(role) or f"{name} — Workstreams"
+    short = DESC["org"].format(name=name) if role == "org" else \
+        _need(pcfg, f"{role}_description", f"the {role} board's short description")
     sd = short_description_checks(short, names=(name,))
     if any(c["result"] == "fail" for c in sd):
         raise ShowcaseError(f"short description fails §13.2: {short!r}", log="usage", code=CHECK_FAILED)
-    if role == "template" and not resolver_same(resolver, owner, TEMPLATE_OWNER):
-        logs.append("template-owner: §13.2 puts the template in CompleteTech-LLC")
-    sid = _slug(owner)
+    template_owner = pcfg.get("template_owner")
+    if role == "template" and not (template_owner and resolver_same(resolver, owner, template_owner)):
+        logs.append(f"template-owner: §13.2 puts the template in {template_owner}" if template_owner
+                    else "needs-input:projects-template-owner")
+    sid = _slug(owner, me)
     pid = f"p{PHASE}-{sid}-project"
     if copied is None and resolver is not None and not resolver.approved("create-project", "@me" if owner == "@me" else owner):
         logs.append(f"needs-approval:create-project:{owner}")
@@ -1222,7 +1281,7 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
         try:
             text, lg = readme(owner, name, number, nums, repositories=readme_repos,
                               out_of_scope=out_of_scope, reviewed=reviewed, views=vlist, estate=role == "estate",
-                              fields=doc_fields(spec, planned, estate=role == "estate"))
+                              fields=doc_fields(spec, planned, estate=role == "estate"), op=op)
             logs += lg
         except NeedsInput:
             pending.append({"why": "README needs every view number: re-capture after the view jobs run"})
@@ -1248,7 +1307,7 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
     # 5. repository links (org boards: same owner only), decided in step 0 and emitted here, before the browser steps
     jobs.extend(link_jobs)
     # 6. browser: UI-only view settings, workflows, insights, default repo, auto-add, recommended template
-    url = project_url(owner, number)
+    url = project_url(owner, number, me)
     for v in vlist:
         if v["name"] in held_views:
             continue
@@ -1329,7 +1388,8 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
             pending.append({"why": "the first status update links the Shipped view, which this plan creates",
                             "next": f"run the view jobs, re-capture board {num} and plan copy-plan --copied again"})
         elif status_update:
-            body = ("**Summary**\nBoard set up from the CompleteTech workstream template.\n\n**Shipped**\n"
+            summary = pcfg.get("setup_summary") or "Board set up from the workstream template."
+            body = (f"**Summary**\n{summary}\n\n**Shipped**\n"
                     f"[Shipped view]({url}/views/{nums['Shipped']})\n\n**Next**\nAdd this cycle's work to the board."
                     "\n\n**Risks and blocks**\nNone recorded.\n\n**Asks and dependencies**\nNone recorded.")
             # the dates are the current quarter's (not today), so a re-plan within the quarter is byte-identical and
@@ -1397,7 +1457,8 @@ def _check_board_owner(spec: dict, owner: str, target: str, resolver) -> None:
         raise ShowcaseError("the --copied capture does not say whose board it is (no project url): re-capture the "
                             "board with `project capture-query`; nothing was planned", log="usage")
     kind, login = board
-    mine = kind == "users" and is_user(login) if owner == "@me" else kind == "orgs" and resolver_same(resolver, login, owner)
+    mine = kind == "users" and is_user(login, operator(resolver).get("login") or "") if owner == "@me" \
+        else kind == "orgs" and resolver_same(resolver, login, owner)
     if not mine:
         raise ShowcaseError(f"the --copied capture is {login}'s board {spec.get('number')}, not a board of {target}: "
                             "pass the capture of the board copied into the target; nothing was planned", log="usage")
@@ -1433,8 +1494,9 @@ def lint(capture: dict, *, role: str = "org", owner: str | None = None, display_
     spec = capture if "std" in capture and "fields" in capture else normalize(capture)
     estate = role == "estate"
     cells, notes = {}, []
-    want_title = {"template": TEMPLATE_TITLE, "estate": ESTATE_TITLE}.get(role) or (f"{display_name} — Workstreams"
-                                                                                   if display_name else None)
+    want_title = {"template": TEMPLATE_TITLE,
+                  "estate": projects_cfg(resolver).get("estate_title") if role == "estate" else None}.get(role) or \
+        (f"{display_name} — Workstreams" if display_name else None)
     cells["title"] = "pass" if not want_title or spec.get("title") == want_title else "fail"
     if cells["title"] == "fail":
         notes.append(f"title {spec.get('title')!r} != {want_title!r}")
@@ -1502,7 +1564,7 @@ def lint(capture: dict, *, role: str = "org", owner: str | None = None, display_
 
 
 # =====================================================================================================
-# estate-plan (§13.10): the cross-org personal Estate project on CompleteDotTech
+# estate-plan (§13.10): the cross-org personal Estate project on the operator's own account (`operator.login`)
 # =====================================================================================================
 def estate_orgs(resolver: Resolver, *, allow_t3: bool = False, refusals: list[str] | None = None) -> list[dict]:
     """In-scope orgs for the Estate's Org field: T1, T2, T2-R (T3 only after sign-off; never HOLD or excluded).
@@ -1632,7 +1694,8 @@ def estate_plan(resolver: Resolver, *, source: str | None = None, copied: dict |
     extra = [org_field, *ESTATE_FIELDS[1:]]
     plan = copy_plan("@me", role="estate", source=source, copied=copied, resolver=resolver, approval_id=approval_id,
                      user_id=user_id, extra_fields=extra, views=[dict(v) for v in ESTATE_VIEWS], reviewed=reviewed,
-                     display_name="CompleteTech Estate", status_update=False, allow_t3=allow_t3)
+                     display_name=_need(projects_cfg(resolver), "estate_name", "the Estate board's display name"),
+                     status_update=False, allow_t3=allow_t3)
     plan["action"] = "estate-plan"
     plan["orgs"] = orgs
     plan["logs"] = list(dict.fromkeys([*plan.get("logs", []), *t3_refusals]))
@@ -1642,7 +1705,7 @@ def estate_plan(resolver: Resolver, *, source: str | None = None, copied: dict |
     plan["pending"].append({"why": "add each labelled Initiative or Feature with `gh project item-add N --owner @me --url URL` "
                                    "(test cross-org adding with one item first, T4)"})
     if copied is not None:
-        url = project_url("@me", plan.get("number"))
+        url = project_url("@me", plan.get("number"), operator(resolver).get("login") or "")
         plan["jobs"].append(_browser(f"p{PHASE}-me-project-{plan.get('number')}-private", "@me", f"{url}/settings",
                                      [f"Open {url}/settings.", "Check that 'Visibility' reads Private; change nothing.",
                                       "Screenshot it into state/screens/projects/me/."], "project-check",
@@ -1666,13 +1729,14 @@ ACTIONS = ("capture-query", "normalize", "copy-plan", "readme", "lint", "estate-
 def register(sub) -> None:
     s = sub.add_parser("project", help="GitHub Projects: capture query, template spec, copy plans, README, lint, Estate")
     s.add_argument("action", choices=ACTIONS)
-    s.add_argument("--owner", help="project owner (org login, CompleteDotTech or @me)")
+    s.add_argument("--owner", help="project owner (org login, the operator's own login, or @me)")
     s.add_argument("--number", type=int, help="project number")
     s.add_argument("--capture", help="captured GraphQL JSON (normalize, lint, readme)")
     s.add_argument("--rest-fields", help="REST fields JSON (integer field ids) for normalize")
     s.add_argument("--copied", help="copy-plan/estate-plan: capture (or normalized spec) of the board after the copy")
     s.add_argument("--target", help="copy-plan: target org (or @me)")
-    s.add_argument("--source", help="copy-plan: OWNER/NUMBER to copy (the CompleteTech-LLC template; fallback Pick-Your-AI/1)")
+    s.add_argument("--source", help="copy-plan: OWNER/NUMBER to copy (the operator's template board; fallback "
+                                    "operator.projects.reference)")
     s.add_argument("--role", choices=("org", "template", "estate"), default="org")
     s.add_argument("--title")
     s.add_argument("--display-name", help="org display name (default: brand.yaml)")
@@ -1738,8 +1802,10 @@ def cmd_project(args):
     if act == "capture-query":
         if not args.owner or not args.number:
             raise ShowcaseError("capture-query needs --owner and --number", log="usage")
-        owner = args.owner if is_user(args.owner) else _resolver(args).canonical(args.owner)  # a renamed org (CQ-03)
-        res = capture_query(owner, args.number)
+        cr = _resolver(args)
+        op = operator(cr)
+        owner = args.owner if is_user(args.owner, op.get("login") or "") else cr.canonical(args.owner)  # CQ-03
+        res = capture_query(owner, args.number, op=op)
         if owner != args.owner:
             res["logs"] = [*res["logs"], f"org-alias:{args.owner}->{owner}"]
         return res, OK
@@ -1769,8 +1835,9 @@ def cmd_project(args):
         owner = args.owner or args.target
         if not owner:
             raise ShowcaseError("readme needs --owner", log="usage")
-        estate = args.role == "estate" or is_user(owner)
-        name = args.display_name or ("CompleteTech Estate" if estate else brand_display_name(r, owner))
+        estate = args.role == "estate" or is_user(owner, operator(r).get("login") or "")
+        name = args.display_name or (_need(projects_cfg(r), "estate_name", "the Estate board's display name")
+                                     if estate else brand_display_name(r, owner))
         if not name:
             raise NeedsInput("display-name", f"{owner} has no display_name in references/brand.yaml (pass --display-name)")
         canon = r.canonical(owner) if not estate else "@me"
@@ -1778,7 +1845,7 @@ def cmd_project(args):
         repos, gate = _readme_repos(spec, canon, "estate" if estate else "org", r, _parse_repos_arg(args.repos))
         text, logs = readme(canon, name, spec.get("number"), view_numbers(spec),
                             fields=doc_fields(spec, estate=estate), repositories=repos,
-                            out_of_scope=args.out_of_scope, reviewed=args.reviewed, estate=estate)
+                            out_of_scope=args.out_of_scope, reviewed=args.reviewed, estate=estate, op=operator(r))
         logs = gate + logs
         if args.out:
             Path(args.out).write_text(text, encoding="utf-8")
