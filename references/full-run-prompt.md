@@ -19,8 +19,11 @@ pending even when a command could accept their login.
    Set `<ESTATE_ROOT>` only to your verified private bundle (layout: `examples/estate/`), and never commit it.
    Empty selects an isolated scratch estate with no registry or approvals. A missing registry does not by
    itself require brand onboarding. These selections never cancel known exclusions, holds or consent gates.
-3. Adjust the options and replace the single final TARGET line. Existing scoped authorization is reusable;
-   STOP 1 asks only for an unresolved gate, and STOP 2 is the existing per-family pilot gate.
+3. Adjust the options, including BRAND_IDENTITY (family, label, display name, tier, footer and authorized
+   logo), BRAND_CONTACT (proposed public contact/profile inputs) and BRAND_COLORS (a proposed dark palette),
+   then replace the single final TARGET line. TARGET stays last inside the copied prompt, after every rule
+   and option. Existing scoped authorization is reusable; STOP 1 asks only for an unresolved gate, and
+   STOP 2 is the existing per-family pilot gate.
 4. Send it to the agent. `SKILL.md` and the referenced command contracts remain authoritative if they change.
 
 ````markdown
@@ -150,9 +153,17 @@ Use only an explicitly selected applicable bundle or sign-off file, and stop if 
   without job/record sinks or identity claims in the writer handoff. Account-chart capture remains available;
   its unknown **organization lanes** are neutral, but its unknown **account header** uses CompleteTech defaults.
   The account itself therefore also needs its own verified row before chart rendering.
-- At STOP 1, obtain the owner-supplied family name/label, dark canvas, ink and accent hex, tier, display name,
-  `footer yes|no|hold`, and any authorized mark. Existing configured-estate identities may use their verified
-  rows. For an outside owner, first select a config the operator owns. If BRAND_CONFIG is empty or names the
+- At STOP 1, take the new-row inputs from BRAND_IDENTITY and BRAND_COLORS, asking only for missing facts or
+  unresolved approval. Never default another owner's family label, display name, tier, footer or mark to
+  CompleteTech's. The shown colours are a proposal: if those defaults are used, show them and obtain or reuse
+  the operator's explicit confirmation for this owner before the onboarding dry run. Existing verified rows
+  remain authoritative; these options do not recolour or replace an existing family, org row or mark. If an
+  explicitly requested value conflicts, report the mismatch and hold that change. Do not invent a new owner,
+  alias or family assignment to evade the existing-row protections.
+  LOGO is an absolute path to a valid PNG the operator is authorized to use. The onboarding CLI copies it
+  unchanged; never download, crop or recolour it. `none` requests no new mark and never removes an existing
+  one. For a new row it leaves only the documented repository banner/card wordmark fallback, not an intro mark.
+  For an outside owner, first select a config the operator owns. If BRAND_CONFIG is empty or names the
   shared installed config, create a fresh private copy before either an onboarding dry run or `--write`:
   ```python
   OWNED_PACKAGE = Path(tempfile.mkdtemp(prefix="operator-config-", dir=WS))
@@ -174,7 +185,38 @@ Use only an explicitly selected applicable bundle or sign-off file, and stop if 
   `S brand add-org --family FAMILY --org OWNER --tier TIER --display-name DISPLAY_NAME --footer FOOTER` for an
   existing authorized family. Add `--mark MARK` only for a verified authorized PNG. Check the returned config,
   lock and proposed rows, then repeat with `--write` only after approval. Never write the shared config.
+  For `brand add-family`, add `--icon-ink ICON_INK` or `--icon-spark ICON_SPARK` only when explicitly supplied;
+  `derived` means omit that argument. The CLI validates them against the derived icon-card ground, as well
+  as the canvas/text and chip contrast checks. These flags do not change an existing family's palette.
   Rebuild CONFIG, BASE, S and every R whenever the config or skill path changes.
+- BRAND_CONTACT contains proposed public inputs for this owner, not CLI flags, captured facts or permission
+  to publish. `none` leaves an input unspecified; never fill it with another owner's values. A supplied public
+  email requires explicit approval to expose it, in addition to the applicable writer approval. Report conflicts
+  with verified rows/captures instead of silently replacing them or editing a generated payload.
+  Use only the input mappings and supported paths in `references/org.md` and `references/profile-readmes.md`:
+  a verified website maps to the selected registry's `orgs.<ORG>.profile.blog` for an applicable org About
+  proposal or website badge; email/location use that same org profile's `email`/`location` fields. The fixed
+  supported personal profile instead uses top-level registry `profile.blog`, `profile.email` and
+  `profile.socials`. Only that personal renderer consumes arbitrary supplied social URLs: its five-badge cap
+  includes website and email, while remaining social URLs stay Contact links. Do not promise arbitrary
+  social badges/links for a generic org profile. Location remains a scoped About proposal.
+  Personal `social_accounts` inputs are add-only, at most four,
+  and remain pending for the separately approved configured-account procedure in `references/org.md`.
+  These options do not create a new CLI route or a user-about/social-account writer job.
+  Inspect effective contact fields before generating any public surface: omitted About or fixed-personal
+  email inputs can still select an installed fallback, and the personal renderer does not enforce the org
+  email approval gate. Use a fallback only if separately verified and explicitly approved for this owner;
+  otherwise hold the affected output. `none` is not a runtime suppression switch. Never edit generated
+  payloads or READMEs to pretend the CLI supports omission or a different actor.
+  **Section 6's restrictions still apply:** external About, pin, personal-profile and personal-account mutation
+  jobs remain withheld; diagnostic stdout must not become writer input. An owned brand/contact config does
+  not remove the fixed About handle, installed verification policy or fixed personal actor. Supported external
+  organization profile inputs may proceed only through that section's registry, identity and ownership gates.
+  TAGLINE may supply the supported `intro --tagline` input or owned brand `orgs.<OWNER>.profile.tagline`
+  after the remaining intro identity/mark requirements are met. BRAND_TOPIC is a proposed
+  `orgs.<OWNER>.brand_topic` in the owned brand config; until it is explicitly approved and configured,
+  preserve `needs-input:brand-topic`. Do not invent onboarding flags
+  or treat any proposed contact/topic change as already applied to GitHub.
 - A new family is `measured: false`: `--allow-unmeasured` on commands that support it needs explicit approval
   and produces review renders. A missing mark may use that family's wordmark for a repository banner/card;
   it does not supply an intro mark. Review all effective identity fields, legal text and footer scope before
@@ -554,13 +596,34 @@ print(f"keyed {src} -> {out} box={box} ground=#{''.join(f'{v:02X}' for v in grou
 - IMAGE_MODEL: default (pin only a named model; one per family)
 - PILOT_APPROVED: no (yes only for already approved golden references of this family)
 - FAN_OUT: no (enterprise only; each member still passes its own eligibility gates)
+- BRAND_IDENTITY (operator-set; new rows only, never replacement or reclassification):
+  - FAMILY: ask (lowercase slug, such as northwind-new)
+  - LABEL: ask (company label on banners and cards)
+  - DISPLAY_NAME: ask (verified org display name)
+  - TIER: ask (T1, T1-user, T2, T2-R or T3; consent and eligibility gates remain)
+  - FOOTER: ask (yes, no or hold; yes requires verified applicability of the configured footer)
+  - LOGO: none (absolute authorized PNG path, or no new mark; never removes an existing mark)
+- BRAND_CONTACT (operator-set proposals; none means unspecified, never another owner's values):
+  - WEBSITE: none (verified https URL; only supported About/profile paths)
+  - SOCIALS: none (up to four owner-supplied public profile URLs)
+  - EMAIL: none (public contact; explicit approval required before exposure)
+  - LOCATION: none (verified public About/profile input)
+  - TAGLINE: none (one line; remaining intro identity and mark inputs still required)
+  - BRAND_TOPIC: none (owner-approved topic for the owned config; never another owner's affiliation)
+- BRAND_COLORS (operator-set; shown CompleteTech defaults require explicit confirmation for a new family;
+  never recolour an existing row):
+  - CANVAS: #0F172A (six-digit hex; dark, decision 21)
+  - INK: #F1F5F9 (six-digit hex; at least 4.5:1 against CANVAS)
+  - ACCENT: #00A7FD (six-digit hex; the CLI derives and checks a 4.5:1 chip foreground)
+  - ICON_INK: derived (optional six-digit hex; checked against the derived icon-card ground)
+  - ICON_SPARK: derived (optional six-digit hex; checked against the derived icon-card ground)
 
 TARGET: <OWNER/REPO | ORG | user:LOGIN | enterprise:SLUG>
 ````
 
 ## Verification boundary
 
-Checked offline on 2026-11-18 with Python 3.12 on Linux, using synthetic Northwind inputs, blocked sockets
+Core workflow baseline checked offline on 2026-11-18 with Python 3.12 on Linux, using synthetic Northwind inputs, blocked sockets
 and a blocked `gh` executable: 23 package unittests, package validation, 20 focused existing regressions and
 28 bounded CLI invocations passed their expected outcomes. All four embedded Python blocks parsed. Checks
 included refusal and pending-input exits, not just exit-0 output:
