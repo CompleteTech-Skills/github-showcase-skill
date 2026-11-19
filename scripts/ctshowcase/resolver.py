@@ -309,13 +309,17 @@ class Resolver:
         return st
 
     def family_hold(self, login: str) -> bool:
+        """Read policy independently of artwork readiness, retaining every applicable alias row."""
         if not self.brand:
             return False
-        key = self.brand_key(login) or login
-        try:
-            return bool(self.brand.style(key).get("hold"))
-        except Exception:  # an unknown family is not a hold
-            return False
+        names = {alias.casefold() for alias in self.aliases(login)}
+        rows = [row for owner, row in self.brand.raw.get("orgs", {}).items() if owner.casefold() in names]
+        if not rows:
+            rows = [self.brand.org(login)]
+        families = self.brand.raw.get("families", {})
+        default_hold = self.brand.raw.get("defaults", {}).get("hold", False)
+        return any(bool((families.get(row.get("family", "completetech")) or {}).get("hold", default_hold))
+                   for row in rows if row.get("family", "completetech") in families)
 
     # -- approvals --------------------------------------------------------------------------------------
     def approved(self, action: str, owner: str, name: str = "*") -> bool:
