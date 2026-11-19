@@ -32,6 +32,6 @@ jobs:
         run: python scripts/showcase.py fonts --check
       - name: Run the test suite
         # Keep each file together; run every collected test with two local workers.
-        run: python -m pytest -q -n 2 --dist loadfile --max-worker-restart 0
+        run: python -m pytest -p scripts.pytest_worker_guard -q -n 2 --dist loadfile --max-worker-restart 0
       - name: Run quality validation
         run: python scripts/validate_quality.py

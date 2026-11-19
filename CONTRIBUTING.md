@@ -28,10 +28,15 @@ Use synthetic fixtures and new output paths instead of overwriting committed pre
 The full gate for this repository adds the test suite and the showcase quality gates to the package baseline:
 
 ```bash
-python -m pip install -r requirements.txt ruff==0.17.2 pytest==9.1.1 jsonschema==4.25.1
+python -m pip install -r requirements.txt ruff==0.17.2 pytest==9.1.1 pytest-xdist==3.8.0 execnet==2.1.2 jsonschema==4.25.1
 python -m pytest -q
 python scripts/validate_quality.py
 ```
+
+CI runs the same complete suite with two local workers, keeping each file together:
+`python -m pytest -p scripts.pytest_worker_guard -q -n 2 --dist loadfile --max-worker-restart 0`.
+The explicit worker guard fails the run if a worker exits abnormally, including after
+its final test. It does not retry, filter or suppress failing tests.
 
 - **Standard data** lives in `references/brand.yaml` and `references/standard/`. Change a rule there, not in code, then regenerate the stdlib lock copy with `python scripts/showcase.py config --write-lock` (the quality gate checks that it is in sync).
 - **Rules a user decision settled** (dark-only art, banner first, the exact footer) change only after the user changes the decision; see [references/decisions.md](references/decisions.md).
