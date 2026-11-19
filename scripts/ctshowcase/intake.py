@@ -18,7 +18,6 @@ from pathlib import Path
 from . import STANDARD
 from .errors import NeedsInput, Refused, ShowcaseError
 
-TEMPLATE_REPO = "CompleteTech-LLC/completetech-repo-template"
 # files the template owns: a repository born from it keeps them byte-identical until a bump PR updates them
 TEMPLATE_MANAGED = (".github/workflows/showcase.yml", ".github/showcase/LICENSE-POLICY.md", ".editorconfig",
                     ".gitattributes")
@@ -192,7 +191,18 @@ def name_ok(name: str) -> bool:
     return not ("." in name and not re.search(n["n1_dot_suffix"], name))
 
 
-def new_plan(brand, slug: str, type_: str, *, template: str = TEMPLATE_REPO, description: str = "",
+def default_template(brand, owner: str) -> str:
+    """The repository template for a new repository of `owner`: the selected config's `operator.repo_template`, for an
+    owner that has a row in it. An owner with no row, or a config that names no template, is
+    `needs-input:template` (pass --template OWNER/REPO): never another operator's template."""
+    tpl = brand.operator().get("repo_template")
+    if not tpl or not brand.org(owner).get("known"):
+        raise NeedsInput("template", f"{owner}: no repository template is configured for this owner; pass "
+                                     "--template OWNER/REPO or set operator.repo_template in the brand config")
+    return tpl
+
+
+def new_plan(brand, slug: str, type_: str, *, template: str | None = None, description: str = "",
              resolver=None, approval_id: str | None = None) -> dict:
     """`new OWNER/NAME --type T`: the create job (from the template, private), then `adopt` on the planned repository."""
     from .context import RepoContext
@@ -211,6 +221,7 @@ def new_plan(brand, slug: str, type_: str, *, template: str = TEMPLATE_REPO, des
         raise ShowcaseError(f"--type {type_!r} is not a §5.4 type", log="usage")
     if not name_ok(name):
         raise ShowcaseError(f"{name} fails the naming rules N1-N4 (lowercase kebab-case, no filler suffix)", log="usage")
+    template = template or default_template(brand, owner)
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+", template):
         raise ShowcaseError("--template must be OWNER/REPO", log="usage")
     full = f"{resolver.canonical(owner) if resolver else owner}/{name}"
@@ -218,7 +229,7 @@ def new_plan(brand, slug: str, type_: str, *, template: str = TEMPLATE_REPO, des
     if description:
         argv += ["--description", description]
     create = _job(_jid("p3", "create", full.replace("/", "__")), argv, full,
-                  "Create from the CompleteTech template, private (OPS-06). Push `main` first; never change visibility.",
+                  f"Create from the template {template}, private (OPS-06). Push `main` first; never change visibility.",
                   approval_id, kind="create-repo")
     meta = normalize({"owner": owner, "repo": name, "visibility": "private", "default_branch": "main",
                       "description": description, "topics": [], "is_template": False, "fork": False})

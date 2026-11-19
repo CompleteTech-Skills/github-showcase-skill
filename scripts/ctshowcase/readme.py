@@ -137,10 +137,10 @@ def split_sections(text: str) -> tuple[str, list[tuple[str, str]]]:
 # ------------------------------------------------------------------------------------------------
 def nav_line(ctx: RepoContext) -> str:
     org, owner = ctx.org, ctx.brand.resolver().canonical(ctx.owner)  # links name the org's current login (CQ-03)
-    if ctx.same_owner("CompleteTech-Skills") and ctx.det["type"] == "agent-skills":
-        line = ("**CompleteTech LLC Skills** · [Start here](ONBOARDING.md) · [Agent instructions](SKILL.md) · "
-                "[Skill library](https://github.com/CompleteTech-Skills/agentic-services-orchestrator-skill/blob/main/"
-                "references/skill-family.md) · [Contributing](CONTRIBUTING.md)")
+    lib = ctx.org.get("skill_library") if ctx.org.get("known") else None
+    if lib and ctx.det["type"] == "agent-skills":  # the org row's `skill_library` names its skills family
+        line = (f"**{lib['label']}** · [Start here](ONBOARDING.md) · [Agent instructions](SKILL.md) · "
+                f"[Skill library]({lib['catalog_url']}) · [Contributing](CONTRIBUTING.md)")
         return line + (" · Internal" if not ctx.public else "")
     f = ctx.facts
     contrib = "CONTRIBUTING.md" if f.exists("CONTRIBUTING.md") else f"https://github.com/{owner}/.github/blob/main/CONTRIBUTING.md"
@@ -564,9 +564,11 @@ def section_facts(ctx: RepoContext, h2: str) -> str | None:
         if hp and ctx.meta.get("homepage_status") == 200:
             return f"**[{re.sub(r'^https?://', '', hp).rstrip('/')}]({hp})**"
     if h2 == "Ownership":
-        if ctx.org.get("family") not in (None, "completetech"):
-            return f"Organization: {ctx.owner}"
-        return f"Owner: @CompleteDotTech · Organization: {ctx.owner}"
+        # the family's `owner_login` (the account that owns the family's orgs); none: the organization alone
+        fam = (ctx.brand.raw.get("families") or {}).get(ctx.org.get("family")) or {}
+        if ctx.org.get("known") and fam.get("owner_login"):
+            return f"Owner: @{fam['owner_login']} · Organization: {ctx.owner}"
+        return f"Organization: {ctx.owner}"
     if h2 == "Files" and ctx.det["variant"] == "J":
         rows = [("profile/README.md", f"Organization profile shown at github.com/{ctx.owner}")]
         rows = [r for r in rows if f.exists(r[0])]
@@ -1398,7 +1400,17 @@ def license_block(ctx: RepoContext, text: str) -> str:
     return text[:h.start()] + f"## {lic[0]}\n" + h.group(1) + text[i:] if h else text
 
 
-TEMPLATE_H1 = "CompleteTech Repo Template"
+def template_titles(brand) -> set[str]:
+    """The H1 of the operator's repository template (`operator.repo_template_title`): a README still carrying it is
+    the template's own title, safe to replace. None configured: no title is treated as the template's."""
+    title = (brand.operator() if brand is not None else {}).get("repo_template_title")
+    return {title} if title else set()
+
+
+def template_owner(brand) -> str | None:
+    """The owner of the operator's repository template (`operator.repo_template`), or None when none is configured."""
+    tpl = (brand.operator() if brand is not None else {}).get("repo_template") or ""
+    return tpl.split("/", 1)[0] or None
 PRISTINE = re.compile(r"<!-- showcase:template-body:pristine(?: sha256=([0-9a-f]{64}))? -->(?:\r\n|\r|\n)?")
 
 
@@ -1571,7 +1583,7 @@ def bootstrap(ctx: RepoContext, text: str, *, already_normalized: bool = False) 
     if region is not None:
         header_end, markers, old_title = region
         auto = cased_title(ctx.repo, ctx.meta.get("description") or "")
-        if old_title is None or old_title.strip() in (TEMPLATE_H1, auto, slug_title(ctx.repo)):
+        if old_title is None or old_title.strip() in (*template_titles(ctx.brand), auto, slug_title(ctx.repo)):
             # Carry an authored tagline forward under the same rule as an in-place refresh.
             if variant == "J" and _badge_blocks_need_in_place_refresh(text, markers):
                 return header_only(ctx, text, already_normalized=True)
@@ -1586,8 +1598,9 @@ def bootstrap(ctx: RepoContext, text: str, *, already_normalized: bool = False) 
 def bootstrap_contributing(ctx: RepoContext, text: str) -> str:
     """Point the template's own `.github` guide links at this org. Only links to the template owner's `.github` (any
     of its logins) change; a link to another org's or an upstream's guide or security policy stays as written."""
-    from .intake import TEMPLATE_REPO
-    tpl = TEMPLATE_REPO.split("/")[0]
+    tpl = template_owner(getattr(ctx, "brand", None))
+    if not tpl:  # no repository template configured: no link is the template's to repoint
+        return text
     try:
         logins = {x.lower() for x in ctx.brand.resolver().aliases(tpl)}
     except AttributeError:  # a context without a brand: the template login alone

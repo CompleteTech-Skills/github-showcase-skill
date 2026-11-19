@@ -59,6 +59,13 @@ attribution:
   install_url: https://github.com/CompleteTech-Skills/github-showcase-skill#quick-start
   topic: github-showcase-skill
 
+# The operator whose estate this config describes: CompleteTech's own. Another operator's config replaces these
+# values or leaves the block out; nothing here is used for an owner that has no row below.
+operator:
+  login: CompleteDotTech                                       # the operator's own user account
+  repo_template: CompleteTech-LLC/completetech-repo-template   # `new OWNER/NAME` default --template
+  repo_template_title: CompleteTech Repo Template              # the template README's H1, replaced on bootstrap
+
 fonts:
   poppins-regular: Poppins-Regular.ttf
   poppins-medium: Poppins-Medium.ttf
@@ -224,6 +231,7 @@ families:
     identity_pending: true  # Owner-supplied palette and mark are not available; never inherit CompleteTech art.
     company_label: TicketStub
   completetech:
+    owner_login: CompleteDotTech   # README Ownership line: "Owner: @CompleteDotTech"
     measured: true
   ai-ascension:
     badge_brand: "F2B75C"
@@ -431,6 +439,9 @@ orgs:
     footer: true
     flagship: true
   CompleteTech-Skills:
+    skill_library:   # variant A nav line and the R9 family-logo check for agent-skills repositories
+      label: CompleteTech LLC Skills
+      catalog_url: https://github.com/CompleteTech-Skills/agentic-services-orchestrator-skill/blob/main/references/skill-family.md
     family: completetech
     license_wording: "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project."
     private_license_wording: "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved."

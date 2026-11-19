@@ -111,7 +111,7 @@ def row(ctx: RepoContext) -> dict:
         cells["R7"] = "hold"  # T3: no README change before co-owner sign-off (lint readme refuses)
     lic = ctx.meta.get("license")
     cells["R8"] = "pass" if lic or not ctx.public else "warn"
-    if ctx.same_owner("CompleteTech-Skills") and ctx.det["type"] == "agent-skills":
+    if ctx.org.get("known") and ctx.org.get("skill_library") and ctx.det["type"] == "agent-skills":
         if rd:
             ok = all((rd / p).is_file() and hashlib.sha256((rd / p).read_bytes()).hexdigest() == h for p, h in LOGO_SHA.items())
             cells["R9"] = "pass" if ok else "fail"

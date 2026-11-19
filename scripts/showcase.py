@@ -1676,7 +1676,8 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("slug", metavar="OWNER/NAME")
     s.add_argument("--type", dest="type", required=True, help="§5.4 type of the new repository")
     s.add_argument("--description", help="the one-sentence description (§4.1), if already written")
-    s.add_argument("--template", default="CompleteTech-LLC/completetech-repo-template", help="template OWNER/REPO")
+    s.add_argument("--template", help="template OWNER/REPO (default: the brand config's operator.repo_template, for "
+                                      "an owner with a row; otherwise needs-input:template)")
     s.add_argument("--records", help="append change records (JSON lines)")
     s.add_argument("--jobs", help="append the scripts/writer.py jobs (JSON lines)")
     s.add_argument("--approval-id", help="approval id stamped on every job (create-repo)")

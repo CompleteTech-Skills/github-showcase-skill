@@ -239,12 +239,25 @@ def _same_login(a, b) -> bool:
     return bool(a and b) and str(a).lower() == str(b).lower()
 
 
-def variant_for(type_: str, meta: dict, same_owner=None) -> str:
+def _skill_library_owner(owner, same) -> bool:
+    """Whether the default config's row for `owner` carries `skill_library` (callers without a selected config)."""
+    from .config import load_brand
+    try:
+        orgs = load_brand().raw.get("orgs") or {}
+    except Exception:  # noqa: BLE001 - no readable config: no skills-library org
+        return False
+    return any((row or {}).get("skill_library") and same(owner, key) for key, row in orgs.items())
+
+
+def variant_for(type_: str, meta: dict, same_owner=None, skill_library: bool | None = None) -> str:
     """README variant for the type. `same_owner(a, b)` compares org logins (RepoContext passes the shared resolver's,
-    CQ-03); without it the compare is case-insensitive, as GitHub logins are."""
+    CQ-03); without it the compare is case-insensitive, as GitHub logins are. `skill_library` says whether the owner's
+    org row carries `skill_library` (RepoContext passes it from the selected config)."""
     row = standard("types")["types"][type_]
     same = same_owner or _same_login
-    if type_ == "agent-skills" and not same(meta.get("owner"), "CompleteTech-Skills"):
+    if skill_library is None and type_ == "agent-skills":
+        skill_library = _skill_library_owner(meta.get("owner"), same)
+    if type_ == "agent-skills" and not skill_library:
         return row.get("variant_elsewhere", "C")
     if meta.get("visibility") == "private" and row.get("variant_private"):
         return row["variant_private"]
@@ -256,7 +269,7 @@ def card_category(type_: str) -> str | None:
 
 
 def detect(meta: dict, facts: RepoFacts | None = None, override: dict | None = None, type_override: str | None = None,
-           same_owner=None) -> dict:
+           same_owner=None, skill_library: bool | None = None) -> dict:
     facts = facts or RepoFacts(meta)
     type_override = type_override or (override or {}).get("type")
     if type_override:
@@ -266,7 +279,7 @@ def detect(meta: dict, facts: RepoFacts | None = None, override: dict | None = N
         type_, rule = type_override, 0
     else:
         type_, rule = detect_type(meta, facts, same_owner)
-    variant = (override or {}).get("variant") or variant_for(type_, meta, same_owner)
+    variant = (override or {}).get("variant") or variant_for(type_, meta, same_owner, skill_library)
     out = {"type": type_, "rule": rule, "variant": variant, "category": card_category(type_)}
     reason = None if type_override else type_suggestion(rule, facts)
     if reason:

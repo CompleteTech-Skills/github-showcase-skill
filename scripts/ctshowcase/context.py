@@ -61,7 +61,8 @@ class RepoContext:
         self.style = ({"name": family, "hold": True, "measured": False} if for_coverage and self.identity_pending
                       else brand.style(self.owner, repo=self.repo))
         self.det = detect(meta if self.owner == meta.get("owner") else dict(meta, owner=self.owner), self.facts,
-                          self.override, type_override, same_owner=self.same_owner)
+                          self.override, type_override, same_owner=self.same_owner,
+                          skill_library=bool(self.org.get("known") and self.org.get("skill_library")))
         self.logs: list[str] = []
         if self.identity_pending:
             self.log("needs-input:brand-identity")

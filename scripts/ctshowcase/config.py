@@ -132,6 +132,11 @@ class Brand:
             signoff.require(owner, repo, self.aliases(owner))
         return status
 
+    def operator(self) -> dict:
+        """The operator whose estate this config describes (`operator:`): its user login, repository template and
+        template title. A config without the block names no operator, so nothing defaults to another one's."""
+        return dict(self.raw.get("operator") or {})
+
     def org(self, owner: str) -> dict:
         orgs = self.raw.get("orgs", {})
         if owner in orgs:

@@ -254,7 +254,8 @@
    }
   },
   "completetech": {
-   "measured": true
+   "measured": true,
+   "owner_login": "CompleteDotTech"
   },
   "jev-engineering": {
    "badge_accent": "8B5CF6",
@@ -597,6 +598,11 @@
   "Vue": "#41B883",
   "default": "#94A3B8"
  },
+ "operator": {
+  "login": "CompleteDotTech",
+  "repo_template": "CompleteTech-LLC/completetech-repo-template",
+  "repo_template_title": "CompleteTech Repo Template"
+ },
  "orgs": {
   "AI-Ascension": {
    "banner": "keep-existing",
@@ -924,6 +930,10 @@
    "readme_preserve": [
     "creative-studio"
    ],
+   "skill_library": {
+    "catalog_url": "https://github.com/CompleteTech-Skills/agentic-services-orchestrator-skill/blob/main/references/skill-family.md",
+    "label": "CompleteTech LLC Skills"
+   },
    "skills_license_wording": "CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project.",
    "tier": "T1"
   },

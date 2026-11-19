@@ -1090,7 +1090,7 @@ def test_stale_live_readme_plan_cannot_clear_concurrent_staged_provenance(tmp_pa
 def test_staged_bootstrap_preserves_changed_contributing_source(tmp_path, monkeypatch, capsys):
     import showcase
     from ctshowcase import readme
-    from ctshowcase.intake import TEMPLATE_REPO
+    from ctshowcase.config import load_brand
 
     capture = tmp_path / "capture.json"
     capture.write_text(json.dumps(meta_dict()), encoding="utf-8")
@@ -1100,7 +1100,7 @@ def test_staged_bootstrap_preserves_changed_contributing_source(tmp_path, monkey
     original = ("# Template\n\n" + readme.pristine_block("## Usage\n\nTemplate body.") + "\n").encode()
     readme_path.write_bytes(original)
     contributing = root / "CONTRIBUTING.md"
-    owner = TEMPLATE_REPO.split("/", 1)[0]
+    owner = readme.template_owner(load_brand())
     prior = f"See https://github.com/{owner}/.github/blob/main/CONTRIBUTING.md.\n".encode()
     contributing.write_bytes(prior)
     authored = prior + b"A new local contribution note.\r\n"

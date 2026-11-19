@@ -202,7 +202,7 @@ def test_large_profile_without_tagline_keeps_authored_badges(make_ctx, tmp_path)
 
 def test_bootstrap_keeps_authored_badges_outside_pristine_body(make_ctx, tmp_path):
     ctx = profile_context(make_ctx, tmp_path)
-    text = readme.header(ctx, title=readme.TEMPLATE_H1) + "\n\n" + readme.pristine_block("## About\n\nTemplate.")
+    text = readme.header(ctx, title=next(iter(readme.template_titles(ctx.brand)))) + "\n\n" + readme.pristine_block("## About\n\nTemplate.")
     authored = ('<img src="https://img.shields.io/badge/type-community-005ADD" alt="Community">\n'
                 '<img src="https://img.shields.io/badge/license-MIT-64748B" alt="MIT">')
     text = text.replace(badge_block(text), authored)
@@ -214,7 +214,7 @@ def test_bootstrap_keeps_authored_badges_outside_pristine_body(make_ctx, tmp_pat
 
 def test_bootstrap_keeps_duplicate_authored_badge_blocks(make_ctx, tmp_path):
     ctx = profile_context(make_ctx, tmp_path)
-    text = readme.header(ctx, title=readme.TEMPLATE_H1) + "\n\n" + readme.pristine_block("## About\n\nTemplate.")
+    text = readme.header(ctx, title=next(iter(readme.template_titles(ctx.brand)))) + "\n\n" + readme.pristine_block("## About\n\nTemplate.")
     first = "![Community](https://img.shields.io/badge/type-community-005ADD)"
     second = "![MIT](https://img.shields.io/badge/license-MIT-64748B)"
     blocks = readme.wrap("badges", first) + "\n\n" + readme.wrap("badges", second)
@@ -757,7 +757,7 @@ def test_header_keeps_same_line_authored_badge_markers(make_ctx, tmp_path):
     assert readme.header_only(ctx, row) == row
     assert readme.upgrade(ctx, row) == (row, [])
 
-    template = readme.header(ctx, title=readme.TEMPLATE_H1)
+    template = readme.header(ctx, title=next(iter(readme.template_titles(ctx.brand))))
     template += "\n\n" + readme.pristine_block("## About\n\nTemplate.")
     template = readme._sub_blocks(template, lambda m: row if m.group(1) == "badges" else m.group(0))
     assert row in readme.bootstrap(ctx, template)

@@ -235,6 +235,11 @@
     "identity_pending": {
      "type": "boolean",
      "description": "No approved palette and mark; renderers require owner-supplied brand identity."
+    },
+    "owner_login": {
+     "type": "string",
+     "pattern": "^[A-Za-z0-9][A-Za-z0-9-]*$",
+     "description": "The account that owns the family's organizations (README Ownership line); absent: the organization alone."
     }
    }
   },
@@ -345,6 +350,24 @@
     "skills_license_wording": {
      "type": "string",
      "description": "Explicit owner-supplied legal wording; absence never grants permission to infer legal claims."
+    },
+    "skill_library": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "label",
+      "catalog_url"
+     ],
+     "description": "This org publishes a skills family: agent-skills repositories get variant A, its nav line and the family-logo check.",
+     "properties": {
+      "label": {
+       "type": "string"
+      },
+      "catalog_url": {
+       "type": "string",
+       "pattern": "^https://"
+      }
+     }
     }
    }
   }
@@ -405,6 +428,24 @@
     "line_prefix",
     "line_suffix"
    ]
+  },
+  "operator": {
+   "type": "object",
+   "additionalProperties": false,
+   "description": "The operator whose estate this config describes. Absent: no operator defaults (needs-input).",
+   "properties": {
+    "login": {
+     "type": "string",
+     "pattern": "^[A-Za-z0-9][A-Za-z0-9-]*$"
+    },
+    "repo_template": {
+     "type": "string",
+     "pattern": "^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$"
+    },
+    "repo_template_title": {
+     "type": "string"
+    }
+   }
   },
   "attribution": {
    "type": "object",
