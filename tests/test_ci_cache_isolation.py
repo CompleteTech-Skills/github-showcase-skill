@@ -19,7 +19,7 @@ def test_children_keep_enabled_individual_caches_outside_collected_source(tmp_pa
     observations = tmp_path / "cache-observations"
     observations.mkdir()
     hook = (
-        "import hashlib, json, os\n"
+        "import hashlib, json, os, uuid\n"
         "from pathlib import Path\n"
         "def pytest_sessionstart(session):\n"
         "    config = session.config\n"
@@ -35,7 +35,7 @@ def test_children_keep_enabled_individual_caches_outside_collected_source(tmp_pa
         "        'cache_roundtrip': cache.get('synthetic/isolation-probe', False) is True,\n"
         "        'collect_only': bool(config.option.collectonly),\n"
         "    }\n"
-        f"    destination = Path({str(observations)!r}) / (str(os.getpid()) + '.json')\n"
+        f"    destination = Path({str(observations)!r}) / (uuid.uuid4().hex + '.json')\n"
         "    destination.write_text(json.dumps(record), encoding='utf-8')\n"
     )
     result = run_suite(source, hook=hook, parallel=parallel)
