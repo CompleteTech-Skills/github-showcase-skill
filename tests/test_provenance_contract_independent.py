@@ -73,12 +73,14 @@ class Sandbox:
             "  if argument not in ('-u','-B'): return False\n"
             " return False\n", encoding="utf-8")
         self.transport.write_text(
-            "import os,sys\n"
+            "import os,subprocess,sys\n"
             f"sys.path.insert(0,{str(guard)!r})\n"
             "from transport_policy import REAL_GIT as real_git,local_git\n"
             "name,argv = sys.argv[1],sys.argv[2:]\n"
             "allowed = local_git(argv)\n"
-            "if name == 'git' and allowed:\n os.execv(real_git,[real_git]+argv)\n"
+            # A Windows exec overlay does not give this wrapper Git's completed status, and CRT exec argument
+            # joining loses embedded spaces. Popen's list argv preserves quoting and run waits for the real result.
+            "if name == 'git' and allowed:\n sys.exit(subprocess.run([real_git]+argv,check=False).returncode)\n"
             f"with open({str(self.tripwire)!r},'a',encoding='utf-8') as f:\n"
             " f.write(name+' '+repr(argv)+'\\n')\n"
             "if name == 'gh' and os.environ.get('CONTRACT_GH_NOT_STARRED') == '1':\n"
@@ -117,7 +119,11 @@ class Sandbox:
             " def __init__(self,args,*a,**kw):\n"
             "  argv = list(args) if isinstance(args,(list,tuple)) else [str(args)]\n"
             "  executable = os.path.normcase(os.path.abspath(os.fsdecode(argv[0])))\n"
-            "  if executable != os.path.normcase(os.path.abspath(sys.executable)) or kw.get('shell') or kw.get('executable'):\n"
+            # The dispatcher must be able to wait for precisely the already-allowlisted local Git call, without
+            # redispatching itself. Every other executable/argument form still goes through the refusal path.
+            "  local = same_executable(argv[0],REAL_GIT) and local_git(argv[1:])\n"
+            "  if ((executable != os.path.normcase(os.path.abspath(sys.executable)) and not local)\n"
+            "      or kw.get('shell') or kw.get('executable')):\n"
             "   name = os.path.basename(os.fsdecode(argv[0])).lower()\n"
             "   for suffix in ('.exe','.cmd','.bat','.com'):\n"
             "    if name.endswith(suffix): name = name[:-len(suffix)]; break\n"
