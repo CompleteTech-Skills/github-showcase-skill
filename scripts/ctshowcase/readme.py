@@ -8,16 +8,19 @@ from __future__ import annotations
 import re
 from bisect import bisect_left, bisect_right
 from collections import Counter, defaultdict, deque
+from html import escape
 from pathlib import Path
-from urllib.parse import quote
+from posixpath import normpath
+from urllib.parse import quote, unquote, urlsplit
 
 from . import footer as footermod
 from . import tagline as taglinemod
 from .context import RepoContext
 from .detect import required_sections, standard
-from .errors import ConfigError, NeedsInput
+from .errors import ArtFail, ConfigError, NeedsInput
 from .mdcode import (  # noqa: F401  (code_spans: re-exported for callers)
-    MANAGED_BLOCK_PATTERN, after_line_end, code_block_spans, code_spans, find_blocks, html_block_spans, masked,
+    MANAGED_BLOCK_PATTERN, _image_entries, _image_entries_at, _outside_code, after_line_end, code_block_spans, code_spans, find_blocks,
+    html_block_spans, masked, top_level_heading_spans,
 )
 
 MARK = MANAGED_BLOCK_PATTERN
@@ -167,8 +170,92 @@ def nav_line(ctx: RepoContext) -> str:
     return line + (" · Internal" if not ctx.public else "")
 
 
+def personal_profile(ctx: RepoContext) -> bool:
+    """Use the same personal-profile exemption as banner generation (decision 15, CQ-03)."""
+    return ctx.personal_profile
+
+
+def personal_intro_applies(ctx: RepoContext) -> bool:
+    """The banner surface is exempt only because this is the personal profile, which opens with its intro instead."""
+    return ctx.art_status()["banner"] == "exempt:profile-readme"
+
+
+def hero_path(ctx: RepoContext) -> str:
+    return "assets/intro.svg" if personal_profile(ctx) else "docs/images/banner.png"
+
+
+def legacy_banner_html(ctx: RepoContext, repo: str | None = None) -> str:
+    """The exact previously generated body; a similar authored image is not ours to migrate."""
+    return f'<p align="center">\n  <img src="docs/images/banner.png" alt="{repo or ctx.repo} by {ctx.company}" width="100%">\n</p>'
+
+
+def personal_intro_html(ctx: RepoContext) -> str:
+    profile = ctx.org.get("profile") or {}
+    name = profile.get("name") or ctx.org.get("display_name")
+    if not ctx.org.get("known") or not (name or "").strip() or not (profile.get("eyebrow") or "").strip():
+        raise NeedsInput("intro-identity", "Configure the personal profile name and eyebrow in brand.yaml first.")
+    return f'<p align="center">\n  <img src="assets/intro.svg" alt="{escape(name, quote=True)}" width="100%">\n</p>'
+
+
+def personal_generated_hero(ctx: RepoContext, body: str) -> bool:
+    if body == legacy_banner_html(ctx) or not body.strip(" \t\n\r"):
+        return True
+    legacy = re.search(r' alt="([A-Za-z0-9-]+) by ', body)
+    if legacy and body == legacy_banner_html(ctx, legacy.group(1)) and ctx.same_owner(legacy.group(1)):
+        return True
+    try:
+        if body == personal_intro_html(ctx):
+            return True
+        if re.fullmatch(r'<p align="center">\n  <img src="assets/intro\.svg" alt="[^"\n]*" width="100%">\n</p>', body):
+            raise NeedsInput("intro-identity", "Cannot establish ownership of the existing intro hero.")
+        return False
+    except NeedsInput:
+        if "assets/intro.svg" in body:
+            raise  # this may be our generated hero; ownership is unresolved
+        return False
+
+
 def banner_html(ctx: RepoContext) -> str:
-    return (f'<p align="center">\n  <img src="docs/images/banner.png" alt="{ctx.repo} by {ctx.company}" width="100%">\n</p>')
+    if not personal_profile(ctx):
+        return legacy_banner_html(ctx)
+    body = personal_intro_html(ctx)
+    path = ctx.repo_dir / hero_path(ctx) if ctx.repo_dir is not None else None
+    if path is None or path.parent.is_symlink() or path.is_symlink() or not path.is_file():
+        raise NeedsInput("intro", "Generate the personal profile with intro --profile OWNER --out assets/intro.svg "
+                         "as a regular file in the checkout.")
+    # Matching the current default generator output establishes applicability, not asset rights.
+    # Explicit generator overrides cannot be inferred from an SVG and require separate review.
+    from . import intro, svglint
+    from .typeset import Fonts
+    try:
+        if path.resolve() != path.parent.parent.resolve() / "assets" / "intro.svg":
+            raise ValueError("intro is outside the checkout's assets directory")
+        raw = path.read_bytes()
+        if svglint.lint_bytes("intro", raw, str(path))["result"] != "PASS":
+            raise ValueError("invalid intro")
+        profile = ctx.org.get("profile") or {}
+        chips = []
+        for chip in profile.get("chips") or []:
+            kind, _, value = chip.partition(":")
+            if kind not in ("key", "attr") or not value:
+                raise ValueError("invalid chips")
+            chips.append((value, kind))
+        complete = ctx.org.get("family") == "completetech"
+        mark = (ctx.brand.mark_dark() or ctx.brand.dark_master()) if complete else ctx.brand.asset(ctx.org.get("mark"))
+        tagline = profile.get("tagline") or (ctx.brand.strings["tagline"] if complete else None)
+        if not mark or not tagline:
+            raise ValueError("missing profile facts")
+        name = profile.get("name") or ctx.org.get("display_name")
+        fonts = Fonts(ctx.brand)
+        variants = (False, True) if ctx.org.get("flagship") else (True,)
+        if not any(raw == intro.build(ctx.brand, fonts, owner=ctx.owner, name=name,
+                                      eyebrow=profile["eyebrow"], tagline=tagline, chips=chips,
+                                      mark_path=mark, height=height, static=static).encode()
+                   for height in (320, 360) for static in variants):
+            raise ValueError("intro does not match configured profile")
+    except (OSError, ValueError, KeyError, TypeError, ArtFail):
+        raise NeedsInput("intro", "Generate an applicable default profile intro with showcase.py first.") from None
+    return body
 
 
 def license_facts(ctx: RepoContext) -> tuple[str | None, bool]:
@@ -597,19 +684,39 @@ def callout(ctx) -> str | None:
 # ------------------------------------------------------------------------------------------------
 # Modes
 # ------------------------------------------------------------------------------------------------
-def scaffold(ctx: RepoContext, existing: str = "") -> str:
+def scaffold(ctx: RepoContext, existing: str = "", *, already_normalized: bool = False) -> str:
+    guard_credit_ownership(ctx.brand, existing)
     variant = ctx.det["variant"]
+    personal = personal_profile(ctx)
+    authored_prefix = ""
+    if personal:
+        normalized = existing if already_normalized else normalize_text(existing)
+        if variant in ("G", "H"):
+            return upgrade(ctx, normalized, already_normalized=True)[0]
+        markers = find_blocks(MARK, normalized)
+        managed = {marker.group(1) for marker in markers}
+        if {"banner", "nav"} <= managed or _personal_has_authored_hero(ctx, normalized, markers):
+            return header_only(ctx, existing, already_normalized=already_normalized, preserve_structure=True)
+        if "banner" in managed:
+            # Keep the complete authored format prefix beside the replacement hero.
+            # Moving its spaces/tabs onto the suffix could turn prose into indented code.
+            prefix = re.match(r"\ufeff[\ufeff \t]*", normalized)
+            authored_prefix = prefix.group(0) if prefix else ""
+            # Recognize blocks before the prefix removal can turn following spaces into indented code.
+            existing = _sub_blocks(normalized,
+                                   lambda marker: "" if marker.group(1) == "banner" else marker.group(0))
+            existing = existing[len(authored_prefix):]
     order = required_sections(ctx.det, meta=ctx.meta)
     parts = [header(ctx)]
     co = callout(ctx)
     if co:
         parts.append(co)
-    keep = [ln for ln in source_lines(existing) if ln.strip(" \t") and not ln.startswith("# ")]
+    keep = [ln for ln in source_lines(existing) if (personal or ln.strip(" \t")) and not ln.startswith("# ")]
     for h2, req in order:
         if h2 in ("License", "Licensing"):
             continue
         body = section_facts(ctx, h2)
-        if h2 == "About" and keep:
+        if h2 == "About" and any(ln.strip(" \t") for ln in keep):
             body = "\n".join(keep)
         if body:
             parts.append(f"## {h2}\n\n{body}")
@@ -620,7 +727,7 @@ def scaffold(ctx: RepoContext, existing: str = "") -> str:
         parts.append(f"## {lic[0]}\n\n{managed_license(lic[1])}")
     if footer_wanted(ctx):
         parts.append(footermod.block(ctx.brand))
-    return "\n\n".join(parts) + "\n"
+    return authored_prefix + "\n\n".join(parts) + "\n"
 
 
 HEADER_LINE = re.compile(
@@ -642,12 +749,28 @@ def _strip_markers(text: str, keep: dict[str, str] | None = None) -> tuple[str, 
     return "".join(out) + text[pos:], blocks
 
 
+def _badge_or_logo(source: str, *, personal: bool = False) -> bool:
+    if not personal:
+        return bool(re.search(r"logo", source, re.I) or "shields.io" in source
+                    or "badge.svg" in source or "docs/images/badges/" in source)
+    location = re.split(r"[?#]", source, maxsplit=1)[0]
+    try:
+        parsed = urlsplit(location)
+        local_badge = (not (parsed.scheme or parsed.netloc)
+                       and normpath(unquote(parsed.path)).startswith("docs/images/badges/"))
+    except ValueError:
+        local_badge = False
+    return bool(re.search(r"(?:^|[/_.-])logo(?:$|[/_.-])", location, re.I)
+                or re.match(r"https?://(?:img\.)?shields\.io/", location, re.I)
+                or re.fullmatch(r"https://github\.com/[^/]+/[^/]+/actions/workflows/[^/]+/badge\.svg", location, re.I)
+                or local_badge)
+
+
 def _leading_banner(pre: str) -> bool:
     """True when the README preamble opens with a third-party banner image (not ours, not a logo or badge)."""
     first_img = re.search(r"<(img|picture)\b[^>]*>|!\[[^\]]*\]\([^)]*\)", pre)
     return bool(first_img and "docs/images/banner.png" not in first_img.group(0)
-                and not re.search(r"logo", first_img.group(0), re.I)
-                and "shields.io" not in first_img.group(0) and "badge.svg" not in first_img.group(0)
+                and not _badge_or_logo(first_img.group(0))
                 and not pre[:first_img.start()].strip().replace("<p align=\"center\">", "").strip())
 
 
@@ -675,16 +798,107 @@ def fork_callout(ctx: RepoContext) -> str | None:
             "The upstream README follows unchanged; the upstream license applies.")
 
 
-def leading_banner_block(text: str) -> re.Match | None:
-    """Return the paired banner with no authored content preceding it."""
+def leading_banner_block(text: str, *, personal: bool = False) -> re.Match | None:
+    """Return the paired opening banner, allowing a retained personal format prefix."""
     first = next(iter(find_blocks(MARK, text)), None)
-    if (first is not None and first.group(1) == "banner" and not text[:first.start()].strip()
-            and _block_on_separate_lines(text, first)):
+    if first is None or first.group(1) != "banner":
+        return None
+    prefix = text[:first.start()]
+    if not prefix.strip() and _block_on_separate_lines(text, first):
         return first
+    if personal and prefix.startswith(BOM) and not prefix.strip(BOM + " \t\r\n"):
+        # Use the span found in the original context; the suffix must still start
+        # on another line before the G/H callout can be placed after this hero.
+        suffix = re.split(r"\r\n|\r|\n", text[first.end():], maxsplit=1)[0]
+        if not suffix.strip(" \t"):
+            return first
     return None
 
 
-def callout_only(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
+def _personal_preamble_has_art(text: str) -> bool:
+    # Classify visibility in the original document. Deleting marker blocks first
+    # can open an HTML block or turn an inline image into indented literal text.
+    markers = find_blocks(MARK, text)
+    starts = [marker.start() for marker in markers]
+    end = personal_header_end(text)
+    for offset, (_, source, _) in _image_entries_at(_outside_code(text)[:end], text):
+        index = bisect_right(starts, offset) - 1
+        if index >= 0 and offset < markers[index].end():
+            continue
+        if not _badge_or_logo(source, personal=True):
+            return True
+    return False
+
+
+def _personal_has_authored_hero(ctx: RepoContext, text: str, markers: list[re.Match]) -> bool:
+    return (any(m.group(1) == "banner" and not personal_generated_hero(ctx, m.group(2)) for m in markers)
+            or _personal_preamble_has_art(text))
+
+
+def _badges_precede_banner(text: str, banner: re.Match) -> bool:
+    images = _image_entries(_outside_code(text)[:banner.start()], text)
+    return bool(images) and all(_badge_or_logo(source, personal=True) for _, source, _ in images)
+
+
+def _heading_view(text: str) -> str:
+    clean = list(masked(text))
+    for start, end in html_block_spans(text):
+        clean[start:end] = ["\n" if ch == "\n" else "\x00" for ch in clean[start:end]]
+    return "".join(clean)
+
+
+def personal_header_end(text: str) -> int:
+    """End of the opening area, allowing an existing initial H1 title."""
+    headings = iter(top_level_heading_spans(text))
+    section = next(headings, None)
+    if section is not None and section[2] == 1:
+        section = next(headings, None)
+    return section[0] if section is not None else len(text)
+
+
+def _personal_banner_blocks(markers: list[re.Match], *, retain: bool) -> list[re.Match]:
+    banners = [block for block in markers if block.group(1) == "banner"]
+    if not retain and len(banners) > 1:
+        raise NeedsInput("intro", "Keep one managed personal hero block before refreshing the intro.")
+    return banners
+
+
+def _edit_source_spans(spans: list[tuple[int, int, int, int]] | None,
+                       start: int, end: int, inserted: int) -> None:
+    """Update (output start/end, input start/end) intervals after a proven owned edit."""
+    if spans is None:
+        return
+    delta, kept = inserted - (end - start), []
+    for a, b, c, d in spans:
+        left = min(b, start)
+        if a < left:
+            kept.append((a, left, c, c + left - a))
+        right = max(a, end)
+        if right < b:
+            kept.append((right + delta, b + delta, c + right - a, d))
+    spans[:] = kept
+
+
+def compose_source_spans(spans: list[tuple[int, int, int, int]] | None,
+                         originals: list[tuple[int, int, int, int]] | None) -> None:
+    """Map retained output→intermediate spans through exact intermediate→source spans."""
+    if spans is None or originals is None:
+        return
+    rebased = []
+    for a, b, c, d in spans:
+        covered = 0
+        for i, j, k, _ in originals:
+            left, right = max(c, i), min(d, j)
+            if left < right:
+                rebased.append((a + left - c, a + right - c, k + left - i, k + right - i))
+                covered += right - left
+        if covered != d - c:
+            raise NeedsInput("intro-order", "Cannot establish exact authored source spans for the personal intro refresh.")
+    spans[:] = rebased
+
+
+def callout_only(ctx: RepoContext, text: str, *, retain_personal_banner: bool = False,
+                 source_spans: list[tuple[int, int, int, int]] | None = None) -> tuple[str, list[str]]:
     """Variants G and H (§7.4): the hero banner block, then the callout (unless one is already there), then the body
     unchanged, then the decision 18 footer. Nothing else changes. Watching-org forks never reach here (`readme`
     exempts them). Review q27 "Full CompleteTech treatment" (brand.yaml readme.fork_readme: full) means the fork
@@ -701,9 +915,39 @@ def callout_only(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
         ctx.log("needs-input:fork-variant (q27 full treatment: pass readme --variant for the §5.4 variant)")
     body = text
     lead_banner = ""
-    leading = leading_banner_block(text)
+    personal = personal_intro_applies(ctx)
+    leading = leading_banner_block(text, personal=personal)
+    retained = [(0, len(text), 0, len(text))] if personal and source_spans is not None else None
+    body_start = 0
+    banner_prefix = text[:leading.start()] if personal and leading is not None else ""
+    banner_gap = "\n\n"
+    replaced_hero: list[str] = []
+    banners = _personal_banner_blocks(find_blocks(MARK, text), retain=retain_personal_banner) if personal else []
+    if (not retain_personal_banner and not leading and len(banners) == 1
+            and personal_generated_hero(ctx, banners[0].group(2))):
+        banner = banners[0]
+        old_hero = banner.group(2)
+        new_hero = banner_html(ctx)
+        if _badges_precede_banner(text, banner) or personal_header_end(text) < banner.start():
+            if not _block_on_separate_lines(text, banner):
+                raise NeedsInput("intro-order", "Put the managed personal hero markers on their own lines before "
+                                 "moving the hero into the opening area.")
+            # Move only the owned hero; the authored preamble keeps its bytes and order.
+            body = text[:banner.start()] + text[banner.end():]
+            _edit_source_spans(retained, banner.start(), banner.end(), 0)
+            lead_banner = wrap("banner", new_hero) + banner_gap
+        elif new_hero != old_hero:
+            body = text[:banner.start(2)] + new_hero + text[banner.end(2):]
+            _edit_source_spans(retained, banner.start(2), banner.end(2), len(new_hero))
+        replaced_hero = _unreemitted(source_lines(old_hero), Counter(line.strip() for line in source_lines(new_hero)))
     if leading:  # our banner block is already on top (a re-run): keep it, look for the callout below
-        body = text[leading.end():].lstrip("\n")
+        remainder = text[leading.end():]
+        body = remainder.lstrip("\n")
+        if personal and body != remainder:
+            banner_gap = remainder[:len(remainder) - len(body)]
+        body_start = len(text) - len(body)
+        if retained is not None:
+            retained[:] = [(0, len(body), body_start, len(text))] if body else []
     first = next((ln for ln in source_lines(body) if ln.strip()), "")
     out = body
     if not first.lstrip().startswith(">"):
@@ -713,31 +957,65 @@ def callout_only(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
             co = None  # the H callout needs the archive date and reason from the registry
             ctx.log("needs-input:archive-callout")
         if co:
-            out = co + "\n\n" + body.lstrip("\n")
+            if (personal and not retain_personal_banner and not leading and not lead_banner
+                    and len(banners) == 1 and personal_generated_hero(ctx, banners[0].group(2))):
+                raise NeedsInput("intro-order", "Put the managed personal hero markers on their own lines before "
+                                 "adding the fork callout after the intro.")
+            out = co + "\n\n" + (body if personal and not leading else body.lstrip("\n"))
+            _edit_source_spans(retained, 0, 0, len(co) + 2)
     if ctx.art_status()["banner"] is None:
         lead_banner = wrap("banner", banner_html(ctx)) + "\n\n"  # decision 13: the hero banner opens G and H too
     elif leading:
-        lead_banner = leading.group(0) + "\n\n"
-    out = lead_banner + out.lstrip("\n")
-    removed: list[str] = []
+        hero_body = leading.group(2)
+        if personal and not retain_personal_banner and personal_generated_hero(ctx, hero_body):
+            new_hero = banner_html(ctx)
+            lead_banner = wrap("banner", new_hero) + banner_gap
+            # Count only generated lines that the replacement does not carry again.
+            replaced_hero = list((Counter(ln for ln in source_lines(hero_body) if ln.strip())
+                                  - Counter(source_lines(new_hero))).elements())
+        else:
+            lead_banner = leading.group(0) + banner_gap
+    elif personal and not retain_personal_banner and not banners and not _personal_preamble_has_art(text):
+        lead_banner = wrap("banner", banner_html(ctx)) + "\n\n"
+    out = banner_prefix + lead_banner + (out if personal and not leading else out.lstrip("\n"))
+    _edit_source_spans(retained, 0, 0, len(banner_prefix) + len(lead_banner))
+    if retained is not None and leading:
+        prefix_end = len(banner_prefix)
+        hero_end = prefix_end + len(lead_banner) - len(banner_gap)
+        if prefix_end:
+            retained.append((0, prefix_end, 0, leading.start()))
+        if lead_banner[:-len(banner_gap)] == leading.group(0):
+            retained.append((prefix_end, hero_end, leading.start(), leading.end()))
+        if body_start > leading.end():
+            retained.append((hero_end, hero_end + len(banner_gap), leading.end(), body_start))
+        retained.sort()
+    removed: list[str] = list(replaced_hero)
     if footer_wanted(ctx):
         had_footer = False
         if footermod.check(ctx.brand, out)[0] != "pass":
-            pos, kept = 0, []
+            pos, kept, cuts = 0, [], []
             for fm in find_blocks(MARK, out):
                 if fm.group(1) == "footer" and is_footer_copy(fm.group(2), ctx.brand):
                     kept.append(out[pos:fm.start()])
                     removed += [ln for ln in source_lines(fm.group(2)) if ln.strip()]
                     had_footer = True
                     pos = fm.end()
+                    cuts.append(fm.span())
             out = "".join(kept) + out[pos:]
-            out, old_footer = drop_old_footer(out, ctx.brand, own_site=True)
+            for a, b in reversed(cuts):
+                _edit_source_spans(retained, a, b, 0)
+            out, old_footer = drop_old_footer(out, ctx.brand, own_site=True, source_spans=retained)
             removed += old_footer
             if old_footer:
                 had_footer = True
         if had_footer or footermod.check(ctx.brand, out)[0] == "fail:missing":
-            out = drop_own_credit(out)  # decision 25: the credit is re-emitted with the footer, never twice
-            out = out.rstrip("\n") + "\n\n" + footermod.block(ctx.brand) + "\n"
+            out = drop_own_credit(out, ctx.brand, source_spans=retained)  # only exact owned credit is re-emitted
+            body_without_gap = out.rstrip("\n")
+            if personal:
+                out += "\n" * max(0, 2 - (len(out) - len(body_without_gap)))
+            else:
+                out = body_without_gap + "\n\n"
+            out += footermod.block(ctx.brand) + "\n"
             # Report only the removed footer lines that the replacement footer does not carry again (multiset
             # difference), so a re-emitted line never counts as lost content in the preservation check.
             kept = Counter(ln.strip() for ln in source_lines(footermod.block(ctx.brand)) if ln.strip())
@@ -748,6 +1026,8 @@ def callout_only(ctx: RepoContext, text: str) -> tuple[str, list[str]]:
                 else:
                     rest.append(ln)
             removed = rest
+    if retained is not None:
+        source_spans[:] = retained
     return out, removed
 
 
@@ -767,16 +1047,39 @@ def preserved(ctx: RepoContext, text: str) -> bool:
 CENTRED_OPEN = re.compile(r'(?m)^[ \t]*<(p|div) align="center">')
 
 
-def is_own_credit(body: str) -> bool:
-    """A `showcase:credit` block body that carries this skill's generated-by marker (decision 25): ours to replace."""
-    return bool(footermod.GENERATED_BY.search(body or ""))
+def is_own_credit(body: str, brand=None) -> bool:
+    """Ownership requires this skill's complete configured credit, allowing only a version refresh."""
+    return brand is not None and footermod.credit_matches(brand, body)
 
 
-def drop_own_credit(text: str) -> str:
+def drop_own_credit(text: str, brand=None, *,
+                    source_spans: list[tuple[int, int, int, int]] | None = None) -> str:
     """`text` without our own credit marker blocks; an authored block under the same name stays."""
-    if not any(m.group(1) == "credit" and is_own_credit(m.group(2)) for m in find_blocks(MARK, text)):
+    if source_spans is not None:
+        # Personal migrations retain every authored separator. Cut only proven
+        # owned blocks, rebasing the same spans used to restore original bytes.
+        owned = [m for m in find_blocks(MARK, text)
+                 if m.group(1) == "credit" and is_own_credit(m.group(2), brand)]
+        for block in reversed(owned):
+            text = text[:block.start()] + text[block.end():]
+            _edit_source_spans(source_spans, block.start(), block.end(), 0)
         return text
-    return _sub_blocks(text, lambda m: "" if m.group(1) == "credit" and is_own_credit(m.group(2)) else m.group(0))
+    if not any(m.group(1) == "credit" and is_own_credit(m.group(2), brand) for m in find_blocks(MARK, text)):
+        return text
+    return _sub_blocks(text, lambda m: "" if m.group(1) == "credit" and is_own_credit(m.group(2), brand) else m.group(0))
+
+
+def guard_credit_ownership(brand, text: str) -> None:
+    """Refuse before generation when credit-shaped content is authored or has ambiguous seams."""
+    source = normalize_text(text)
+    if not footermod.credit_structure_valid(source):
+        raise NeedsInput("credit-ownership", "Preserve the incomplete or duplicate credit markers; "
+                         "resolve their ownership before regenerating.")
+    for block in find_blocks(MARK, source):
+        if (block.group(1) == "credit" and (not is_own_credit(block.group(2), brand)
+                or not _block_on_separate_lines(source, block))):
+            raise NeedsInput("credit-ownership", "Preserve the authored or ambiguous credit block; "
+                             "move it outside showcase:credit markers before regenerating.")
 
 
 def is_footer_like(block: str, brand=None) -> bool:
@@ -992,7 +1295,8 @@ def is_footer_copy(block: str, brand, loose_src: bool = False, own_site: bool = 
     return True
 
 
-def drop_old_footer(text: str, brand, loose_src: bool = False, own_site: bool = False) -> tuple[str, list[str]]:
+def drop_old_footer(text: str, brand, loose_src: bool = False, own_site: bool = False,
+                    source_spans: list[tuple[int, int, int, int]] | None = None) -> tuple[str, list[str]]:
     """(text, removed lines) with a trailing old footer (an unmarked or drifted decision 18 footer: every line a
     footer line, `is_footer_copy`) taken off the end, so the marked footer replaces it instead of following it. Any
     other block, a centred credits block with authored lines included, is left as it is (lint reports a second
@@ -1005,6 +1309,9 @@ def drop_old_footer(text: str, brand, loose_src: bool = False, own_site: bool = 
     tail = body[m.start():]
     if not tail.rstrip().endswith(f"</{m.group(1)}>") or not is_footer_like(tail, brand) or not is_footer_copy(tail, brand, loose_src, own_site):
         return text, []
+    if source_spans is not None:
+        _edit_source_spans(source_spans, m.start(), len(body), 0)
+        return text[:m.start()] + text[len(body):], [ln for ln in source_lines(tail) if ln.strip()]
     return body[:m.start()].rstrip() + "\n", [ln for ln in source_lines(tail) if ln.strip()]
 
 
@@ -1036,19 +1343,51 @@ def _badge_blocks_need_in_place_refresh(text: str, markers: list[re.Match]) -> b
     )
 
 
-def upgrade(ctx: RepoContext, text: str, *, already_normalized: bool = False) -> tuple[str, list[str]]:
-    """Return (new text, header lines removed). Raises nothing; callers run the shrink checks."""
+def _header_upgrade(ctx: RepoContext, text: str, **kwargs) -> tuple[str, list[str]]:
+    after = header_only(ctx, text, already_normalized=True, **kwargs)
+    removed: list[str] = []
+    if personal_profile(ctx):
+        for kind in ("banner", "footer"):
+            prior = [m for m in find_blocks(MARK, text) if m.group(1) == kind]
+            current = [m for m in find_blocks(MARK, after) if m.group(1) == kind]
+            if len(prior) != len(current):
+                continue
+            for old, new in zip(prior, current, strict=True):
+                owned = (personal_generated_hero(ctx, old.group(2)) if kind == "banner"
+                         else is_footer_copy(old.group(2), ctx.brand))
+                if old.group(2) != new.group(2) and owned:
+                    # Only replaced lines from verified generated blocks are exempt from the shrink guard.
+                    removed += _unreemitted(source_lines(old.group(2)),
+                                            Counter(ln.strip() for ln in source_lines(new.group(2))))
+    return after, removed
+
+
+def upgrade(ctx: RepoContext, text: str, *, already_normalized: bool = False,
+            source_spans: list[tuple[int, int, int, int]] | None = None) -> tuple[str, list[str]]:
+    """Return (new text, header lines removed); refuse unowned credit before generating."""
+    guard_credit_ownership(ctx.brand, text)
     if not already_normalized:
         text = normalize_text(text)
     variant = ctx.det["variant"]
     rv = standard("readme-variants")
+    personal = personal_profile(ctx)
+    retain_personal_banner = personal and ctx.preserve_unchanged() and preserved(ctx, text)
+    markers = find_blocks(MARK, text) if personal or variant == "J" else []
+    if personal and _personal_has_authored_hero(ctx, text, markers):
+        # Every personal variant preserves authored artwork and refreshes only existing owned blocks.
+        return _header_upgrade(ctx, text, preserve_structure=True,
+                               retain_personal_banner=retain_personal_banner, callout_refresh=variant in ("G", "H"))
     if variant in ("G", "H"):
-        return callout_only(ctx, text)
-    if variant == "J" and _badge_blocks_need_in_place_refresh(text, find_blocks(MARK, text)):
-        return header_only(ctx, text, already_normalized=True), []
+        return callout_only(ctx, text, retain_personal_banner=retain_personal_banner, source_spans=source_spans)
+    if retain_personal_banner and any(block.group(1) == "banner" for block in markers):
+        return _header_upgrade(ctx, text, retain_personal_banner=True)
+    if variant == "J" and _badge_blocks_need_in_place_refresh(text, markers):
+        return _header_upgrade(ctx, text)
     body, blocks = _strip_markers(text)
     want_footer = footer_wanted(ctx)
     removed: list[str] = []
+    if personal_profile(ctx) and "banner" in blocks:
+        removed += blocks["banner"].splitlines()  # only an exact generated hero reaches this branch
     # One multiset of the footer lines the emitted footer carries again, shared by the marked and the unmarked branch
     # because only one new footer is emitted. A compliant footer is re-emitted unchanged and must not weaken the
     # never-drop-a-line guard, so only the old lines it does not carry again are reported as removed.
@@ -1102,9 +1441,10 @@ def upgrade(ctx: RepoContext, text: str, *, already_normalized: bool = False) ->
                      and bootstrap_state(text) == "pristine")
 
     def is_header_line(ln: str) -> bool:
-        if HEADER_LINE.match(ln) or "docs/images/banner.png" in ln:
-            return True
-        return False
+        if not personal:
+            return bool(HEADER_LINE.match(ln) or "docs/images/banner.png" in ln)
+        return bool(HEADER_LINE.match(ln)) and not any(_badge_or_logo(source, personal=True)
+                                                      for _, source, _ in _image_entries(masked(ln), ln))
 
     # group the preamble into units: centred HTML blocks and <picture> blocks are classified as a whole
     units: list[list[str]] = []
@@ -1148,7 +1488,8 @@ def upgrade(ctx: RepoContext, text: str, *, already_normalized: bool = False) ->
                 (removed if (x is unit[0] or x is unit[-1] or is_header_line(x)) else keep_pre).append(x)
         else:
             keep_pre.extend(unit)
-    intro = "\n".join(keep_pre).strip(" \t\n")
+    trim = "\n" if personal else " \t\n"
+    intro = "\n".join(keep_pre).strip(trim)
     # sections: renames, mapping, Notes demotion, License last
     renames = rv["renames"]
     section_rows = required_sections(ctx.det, meta=ctx.meta)
@@ -1179,7 +1520,9 @@ def upgrade(ctx: RepoContext, text: str, *, already_normalized: bool = False) ->
         # §7.0 preserve list: additive only. The hero banner block goes on top (q57 `pres` default, "Banner above the
         # existing content"; none when the user answers "Leave them unchanged"), with the nav line in the §7.1 order;
         # the README's own banner and every section stay verbatim and in place; add License if missing, then footer.
-        if ctx.preserve_unchanged() or ctx.art_status()["banner"] is not None:
+        # The personal profile's banner exemption is not "no hero": it opens with its intro (decision 15), which
+        # banner_html returns or refuses with needs-input before any write.
+        if ctx.preserve_unchanged() or (ctx.art_status()["banner"] is not None and not personal_intro_applies(ctx)):
             out.append(wrap("nav", nav_line(ctx)))
         else:
             out += lead(ctx, wrap("banner", banner_html(ctx)), wrap("nav", nav_line(ctx)))
@@ -1217,7 +1560,7 @@ def upgrade(ctx: RepoContext, text: str, *, already_normalized: bool = False) ->
         if h in ("License", "Licensing"):
             continue
         if h in placed:
-            content = placed[h].strip(" \t\n")
+            content = placed[h].strip(trim)
             out.append(f"## {h}\n\n{content}" if content else f"## {h}")
         elif req == "R" and not preserve:
             body = section_facts(ctx, h)
@@ -1244,15 +1587,41 @@ def upgrade(ctx: RepoContext, text: str, *, already_normalized: bool = False) ->
 
 
 def header_only(ctx: RepoContext, text: str, *, already_normalized: bool = False,
-                preserve_structure: bool = False) -> str:
+                preserve_structure: bool = False, retain_personal_banner: bool = False,
+                callout_refresh: bool = False) -> str:
     """Replace only existing marker blocks (what the Action runs)."""
+    guard_credit_ownership(ctx.brand, text)
     original = text
     if not already_normalized:
         text = normalize_text(text)
-    gen = {"nav": nav_line(ctx), "banner": banner_html(ctx), "footer": footermod.markup(ctx.brand)}
+    personal = personal_profile(ctx)
+    if personal and not retain_personal_banner:
+        markers = find_blocks(MARK, text)
+        if ctx.det["variant"] in ("G", "H"):
+            _personal_banner_blocks(markers, retain=False)
+        if not preserve_structure:
+            preserve_structure = (_personal_has_authored_hero(ctx, text, markers)
+                                  or any(m.group(1) == "banner" and not _block_on_separate_lines(text, m) for m in markers))
+    blocks = find_blocks(MARK, text)
+    if len(blocks) >= 2:
+        footer, credit_block = blocks[-2:]
+        if (footer.group(1) == "footer" and credit_block.group(1) == "credit"
+                and is_footer_copy(footer.group(2), ctx.brand)
+                and is_own_credit(credit_block.group(2), ctx.brand)
+                and not text[footer.end():credit_block.start()].strip()
+                and not text[credit_block.end():].strip()):
+            if preserve_structure:
+                raise NeedsInput("credit-order", "Use a normal header refresh to place the owned credit "
+                                 "before the final decision 18 footer.")
+            seam = text[footer.end():credit_block.start()]
+            text = (text[:footer.start()] + credit_block.group(0) + seam
+                    + footer.group(0) + text[credit_block.end():])
+    gen = {"nav": nav_line(ctx), "footer": footermod.markup(ctx.brand)}
+    if not personal:
+        gen["banner"] = banner_html(ctx)
     credit = footermod.credit_markup(ctx.brand)
     has_credit = any(m.group(1) == "credit" for m in find_blocks(MARK, text))
-    if ctx.repo_dir is not None and not (ctx.repo_dir / "docs" / "images" / "banner.png").is_file():
+    if not personal and ctx.repo_dir is not None and not (ctx.repo_dir / hero_path(ctx)).is_file():
         gen["banner"] = ""  # no image yet (for example no description): an empty block, never a broken image
         ctx.log("needs-input:banner")
     # Preserve the existing preflight for other variants, even without a badge block.
@@ -1262,6 +1631,15 @@ def header_only(ctx: RepoContext, text: str, *, already_normalized: bool = False
 
     def sub(m):
         b, body = m.group(1), m.group(2)
+        if callout_refresh and b not in ("banner", "footer"):
+            return m.group(0)  # G/H upgrades leave the other blocks as authored body.
+        if b == "footer" and personal and not is_footer_copy(body, ctx.brand):
+            return m.group(0)
+        if b == "nav" and personal and preserve_structure and body.strip():
+            # Formatting is not ownership. Keep any nonempty row that cannot be
+            # established as the exact navigation generated for this context.
+            if body.strip("\n") != gen["nav"]:
+                return m.group(0)
         if b == "badges" and (preserve_structure or ctx.det["variant"] == "J"):
             fresh = badge_body(ctx, body)
             return m.group(0) if fresh == body else wrap(b, fresh)
@@ -1272,28 +1650,168 @@ def header_only(ctx: RepoContext, text: str, *, already_normalized: bool = False
         if b == "tagline":  # tagline_body: the description's line, else the block as written unless inherited
             new = tagline_body(ctx, body, text)
             return m.group(0) if new == body else wrap(b, new)
-        if b == "credit" and credit is not None and is_own_credit(body):
+        if b == "credit" and credit is not None and is_own_credit(body, ctx.brand):
             return m.group(0) if body == credit else wrap(b, credit)  # only our own credit block is refreshed
+        if b == "banner" and personal:
+            owned = not retain_personal_banner and personal_generated_hero(ctx, body)
+            fresh = banner_html(ctx) if owned else body
+            if owned and (_badges_precede_banner(text, m)
+                          or (ctx.det["variant"] in ("G", "H") and personal_header_end(text) < m.start())):
+                raise NeedsInput("intro-order", "The personal intro belongs in the opening area. Use readme --mode "
+                                 "upgrade without --no-regroup to request a complete header refresh.")
+            return m.group(0) if fresh == body else wrap(b, fresh)
         if b in gen:
             out = wrap(b, re.sub(r"\n{3,}", "\n\n", gen[b]))
             if b == "footer" and credit is not None and not has_credit:
-                out += "\n\n" + wrap("credit", credit)  # decision 25: an old footer gains the credit in one regeneration
+                out = wrap("credit", credit) + "\n\n" + out  # decision 18 keeps the footer last
             return out
         return m.group(0)
     if preserve_structure:
         return _replace_blocks_in_source(original, text, sub)
-    return license_block(ctx, reorder_lead(ctx, _sub_blocks(text, sub)))
+    refreshed = _replace_blocks_in_source(text, text, sub) if personal else _sub_blocks(text, sub)
+    return license_block(ctx, refreshed if retain_personal_banner else reorder_lead(ctx, refreshed))
 
 
-def _replace_blocks_in_source(original: str, normalized: str, sub) -> str:
-    """Splice blocks into their source spans, leaving all other bytes in place."""
-    bom = int(original.startswith(BOM))
+def _source_offset_mapper(original: str, *, strip_bom: bool = True):
+    """Map normalized offsets, excluding an encoding BOM only when the caller removed it."""
+    bom = int(strip_bom and original.startswith(BOM))
     dropped = [m.start() - bom - count
                for count, m in enumerate(re.finditer(r"\r\n", original))]
 
     def source_offset(index):
         return index + bom + bisect_left(dropped, index)
+    return source_offset
 
+
+def _personal_context_views(text: str) -> tuple:
+    """Source-aligned code/Markdown visibility and the actual local link inventory."""
+    from .content import extract_links
+
+    markdown = _outside_code(text, mask_html=True, mask_autolinks=False)
+    syntax = list(re.sub(r"[^\[\]!*_~`#>@|\\$]", " ", markdown))
+    # Plain prose may move out of raw HTML without changing its meaning. Keep
+    # Markdown delimiters and line-start list/rule markers visible in the proof.
+    for match in re.finditer(r"(?m)^ {0,3}(?:(?:[-+]|[0-9]{1,9}[.)])(?=[ \t])|(?:-[ \t]*){3,}(?=\n|$))", markdown):
+        syntax[match.start():match.end()] = markdown[match.start():match.end()]
+    # Spaces before a continuing line can become a hard break outside raw HTML.
+    # Bare URLs and mentions likewise acquire Markdown/GitHub link semantics.
+    for match in re.finditer(r"(?m)\S([ \t]* {2,})(?=\n[ \t]*\S)", markdown):
+        syntax[match.start(1)] = "\x01"
+    for match in re.finditer(r"(?i)(?:https?://|www\.)[^\s<>]+", markdown):
+        syntax[match.start()] = "\x01"
+    links = defaultdict(list)
+    for row in extract_links(text):
+        links[row["line"]].append((row["target"], row["syntax"], row["image"], row.get("alt") or ""))
+    return _outside_code(text), "".join(syntax), links, top_level_heading_spans(text)
+
+
+def _personal_context_key(text: str, views: tuple, start: int, end: int) -> tuple:
+    visible, markdown, links, headings = views
+    first = text.count("\n", 0, start) + 1
+    last = text.count("\n", 0, max(start, end - 1)) + 1
+    inventory = tuple((line - first, tuple(sorted(links[line])))
+                      for line in range(first, last + 1) if links.get(line))
+    return (visible[start:end], markdown[start:end], inventory,
+            tuple((a - start, level) for a, _, level in headings if start <= a < end))
+
+
+def _personal_hero_context_regions(text: str, block: re.Match) -> list[tuple[int, int]]:
+    """Authored regions sharing the hero's raw HTML context, plus its physical suffix.
+
+    A closing HTML tag or a marker on its own line does not end a raw HTML block.
+    Its following lines stay literal until the parser's actual block boundary.
+    Prefixes of enclosing HTML blocks need the same proof when the hero moves.
+    """
+    end = text.find("\n", block.end())
+    regions = [(block.end(), end + 1 if end >= 0 else len(text))]
+    for a, b in html_block_spans(text):
+        if a < block.end() and b > block.start():
+            if a < block.start():
+                regions.append((a, block.start()))
+            if b > block.end():
+                regions.append((block.end(), b))
+    merged = []
+    for a, b in sorted(regions):
+        if a == b:
+            continue
+        if merged and a <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(b, merged[-1][1]))
+        else:
+            merged.append((a, b))
+    return merged
+
+
+def personal_hero_source_spans(ctx: RepoContext, before: str, after: str) -> list[tuple[int, int, int, int]]:
+    """Prove unchanged inline seams in normalized text before restoring source bytes."""
+    old = [block for block in find_blocks(MARK, before)
+           if block.group(1) == "banner" and personal_generated_hero(ctx, block.group(2))
+           and not _block_on_separate_lines(before, block)]
+    current = [block for block in find_blocks(MARK, after) if block.group(1) == "banner"]
+    if len(old) != 1 or len(current) != 1:
+        return []
+    block = old[0]
+    if before[:block.start()] != after[:current[0].start()]:
+        return []
+    spans = [(0, block.start(), 0, block.start())] if block.start() else []
+    end = max((b for a, b in _personal_hero_context_regions(before, block)
+               if a == block.end()), default=block.end())
+    seam = before[block.end():end]
+    if seam.strip(" \t\n") and after.count(seam) == 1:
+        start = after.find(seam)
+        if (start >= current[0].end()
+                and _personal_context_key(before, _personal_context_views(before), block.end(), end)
+                == _personal_context_key(after, _personal_context_views(after), start, start + len(seam))):
+            spans.append((start, start + len(seam), block.end(), end))
+    return spans
+
+
+def guard_personal_hero_context(ctx: RepoContext, original: str, updated: str, *, already_normalized: bool = False) -> None:
+    """Refuse an owned hero edit that changes authored bytes or their original parsing context."""
+    if original == updated:
+        return
+    before = original if already_normalized else normalize_text(original)
+    after = updated if already_normalized else normalize_text(updated)
+    owned = [block for block in find_blocks(MARK, before)
+             if block.group(1) == "banner" and personal_generated_hero(ctx, block.group(2))]
+    if not owned:
+        return
+    current = [block for block in find_blocks(MARK, after) if block.group(1) == "banner"]
+    old_offset = _source_offset_mapper(original, strip_bom=not already_normalized)
+    new_offset = _source_offset_mapper(updated, strip_bom=not already_normalized)
+    old_views, new_views = _personal_context_views(before), _personal_context_views(after)
+
+    def signatures(raw: str, text: str, views: tuple, fragment: str) -> Counter:
+        # Exact bytes include the authored line ending. Compare every occurrence,
+        # so an identical line elsewhere cannot hide a lost or reinterpreted seam.
+        width = len(normalize_line_endings(fragment))
+        result = Counter()
+        for match in re.finditer(re.escape(fragment), raw):
+            prefix = raw[:match.start()]
+            start = len(prefix if already_normalized else normalize_text(prefix))
+            result[_personal_context_key(text, views, start, start + width)] += 1
+        return result
+
+    for block in owned:
+        prefix = original[:old_offset(block.start())]
+        if (not _block_on_separate_lines(before, block)
+                and (len(current) != 1 or updated[:new_offset(current[0].start())] != prefix)):
+            raise NeedsInput("intro-order", "Put the managed personal hero markers on their own lines before "
+                             "a refresh that would move the authored prefix.")
+        for a, b in _personal_hero_context_regions(before, block):
+            fragment = original[old_offset(a):old_offset(b)]
+            if (fragment.strip(" \t\r\n") and signatures(original, before, old_views, fragment)
+                    != signatures(updated, after, new_views, fragment)):
+                raise NeedsInput("intro-order", "Keep authored content outside the hero's raw HTML block "
+                                 "before a refresh that would change its parsing context or source bytes.")
+
+
+def _replace_blocks_in_source(original: str, normalized: str, sub) -> str:
+    """Splice blocks into their source spans, leaving all other bytes in place."""
+    source_view = normalize_line_endings(original)
+    removed_bom = source_view != normalized and source_view.startswith(BOM) and source_view[1:] == normalized
+    if source_view != normalized and not removed_bom:
+        raise NeedsInput("intro-order", "Cannot establish exact authored source spans for the personal intro refresh.")
+    source_offset = _source_offset_mapper(original, strip_bom=removed_bom)
     out, pos = [], 0
     for match in find_blocks(MARK, normalized):
         replacement = sub(match)
@@ -1500,11 +2018,14 @@ def reseal_pristine(text: str) -> str | None:
     return text[:digest_start] + body_sha(body) + text[digest_end:]
 
 
-def drop_pristine(text: str) -> str:
+def drop_pristine(text: str, *, source_spans: list[tuple[int, int, int, int]] | None = None) -> str:
     """Remove only a genuine ownership marker inside the first template body."""
+    if source_spans is not None:
+        source_spans[:] = [(0, len(text), 0, len(text))] if text else []
     block = _template_block(text)
     if block is None or (marker := _pristine_marker(text, block)) is None:
         return text
+    _edit_source_spans(source_spans, marker.start(), marker.end(), 0)
     return text[:marker.start()] + text[marker.end():]
 
 
@@ -1551,6 +2072,8 @@ def bootstrap(ctx: RepoContext, text: str, *, already_normalized: bool = False) 
     if ctx.meta.get("is_template") or bootstrap_state(text) != "pristine":
         return text
     variant = ctx.det["variant"]
+    if variant in ("G", "H") and personal_profile(ctx):
+        _personal_banner_blocks(find_blocks(MARK, text), retain=False)
     order = required_sections(ctx.det, meta=ctx.meta)
     secs = []
     for h2, req in order:
@@ -1575,9 +2098,12 @@ def bootstrap(ctx: RepoContext, text: str, *, already_normalized: bool = False) 
             # Carry an authored tagline forward under the same rule as an in-place refresh.
             if variant == "J" and _badge_blocks_need_in_place_refresh(text, markers):
                 return header_only(ctx, text, already_normalized=True)
-            blocks = {marker.group(1): marker.group(2) for marker in markers}
+            blocks = {m.group(1): m.group(2) for m in markers}
             old = blocks["tagline"]
-            new_header = header(ctx, title=auto, tagline=tagline_body(ctx, old, text),
+            authored_hero = next((m.group(0) for m in markers
+                                  if m.group(1) == "banner" and personal_profile(ctx)
+                                  and not personal_generated_hero(ctx, m.group(2))), None)
+            new_header = header(ctx, keep_banner=authored_hero, title=auto, tagline=tagline_body(ctx, old, text),
                                 existing_badges=blocks.get("badges"))
             text = new_header + "\n\n" + text[header_end:].lstrip("\n")
     return header_only(ctx, text, already_normalized=True)
@@ -1641,11 +2167,8 @@ def heading_moves(before: str, after: str, variant: str) -> list[dict]:
 
     def headings(text):
         text = normalize_text(text)
-        clean = list(masked(text))
-        for start, end in html_block_spans(text):
-            clean[start:end] = ["\n" if ch == "\n" else "\x00" for ch in clean[start:end]]
         groups = {}
-        for match in pattern.finditer("".join(clean)):
+        for match in pattern.finditer(_heading_view(text)):
             title = re.sub(r"[ \t]+#+[ \t]*$", "", text[match.start(2):match.end(2)]).strip()
             key = EMOJI.sub("", title).strip()
             key = renames.get(key.lower(), key).casefold()
@@ -1749,7 +2272,7 @@ def preservation(before: str, after: str, removed: list[str], *, ctx: RepoContex
     before = "".join(comparison)
     # Decision 25: our own credit block is generated (its marker names the skill version), so a refresh never counts
     # its previous lines as lost content.
-    before = _sub_blocks(before, lambda m: wrap("credit", "") if m.group(1) == "credit" and is_own_credit(m.group(2))
+    before = _sub_blocks(before, lambda m: wrap("credit", "") if m.group(1) == "credit" and is_own_credit(m.group(2), brand)
                          else m.group(0))
     if replace_tagline:
         # Badge spans belong to the original source; use them before changing
@@ -1824,15 +2347,35 @@ def _managed_line_matches(before: str, after: str, old: list[str], new: list[str
     return matched
 
 
-def restore_line_endings(raw: str, before: str, after: str) -> str:
+def restore_line_endings(raw: str, before: str, after: str, *,
+                        source_spans: list[tuple[int, int, int, int]] | None = None) -> str:
     """`after` with the authored line endings of `raw` restored (#160).
 
     `read_text` decodes with universal newlines, so `before` holds one LF for
     every CRLF, lone CR or LF in `raw` (the file's own text).
     Each line `after` keeps unchanged from `before` takes its original
     ending back; a new or edited line takes the README's most common ending.
-    An LF-only README is returned unchanged.
+    Proven source spans take their exact original bytes instead of heuristic
+    line matches; a join that changes the normalized text refuses before writing.
+    An LF-only README is otherwise returned unchanged.
     """
+    if source_spans:
+        generated = restore_line_endings(raw, before, after)
+        old_offset = _source_offset_mapper(raw)
+        # Generated text has no encoding BOM; any leading U+FEFF is authored content.
+        new_offset = _source_offset_mapper(generated, strip_bom=False)
+        out, pos = [], 0
+        for a, b, c, d in source_spans:
+            if not (0 <= pos <= a < b <= len(after) and 0 <= c < d <= len(before)
+                    and after[a:b] == before[c:d]):
+                raise NeedsInput("intro-order", "Cannot establish exact authored source spans for the personal intro refresh.")
+            out.extend((generated[new_offset(pos):new_offset(a)], raw[old_offset(c):old_offset(d)]))
+            pos = b
+        out.append(generated[new_offset(pos):])
+        restored = "".join(out)
+        if normalize_line_endings(restored) != after:
+            raise NeedsInput("intro-order", "Moving the personal intro would merge authored line endings; keep the hero on separate blank lines.")
+        return restored
     endings = _LINE_END.findall(raw)
     if not endings or all(e == "\n" for e in endings):
         return after

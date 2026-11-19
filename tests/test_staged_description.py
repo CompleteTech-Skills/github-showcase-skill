@@ -1792,7 +1792,11 @@ def test_untrackable_staged_tagline_refuses_before_writing_checkout(tmp_path, mo
     checkout.mkdir()
     meta = tmp_path / "capture.json"
     meta.write_text(json.dumps(meta_dict()), encoding="utf-8")
-    monkeypatch.setattr(readme, "scaffold", lambda ctx, text: "# Synthetic\n\n" + readme.tagline_body(ctx) + "\n")
+    def untrackable_scaffold(ctx, text, *, already_normalized):
+        assert already_normalized is True
+        return "# Synthetic\n\n" + readme.tagline_body(ctx) + "\n"
+
+    monkeypatch.setattr(readme, "scaffold", untrackable_scaffold)
     args = ["--meta", str(meta), "--repo-dir", str(checkout), "readme", "--mode", "scaffold",
             "--variant", "A", "--write", "--description", "Route a synthetic request."]
     assert showcase.main(args) == 1

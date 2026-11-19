@@ -1,6 +1,6 @@
 """Org module: profile README from the public slice, About plan, pins and star Lists, labels, health and doctor.
 Synthetic Northwind registry and metadata only (tests/fixtures/org)."""
-from conftest import footer_then_credit  # noqa: E402
+from conftest import credit_then_footer  # noqa: E402
 import argparse
 import copy
 import json
@@ -69,7 +69,7 @@ def test_profile_readme_follows_the_kit(make_estate):
                                      O.AS_IS_LINE, "## Also from CompleteTech", "## Favorites", "Contributing</a>",
                                      "<!-- showcase:footer:start -->")]
     assert order == sorted(order)
-    assert footer_then_credit(text)
+    assert credit_then_footer(text)
     assert "<picture>" in text and text.count("<picture>") == 1  # decision 18 footer only
     assert "img.shields.io" not in text and "github-readme-stats" not in text
     for name in PRIVATE:
@@ -96,7 +96,7 @@ def test_profile_private_variant(make_estate):
     text = res["readme"]
     assert code == OK and res["variant"] == "private" and O.PRIVATE_LINE in text
     assert "## Featured" not in text and "## All projects" not in text and "## Favorites" not in text
-    assert "secret-lab" not in text and footer_then_credit(text)
+    assert "secret-lab" not in text and credit_then_footer(text)
 
 
 def test_profile_fails_closed_on_a_leak(make_estate):
