@@ -251,4 +251,3 @@ def test_scoped_parent_consent_does_not_authorize_an_organization_query(tmp_path
     assert by_name["retained-fork"]["parent"] == f"{FORMER}/upstream-kept", "a valid scoped parent grant must work"
     assert "parent" not in by_name["unknown-upstream-fork"], "HOLD must not mask the parent's repository scope"
     assert not any(n == "account_org" for n, _ in calls), "a scoped parent grant cannot authorize owner-wide reads"
-

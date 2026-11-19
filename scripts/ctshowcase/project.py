@@ -775,7 +775,8 @@ def _authorize_readme_repos(readme_repos, resolver, allow_t3: bool, grants: dict
     A T3 owner's repository is dropped with `t3-signoff:readme:<owner>/<repo>` when --allow-t3 is not passed; with it,
     the repository needs a valid sign-off record that covers it on its own owner and name (checked on its own owner and
     name, whatever the board owner is). A denied one is logged and dropped, a granted one is recorded in grants for the
-    README job's sign-off ids. Other owners' references are kept unchanged."""
+    README job's sign-off ids. HOLD and excluded references stay withheld; this planner has no HOLD release.
+    Other owners' references are kept unchanged."""
     from . import signoff
     kept: list[str] = []
     for r0 in _normalize_repo_entries(readme_repos, board_owner, role, resolver, logs):
@@ -788,7 +789,11 @@ def _authorize_readme_repos(readme_repos, resolver, allow_t3: bool, grants: dict
         if status not in (None, "excluded", "hold", "t3", "watching"):
             logs.append(f"readme-held:{r0} (owner cannot be resolved)")
             continue
-        if status != "t3":
+        statuses = resolver.owner_statuses(ro)
+        if "hold" in statuses or "excluded" in statuses or resolver.family_hold(ro):
+            logs.append("readme-held:owner-policy")
+            continue
+        if "t3" not in statuses:
             kept.append(r0)
             continue
         if not allow_t3:
@@ -1152,7 +1157,7 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
             if r.lower() in linked:
                 continue  # listed twice: one link job
             rec = None
-            if allow_t3 and resolver is not None and resolver.owner_status(owner) == "t3":
+            if allow_t3 and resolver is not None and "t3" in resolver.owner_statuses(owner):
                 # the owner-wide grant does not settle a repository that a later withdrawal names: check each link
                 from . import signoff
                 rec, why = signoff.evaluate([owner, *resolver.aliases(owner)], r.split("/", 1)[1])

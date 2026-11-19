@@ -48,7 +48,7 @@ All notable changes to `github-showcase-skill` are recorded here. Versions follo
 
 ### Fixed
 
-- Owner policy gates retain every applicable restriction across resolver aliases. An organization HOLD allowance no longer masks T3 sign-off or an alias exclusion; repository withdrawals and T3 provenance checks remain independent in chart capture/render and shared org/content planning (#213).
+- Project README/view references also enforce family HOLD, personal-directory links check independent owner restrictions, and explicit legacy social-plan resolvers remain supported without releasing their holds. Owner policy gates retain every applicable restriction across resolver aliases. An organization HOLD allowance no longer masks T3 sign-off or an alias exclusion; repository withdrawals and T3 provenance checks remain independent in chart capture/render and shared org/content planning (#213).
 - The account-chart extension keeps `--allow-hold` scoped to organization lanes, applies chart-only holds during capture, and removes withheld fork-parent metadata before snapshot persistence. Summary bars use bounded proportional widths, and their compacted key is repeated in Markdown and alternative text. Summary artwork requires a resolved owner/family association, and every reveal settles within the 2.5-second intro limit. Older owned configs retain compatible defaults for the two new language labels; explicit invalid labels still fail validation.
 - Personal hero context proof retains math delimiters, preventing literal inline or block math inside raw HTML from becoming active Markdown. Four added CLI regressions and two formatter-ordering controls accompany independent native Prettier parsing probes.
 

@@ -1189,7 +1189,7 @@ def user_slice(estate: Estate, login: str, *, allow_t3: bool = False) -> tuple[d
             st = r.owner_status(o)
             if r.is_placeholder(o) or st == "excluded":
                 continue  # q71: placeholder orgs are left out
-            if st == "t3" and not (allow_t3 and _t3_granted(o)):
+            if "t3" in r.owner_statuses(o) and not (allow_t3 and _t3_granted(o)):
                 logs.append(f"t3-signoff:{o}")
                 continue
             try:

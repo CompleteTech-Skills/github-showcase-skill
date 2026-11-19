@@ -229,3 +229,23 @@ def test_optional_resolver_fallback_does_not_replace_explicit_falsey_resolver(br
     job = social_job(context(brand, owner="CompleteTech-Skills"), ExplicitResolver(), "assets/social-preview.png")
     assert job["repo"] == f"CompleteTech-Skills/{REPO}"
     assert checked == ["CompleteTech-Skills"]
+
+
+@pytest.mark.parametrize("status", ["hold", "excluded"])
+def test_legacy_explicit_resolver_restrictions_withhold_social_plan(brand, status):
+    checked = []
+
+    class LegacyResolver:
+        def __bool__(self):
+            return False
+
+        def owner_status(self, owner):
+            checked.append(owner)
+            return status
+
+        def canonical(self, owner):
+            raise AssertionError("a withheld plan must not resolve a writer target")
+
+    assert social_job(context(brand, owner="CompleteTech-Skills"), LegacyResolver(),
+                      "assets/social-preview.png") is None
+    assert checked == ["CompleteTech-Skills"]

@@ -34,26 +34,51 @@ class Sandbox:
         tools.mkdir()
         guard = root / "guard"
         guard.mkdir()
-        # Catch Python HTTP clients as well as requests made through gh/curl.
-        (guard / "sitecustomize.py").write_text(
-            "import os,sys\n"
-            "def guard(event,args):\n"
-            " if event in ('socket.connect','socket.getaddrinfo'):\n"
-            "  with open(os.environ['CONTRACT_TRIPWIRE'],'a') as f: f.write(event+'\\n')\n"
-            "  raise RuntimeError('network forbidden by synthetic test')\n"
-            "sys.addaudithook(guard)\n", encoding="utf-8")
         real_git = shutil.which("git")
         assert real_git, "git is required for synthetic local origin fixtures"
-        for name in ("gh", "curl", "wget", "ssh", "git"):
-            script = tools / name
-            script.write_text(
-                f"#!{sys.executable}\nimport os,sys\n"
-                + (f"if len(sys.argv)>1 and sys.argv[1] not in ('fetch','push','clone','pull','ls-remote'):\n"
-                   f" os.execv({real_git!r}, [{real_git!r}]+sys.argv[1:])\n" if name == "git" else "")
-                + "with open(os.environ['CONTRACT_TRIPWIRE'],'a') as f: f.write(os.path.basename(sys.argv[0])+' '+repr(sys.argv[1:])+'\\n')\n"
-                + ("if os.environ.get('CONTRACT_GH_NOT_STARRED') == '1':\n print('HTTP/2.0 404 Not Found')\n sys.exit(1)\n" if name == "gh" else "")
-                + "sys.exit(86)\n", encoding="utf-8")
-            script.chmod(0o755)
+        self.transport = tools / "transport.py"
+        # Dispatch through Python on every platform: extensionless shebang
+        # scripts are not executable commands on Windows. Only these local Git
+        # forms may reach the resolved binary; every other transport fails closed.
+        self.transport.write_text(
+            "import os,sys\n"
+            f"real_git = {real_git!r}\n"
+            "name,argv = sys.argv[1],sys.argv[2:]\n"
+            "local = argv[2:] if len(argv)>2 and argv[0]=='-C' else argv\n"
+            "allowed = (local in ([ 'init','--quiet' ], [ 'rev-parse','--show-toplevel' ],\n"
+            " [ 'remote','get-url','origin' ])\n"
+            " or (len(local)==3 and local[:2] in ([ 'config','user.name' ],[ 'config','user.email' ]))\n"
+            " or (len(local)==4 and local[:3] in ([ 'remote','add','origin' ],[ 'remote','set-url','origin' ])\n"
+            "     and local[3].startswith('https://github.com/') and local[3].endswith('.git'))\n"
+            " or (len(local)>4 and local[:4]==['status','--porcelain','--untracked-files=all','--'])\n"
+            " or (len(local)==2 and local[0]=='show' and local[1].startswith('HEAD:')))\n"
+            "if name == 'git' and allowed:\n os.execv(real_git,[real_git]+argv)\n"
+            "with open(os.environ['CONTRACT_TRIPWIRE'],'a',encoding='utf-8') as f:\n"
+            " f.write(name+' '+repr(argv)+'\\n')\n"
+            "if name == 'gh' and os.environ.get('CONTRACT_GH_NOT_STARRED') == '1':\n"
+            " print('HTTP/2.0 404 Not Found')\n sys.exit(1)\n"
+            "sys.exit(86)\n", encoding="utf-8")
+        # Catch Python HTTP clients and route subprocess tools before OS command
+        # lookup. No child inherits host PATH, authentication or Git configuration.
+        (guard / "sitecustomize.py").write_text(
+            "import os,subprocess,sys\n"
+            "def guard(event,args):\n"
+            " if event in ('socket.connect','socket.getaddrinfo'):\n"
+            "  with open(os.environ['CONTRACT_TRIPWIRE'],'a',encoding='utf-8') as f: f.write(event+'\\n')\n"
+            "  raise RuntimeError('network forbidden by synthetic test')\n"
+            "sys.addaudithook(guard)\n"
+            "class GuardedPopen(subprocess.Popen):\n"
+            " def __init__(self,args,*a,**kw):\n"
+            "  argv = list(args) if isinstance(args,(list,tuple)) else [str(args)]\n"
+            "  executable = os.path.normcase(os.path.abspath(os.fsdecode(argv[0])))\n"
+            "  if executable != os.path.normcase(os.path.abspath(sys.executable)) or kw.get('shell') or kw.get('executable'):\n"
+            "   name = os.path.basename(os.fsdecode(argv[0])).lower()\n"
+            "   for suffix in ('.exe','.cmd','.bat','.com'):\n"
+            "    if name.endswith(suffix): name = name[:-len(suffix)]; break\n"
+            f"   argv = [sys.executable,{str(self.transport)!r},name,*argv[1:]]\n"
+            "   kw.pop('executable',None)\n   kw['shell'] = False\n"
+            "  super().__init__(argv,*a,**kw)\n"
+            "subprocess.Popen = GuardedPopen\n", encoding="utf-8")
         home = root / "home"
         home.mkdir()
         # Do not inherit authentication, host-specific config or personal identity.
@@ -90,7 +115,8 @@ class Sandbox:
         self.git("remote", "add", "origin", f"https://github.com/{TARGET}.git")
 
     def git(self, *args):
-        result = subprocess.run(["git", *args], cwd=self.repo, env=self.env,
+        result = subprocess.run([sys.executable, str(self.transport), "git", *args],
+                                cwd=self.repo, env=self.env,
                                 capture_output=True, text=True, encoding="utf-8", timeout=20)
         assert result.returncode == 0, result.stderr
 
