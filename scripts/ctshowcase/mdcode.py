@@ -484,19 +484,23 @@ class _DefinitionProgress:
 
 @functools.lru_cache(maxsize=16)
 def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, int], ...], tuple[int, ...],
-                                tuple[tuple[int, int], ...], tuple[tuple[int, int], ...], dict[int, int]]:
-    """(inline regions, fenced spans, continuation starts, raw HTML spans, indented spans). An inline region is a stretch in which
+                                tuple[tuple[int, int], ...], tuple[tuple[int, int], ...], dict[int, int],
+                                tuple[tuple[int, int, int], ...]]:
+    """(inline regions, fenced spans, continuation starts, raw HTML spans, indented spans, prefixes, headings).
+    An inline region is a stretch in which
     one inline code span can live: a paragraph, a heading line, an HTML block start line or one table cell. A
     continuation start is the source offset of a line that continues an open paragraph or table (not the first line of
     a block, not a heading, not a line inside a fence). An HTML block span runs from its first line to just past its
-    last line, excluding a terminating blank line or the line that ended its container. The final tuple records
-    indented code blocks, which cannot interrupt a paragraph and are never inline regions."""
+    last line, excluding a terminating blank line or the line that ended its container. Indented code blocks cannot
+    interrupt a paragraph and are never inline regions. Heading entries are (start, end, level) for top-level ATX and
+    Setext headings, using these same block decisions rather than scanning a masked projection again."""
     text = _source_view(text)
     WORK['layout_builds'] += 1
     regions: list[tuple[int, int]] = []
     fences: list[tuple[int, int]] = []
     html_blocks: list[tuple[int, int]] = []
     indented_blocks: list[tuple[int, int]] = []
+    headings: list[tuple[int, int, int]] = []
     indented = None  # (source start, ordered container ancestors)
     hstart = 0
     conts: set[int] = set()
@@ -665,6 +669,8 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
                 seg, table = [], True
                 continue
             elif matched and _SETEXT.match(para_content):
+                if not para_path:
+                    headings.append((seg[0][0], pos, 1 if para_content.lstrip(" ").startswith("=") else 2))
                 flush(seg)
                 seg = []
                 continue
@@ -697,8 +703,10 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
         opener = FENCE_OPEN.match(crest)
         if opener:
             fence, fstart = (opener.group(1), path), at
-        elif _ATX_HEADING.match(crest):
+        elif heading := _ATX_HEADING.match(crest):
             regions.append((at, pos))
+            if not path:
+                headings.append((at, pos, len(heading.group().strip())))
         elif (kind := _html_block(crest)) is not None:
             # raw HTML: no inline region, so a backtick on these lines never pairs and the block's images stay visible
             hstart = at
@@ -718,12 +726,18 @@ def _layout(text: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, in
         html_blocks.append((hstart, len(text)))
     if indented is not None:
         indented_blocks.append((indented[0], len(text)))
-    return tuple(regions), tuple(fences), tuple(sorted(conts)), tuple(html_blocks), tuple(indented_blocks), prefixes
+    return (tuple(regions), tuple(fences), tuple(sorted(conts)), tuple(html_blocks), tuple(indented_blocks),
+            prefixes, tuple(headings))
 
 
 def inline_regions(text: str) -> tuple[tuple[int, int], ...]:
     """Canonical, source-aligned blocks in which one inline construct may live."""
     return _layout(text)[0]
+
+
+def top_level_heading_spans(text: str) -> tuple[tuple[int, int, int], ...]:
+    """Source-aligned (start, end, level) for visible top-level ATX and Setext headings."""
+    return _layout(text)[6]
 
 
 @functools.lru_cache(maxsize=16)
@@ -2326,8 +2340,8 @@ def _markdown_images(text: str, document: str) -> list[tuple[str, str, int, int]
     return sources
 
 
-def _image_entries(text: str, document: str) -> list[tuple[str, str, bool]]:
-    """Read HTML and Markdown images, excluding Markdown-looking text in HTML attributes."""
+def _image_entries_at(text: str, document: str, *, source_order: bool = False) -> list[tuple[int, tuple[str, str, bool]]]:
+    """Read visible HTML and Markdown images with their original source offsets."""
     text, document = _parse_views(text, document)
     parser = _HTMLTokens(text, document)
     markdown = _markdown_images(text, document)
@@ -2354,13 +2368,19 @@ def _image_entries(text: str, document: str) -> list[tuple[str, str, bool]]:
         return _span_at(spans, start) is not None
     def in_link_literal(start):
         return _span_at(link_spans, start) is not None
-    result = [(written_alt(alt, start), source, False) for alt, source, start, end in markdown
+    result = [(start, (written_alt(alt, start), source, False)) for alt, source, start, end in markdown
               if not in_definition(start) and not inside(tags, start, end) and not in_link_literal(start)]
     kept = set(tags)
-    result += [(alt, source, True) for alt, source, start, end in parser.images
+    result += [(start, (alt, source, True)) for alt, source, start, end in parser.images
                if (start, end) in kept and not in_definition(start) and not in_link_literal(start)]
+    if source_order:
+        result.sort(key=lambda entry: entry[0])
     return result
 
+
+def _image_entries(text: str, document: str, *, source_order: bool = False) -> list[tuple[str, str, bool]]:
+    """Read HTML and Markdown images, excluding Markdown-looking text in HTML attributes."""
+    return [image for _, image in _image_entries_at(text, document, source_order=source_order)]
 
 
 def _images(text: str, document: str) -> list[tuple[str, str]]:
@@ -2564,6 +2584,10 @@ def _marker_projection(text: str) -> str:
     source = _source_view(text)
     parsed = _accepted_inline(source)
     spans = list(code_block_spans(source)) + list(parsed[1]) + list(parsed[2]) + list(parsed[3])
+    # Accepted image descriptions render as alt text, including comment-shaped
+    # data. Reuse the image grammar so only real neighboring markers stay live.
+    visible = _outside_code(source, mask_autolinks=False)
+    spans.extend((start, end) for _, _, start, end in _markdown_images(visible, source))
     # The main inline pass skips raw HTML blocks. Their tag attributes still
     # contain literal data, whereas real marker comments must remain visible.
     blocks = html_block_spans(source)

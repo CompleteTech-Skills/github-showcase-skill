@@ -9,6 +9,7 @@ percentages are the ones the chart's colour key shows and its Markdown repeats (
 """
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 from PIL import Image
@@ -30,9 +31,12 @@ DOT_R = 5
 
 
 def _mark(brand, account: dict) -> tuple[Image.Image | None, bool]:
-    """The mark the intro would use for this account: the dark master for CompleteTech, else the account's mark."""
-    style = account["style"]
-    path = (brand.mark_dark() or brand.dark_master()) if style.get("name") == "completetech" else account.get("mark")
+    """Prefer the account's configured mark; a verified CompleteTech identity may use its dark master."""
+    path = account.get("mark")
+    if not path:
+        row = brand.org(account["login"])
+        if row.get("known") and row.get("family") == "completetech":
+            path = brand.mark_dark() or brand.dark_master()
     if not path or not Path(path).is_file():
         return None, False
     im = Image.open(path)
@@ -68,14 +72,43 @@ def _key(fonts: Fonts, font: str, entries: list[dict], avail: float, other: str)
     return entries
 
 
+def _segments(entries: list[dict], left: float, right: float) -> list[tuple[float, dict, float]]:
+    """Apportion the available bar at SVG's tenth-pixel precision, without enlarging tiny code shares.
+
+    Cumulative boundaries keep the final segment inside the bar even when earlier shares round up. A share
+    smaller than one drawable unit may have zero width; its language and exact displayed share stay in the key.
+    """
+    if not entries:
+        return []
+    lo, hi = math.ceil(left * 10), math.floor(right * 10)
+    gap = min(round(BAR_GAP * 10), max(0, hi - lo) // max(1, len(entries) - 1))
+    available = max(0, hi - lo - gap * (len(entries) - 1))
+    total = sum(entry["share"] for entry in entries)
+    used, cumulative = 0, 0.0
+    segments = []
+    for i, entry in enumerate(entries):
+        cumulative += entry["share"]
+        end = available if i == len(entries) - 1 else round(available * cumulative / total)
+        end = min(available, max(used, end))
+        segments.append(((lo + used + gap * i) / 10, entry, (end - used) / 10))
+        used = end
+    return segments
+
+
 def build(brand, fonts: Fonts, model: dict, *, static: bool = False) -> str | None:
     """The summary SVG, or None when the chart has no code shares to show (a snapshot without sizes)."""
+    return build_with_key(brand, fonts, model, static=static)[0]
+
+
+def build_with_key(brand, fonts: Fonts, model: dict, *, static: bool = False) -> tuple[str | None, list[dict]]:
+    """Compose the SVG and its actual key together so the Markdown can repeat every displayed percentage."""
     if not model.get("code_share"):
-        return None
+        return None, []
+    from .account import chart_labels
     acct = model["account"]
     style = acct["style"]
     tok, fk = style["tokens"], style["fonts"]
-    labels = brand.raw["chart"]["labels"]
+    labels = chart_labels(brand)
     langs = {**(model.get("language_colors") or {}), **(brand.raw.get("languages") or {})}
     canvas = style["canvas"] if style["canvas"]["kind"] in ("gradient-grid", "flat", "flat-grid") else \
         {"kind": "flat", "color": tok["plate_low"]}
@@ -143,12 +176,7 @@ def build(brand, fonts: Fonts, model: dict, *, static: bool = False) -> str | No
     # -- the bar and its key ----------------------------------------------------------------------------------
     key_font = fk["chip"]
     entries = _key(fonts, key_font, model["code_share"], RIGHT - TX, labels["other_languages"])
-    bw = RIGHT - TX - BAR_GAP * (len(entries) - 1)
-    segs, x = [], TX
-    for i, e in enumerate(entries):
-        sw = bw - sum(s[2] for s in segs) if i == len(entries) - 1 else max(3.0, round(e["share"] * bw, 2))
-        segs.append((x, e, sw))
-        x += sw + BAR_GAP
+    segs = _segments(entries, TX, RIGHT)
     colour = {id(e): langs.get(e["language"] or "", langs.get("default")) for e in entries}
     track_rect = (f'<rect x="{TX}" y="{BAR_Y}" width="{RIGHT - TX}" height="{BAR_H}" rx="{BAR_H / 2:g}" fill="{tok["title"]}" '
                   'fill-opacity=".08"/>')
@@ -157,7 +185,10 @@ def build(brand, fonts: Fonts, model: dict, *, static: bool = False) -> str | No
         return f'<rect{cls} x="{ntos(x)}" y="{BAR_Y}" width="{ntos(sw)}" height="{BAR_H}" fill="{colour[id(e)]}"/>'
 
     bar_still = "".join(seg(x, e, sw) for x, e, sw in segs)
-    bar_anim = "".join(seg(x, e, sw, f' class="gr" style="animation-delay:{1.0 + .12 * i:.2f}s"')
+    # The last key fades in for .4s after a 1.3s start. Bound the whole stagger to S11c's 2.5s,
+    # regardless of how many short language names fit the key; retain the original spacing for small keys.
+    stagger = min(.12, .8 / max(1, len(entries) - 1))
+    bar_anim = "".join(seg(x, e, sw, f' class="gr" style="animation-delay:{1.0 + stagger * i:.2f}s"')
                        for i, (x, e, sw) in enumerate(segs))
     keys, kx, ky = [], TX, KEY_Y
     for e in entries:
@@ -172,7 +203,7 @@ def build(brand, fonts: Fonts, model: dict, *, static: bool = False) -> str | No
                     + w.node(Text(key_font, pct, KEY_SIZE, kx + DOT_R * 2 + 16 + name_w, ky, tok["subtitle"])))
         kx += iw + 28
     keys_still = "".join(keys)
-    keys_anim = "".join(f'<g class="f" style="animation-delay:{1.3 + .12 * i:.2f}s">{k}</g>' for i, k in enumerate(keys))
+    keys_anim = "".join(f'<g class="f" style="animation-delay:{1.3 + stagger * i:.2f}s">{k}</g>' for i, k in enumerate(keys))
 
     # -- plate ------------------------------------------------------------------------------------------------
     gradient = canvas["kind"] == "gradient-grid"
@@ -191,8 +222,9 @@ def build(brand, fonts: Fonts, model: dict, *, static: bool = False) -> str | No
     bar_h = bar.get("height", 6)
     shares = "; ".join(f"{e['name']} {percent(e['share'])}" for e in entries)
     title = f"{acct['name']}: the languages of the code in this GitHub account map"
+    identity = f"{acct['name']} mark" if im is not None else "account monogram"
     desc = (("Animated summary" if not static else "Summary")
-            + f": the {style['company_label']} mark on a dark plate with gold circuit traces"
+            + f": the {identity} on a dark plate with gold circuit traces"
             + (" drawing out from it while signals travel along them, and a bar of languages growing in segment by segment"
                if not static else ", and a bar of languages")
             + f". Text: {acct['eyebrow']}; {acct['name']}; the code across the repositories shown, excluding forks: {shares}.")
@@ -229,4 +261,4 @@ def build(brand, fonts: Fonts, model: dict, *, static: bool = False) -> str | No
                 f'<g class="anim"><g clip-path="url(#track)">{bar_anim}</g>{keys_anim}{signals}</g>')
     return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="{W}" height="{H}" role="img" '
             f'aria-label="{_esc(title)}">\n<title>{_esc(title)}</title>\n<desc>{_esc(desc)}</desc>\n{css}{defs}\n'
-            f'{plate}{body}\n</svg>\n')
+            f'{plate}{body}\n</svg>\n'), entries

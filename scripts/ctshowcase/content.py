@@ -2815,7 +2815,7 @@ def social_job(ctx, resolver: Resolver | None, out: str) -> dict | None:
         resolver = ctx.brand.resolver()
     # Re-check at the planning boundary, including direct library callers, so a T3
     # grant is scoped to this repository and registered for provenance stamping.
-    if resolver.owner_status(ctx.owner) == "t3":
+    if "t3" in resolver.owner_statuses(ctx.owner):
         resolver.check_owner(ctx.owner, repo=ctx.repo)
     full = f"{current_login(resolver, ctx.owner)}/{ctx.repo}"
     steps = [f"Open https://github.com/{full}/settings (the General page).",

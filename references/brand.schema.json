@@ -698,8 +698,6 @@
       "fork",
       "archived",
       "language",
-      "no_language",
-      "other_languages",
       "legend_private"
      ],
      "properties": {
@@ -777,11 +775,13 @@
       },
       "no_language": {
        "type": "string",
-       "minLength": 1
+       "minLength": 1,
+       "default": "No language"
       },
       "other_languages": {
        "type": "string",
-       "minLength": 1
+       "minLength": 1,
+       "default": "Other languages"
       },
       "legend_private": {
        "type": "string",

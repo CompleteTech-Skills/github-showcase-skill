@@ -46,8 +46,8 @@ footer:
   line_prefix: Built by
   line_suffix: "· Innovation at Every Integration"
 
-# Public attribution and provenance (decision 25, PROPOSAL pending user confirmation). The credit line follows the
-# decision 18 footer in its own marker block (never inside the footer); the stamp names the skill in every target.
+# Public attribution and bounded provenance. Credit precedes the unchanged final decision 18 footer
+# in its own marker block; this maintenance policy does not override the settled user decisions.
 attribution:
   skill: github-showcase-skill
   skill_repo: CompleteTech-Skills/github-showcase-skill
@@ -140,7 +140,7 @@ chart:
   muted: "#94A3B8"
   archived_opacity: 0.5
   # orgs the account chart treats as HOLD (left off unless --allow-hold), beside the estate-wide HOLD families;
-  # user, 2026-11-18: the romgenie archive and following orgs, as for TouchedByAnAgent
+  # Chart-only organization omission; this does not relax root-account or consent gates.
   hold: [romgenie-archive-repostiory, romgenie-following-repos]
   enterprise: {accent: "#FFC300", eyebrow: "#FFC300", fill: "#001F3F", fill_opacity: 0.4, edge_opacity: 0.45}
   neutral:

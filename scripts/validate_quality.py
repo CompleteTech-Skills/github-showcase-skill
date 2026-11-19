@@ -304,7 +304,7 @@ def gate_action() -> None:
 
 
 def gate_provenance() -> None:
-    """Decision 25 (a proposal): the stamp schema is valid JSON Schema, the credit block follows an unchanged footer, and
+    """The stamp schema is valid JSON Schema, the credit precedes the unchanged final footer, and
     the run ledger and stamp code never star the skill or send a GitHub write themselves (writer-job argv only)."""
     sys.path.insert(0, str(ROOT / "scripts"))
     from ctshowcase import footer, provenance
@@ -324,9 +324,9 @@ def gate_provenance() -> None:
     brand = load_brand()
     block = footer.block(brand)
     if not footer.attribution(brand):
-        raise RuntimeError("brand.yaml has no attribution row (decision 25 credit)")
-    if not block.startswith(footer.footer_block(brand) + "\n\n" + footer.CREDIT_START) or block.count("<picture>") != 1:
-        raise RuntimeError("the credit block must follow the unchanged decision 18 footer, which stays the only <picture>")
+        raise RuntimeError("brand.yaml has no configured attribution row")
+    if not block.endswith(footer.CREDIT_END + "\n\n" + footer.footer_block(brand)) or block.count("<picture>") != 1:
+        raise RuntimeError("the credit must precede the unchanged final decision 18 footer, the only <picture>")
     for name in ("ledger.py", "provenance.py"):
         src = (ROOT / "scripts" / "ctshowcase" / name).read_text(encoding="utf-8")
         if re.search(r"[\"']repo[\"'],\s*[\"']star[\"']", src):
@@ -334,9 +334,9 @@ def gate_provenance() -> None:
         for line in src.splitlines():
             if re.search(r"[\"']-X[\"'],\s*[\"'](PUT|POST|PATCH|DELETE)[\"']", line) and "argv = [" not in line:
                 raise RuntimeError(f"{name}: a write verb outside writer-job argv: {line.strip()}")
-    if provenance.EXIT != {"fresh": 0, "never": 1, "stale": 1, "untracked": 1, "foreign": 2}:
+    if provenance.EXIT != {"fresh": 0, "never": 1, "stale": 1, "untracked": 1, "incomplete": 1, "foreign": 2}:
         raise RuntimeError("provenance check exit codes drifted from SKILL.md")
-    print("provenance ok (schema, credit after footer, no star or write)")
+    print("provenance ok (schema, credit before final footer, no star or write)")
 
 
 def gate_privacy() -> None:

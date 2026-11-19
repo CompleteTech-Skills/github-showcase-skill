@@ -12,7 +12,8 @@ from .mdcode import find_inline_code  # noqa: F401 (compatibility re-export)
 from .context import RepoContext
 from .detect import required_sections, standard
 from .readme import (
-    EMOJI, MARK, is_footer_like, leading_banner_block, masked, normalize_text, nav_first, preserved, source_lines,
+    BOM, EMOJI, MARK, hero_path, is_footer_like, leading_banner_block, masked, normalize_text, nav_first, personal_header_end, preserved,
+    source_lines,
     split_sections,
 )
 
@@ -186,11 +187,17 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
     variant = variant if variant and variant != "auto" else ctx.det["variant"]
     if len(raw) >= 512_000:
         fails.append("R7 size >= 500 KiB")
+    hero = hero_path(ctx)
+    personal = hero == "assets/intro.svg"
     if variant in ("G", "H"):
         # §7.4 G/H: the hero banner block, then the callout, then the body unchanged, then the footer
-        banner = leading_banner_block(text)
+        banner = leading_banner_block(text, personal=personal)
         rest = (text[banner.end():] if banner else text).lstrip()
-        if not banner and ctx.art_status()["banner"] is None:
+        if personal:
+            unchanged = ctx.preserve_unchanged() and preserved(ctx, text)
+            opening = banner.span(2) if banner else (0, personal_header_end(text))
+            fails.extend(_personal_hero_failures(text, hero, unchanged, readme=path, opening=opening))
+        elif not banner and ctx.art_status()["banner"] is None:
             fails.append(f"D13 variant {variant} must open with the hero banner block")
         first = rest.splitlines()[0] if rest.strip() else ""
         if not first.startswith(">"):
@@ -207,13 +214,16 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
         offset = block.end()
     parts.append(text[offset:])
     plain = "".join(parts)
-    lines = [line for line in source_lines(plain) if line.strip(" \t")]
+    # A retained personal format prefix is nonprinting; visible authored preambles
+    # still participate in ordering. Source/image checks keep the original view.
+    presentation = plain.lstrip(BOM + " \t") if personal and plain.startswith(BOM) else plain
+    lines = [line for line in source_lines(presentation) if line.strip(" \t")]
     preserve = preserved(ctx, text)
     unchanged = preserve and ctx.preserve_unchanged()
     # §7.1 order (q57 `nav`): hero banner, then the nav line; "Nav line first" (readme.nav_first) puts the nav on top
     navs = lines
     if not nav_first(ctx) and not unchanged:
-        n = _lead_banner_lines(lines)
+        n = _lead_banner_lines(lines, hero)
         if n is None:
             fails.append("R7 the hero banner must open the README, then the nav line")
             navs = []
@@ -232,12 +242,14 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
         else:
             warns.append("preserve: §7.0 additive-only README under the hero banner (q57 pres); R2 tagline and R7 H2 "
                          "order are n/a")
-    if imgs:
+    if personal:
+        fails.extend(_personal_hero_failures(plain, hero, unchanged))
+    elif imgs:
         _, first = imgs[0]
-        if "docs/images/banner.png" not in first and not unchanged:
-            fails.append("D13 the banner must be the first image (docs/images/banner.png)")
+        if hero not in first and not unchanged:
+            fails.append(f"D13 the hero must be the first image ({hero})")
         pic = re.search(r"<picture>.*?</picture>", plain, re.S)
-        if pic and "docs/images/banner.png" in pic.group(0):
+        if pic and hero in pic.group(0):
             fails.append("D13 banner must be a plain <img>, not <picture>")
     elif not unchanged:
         fails.append("D13 no banner image")
@@ -350,13 +362,46 @@ def lint(ctx: RepoContext, path: Path, variant: str | None = None) -> dict:
     return _result(path, fails, warns, incomplete)
 
 
-def _lead_banner_lines(lines: list[str]) -> int | None:
+def _is_personal_hero(image: tuple[str, str, bool], hero: str) -> bool:
+    _, target, html = image
+    return html and unquote(target).removeprefix("./") == hero
+
+
+def _has_personal_hero(text: str, hero: str) -> bool:
+    return any(_is_personal_hero(image, hero) for image in _image_entries(_outside_code(text), text))
+
+
+def _personal_hero_failures(text: str, hero: str, unchanged: bool, *, readme: Path | None = None,
+                            opening: tuple[int, int] | None = None) -> list[str]:
+    image_view = _outside_code(text)
+    if opening is not None:
+        start, end = opening
+        image_view = " " * start + image_view[start:end]
+    parsed = _image_entries(image_view, text, source_order=True)
+    failures = []
+    if not unchanged:
+        if not parsed:
+            failures.append("D13 no banner image")
+        elif not _is_personal_hero(parsed[0], hero):
+            failures.append(f"D13 the hero must be the first image ({hero})")
+        elif readme is not None:
+            _local(readme, parsed[0][1], failures)
+    pictures = re.finditer(r"<picture\b[^>]*>.*?</picture\s*>", image_view, re.I | re.S)
+    if any(_has_personal_hero(picture.group(0), hero) for picture in pictures):
+        failures.append("D13 banner must be a plain <img>, not <picture>")
+    return failures
+
+
+def _lead_banner_lines(lines: list[str], hero: str = "docs/images/banner.png") -> int | None:
     """How many leading non-blank lines the hero banner takes (`<p align="center">`, the banner `<img>`, `</p>`, or one
     line holding it), or None when the README does not open with it."""
-    if len(lines) >= 3 and lines[0].strip() == '<p align="center">' and "docs/images/banner.png" in lines[1] \
+    def has_hero(line):
+        return _has_personal_hero(line, hero) if hero == "assets/intro.svg" else hero in line
+
+    if len(lines) >= 3 and lines[0].strip() == '<p align="center">' and has_hero(lines[1]) \
             and lines[2].strip() == "</p>":
         return 3
-    if lines and "docs/images/banner.png" in lines[0]:
+    if lines and has_hero(lines[0]):
         return 1
     return None
 
@@ -368,7 +413,6 @@ def _first_is_foreign(imgs) -> bool:
 def _extra_footer(text: str) -> bool:
     """True when a footer-like block (centred, "Built by", complete.tech) sits anywhere but last: an old footer kept
     beside the decision 18 one."""
-    text, _ = footermod.split_credit(text)  # decision 25: the credit block follows the footer; it is not a block before it
     t = masked(text.replace(footermod.START + "\n", "").replace("\n" + footermod.END, ""))
     blocks = [b for b in re.split(r"\n\s*\n", t.strip()) if b.strip()]
     return any(is_footer_like(b) for b in blocks[:-1])

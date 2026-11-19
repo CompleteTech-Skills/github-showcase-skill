@@ -12,9 +12,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    # Older Windows runs already took 24 minutes before the new CLI and transaction coverage.
-    # Keep the full suite on every platform, with room for the combined integration and cleanup.
-    timeout-minutes: ${{ matrix.os == 'windows-latest' && 60 || 45 }}
+    # Earlier full suites hit 45 minutes on macOS and 60 minutes on Windows before the final CLI cases.
+    # Budget for the additional preservation cases and cleanup without dropping any tests.
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 120 || 75 }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -25,4 +25,5 @@ jobs:
       - name: Install test dependencies
         run: python -m pip install -r requirements.txt pytest==9.1.1 jsonschema==4.25.1
       - name: Run the full test suite
-        run: python -m pytest -q
+        # Full inventory, whole-file batches, two ordinary local pytest processes.
+        run: python scripts/run_ci_tests.py

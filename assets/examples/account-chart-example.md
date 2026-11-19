@@ -53,6 +53,8 @@
 
 </details>
 
+<sub>Summary key (smaller entries combined): Python 19.6%, TypeScript 14.8%, Jupyter Notebook 12.9%, C# 9.2%, Rust 6.9%, Swift 5.0%, Go 4.8%, PHP 4.4%, Vue 4.1%, JavaScript 3.6%, Kotlin 3.5%, C++ 3.3%, Other languages 7.9%.</sub>
+
 <p align="center">
-  <img src="account-chart-example-summary.svg" alt="Northwind Developer: the languages of the code in this map, excluding forks: Python 19.6%, TypeScript 14.8%, Jupyter Notebook 12.9%, C# 9.2%, Rust 6.9%, Swift 5.0%, Go 4.8%, PHP 4.4%, Vue 4.1%, JavaScript 3.6%, Kotlin 3.5%, C++ 3.3%, Svelte 2.9%, GDScript 2.6%, Shell 2.4%" width="100%">
+  <img src="account-chart-example-summary.svg" alt="Northwind Developer: the languages of the code in this map, excluding forks: Python 19.6%, TypeScript 14.8%, Jupyter Notebook 12.9%, C# 9.2%, Rust 6.9%, Swift 5.0%, Go 4.8%, PHP 4.4%, Vue 4.1%, JavaScript 3.6%, Kotlin 3.5%, C++ 3.3%, Other languages 7.9%" width="100%">
 </p>

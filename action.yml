@@ -202,8 +202,8 @@ runs:
           none)
             ;;
         esac
-        # Decision 25: record this run in the sidecar's provenance block, so it lands in the same commit as the art.
-        # A run that changed nothing writes nothing (never a commit just to bump the time). Offline: the metadata
+        # Record bounded local output evidence in the same sidecar change set as the art.
+        # An unchanged fresh or incomplete capture writes nothing. This is not live completion proof. Offline: metadata
         # was captured above; CI never counts toward or prints the operator's star line.
         prc=0
         "${S[@]}" --format json provenance stamp "$GITHUB_REPOSITORY" --offline --no-star-prompt \

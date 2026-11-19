@@ -207,15 +207,28 @@ def capture_reads(login: str | None = None) -> dict:
                     "named; `account-chart capture` runs these reads and writes the snapshot."}
 
 
+def _chart_hold(resolver, login: str) -> bool:
+    """Chart-only holds follow the same current/former-owner identities as the estate gates."""
+    cfg = (resolver.brand.raw.get("chart") or {}) if resolver.brand else {}
+    return any(resolver.same(login, owner) for owner in cfg.get("hold") or ())
+
+
+def chart_labels(brand) -> dict:
+    """Keep pre-language-share operator configs usable with neutral labels for the new key entries."""
+    return {"no_language": "No language", "other_languages": "Other languages", **brand.raw["chart"]["labels"]}
+
+
 def _check_capture_owner(resolver, login: str, allow_t3: bool, allow_hold: bool = False) -> None:
-    """Use the shared owner and sign-off gates before a query can return repository data. A HOLD owner is read
-    only with `--allow-hold`."""
+    """Use the shared owner and sign-off gates before a query can return repository data. Only organization
+    reads may receive the scoped HOLD allowance; a root account remains refused."""
     from .errors import Refused
     resolver.check_owner(login, allow_t3=allow_t3, allow_hold=allow_hold)
     if resolver.family_hold(login) and not allow_hold:
         raise Refused(f"{login} is on HOLD", log="hold")
     if resolver.is_placeholder(login):
         raise Refused(f"{login} is a merged placeholder", log="exempt")
+    if not allow_hold and _chart_hold(resolver, login):
+        raise Refused(f"{login} is on HOLD", log="hold")
 
 
 def capture(login: str | None = None, run=None, today: str | None = None, *, brand=None, resolver=None,
@@ -234,17 +247,18 @@ def capture(login: str | None = None, run=None, today: str | None = None, *, bra
         login = login.strip()
         if not LOGIN_RE.fullmatch(login):
             raise ShowcaseError(f"not a GitHub login: {login!r}", log="usage")
-        _check_capture_owner(resolver, login, allow_t3, allow_hold)
+        _check_capture_owner(resolver, login, allow_t3)
     viewer = _dig(run("account_viewer"), ("viewer", "login"))
     if not isinstance(viewer, str) or not LOGIN_RE.fullmatch(viewer):
         raise NeedsInput("gh", "gh is not signed in (gh auth status)")
     login = (login or viewer).strip()
-    _check_capture_owner(resolver, login, allow_t3, allow_hold)
+    _check_capture_owner(resolver, login, allow_t3)
     is_viewer = resolver.same(login, viewer)
     # Recheck before every page as well: a changed/withdrawn consent record does not authorize another read.
     def guarded(name, **variables):
         owner = variables.get("org") or variables.get("login") or login
-        _check_capture_owner(resolver, owner, allow_t3, allow_hold)
+        org_allowance = allow_hold and name == "account_org"
+        _check_capture_owner(resolver, owner, allow_t3, org_allowance)
         data = run(name, **variables)
         # Repository queries request login on every page. Discovery queries currently omit source identity;
         # preserve that protocol, but validate an identity whenever supplied before accumulating any nodes.
@@ -266,7 +280,7 @@ def capture(login: str | None = None, run=None, today: str | None = None, *, bra
                 raise Refused("capture response identity does not match the requested source",
                               log="usage:capture-identity")
             if field == "login":
-                _check_capture_owner(resolver, actual, allow_t3, allow_hold)
+                _check_capture_owner(resolver, actual, allow_t3, org_allowance)
         return data
 
     first, nodes, repo_status = _paged(guarded, "account_user", ("user", "repositories"), login=login)
@@ -276,10 +290,19 @@ def capture(login: str | None = None, run=None, today: str | None = None, *, bra
     actual = user.get("login") or login
     if not isinstance(actual, str) or not resolver.same(login, actual):
         raise NeedsInput("account", "captured account identity differs from the requested account")
-    _check_capture_owner(resolver, actual, allow_t3, allow_hold)
+    _check_capture_owner(resolver, actual, allow_t3)
     repo_status = _repository_status(repo_status, user, nodes)
     notes: list[str] = []
     colours: dict[str, str] = {}  # language -> GitHub linguist colour, from every repository page read
+
+    def parent_withheld(full):
+        owner = full.partition("/")[0]
+        status = resolver.owner_status(owner)
+        org_allowance = allow_hold and not resolver.same(owner, login) and any(
+            resolver.same(owner, org) for org in logins.values())
+        held = status == "hold" or resolver.family_hold(owner) or _chart_hold(resolver, owner)
+        return (status == "excluded" or resolver.is_placeholder(owner) or (held and not org_allowance)
+                or _t3_held(estate, full, allow_t3) or estate.exposure(full))
 
     def safe_repos(owner, raw):
         kept = []
@@ -290,6 +313,11 @@ def capture(login: str | None = None, run=None, today: str | None = None, *, bra
             elif estate.exposure(full):
                 notes.append("exposure-withheld")
             else:
+                if repo.get("parent") and parent_withheld(repo["parent"]):
+                    # Removing the optional fact preserves unknown upstream ownership. Null would instead claim
+                    # GitHub returned no parent; the render logs the missing fact and uses its external-fork fallback.
+                    repo.pop("parent")
+                    notes.extend(("fork-parent-withheld", "needs-input:fork-parents"))
                 kept.append(repo)
         return kept
 
@@ -564,11 +592,10 @@ def build(snap: dict, brand, *, resolver=None, flags: dict | None = None, allow_
     from .org import Estate, _t3_granted, _t3_held
     r = resolver or brand.resolver()
     estate = Estate(brand, r, flags=flags or {})
-    cfg = brand.raw["chart"]
-    labels = cfg["labels"]
+    labels = chart_labels(brand)
     logs: list[str] = list(snap.get("notes") or [])
     login = snap["account"]["login"]
-    r.check_owner(login, allow_t3=allow_t3, allow_hold=allow_hold)  # an excluded or HOLD account refuses (exit 2)
+    _check_capture_owner(r, login, allow_t3)  # --allow-hold admits organization lanes, never a refused root account
     counts = {"public": 0, "named": 0, "withheld": 0, "hidden": 0, "not_public": 0, "organizations": 0,
               "enterprises": 0, "omitted_orgs": 0, "incomplete_orgs": 0, "orgs_without_public": 0, "hidden_by": {}}
     hidden_categories: set[str] = set()  # categories survive omission; omitted orgs never add repository counts
@@ -660,7 +687,7 @@ def build(snap: dict, brand, *, resolver=None, flags: dict | None = None, allow_
             logs.append(f"placeholder:{lg}")
             counts["omitted_orgs"] += 1
             return None
-        if st == "t3" and not (allow_t3 and _t3_granted(lg)):
+        if "t3" in r.owner_statuses(lg) and not (allow_t3 and _t3_granted(lg)):
             logs.append(f"t3-signoff:{lg}")  # T3 work waits for co-owner sign-off (decision 12)
             counts["omitted_orgs"] += 1
             return None
@@ -668,7 +695,7 @@ def build(snap: dict, brand, *, resolver=None, flags: dict | None = None, allow_
         observed = status in ("complete", "partial")
         repos = o["repositories"] if observed else []
         # the estate's HOLD (owner status or a family with `hold: true`), or the chart's own `chart.hold` list
-        on_hold = st == "hold" or r.family_hold(lg) or any(r.same(lg, h) for h in cfg.get("hold") or ())
+        on_hold = st == "hold" or r.family_hold(lg) or _chart_hold(r, lg)
         if on_hold and not allow_hold:
             logs.append(f"hold:{lg}")  # a HOLD org is left off the chart whole; --allow-hold shows it like any org
             counts["omitted_orgs"] += 1
@@ -867,7 +894,7 @@ def alt_text(model: dict) -> str:
             f"the list below repeats each one as a link.")
 
 
-def markdown(model: dict, files: dict) -> str:
+def markdown(model: dict, files: dict, *, summary_key: list[dict] | None = None) -> str:
     """The README block for the chart: the image (linking to the full-resolution PNG), the counts, and every repository
     in the map as a link, grouped like the tree."""
     c = model["counts"]
@@ -958,8 +985,12 @@ def markdown(model: dict, files: dict) -> str:
     out += ["</details>", ""]
     if files.get("summary"):  # the closing visual: the code's languages in the intro's design
         from .chart import percent
-        shares = ", ".join(f"{e['name']} {percent(e['share'])}" for e in model.get("code_share") or [])
+        entries = summary_key if summary_key is not None else model.get("code_share") or []
+        shares = ", ".join(f"{e['name']} {percent(e['share'])}" for e in entries)
         alt = f"{acct['name']}: the languages of the code in this map, excluding forks: {shares}"
+        if entries != model.get("code_share"):
+            out += ["<sub>Summary key (smaller entries combined): "
+                    + ", ".join(f"{_md(e['name'])} {percent(e['share'])}" for e in entries) + ".</sub>", ""]
         out += ['<p align="center">', f'  <img src="{files["summary"]}" alt="{_attr(alt)}" width="100%">', "</p>", ""]
     return "\n".join(out)
 
@@ -1150,7 +1181,8 @@ def render(args):
     svg = chart.svg(laid, fonts)
     lint = svglint.lint_bytes("chart", svg.encode("utf-8"), str(out_dir / files["svg"]))
     from . import summary
-    summary_svg, slint = summary.build(brand, fonts, model, static=args.static_summary), None
+    summary_svg, summary_key = summary.build_with_key(brand, fonts, model, static=args.static_summary)
+    slint = None
     if summary_svg is None:
         logs.append("summary-skipped:no-code-shares")  # no per-language sizes to show (an older snapshot, or no code)
     else:
@@ -1160,7 +1192,7 @@ def render(args):
             return {"command": "account-chart", "action": "render", "owner": model["account"]["login"], "result": "fail",
                     "lint": lint, "summary_lint": slint, "logs": sorted(set(logs))}, CHECK_FAILED
     mmd, minfo = chart.mermaid(model, brand)
-    md = markdown(model, files)
+    md = markdown(model, files, summary_key=summary_key)
     if minfo["bytes"] > 50_000:
         logs.append(f"mermaid-size:{minfo['bytes']}")  # over Mermaid's default maxTextSize: GitHub may refuse to draw it
     if minfo["edges"] + minfo["invisible_links"] > 500:

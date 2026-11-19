@@ -18,6 +18,7 @@ from ctshowcase.config import Brand
 from ctshowcase.context import RepoContext
 from ctshowcase.errors import NeedsInput
 from ctshowcase.meta import normalize
+from test_credit_identity_boundary import identity_sections
 
 
 def is_complete_tech_identity(owner, row):
@@ -245,7 +246,7 @@ def test_each_org_row_keeps_its_identity_across_surfaces(brand, tmp_path):
         assert generated.returncode == 0, (owner, generated.stdout, generated.stderr)
         cli_readme = (checkout / "README.md").read_text(encoding="utf-8")
         if not is_complete_tech_identity(owner, row):
-            body = cli_readme.split("<!-- showcase:footer:start -->", 1)[0]
+            body, _ = identity_sections(cli_readme, brand.raw, footer_required=row.get("footer", True) is True)
             assert_no_complete_tech_leak(owner, body)
         ctx = context(brand, owner, language="Python", files=["agent.py"])
         header = readme.header(ctx)

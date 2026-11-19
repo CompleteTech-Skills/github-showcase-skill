@@ -170,11 +170,11 @@ def _isolated_signoff_state():
         signoff.restore(run)
 
 
-def footer_then_credit(text: str) -> bool:
-    """The decision 18 footer ends the README, followed only by the decision 25 credit block."""
+def credit_then_footer(text: str) -> bool:
+    """Require the credit before the unchanged final decision 18 footer; retain the original footer-last assertion."""
     from ctshowcase import footer
     rest, credit = footer.split_credit(text)
-    return credit is not None and rest.rstrip().endswith(footer.END)
+    return credit is not None and text.rstrip().endswith(footer.END) and rest.rstrip().endswith(footer.END)
 
 
 @pytest.fixture(autouse=True)

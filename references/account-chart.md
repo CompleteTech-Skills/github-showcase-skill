@@ -37,6 +37,12 @@ New snapshots also carry `coverage` for personal `repositories`, `organizations`
 
 **Privacy by construction.** Every connection that returns repository names asks for `privacy: PUBLIC`. Private and internal repositories are counted as `all` minus `public` and never named, so no private name can reach a snapshot, a chart, a fixture or a log. `render` refuses a hand-edited snapshot that marks a repository `private`, `isPrivate` or non-public `visibility` (exit 2, `privacy:not-public-repository`). The snapshot is still the account's own data: keep real snapshots out of fixtures and examples (synthetic stand-ins live in `examples/account-chart/`).
 
+`--allow-hold` applies only to organization lanes and their permitted capture reads. It never releases the root account from HOLD; an explicit or discovered held root still refuses before account data is read or chart files are written. Chart-only holds use the resolver too, including aliases and continuation-page checks.
+
+Owner restrictions are independent across every resolved alias. An organization that is both HOLD and T3 still needs explicit T3 opt-in and a current, applicable sign-off; a HOLD allowance never supplies consent or overrides exclusion. Repository withdrawals are rechecked for both visible repositories and optional fork-parent facts.
+
+A fork's optional parent fact passes exposure, withdrawal and owner-policy checks before the snapshot is saved. A withheld parent is removed without naming it in logs (`fork-parent-withheld`, `needs-input:fork-parents`). Its upstream ownership remains unknown, so the normal external-fork fallback applies; repeating capture does not bypass the policy.
+
 ## What the chart leaves out by default
 
 The chart shows public work. By default `render` leaves out four things, and `--show` brings each back (repeatable):
@@ -85,13 +91,17 @@ Every organization is a lane: its card (the family's plate, accent bar, eyebrow 
 
 The legend is the chart's colour key: every language a pill's dot shows and every language with at least 1% of the code, each with its share of the code across the repositories the chart names, forks excluded (one decimal, `<0.1%` for a trace), most first; the rest of the code as "Other languages"; "No language" for repositories GitHub assigns none. Under it come only the markers the chart draws (fork, archive, private work, roles) and the brand line.
 
+Older owned configs may omit `chart.labels.no_language` and `chart.labels.other_languages`; their compatible defaults are `No language` and `Other languages`. Explicit nonempty custom labels remain supported.
+
 Order is deterministic: repositories by name (case-insensitive); organizations in family bands (the account's family first, then the families in `brand.yaml` order, then orgs without a family), flagship orgs first, then tier, then display name; enterprises by name. Colours, labels and the Mermaid font come from `brand.yaml` (`chart:` and the family tokens); the scripts hold no colour literals.
 
-The image carries no map counts (S16): the Markdown block states how many repositories are named and withheld (plus the private and internal counts with `--show private-work`), names without counts what the render options leave out ("Not shown: ..."), repeats the colour key's percentages as a sentence, and repeats every repository as a link with its description and star count (S15). The star counts and the language percentages in the images are the user's decisions of 2026-11-18, recorded as exceptions beside S16 in [svg-rules.md](svg-rules.md).
+The image carries no map counts (S16): the Markdown block states how many repositories are named and withheld (plus the private and internal counts with `--show private-work`), names without counts what the render options leave out ("Not shown: ..."), repeats the colour key's percentages as a sentence, and repeats every repository as a link with its description and star count (S15). These are scoped captured-data display exceptions beside S16 in [svg-rules.md](svg-rules.md), not live measurements or permission to bypass the estate gates.
 
 ## The summary SVG
 
-`NAME-summary.svg` closes the README block in the profile intro's design (1280x360, the intro kind): the account's mark (the CompleteTech dark master for the CompleteTech family, else the account's own mark, else its monogram) on the family plate, gold circuit traces drawing out from it, the eyebrow and the account's name, and the code's languages as a bar that grows in segment by segment over a key of up to three rows (the smallest languages fold into "Other languages" when they do not fit). Signals travel the traces after the motion settles; `prefers-reduced-motion` shows the settled frame (S20, S21). It is written only when the colour key has shares (`summary-skipped:no-code-shares` otherwise). `--static-summary` writes the settled frame without motion, for a page that already shows an animated intro (S11: one animated asset per page).
+`NAME-summary.svg` closes the README block in the profile intro's design (1280x360, the intro kind): the account's configured mark (otherwise the CompleteTech dark master only for a resolved CompleteTech family association, otherwise the account's monogram) on the family plate, gold circuit traces drawing out from it, the eyebrow and the account's name, and the code's languages as a bar that grows in segment by segment over a key of up to three rows (the smallest languages fold into "Other languages" when they do not fit). Signals travel the traces after the motion settles; `prefers-reduced-motion` shows the settled frame (S20, S21). It is written only when the colour key has shares (`summary-skipped:no-code-shares` otherwise). `--static-summary` writes the settled frame without motion, for a page that already shows an animated intro (S11: one animated asset per page).
+
+When the summary compacts its key, the Markdown retains the original chart share line and adds the actual compacted summary key beside its image. Its image alternative text uses that same compacted key. Segment boundaries are proportional and bounded at SVG precision; very small shares can have zero drawable width, while their names and percentages remain in the key and Markdown.
 
 ## The Mermaid source
 

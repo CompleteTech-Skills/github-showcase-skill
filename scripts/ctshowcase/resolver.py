@@ -276,15 +276,19 @@ class Resolver:
         row["owner"], row["brand_key"] = self.canonical(login), key
         return row
 
-    def owner_status(self, login: str) -> str | None:
-        """excluded / hold / t3 / watching for any of the org's logins (the watching exemption survives a rename)."""
+    def owner_statuses(self, login: str) -> set[str]:
+        """Independent restrictions across every resolved login, including approved registry renames."""
         if not self.brand:
-            return None
+            return set()
+        statuses = set()
         for a in self.aliases(login):
-            st = self.brand.owner_status(a)
-            if st:
-                return st
-        return None
+            statuses.update(self.brand.owner_statuses(a))
+        return statuses
+
+    def owner_status(self, login: str) -> str | None:
+        """Most restrictive display status; permission checks must retain all applicable restrictions."""
+        statuses = self.owner_statuses(login)
+        return next((st for st in ("excluded", "hold", "t3", "watching") if st in statuses), None)
 
     def check_owner(self, login: str, *, allow_t3: bool = False, allow_hold: bool = False,
                     repo: str | None = None, verify_signoff: bool = True) -> str | None:
@@ -296,9 +300,10 @@ class Resolver:
             raise Refused(f"{login} is an excluded owner; every command refuses", log="exempt")
         if st == "hold" and not allow_hold:
             raise Refused(f"{login} is on HOLD", log="hold")
-        if st == "t3" and not (allow_t3 or t3_signed_off()):
+        t3 = "t3" in self.owner_statuses(login)
+        if t3 and not (allow_t3 or t3_signed_off()):
             raise Refused(f"{login} is T3; needs co-owner sign-off", log="t3-signoff")
-        if st == "t3" and verify_signoff:  # doctor passes False: it reports the hold instead of refusing
+        if t3 and verify_signoff:  # doctor passes False: it reports the hold instead of refusing
             from . import signoff
             signoff.require(login, repo, self.aliases(login))
         return st

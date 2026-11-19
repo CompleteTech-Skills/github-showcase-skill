@@ -107,14 +107,16 @@ class Brand:
         """Every login of the owner's org: the current one first, then former ones (just `owner` when none is known)."""
         return self.resolver().aliases(owner) if owner else [owner]
 
-    def owner_status(self, owner: str) -> str | None:
+    def owner_statuses(self, owner: str) -> set[str]:
+        """All applicable policies; a HOLD allowance must not erase independent consent or exclusion."""
         owners = self.raw.get("owners", {})
-        for login in self.aliases(owner):
-            low = (login or "").lower()
-            for status in ("excluded", "hold", "t3", "watching"):
-                if low in {o.lower() for o in owners.get(status, [])}:
-                    return status
-        return None
+        names = {(login or "").lower() for login in self.aliases(owner)}
+        return {status for status in ("excluded", "hold", "t3", "watching")
+                if names.intersection(o.lower() for o in owners.get(status, []))}
+
+    def owner_status(self, owner: str) -> str | None:
+        statuses = self.owner_statuses(owner)
+        return next((status for status in ("excluded", "hold", "t3", "watching") if status in statuses), None)
 
     def check_owner(self, owner: str, *, allow_t3: bool = False, repo: str | None = None,
                     verify_signoff: bool = True) -> str | None:
@@ -124,9 +126,10 @@ class Brand:
             raise Refused(f"{owner} is an excluded owner; every command refuses", log="exempt")
         if status == "hold":
             raise Refused(f"{owner} is on HOLD", log="hold")
-        if status == "t3" and not (allow_t3 or t3_signed_off()):
+        t3 = "t3" in self.owner_statuses(owner)
+        if t3 and not (allow_t3 or t3_signed_off()):
             raise Refused(f"{owner} is T3; needs co-owner sign-off", log="t3-signoff")
-        if status == "t3" and verify_signoff:
+        if t3 and verify_signoff:
             from . import signoff
             signoff.require(owner, repo, self.aliases(owner))
         return status

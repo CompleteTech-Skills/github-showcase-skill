@@ -10,7 +10,8 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # This job runs the same complete CLI regression suite before the quality validator.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
         with:
@@ -30,6 +31,7 @@ jobs:
       - name: Verify the bundled OFL fonts
         run: python scripts/showcase.py fonts --check
       - name: Run the test suite
-        run: python -m pytest -q
+        # Full inventory, whole-file batches, two ordinary local pytest processes.
+        run: python scripts/run_ci_tests.py
       - name: Run quality validation
         run: python scripts/validate_quality.py

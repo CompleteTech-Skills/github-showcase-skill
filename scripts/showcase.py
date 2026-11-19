@@ -10,9 +10,8 @@ Command groups: org {profile,about,pins,labels,health,doctor} · project {captur
 estate-plan} · enterprise {snapshot-query,discover,snapshot,doctor,seat-check,diff,plan} · content {social,icon,links,
 linguist,actions,images,sidebar}. `content social` is the contract name for the social preview (`social-preview` is a
 hidden, deprecated alias); `org-banner` and `org-tile` are top-level generators. `account-chart {capture-query,capture,
-render}` maps one account's repositories, enterprises and organizations (Mermaid source, dark SVG, HD PNG).
-`provenance {check,stamp,star}` (decision 25, a proposal) tells before a run whether a target was already showcased
-and records the run.
+render}` maps one account’s repositories, enterprises and organizations (Mermaid source, dark SVG, HD PNG).
+`provenance {check,stamp,star}` compares recorded outputs with supplied captures and records bounded local evidence.
 """
 from __future__ import annotations
 
@@ -28,7 +27,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from ctshowcase import STANDARD, __version__  # noqa: E402
-from ctshowcase.errors import CHECK_FAILED, NEEDS_INPUT, OK, USAGE, ConfigError, ShowcaseError  # noqa: E402
+from ctshowcase.errors import CHECK_FAILED, NEEDS_INPUT, OK, USAGE, ConfigError, NeedsInput, ShowcaseError  # noqa: E402
 
 GENERATORS = {"banner", "card", "org-tile", "intro", "contact-sheet", "social-preview", "org-banner"}
 # commands whose default output is text (`--format json` for the JSON object): the generators and `provenance`
@@ -592,9 +591,11 @@ def cmd_readme(args):
     original_readme = path.read_bytes() if path.is_file() else None
     raw = (original_readme or b"").decode("utf-8")
     before = readme.normalize_text(raw)
+    readme.guard_credit_ownership(ctx.brand, before)
     if args.variant and args.variant != "auto":
         ctx.det["variant"] = args.variant
     ctx.local_badges = args.badges == "local"
+    personal = readme.personal_profile(ctx)
     def preservation(old, new, removed):
         problems = readme.preservation(old, new, removed, ctx=ctx)
         if problems and args.format_generated:
@@ -605,12 +606,29 @@ def cmd_readme(args):
 
     reason = readme.managed_reason(ctx, before)
     if reason:
-        proposed = readme.header(ctx)
+        if (personal and args.mode in ("auto", "upgrade") and not args.bootstrap
+                and not args.format_generated and (ctx.override.get("readme") or {}).get("managed") is not True):
+            from ctshowcase.org import USER_GENERATED_NOTICE
+            if before.partition("\n")[0] == USER_GENERATED_NOTICE:
+                if (args.diff or not args.write) and args.format == "text":
+                    return None, OK
+                payload = base("readme", ctx, result="unchanged", mode="header" if args.no_regroup else "upgrade",
+                               variant=ctx.det["variant"], written=False, heading_moves=[])
+                if args.diff or not args.write:
+                    payload["diff"] = ""
+                return payload, OK
         ctx.log("needs-input:readme-managed")
+        proposed = None
+        try:
+            proposed = readme.header(ctx)
+        except NeedsInput as exc:
+            if exc.detail not in ("intro", "intro-identity"):
+                raise
+            ctx.log(exc.log)
         if args.format == "text":
             if not args.quiet:
                 print(f"readme: needs-input:readme-managed ({reason})", file=sys.stderr)
-                if not args.write:
+                if not args.write and proposed is not None:
                     print(proposed)
                 if getattr(ctx, "staged_description", None) is not None:
                     sys.stderr.write(f"staged-description: {json.dumps(ctx.staged_description, ensure_ascii=False)}\n")
@@ -622,6 +640,7 @@ def cmd_readme(args):
         raise ShowcaseError("--no-regroup cannot be combined with --bootstrap or --mode scaffold", log="usage")
     contrib_new = None
     original_contrib = None
+    source_spans = [] if not args.format_generated else None
     if args.bootstrap:
         state = readme.bootstrap_state(before)
         removed = []
@@ -643,8 +662,10 @@ def cmd_readme(args):
             # a person wrote inside the template body: the block is theirs. Drop the marker and upgrade with the
             # never-drop-a-line check; if that check objects, only the marker goes and the header blocks refresh.
             ctx.log("bootstrap:edited")
-            base_text = readme.drop_pristine(before)
-            after, removed = readme.upgrade(ctx, base_text, already_normalized=True)
+            base_spans = [] if source_spans is not None else None
+            base_text = readme.drop_pristine(before, source_spans=base_spans)
+            after, removed = readme.upgrade(ctx, base_text, already_normalized=True, source_spans=source_spans)
+            readme.compose_source_spans(source_spans, base_spans)
             problems = preservation(base_text, after, removed)
             if problems:
                 # a marked footer that holds authored content (partner or foreign image) must never be regenerated
@@ -654,6 +675,8 @@ def cmd_readme(args):
                                 problems=refusal + problems[:19],
                                 logs=ctx.logs + ["readme-shrink"]), CHECK_FAILED
                 ctx.log("readme-shrink")
+                if source_spans is not None:
+                    source_spans.clear()
                 after, removed = readme.header_only(ctx, base_text, already_normalized=True), []
         else:
             after = readme.header_only(ctx, before, already_normalized=True)
@@ -669,16 +692,23 @@ def cmd_readme(args):
         if mode == "auto":
             mode = "scaffold" if len([ln for ln in readme.source_lines(before) if ln.strip(" \t")]) < 3 else "upgrade"
         removed = []
-        if mode == "scaffold":
-            after = readme.scaffold(ctx, before)
+        callout_scaffold = personal and mode == "scaffold" and ctx.det["variant"] in ("G", "H")
+        if mode == "scaffold" and not callout_scaffold:
+            after = readme.scaffold(ctx, before, already_normalized=True)
         elif mode == "header":
             after = readme.header_only(ctx, before, already_normalized=True)
         else:
-            after, removed = readme.upgrade(ctx, before, already_normalized=True)
+            after, removed = readme.upgrade(ctx, before, already_normalized=True, source_spans=source_spans)
+            if personal:
+                readme.guard_personal_hero_context(ctx, before, after, already_normalized=True)
             problems = preservation(before, after, removed)
             if problems:
                 return base("readme", ctx, result="fail", mode=mode, problems=problems[:20],
                             logs=ctx.logs + ["readme-shrink"]), CHECK_FAILED
+    if personal and not args.no_regroup:
+        # Formatting may change spelling, but never authorizes a generator to
+        # reinterpret authored content before the formatter sees the candidate.
+        readme.guard_personal_hero_context(ctx, before, after, already_normalized=True)
     from ctshowcase.fingerprint import bytes_record, has_staged_outputs
     from ctshowcase.staged import (
         check_outputs, lock_outputs, plan_sidecars, protected_auxiliary, record_output, record_staged_writes,
@@ -734,9 +764,13 @@ def cmd_readme(args):
         restored = after
     elif after != before:
         bom = readme.BOM if raw.startswith(readme.BOM) else ""
-        restored = bom + readme.restore_line_endings(raw, before, after)
+        if personal and not source_spans:
+            source_spans = readme.personal_hero_source_spans(ctx, before, after)
+        restored = bom + readme.restore_line_endings(raw, before, after, source_spans=source_spans)
     else:
         restored = raw
+    if personal and not args.format_generated:
+        readme.guard_personal_hero_context(ctx, raw, restored)
     changed = restored != raw
     badge_outputs = {}
     if getattr(ctx, "badge_files", None):
@@ -756,9 +790,12 @@ def cmd_readme(args):
     report = (Path(args.records),) if staged and args.records and changed else ()
     capture = getattr(ctx, "meta_path", None)
     change_records = []
+    intro_path = rd / readme.hero_path(ctx) if personal else None
     if args.records and changed:
         change_records.append(records.record(ctx.owner, ctx.repo, "readme", "README.md", raw, restored,
                                              f"§7 variant {ctx.det['variant']} ({mode})"))
+        if intro_path is not None:
+            ensure_distinct_outputs(Path(args.records), intro_path)
     if args.no_regroup and change_records and not staged:
         metadata_path = ctx.facts.metadata_path
         ensure_distinct_outputs(Path(args.records), path, rd / ".showcase.json", rd / "docs/images/.showcase.json",
@@ -775,6 +812,9 @@ def cmd_readme(args):
             outputs.append((path, rendered_readme))
             if contrib_new is not None:
                 outputs.append((contrib_path, contrib_new.encode("utf-8")))
+        if intro_path is not None:
+            for target, _ in outputs:
+                ensure_distinct_outputs(target, intro_path)
         rendered_taglines = tagline_blocks(after) if tagline_indices and args.format_generated else planned_taglines
         if len(rendered_taglines) != len(planned_taglines):
             raise ShowcaseError("formatter changed the README tagline markers", log="formatter-content",
@@ -841,6 +881,8 @@ def cmd_readme(args):
                             check_outputs(ctx, *destinations, auxiliary=report)
                         ensure_distinct_outputs(record_path, path, contrib_path, *(target for target, _ in provenance),
                                                 *(rd / rel for rel in badge_outputs), *((capture,) if capture else ()))
+                        if intro_path is not None:
+                            ensure_distinct_outputs(record_path, intro_path)
                     write_formatted_outputs(output_group, repo_root=ctx.format_root, snapshots=snapshots,
                                             private=staged, private_metadata=private_metadata, append_output=append_output)
             else:
@@ -1332,7 +1374,7 @@ def cmd_doctor(args):
     ctx.brand.check_owner(ctx.owner, allow_t3=True, repo=ctx.repo, verify_signoff=False)  # read-only: doctor.row shows R7 hold
     r = doctor.row(ctx)
     from ctshowcase import provenance
-    prov = provenance.doctor_repo(ctx, args.meta)  # decision 25: a row of its own, never a cell or the done verdict
+    prov = provenance.doctor_repo(ctx, args.meta)  # Recorded-output evidence: a row of its own, never a cell or the done verdict
     fmt = args.doctor_format
     if fmt == "tsv":
         print(doctor.as_tsv(r, args.header))
@@ -1382,7 +1424,7 @@ def cmd_enterprise(args):
         b = brand(args)
         res = Resolver.from_paths(b, args.registry, args.approved, args.approved_yaml, args.actions)  # CQ-03
         r = E.doctor(snap, E.desired(), b, load(args.baseline, "--baseline") if args.baseline else None, resolver=res)
-        from ctshowcase import provenance  # decision 25: the private estate stamp against this snapshot
+        from ctshowcase import provenance  # Recorded-output evidence: the private estate stamp against this snapshot
         r["provenance"] = provenance.doctor_local("enterprise", str(snap.get("slug") or ""), b, res,
                                                   provenance.enterprise_stamp_dir(), snapshot=snap)
         return {"command": "enterprise", "action": act, **r, "logs": []}, CHECK_FAILED if r["result"] == "fail" else OK
@@ -1403,7 +1445,7 @@ def cmd_enterprise(args):
 
 
 def cmd_provenance(args):
-    """Decision 25 (PROPOSAL): `provenance check|stamp|star`; read-only toward GitHub."""
+    """Recorded-output evidence: `provenance check|stamp|star`; read-only toward GitHub."""
     from ctshowcase import provenance
     return provenance.cmd(args, brand)
 
@@ -1716,7 +1758,7 @@ def parser() -> argparse.ArgumentParser:
     account.register(sub)
     content.add_parser(sub, sys.modules.get(__name__))  # None when loaded by path: content finds showcase.py itself
     from ctshowcase import provenance
-    provenance.register(sub, cmd_provenance)  # decision 25: run-once check, stamp and the local run ledger
+    provenance.register(sub, cmd_provenance)  # Recorded-output evidence: run-once check, stamp and the local run ledger
     return p
 
 
