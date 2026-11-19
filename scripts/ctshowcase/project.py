@@ -822,6 +822,27 @@ def _is_t3(row: dict) -> bool:
     return bool(words) and words[0] == "T3"
 
 
+def _association_rows(resolver: Resolver, login: str) -> list[dict]:
+    """Every applicable policy row, without requiring a ready display identity or selecting away a former row."""
+    names = {alias.casefold() for alias in resolver.aliases(login)}
+    tables = [resolver.registry.get("orgs") or {}]
+    if resolver.brand is not None:
+        tables.append(resolver.brand.raw.get("orgs") or {})
+    return [row for table in tables for owner, row in table.items() if owner.casefold() in names]
+
+
+def _association_t3(resolver: Resolver, login: str, row: dict) -> bool:
+    """Consent is independent of the selected display tier and applies through every resolved alias."""
+    return ("t3" in resolver.owner_statuses(login) or _is_t3(row)
+            or any(_is_t3(policy) for policy in _association_rows(resolver, login)))
+
+
+def _association_held(resolver: Resolver, login: str) -> bool:
+    """A grant cannot release another owner, family or placeholder restriction."""
+    return (bool(resolver.owner_statuses(login) & {"excluded", "hold"})
+            or resolver.family_hold(login) or resolver.is_placeholder(login))
+
+
 def _captured_spec(copied: dict | None) -> dict | None:
     """The normalized spec of a captured board; copy_plan and estate_plan derive it the same way."""
     if copied is None:
@@ -830,8 +851,8 @@ def _captured_spec(copied: dict | None) -> dict | None:
 
 
 def captured_t3(resolver: Resolver | None, spec: dict | None, allow_t3: bool) -> tuple[list[str], list[dict]]:
-    """Sign-off check of T3 associations in an Org field (an option whose description is `T3: <login>`, or whose
-    name is a T3 org's display name). Both the explicit flag and a current record are required.
+    """Policy check of Org associations, including independent owner restrictions and every alias policy row.
+    T3 associations need both the explicit flag and a current record; a grant never releases another HOLD.
     Returns (refusals, retained):
     refusals are `t3-signoff:<code>:<login>` for each such org with no valid sign-off record, and retained are
     {login, name, tier, signoff_id, labels} for each such org whose record is valid. The description remainder and the
@@ -850,62 +871,68 @@ def captured_t3(resolver: Resolver | None, spec: dict | None, allow_t3: bool) ->
     if not have:
         return [], []
     from . import signoff
-    t3, rows = {}, {}
+    identities, display_names, rows = {}, {}, {}
 
     def _index(key: str, row: dict) -> None:
+        key = resolver.canonical(key)
         rows[key] = row
         for alias in resolver.aliases(key):  # a description written under a former login still names this org
-            t3[alias.lower()] = key
-        t3[resolver.canonical(key).lower()] = key
-        t3[str(row.get("display_name") or key).lower()] = key
+            identities[alias.lower()] = key
+        for policy in [row, *_association_rows(resolver, key)]:
+            label = str(policy.get("display_name") or key).strip().lower()
+            display_names.setdefault(label, set()).add(key)
 
     sources = [list(resolver.registry.get("orgs") or {})]
     if resolver.brand is not None:
         sources.append(list((resolver.brand.raw.get("orgs") or {}).keys()))
+        sources.extend(list(owners) for owners in (resolver.brand.raw.get("owners") or {}).values())
     for keys in sources:
         for key in keys:
             try:
                 row = resolver.brand_org(key)
             except NeedsInput:
-                continue
-            if _is_t3(row):
-                _index(key, row)
-    def _resolve(ident: str) -> str | None:
-        """The T3 org key that one captured identifier names (a login, rename, display name or former slug), or None."""
+                row = {}
+            _index(key, row)
+    def _resolve(ident: str) -> list[str]:
+        """Exact owner identities precede display labels; multiple display matches stay ambiguous."""
         ident = ident.strip().lower()
         if not ident:
-            return None
-        key = t3.get(ident)
-        if key is None:  # an approved rename: resolve the identifier to its current login
-            try:
-                key = t3.get(resolver.canonical(ident).lower())
-            except NeedsInput:
-                key = None
-        if key is None:  # a former login: brand former_slugs resolve it without registry membership
-            bk = resolver.brand_key(ident)
-            if bk is not None:
-                try:
-                    row = resolver.brand_org(bk)
-                except NeedsInput:
-                    row = {}
-                if _is_t3(row):
-                    key = bk
-                    rows[bk] = row
-        return key
+            return []
+        key = identities.get(ident) or identities.get(resolver.canonical(ident).lower())
+        if key is not None:
+            return [key]
+        # Placeholder/merge metadata is authoritative even without an org/brand row to enumerate above.
+        # Other policy belongs to the resolved owner, never to an unresolved display label's default family.
+        if resolver.is_placeholder(ident):
+            return [resolver.canonical(ident)]
+        return sorted(display_names.get(ident, set()))
 
     refusals, retained, seen = [], [], set()
     for o in have.get("options") or []:
         desc = str(o.get("description") or "")
         name = str(o.get("name") or "")
-        # the description remainder and the option name are resolved independently: the remainder first (only with the
-        # T3 prefix), the option name when the remainder does not resolve
-        candidates = [desc[len(TIER_PREFIX_T3):]] if desc.startswith(TIER_PREFIX_T3) else []
+        # A T1 display tier cannot conceal independent T3/HOLD policy. Preserve the existing description/name fallback.
+        tier, separator, ident = desc.partition(": ")
+        candidates = [ident] if separator and tier in TIER_COLOR else []
         candidates.append(name)
-        key = None
+        key, ambiguous = None, False
         for ident in candidates:
-            key = _resolve(ident)
-            if key is not None:
+            matches = _resolve(ident)
+            if len(matches) > 1:
+                refusals.append(f"needs-input:org-identity:{ident.strip()}")
+                ambiguous = True
                 break
+            if matches:
+                candidate = matches[0]
+                # A known ordinary owner is not reinterpreted as another owner's matching display label.
+                # Preserve the historical T3 description/name fallback when the description has obsolete policy.
+                if (desc.startswith(TIER_PREFIX_T3) and not _association_held(resolver, candidate)
+                        and not _association_t3(resolver, candidate, rows.get(candidate) or {})):
+                    continue
+                key = candidate
+                break
+        if ambiguous:
+            continue
         if key is None:
             if desc.startswith(TIER_PREFIX_T3):
                 # A declared co-owned association does not become safe merely
@@ -917,8 +944,16 @@ def captured_t3(resolver: Resolver | None, spec: dict | None, allow_t3: bool) ->
             continue
         labels = list(dict.fromkeys(x for x in (name.strip().lower(), desc.strip().lower()) if x))
         login = resolver.canonical(key)
+        if _association_held(resolver, key):
+            refusals.append(f"owner-policy:association-held:{login}")
+            continue
+        if not _association_t3(resolver, key, rows.get(key) or {}):
+            continue
         if not allow_t3:
             refusals.append(f"t3-signoff:missing-opt-in:{login}")
+            continue
+        if not rows.get(key):
+            refusals.append(f"needs-input:org-identity:{login}")
             continue
         rec, why = signoff.evaluate([key, *resolver.aliases(key)])
         if rec is None:
@@ -1043,7 +1078,7 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
         if held_t3 and f["name"] == "Org":
             # Leave captured ids untouched and do not introduce or retain an
             # unauthorized association through an option mutation or README.
-            logs.append("hold:org-options (a T3 Org option has no current authorization)")
+            logs.append("hold:org-options (an Org association is held or has no current authorization)")
             planned[f["name"]] = (have or {}).get("options") or []
             continue
         if have is None:
@@ -1221,8 +1256,8 @@ def copy_plan(target: str, *, role: str = "org", source: str | None = None, titl
     text = readme_text
     if held_t3:
         text = None
-        pending.append({"why": "README held: an Org association has unresolved identity or no current T3 authorization",
-                        "needs": "resolved Org identity and a current matching record; keep captured option ids unchanged"})
+        pending.append({"why": "README held: an Org association is held, unresolved or lacks current T3 authorization",
+                        "needs": "resolved Org identity, independent policy release and applicable consent; keep option ids"})
     elif text is None:
         try:
             text, lg = readme(owner, name, number, nums, repositories=readme_repos,
@@ -1520,16 +1555,15 @@ def estate_orgs(resolver: Resolver, *, allow_t3: bool = False, refusals: list[st
     groups = (resolver.registry.get("profile") or {}).get("org_directory") or []
     keys = [o for g in groups for o in (g or {}).get("orgs") or []] or list(resolver.registry.get("orgs") or {})
     for key in keys:
-        st = resolver.owner_status(key)
-        if st in ("excluded", "hold") or resolver.family_hold(key) or resolver.is_placeholder(key):
+        if _association_held(resolver, key):
             continue
         try:
             row = resolver.brand_org(key)
         except NeedsInput:
             continue
-        tier = str(row.get("tier") or "").split()[0]
+        tier = (str(row.get("tier") or "").split() or [""])[0]
         rec = None
-        if tier == "T3":
+        if _association_t3(resolver, key, row):
             if not allow_t3:
                 continue
             rec, why = signoff.evaluate([key, *resolver.aliases(key)])

@@ -293,7 +293,7 @@ def capture(login: str | None = None, run=None, today: str | None = None, *, bra
     _check_capture_owner(resolver, actual, allow_t3)
     repo_status = _repository_status(repo_status, user, nodes)
     notes: list[str] = []
-    colours: dict[str, str] = {}  # language -> GitHub linguist colour, from every repository page read
+    colours: dict[str, str] = {}  # language -> GitHub linguist colour, from retained repository nodes only
 
     def parent_withheld(full):
         owner = full.partition("/")[0]
@@ -306,7 +306,10 @@ def capture(login: str | None = None, run=None, today: str | None = None, *, bra
 
     def safe_repos(owner, raw):
         kept = []
-        for repo in _repos(raw):
+        # Keep the same last-node/name ordering as _repos, together with the raw language facts that belong to it.
+        # A withheld or discarded node must not add a language or overwrite a permitted repository's colour.
+        indexed = {repo["name"].lower(): (repo, node) for node in raw or [] if (repo := _repo(node)) is not None}
+        for repo, node in sorted(indexed.values(), key=lambda pair: (pair[0]["name"].lower(), pair[0]["name"])):
             full = f"{owner}/{repo['name']}"
             if _t3_held(estate, full, allow_t3):
                 notes.append("t3-signoff:repository-withheld")
@@ -319,6 +322,7 @@ def capture(login: str | None = None, run=None, today: str | None = None, *, bra
                     repo.pop("parent")
                     notes.extend(("fork-parent-withheld", "needs-input:fork-parents"))
                 kept.append(repo)
+                colours.update(_colours([node]))
         return kept
 
     _, org_nodes, org_status = _paged(guarded, "account_orgs", ("user", "organizations"), login=login)
@@ -365,7 +369,6 @@ def capture(login: str | None = None, run=None, today: str | None = None, *, bra
         if is_viewer:
             role = "owner" if org.get("viewerCanAdminister") else ("member" if key in member_of else None)
         captured_repos = safe_repos(o, rnodes)
-        colours.update(_colours(rnodes))
         status = _repository_status(status, org, rnodes)
         if len(captured_repos) != len(_repos(rnodes)):
             status = "partial"
@@ -378,7 +381,6 @@ def capture(login: str | None = None, run=None, today: str | None = None, *, bra
     for k, src in (("name", "name"), ("company", "company"), ("location", "location"), ("website", "websiteUrl")):
         acct[k] = " ".join(str(user.get(src) or "").split())
     captured_repos = safe_repos(login, nodes)
-    colours.update(_colours(nodes))
     if len(captured_repos) != len(_repos(nodes)):
         repo_status = "partial"
     coverage = {"repositories": repo_status, "organizations": org_status, "enterprises": ent_status}

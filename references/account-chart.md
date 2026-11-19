@@ -41,6 +41,8 @@ New snapshots also carry `coverage` for personal `repositories`, `organizations`
 
 Owner restrictions are independent across every resolved alias. An organization that is both HOLD and T3 still needs explicit T3 opt-in and a current, applicable sign-off; a HOLD allowance never supplies consent or overrides exclusion. Repository withdrawals are rechecked for both visible repositories and optional fork-parent facts.
 
+The persisted `language_colors` map is built only from retained repository nodes. An exposure-withheld or consent-withdrawn repository cannot add a language or overwrite a permitted language's colour, in either the personal or organization capture lane. Invalid and superseded duplicate repository nodes do not contribute language colours either.
+
 A fork's optional parent fact passes exposure, withdrawal and owner-policy checks before the snapshot is saved. A withheld parent is removed without naming it in logs (`fork-parent-withheld`, `needs-input:fork-parents`). Its upstream ownership remains unknown, so the normal external-fork fallback applies; repeating capture does not bypass the policy.
 
 ## What the chart leaves out by default
