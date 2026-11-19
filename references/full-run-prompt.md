@@ -14,8 +14,10 @@ Missing inputs, exemptions and owner-controlled work remain visible; nothing in 
    `brand add-org` ([brand onboarding](brand-onboarding.md)) and set `<BRAND_CONFIG>` to it. Set
    `<ESTATE_ROOT>` only if you keep a private registry (layout: `examples/estate/`), and never commit it. Leave
    either empty and the agent proposes the onboarding dry run at STOP 1 instead of guessing.
-3. Adjust the options and replace the single final TARGET line. Existing scoped authorization is reusable;
-   STOP 1 asks only for an unresolved gate, and STOP 2 is the existing per-family pilot gate.
+3. Adjust the options, including BRAND_IDENTITY (logo PNG, label, display name, footer and tier) and
+   BRAND_COLORS (CompleteTech's palette by default; set your own canvas, ink and accent hex), and replace the single final TARGET line. TARGET stays the last line of the prompt, below
+   every rule, restriction and option. Existing scoped authorization is reusable; STOP 1 asks only for an
+   unresolved gate, and STOP 2 is the existing per-family pilot gate.
 4. Send it to the agent. `SKILL.md` and the referenced command contracts remain authoritative if they change.
 
 ````markdown
@@ -100,8 +102,16 @@ after it. Rebuild the appropriate prefix for every invocation; do not let one re
 - Local diagnostics the contracts expressly allow (such as repository `doctor`'s T3 hold row, or HOLD org
   about/pins/health/doctor) remain available; their exception never grants permission for otherwise denied reads.
 - Brand identity. An owner with no row in the selected config renders only in neutral style
-  (`needs-input:org-row`). At STOP 1, ask the operator for the identity inputs: family name and label, dark
-  canvas, ink and accent hex, tier, display name, `footer yes|no|hold`, and an authorized mark PNG if any. Then
+  (`needs-input:org-row`). At STOP 1, take the identity inputs from BRAND_IDENTITY (family name, label,
+  display name, tier, `footer yes|no|hold` and LOGO, passed as `--mark`) and ask only for any still unset;
+  never default another owner's label, tier, footer or logo to CompleteTech's. LOGO must be a PNG the operator
+  is authorized to use; it is copied unchanged, never downloaded, cropped or recoloured, and `none` keeps the
+  family wordmark fallback. Take the canvas, ink and accent hex
+  (and icon ink/spark when set) from BRAND_COLORS; when they are still the CompleteTech defaults, show them
+  and ask the operator to confirm or replace them before the dry run. BRAND_COLORS never edits an existing
+  family row, and BRAND_IDENTITY never replaces an existing org row or mark: if an owner already has a row and
+  either option differs from it, report the conflict at STOP 1 and propose a new family or org in
+  BRAND_CONFIG instead. Then
   show the `S brand add-family ...` or `S brand add-org ...` dry run against BRAND_CONFIG
   (`references/brand-onboarding.md`). Never invent colours, legal wording or affiliation, and never write to
   the shipped `references/brand.yaml` of a shared install. Repeat with `--write` only after approval. A new
@@ -418,6 +428,21 @@ print(f"keyed {src} -> {out} box={box} ground=#{''.join(f'{v:02X}' for v in grou
 - PILOT_APPROVED: no (yes only for already approved golden references of this family)
 - FAN_OUT: no (enterprise only; each member still passes its own eligibility gates)
 - FORCE: no (yes reruns a target that `provenance check` reports `fresh`)
+- BRAND_IDENTITY (operator-set; used only for a new family or org at STOP 1, never to replace an existing
+  row or mark):
+  - FAMILY: ask (lowercase slug, such as northwind)
+  - LABEL: ask (company label on banners and cards)
+  - DISPLAY_NAME: ask (the org's name as shown)
+  - TIER: ask (T1, T1-user, T2, T2-R or T3; T3 still needs the sign-off record)
+  - FOOTER: ask (yes, no or hold)
+  - LOGO: none (absolute path to an authorized PNG mark; none = family wordmark fallback)
+- BRAND_COLORS (operator-set; CompleteTech defaults shown; six-digit hex; used only for a new family at
+  STOP 1, never to recolour an existing row):
+  - CANVAS: #0F172A (must be dark, decision 21)
+  - INK: #F1F5F9 (text; at least 4.5:1 on CANVAS)
+  - ACCENT: #00A7FD (eyebrow, bar, key chip and traces; needs a 4.5:1 chip foreground)
+  - ICON_INK: derived (optional; at least 4.5:1 on CANVAS)
+  - ICON_SPARK: derived (optional; at least 4.5:1 on CANVAS)
 
 TARGET: <OWNER/REPO | ORG | user:LOGIN | enterprise:SLUG>
 ````
