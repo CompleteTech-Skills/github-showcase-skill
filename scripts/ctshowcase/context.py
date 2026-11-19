@@ -54,7 +54,7 @@ class RepoContext:
         else:
             self._scoped_away = None
         self.org = brand.org(self.owner)
-        family = self.org.get("family", "completetech")
+        family = self.org.get("family")
         self.identity_pending = bool((brand.raw.get("families", {}).get(family) or {}).get("identity_pending"))
         # A read-only coverage row must report missing identity inputs, without borrowing a palette or needing
         # consent to generate art. Ordinary contexts still require the real style and its owner/scope checks.
@@ -111,8 +111,8 @@ class RepoContext:
 
     @property
     def company(self) -> str:
-        """Alt-text company: CompleteTech LLC for T1, the §2.3 display name for T2."""
-        if self.tier.startswith("T2") or self.tier == "T3":
+        """Alt-text company: the brand company for T1, the §2.3 display name for T2, T3 and an owner with no row."""
+        if not self.org.get("known") or self.tier.startswith("T2") or self.tier == "T3":
             return self.org.get("display_name") or self.owner
         return self.brand.strings["company"]
 

@@ -20,6 +20,7 @@ except ImportError:  # pragma: no cover - exercised in the Action before pip ins
 
 DEFAULT_CONFIG = REFERENCES / "brand.yaml"
 LOCK = REFERENCES / "brand.lock.json"
+NEUTRAL = "neutral"  # the style name of an owner with no brand row (Brand.neutral_style)
 
 
 def load_yaml_text(text: str):
@@ -142,8 +143,10 @@ class Brand:
             for name, row in orgs.items():
                 if login.lower() != owner.lower() and name.lower() == login.lower():
                     return dict(row, owner=name, known=True)
-        return {"owner": owner, "family": "completetech", "tier": "unknown", "display_name": owner, "nav_name": owner,
-                "eyebrow": None, "brand_topic": "completetech", "family_topics": [], "footer": True, "known": False}
+        # An owner with no row borrows no shipped identity: the neutral style under its own name, no footer, no
+        # brand topic (`needs-input:org-row`, `needs-input:brand-topic`) until `brand add-org` gives it a row.
+        return {"owner": owner, "family": NEUTRAL, "tier": "unknown", "display_name": owner, "nav_name": owner,
+                "eyebrow": None, "brand_topic": None, "family_topics": [], "footer": False, "known": False}
 
     # -- families ---------------------------------------------------------------------------------
     def family(self, name: str) -> dict:
@@ -171,10 +174,29 @@ class Brand:
         org = self.org(owner)
         if (self.raw.get("families", {}).get(org.get("family")) or {}).get("identity_pending"):
             self.check_owner(owner, repo=repo)  # Missing consent still refuses before missing design inputs.
-        fam = self.family(org.get("family", "completetech"))
+        if not org.get("known"):
+            return self.neutral_style(org.get("display_name") or owner)
+        fam = self.family(org.get("family", NEUTRAL))
         if org.get("banner"):
             fam["banner"] = org["banner"]
         return fam
+
+    def neutral_style(self, label: str) -> dict:
+        """The house fonts and canvas with the chart's neutral tokens, labelled with the owner's own name: the style
+        of an owner with no brand row, which never inherits a configured family's art, eyebrow or logo."""
+        n = self.raw["chart"]["neutral"]
+        st = deep_merge(self.raw.get("defaults", {}), {})
+        tokens = deep_merge(st["tokens"], {k: n[k] for k in ("eyebrow", "title", "accent", "accent_mid",
+                                                             "accent_deep", "plate_low")})
+        tokens["edge"] = dict(n["edge"])
+        tokens["bar"] = {**tokens["bar"], "from": n["bar"]["from"], "to": n["bar"]["to"]}
+        tokens["gold_trace"] = n["accent"]
+        tokens["icon_ink"] = n["accent_deep"]
+        cands = list(self.raw.get("contrast_candidates", []))
+        for chip, bg in (("chip_key", n["accent_mid"]), ("chip_attr", n["plate_low"])):
+            tokens[chip] = {"bg": bg, "fg": best_fg(bg, [tokens["title"], *cands])}
+        return {**st, "tokens": tokens, "company_label": label, "eyebrow_case": "asis", "name": NEUTRAL,
+                "badge_brand": n["accent_deep"].lstrip("#"), "badge_accent": n["accent_mid"].lstrip("#")}
 
     # -- assets -----------------------------------------------------------------------------------
     def asset(self, rel: str | None) -> Path | None:
