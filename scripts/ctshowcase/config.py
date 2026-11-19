@@ -182,7 +182,7 @@ class Brand:
         return fam
 
     def neutral_style(self, label: str) -> dict:
-        """The house fonts and canvas with the chart's neutral tokens, labelled with the owner's own name: the style
+        """The house fonts with the chart's neutral tokens and canvas, labelled with the owner's own name: the style
         of an owner with no brand row, which never inherits a configured family's art, eyebrow or logo."""
         n = self.raw["chart"]["neutral"]
         st = deep_merge(self.raw.get("defaults", {}), {})
@@ -195,6 +195,8 @@ class Brand:
         cands = list(self.raw.get("contrast_candidates", []))
         for chip, bg in (("chip_key", n["accent_mid"]), ("chip_attr", n["plate_low"])):
             tokens[chip] = {"bg": bg, "fg": best_fg(bg, [tokens["title"], *cands])}
+        if n.get("canvas"):  # the house canvas is CompleteTech's navy gradient: the neutral style has its own
+            st["canvas"] = dict(n["canvas"])
         return {**st, "tokens": tokens, "company_label": label, "eyebrow_case": "asis", "name": NEUTRAL,
                 "badge_brand": n["accent_deep"].lstrip("#"), "badge_accent": n["accent_mid"].lstrip("#")}
 

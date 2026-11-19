@@ -66,3 +66,13 @@ def test_cli_outputs_carry_no_shipped_identity(brand, outside_meta, tmp_path):
     assert res.returncode == 0, res.stderr
     svg = card.read_text(encoding="utf-8")
     assert company not in svg and short.upper() not in svg
+
+
+def test_neutral_style_has_its_own_canvas(brand):
+    """The house canvas is CompleteTech's navy gradient grid; an owner with no row gets the neutral canvas instead."""
+    import json
+    style = brand.style("Synthetic-Outside-Owner")
+    house = brand.raw["defaults"]["canvas"]
+    assert style["canvas"] == brand.raw["chart"]["neutral"]["canvas"] != house
+    for colour in ("#001F3F", "#1E3A8A", "#00A7FD", "#0081ED", "#005ADD", "#FFC300"):
+        assert colour.lower() not in json.dumps(style).lower(), colour

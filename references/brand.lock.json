@@ -95,6 +95,12 @@
     "from": "#94A3B8",
     "to": "#64748B"
    },
+   "canvas": {
+    "color": "#111827",
+    "grid": "#94A3B8",
+    "grid_opacity": 0.06,
+    "kind": "flat-grid"
+   },
    "edge": {
     "color": "#94A3B8",
     "opacity": 0.3

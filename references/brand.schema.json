@@ -635,6 +635,9 @@
       "plate_low": {
        "$ref": "#/$defs/hex"
       },
+      "canvas": {
+       "$ref": "#/$defs/canvas"
+      },
       "edge": {
        "type": "object",
        "additionalProperties": false,

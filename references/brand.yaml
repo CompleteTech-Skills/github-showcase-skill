@@ -147,6 +147,7 @@ chart:
     accent_mid: "#64748B"
     accent_deep: "#475569"
     plate_low: "#1E293B"
+    canvas: {kind: flat-grid, color: "#111827", grid: "#94A3B8", grid_opacity: 0.06}   # owners with no row: not the house navy
     edge: {color: "#94A3B8", opacity: 0.3}
     bar: {from: "#94A3B8", to: "#64748B"}
   labels:
