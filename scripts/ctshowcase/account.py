@@ -1183,10 +1183,19 @@ def render(args):
     svg = chart.svg(laid, fonts)
     lint = svglint.lint_bytes("chart", svg.encode("utf-8"), str(out_dir / files["svg"]))
     from . import summary
-    summary_svg, summary_key = summary.build_with_key(brand, fonts, model, static=args.static_summary)
+    from .errors import ArtFail
+    try:
+        summary_svg, summary_key = summary.build_with_key(brand, fonts, model, static=args.static_summary)
+        skipped = "summary-skipped:no-code-shares"  # no per-language sizes to show (an older snapshot, or no code)
+    except ArtFail as exc:
+        if exc.element != "summary-type":
+            raise
+        # The chart lays out any account name; only the fixed-width summary has a smaller type ladder. Leave the
+        # optional summary out rather than lose the whole chart, and never cut the name or shrink it below the summary type ladder.
+        summary_svg, summary_key, skipped = None, [], "summary-skipped:type-does-not-fit"
     slint = None
     if summary_svg is None:
-        logs.append("summary-skipped:no-code-shares")  # no per-language sizes to show (an older snapshot, or no code)
+        logs.append(skipped)
     else:
         files["summary"] = f"{args.name}-summary.svg"
         slint = svglint.lint_bytes("intro", summary_svg.encode("utf-8"), str(out_dir / files["summary"]))
