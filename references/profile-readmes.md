@@ -115,5 +115,103 @@ Every intro owner needs a configured organization row; an unresolved owner retur
 Profile mode also needs a configured or explicit name and eyebrow; missing values
 return `needs-input:name` or `needs-input:eyebrow` instead of guessing profile facts.
 
+The repository `readme` command also uses `assets/intro.svg` for a personal
+owner/owner profile. Generate it with `intro --profile OWNER --out
+CHECKOUT/assets/intro.svg` before scaffolding or refreshing a generated hero.
+Use a regular file under the checkout's own `assets/` directory.
+Missing profile name/eyebrow facts return `needs-input:intro-identity`; a missing
+local, invalid, or nonmatching intro returns `needs-input:intro` (exit 4), before any README, badge or change
+record write. The asset must pass intro SVG lint and match the current configured default profile generator output
+(static or applicable animated, at 320 or 360 pixels). Explicit generator overrides cannot be verified here;
+matching establishes applicability, not artwork rights. An unresolved identity on a managed intro also refuses
+refresh because ownership cannot be established. This command does not generate artwork implicitly. Organization
+and ordinary repository scaffolds keep `docs/images/banner.png`.
+
+The same rule covers every place the README hero is emitted for the personal profile: scaffold, header and
+upgrade, `--bootstrap`, the G and H callout variants (`--variant G|H`) and the §7.0 preserve-list upgrade (for
+example a README over 15,000 bytes). Each either writes the intro or returns the needs-input result above, and
+none of them writes a README, badge, CONTRIBUTING or change record on that refusal. `lint readme` checks
+`assets/intro.svg` as the first image of the personal README (D13, R7).
+
+When authored badges precede an owned personal hero, a full upgrade moves only
+that hero ahead of the badges. A full G or H upgrade also moves a managed hero
+out of the authored body. Header-only and `--no-regroup` refreshes instead
+return `needs-input:intro-order` before writing, because they cannot move the
+existing marker block. Fenced or commented image examples do not affect the image order.
+Relative local generated-badge paths are recognized after URL percent decoding and path
+normalization; their authored URL spelling stays unchanged. Paths that leave the badge
+directory and remote artwork URLs remain authored artwork. Moving a G or H hero retains the exact authored source
+on both sides, including mixed line endings and blank separators. If joining those
+spans would merge line endings, the command returns `needs-input:intro-order` before
+writing; put the managed hero on separate blank lines before retrying.
+Source mapping distinguishes the file's encoding BOM from an authored U+FEFF prefix;
+both that prefix and text immediately beside a managed hero stay intact.
+Indentation after that authored prefix does not change which managed hero is replaced
+or leave an extra legacy banner in the scaffolded README.
+The authored prefix includes its following spaces and tabs. Those bytes stay beside
+the replacement hero instead of becoming indentation on the authored body; adjacent
+prose and links keep their Markdown context. Personal header-order lint accepts this
+nonprinting prefix while still rejecting visible content before the hero.
+A personal G/H opening hero with that prefix is recognized from its original source
+span, so an existing callout stays after it and is not duplicated ahead of it.
+If adding a fork callout would split an inline hero from its adjacent authored text,
+the command refuses atomically with `needs-input:intro-order`; put the managed markers
+on their own lines before retrying.
+Scaffold uses the CLI's already-normalized view and retains an authored U+FEFF prefix
+before the new header when migrating a lone managed hero.
+For an inline managed hero, a uniquely matched authored suffix keeps its exact source
+line ending. A refresh that would move the authored prefix, reinterpret adjacent text
+as code, or lose its exact source seam returns `needs-input:intro-order` before any
+README, badge, sidecar or change-record write. Put the managed markers on their own
+lines before retrying. Ordinary safe inline refreshes remain supported. The source
+check also compares Markdown visibility, headings and the local link inventory;
+literal Markdown inside a raw HTML block cannot become an active link or image.
+The comparison also protects hard breaks, math delimiters, bare URLs and email/mention syntax
+whose interpretation would change when moved out of raw HTML.
+The proof covers every authored line sharing the hero's original raw HTML block,
+including enclosing prefixes and later lines up to the parser's block boundary.
+Markers on their own lines do not establish that boundary; without a blank
+separator, following Markdown may still be literal. Unknown or changed context
+refuses before any write, including when formatting is requested.
+`--format-generated` runs the context check before formatting and cannot bypass it.
+Artwork visibility is determined in the original document before excluding managed
+ranges: removing a nav block cannot turn literal Markdown inside HTML into artwork,
+or hide an authored inline HTML image. In-place personal refreshes retain a nonempty
+navigation block unless it matches the exact current generated row. A bold label
+and separator alone do not establish ownership of authored navigation prose.
+Images inside HTML comments do not count as authored heroes or badges; the README
+still needs its applicable intro or an actionable missing-input result.
+Personal scaffolding retains the authored body's blank separators, including
+those that keep prose outside a preceding callout or comment.
+G and H can refresh an exactly owned hero body in place when authored text touches
+its marker lines; that text keeps its original bytes. If preceding badges require
+moving such a block, they instead return `needs-input:intro-order` before writing.
+Put those markers on separate lines before requesting that move.
+An existing initial H1 title belongs to the opening area; the next visible
+Markdown heading begins the authored body. This permits an owned intro beside
+authored opening text to refresh without moving that text.
+
+Personal header refresh migrates only the exact legacy generated banner body
+(or an empty managed banner block). Owner spelling and configured former slugs
+can identify the same profile. Authored hero bodies and unmarked artwork
+stay owned by their author, including Markdown reference images whose definitions
+appear later in the document. For personal READMEs with authored artwork,
+scaffold, header and upgrade refresh existing marker blocks in place, including variants G and H.
+Running scaffold again on a personal README with a managed hero and nav refreshes the existing layout in place.
+A full G or H upgrade with authored artwork refreshes only an owned hero or a
+recognized generated footer. Authored footer, navigation and body bytes stay in place.
+In-place upgrades account for replaced lines only inside a verified owned hero
+or recognized generated footer; the authored-content and size shrink checks still apply.
+A G or H README with multiple managed hero blocks needs review before refresh.
+Without authored artwork or a leading managed hero, those variants require and emit the intro too.
+Their scaffold follows the same callout layout and preservation check as an
+upgrade. Existing callouts and body text stay in place. A new fork callout
+requires the upstream repository in the capture, and an archive callout needs
+the date and reason from the registry.
+README outputs and change records require destinations distinct from the intro.
+The managed block keeps its `showcase:banner` name
+for compatibility, even when its image is the personal intro. The intro is a
+plain `<img>`; the decision 18 footer remains the only generated `<picture>`.
+
 Eyebrows, names and taglines must fit their fixed size ladders. An exhausted ladder
 returns `art-fail` (exit 3) without writing an SVG; text is never truncated.

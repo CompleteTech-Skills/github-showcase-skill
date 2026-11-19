@@ -1,8 +1,8 @@
 {
  "$schema": "https://json-schema.org/draft/2020-12/schema",
  "$id": "https://github.com/CompleteTech-Skills/github-showcase-skill/references/provenance.schema.json",
- "title": "github-showcase-skill provenance stamp (decision 25, PROPOSAL pending user confirmation)",
- "description": "The `provenance` block of a target's stamp: docs/images/.showcase.json (repository), .github/showcase.json in ORG/.github (organization) or USER/USER (personal profile), <estate root>/registry/enterprise.showcase.json (Enterprise, private). Timestamps and run_count are never part of `fingerprint`.",
+ "title": "github-showcase-skill provenance and bounded recorded-output evidence",
+ "description": "The `provenance` block of a target's stamp: docs/images/.showcase.json (repository), .github/showcase.json in ORG/.github (organization) or USER/USER (personal profile), <estate root>/registry/enterprise.showcase.json (Enterprise, private). Timestamps and run_count are never part of `fingerprint`. Evidence verifies only recorded output bytes and supplied inputs, never live publication or whole-workflow completion. Legacy stamps without evidence remain detectable but cannot certify freshness.",
  "type": "object",
  "required": [
   "provenance"
@@ -92,6 +92,86 @@
       "type": "string",
       "minLength": 1
      }
+    }
+   }
+  },
+  "evidence": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "version",
+    "scope",
+    "inputs",
+    "config_sha256",
+    "outputs",
+    "missing",
+    "pending_jobs"
+   ],
+   "properties": {
+    "version": {
+     "type": "integer",
+     "const": 1
+    },
+    "scope": {
+     "type": "string",
+     "const": "recorded-outputs"
+    },
+    "inputs": {
+     "type": "object"
+    },
+    "config_sha256": {
+     "type": "string",
+     "pattern": "^[0-9a-f]{64}$"
+    },
+    "outputs": {
+     "type": "object",
+     "additionalProperties": false,
+     "patternProperties": {
+      "^(?!/)(?!.*(?:^|/)(?:\\.\\.?|\\.[gG][iI][tT])(?:/|$))(?!.*[\\\\:?#%\\x00-\\x1f\\x7f])[^/]+(?:/[^/]+)*$": {
+       "anyOf": [
+        {
+         "type": "object",
+         "required": [
+          "sha256"
+         ],
+         "additionalProperties": false,
+         "properties": {
+          "sha256": {
+           "type": "string",
+           "pattern": "^[0-9a-f]{64}$"
+          }
+         }
+        },
+        {
+         "type": "object",
+         "required": [
+          "exempt"
+         ],
+         "additionalProperties": false,
+         "properties": {
+          "exempt": {
+           "enum": [
+            "exempt:no-card",
+            "exempt:profile-readme",
+            "exempt:placeholder-org"
+           ]
+          }
+         }
+        }
+       ]
+      }
+     }
+    },
+    "missing": {
+     "type": "array",
+     "uniqueItems": true,
+     "items": {
+      "type": "string",
+      "minLength": 1
+     }
+    },
+    "pending_jobs": {
+     "type": "boolean"
     }
    }
   }

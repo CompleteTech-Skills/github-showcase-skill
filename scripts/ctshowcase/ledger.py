@@ -1,23 +1,22 @@
-"""Operator-side run ledger and the star nudge (decision 25, PROPOSAL pending user confirmation). Stdlib only.
+"""Operator-side local capture ledger and optional star note. Stdlib only.
 
 The ledger is per operator, never in a target repository: `~/.config/github-showcase-skill/state.json`
 (`$XDG_CONFIG_HOME` when set), `%APPDATA%\\github-showcase-skill\\state.json` on Windows, or
 `$SHOWCASE_STATE_DIR/state.json`. It holds only `{completed_runs, fresh_runs, star: {status, checked_at, asked_at,
 asked_at_run, declined}}`: no target names, no repository data, and nothing is ever sent anywhere.
 
-What counts: one successful `provenance stamp` (exit 0) is one completed showcase run of one target, whether the
-stamp is written, emitted as a writer job or skipped because the target was already fresh (`fresh_runs` counts those
-separately). No other command counts: checks, lints, plans, `doctor`, `provenance check` and the individual
-generators never touch the ledger. Nothing is counted in CI.
+What counts: a verified local output capture from `provenance stamp`, including an unchanged capture (`fresh_runs`
+counts those separately). Pending writer jobs and incomplete captures never count. This is no claim of live
+publication or whole-showcase completion. No other command counts. Nothing is counted in CI.
 
 The nudge: from `completed_runs >= STAR_THRESHOLD`, one read-only `gh api user/starred/OWNER/REPO` GET (204 starred,
 404 not starred; any other outcome is unknown and stays silent). Starred is recorded and never asked again. Not
 starred prints one line on stderr at the end of the run with the link and the `gh repo star` command for the operator
-to run; it is asked again every STAR_REASK further runs (5, 10, 15, ...), and never again after `provenance star
+to run; it is asked again at most once every STAR_REASK further runs, and never again after `provenance star
 --decline`. The skill never stars on anyone's behalf: it never runs `gh repo star` and never sends `PUT /user/starred`.
 Silent in CI (`CI`, `GITHUB_ACTIONS`), with `--format json`, `--quiet`, without a TTY on stderr, with
-`--no-star-prompt` or `SHOWCASE_NO_STAR_PROMPT=1`. An agent that runs the skill for a person and relays the line sets
-`SHOWCASE_STAR_PROMPT=1` (treated as a TTY; every other silence rule still applies).
+`--no-star-prompt` or `SHOWCASE_NO_STAR_PROMPT=1`. No environment variable overrides the TTY requirement.
+Offline runs never check star status or print the star line.
 """
 from __future__ import annotations
 
@@ -28,11 +27,11 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-STAR_THRESHOLD = 5      # completed runs before the first ask
-STAR_REASK = 5          # further completed runs between asks: runs 5, 10, 15, ... (user answer, 2026-11-18)
+STAR_THRESHOLD = 5      # verified local captures before the first ask
+STAR_REASK = 5          # further verified captures between asks while not starred and not declined
 STATE_FILE = "state.json"
 APP = "github-showcase-skill"
-COUNTED = ("provenance stamp",)   # the only command that counts a completed run (documented in SKILL.md)
+COUNTED = ("provenance stamp",)   # only verified local captures from this command count
 
 
 def now_iso() -> str:
@@ -93,12 +92,11 @@ def in_ci(env=None) -> bool:
     return any((env.get(k) or "").strip().lower() not in ("", "0", "false") for k in ("CI", "GITHUB_ACTIONS"))
 
 
-def prompt_allowed(*, fmt: str | None, quiet: bool = False, no_prompt: bool = False, env=None, isatty=None) -> bool:
+def prompt_allowed(*, fmt: str | None, quiet: bool = False, no_prompt: bool = False, offline: bool = False,
+                   env=None, isatty=None) -> bool:
     env = os.environ if env is None else env
-    if in_ci(env) or fmt == "json" or quiet or no_prompt or env.get("SHOWCASE_NO_STAR_PROMPT", "") not in ("", "0"):
+    if offline or in_ci(env) or fmt == "json" or quiet or no_prompt or env.get("SHOWCASE_NO_STAR_PROMPT", "") not in ("", "0"):
         return False
-    if env.get("SHOWCASE_STAR_PROMPT", "") not in ("", "0"):
-        return True  # an agent relays the line to the person it runs the skill for
     tty = isatty if isatty is not None else getattr(sys.stderr, "isatty", lambda: False)
     try:
         return bool(tty())
@@ -116,7 +114,7 @@ def gh_starred(repo: str, run=subprocess.run) -> str:
         return "unknown"
     out = f"{p.stdout or ''}\n{p.stderr or ''}"
     first = (p.stdout or "").lstrip().splitlines()[0] if (p.stdout or "").strip() else ""
-    if p.returncode == 0 and (" 204" in first or first == ""):
+    if p.returncode == 0 and " 204" in first:
         return "starred"
     if " 404" in first or "(HTTP 404)" in out:
         return "not-starred"
@@ -128,7 +126,7 @@ def star_line(brand) -> str | None:
     a = attribution(brand)
     if not a:
         return None
-    return (f"{a['skill']}: {STAR_THRESHOLD}+ showcase runs completed. If it helped, a star helps others find it: "
+    return (f"{a['skill']}: {STAR_THRESHOLD}+ local showcase captures recorded. If it helped, a star helps others find it: "
             f"{a['skill_url']} (or run: gh repo star {a['skill_repo']}). "
             f"To stop this note: showcase.py provenance star --decline")
 
@@ -142,12 +140,13 @@ def should_ask(state: dict) -> bool:
 
 
 def record_run(brand, *, fresh: bool, fmt: str | None, quiet: bool = False, no_prompt: bool = False, env=None,
-               isatty=None, run=subprocess.run, directory: Path | None = None, stream=None) -> dict:
-    """Count one completed run and, when allowed, print the star line. Never raises: the ledger is a convenience and
-    must never fail a run (an unwritable state directory is skipped)."""
+               isatty=None, run=subprocess.run, directory: Path | None = None, stream=None, offline: bool = False,
+               completed: bool = True) -> dict:
+    """Count one verified local capture and, when allowed, print the star line. Pending jobs never count, and
+    offline mode never checks star status. An unwritable state directory is skipped."""
     env = os.environ if env is None else env
     out = {"counted": False, "asked": False, "star": None}
-    if in_ci(env):
+    if in_ci(env) or not completed:
         return out
     try:
         directory = directory or state_dir(env)
@@ -157,15 +156,14 @@ def record_run(brand, *, fresh: bool, fmt: str | None, quiet: bool = False, no_p
             state["fresh_runs"] += 1
         out["counted"] = True
         star = state["star"]
-        if should_ask(state) and prompt_allowed(fmt=fmt, quiet=quiet, no_prompt=no_prompt, env=env, isatty=isatty):
+        if should_ask(state) and prompt_allowed(fmt=fmt, quiet=quiet, no_prompt=no_prompt, offline=offline,
+                                              env=env, isatty=isatty):
             from .footer import attribution
             a = attribution(brand)
             status = gh_starred(a["skill_repo"], run=run) if a else "unknown"
             star["checked_at"] = now_iso()
-            if status == "starred":
-                star["status"] = "starred"
-            elif status == "not-starred":
-                star["status"] = "not-starred"
+            star["status"] = status
+            if status == "not-starred":
                 line = star_line(brand)
                 if line:
                     print(line, file=stream or sys.stderr)

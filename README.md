@@ -202,6 +202,11 @@ The rules come from the CompleteTech GitHub estate standard `ct-std-v1` and the 
 
 Code, templates, and documentation are licensed under the MIT License. CompleteTech LLC names, logos, seals, and brand assets are reserved and are not licensed for reuse except to identify this project. See `LICENSE` and `BRAND_ASSETS.md`.
 
+<!-- showcase:credit:start -->
+<!-- generated-by: github-showcase-skill v=1.0.0 std=ct-std-v1 -->
+<p align="center"><sub>README styled with <a href="https://github.com/CompleteTech-Skills/github-showcase-skill">github-showcase-skill</a> by CompleteTech LLC · <a href="https://github.com/CompleteTech-Skills/github-showcase-skill#quick-start">Get the skill</a></sub></p>
+<!-- showcase:credit:end -->
+
 <!-- showcase:footer:start -->
 <p align="center">
   <a href="https://www.complete.tech">
@@ -214,8 +219,3 @@ Code, templates, and documentation are licensed under the MIT License. CompleteT
   Built by <a href="https://www.complete.tech">CompleteTech LLC</a> · Innovation at Every Integration
 </p>
 <!-- showcase:footer:end -->
-
-<!-- showcase:credit:start -->
-<!-- generated-by: github-showcase-skill v=1.0.0 std=ct-std-v1 -->
-<p align="center"><sub>README styled with <a href="https://github.com/CompleteTech-Skills/github-showcase-skill">github-showcase-skill</a> by CompleteTech LLC · <a href="https://github.com/CompleteTech-Skills/github-showcase-skill#quick-start">Get the skill</a></sub></p>
-<!-- showcase:credit:end -->

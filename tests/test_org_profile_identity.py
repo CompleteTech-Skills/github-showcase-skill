@@ -6,6 +6,7 @@ import pytest
 import yaml
 
 from conftest import run_cli
+from test_credit_identity_boundary import identity_sections
 
 OWNER = "Pick-Your-AI"
 ALIAS = "Northwind-AI-Alias"
@@ -126,7 +127,7 @@ def test_cli_footer_configuration_does_not_imply_stewardship(inputs, tmp_path):
     result, out = generate(tmp_path, inputs)
     assert result.returncode == 0, result.stdout + result.stderr
     text = (out / "profile" / "README.md").read_text(encoding="utf-8")
-    body, footer = text.split("<!-- showcase:footer:start -->", 1)
+    body, footer = identity_sections(text, inputs[0])
     assert "CompleteTech LLC" in footer
     assert all(forbidden.lower() not in body.lower() for forbidden in FORBIDDEN)
 

@@ -3,7 +3,7 @@
 Each test pins one defect an agent hit when it ran the groups with no other context: approval ids the writer could never
 match, a profile that called a public org private, plans that read as success with nothing checked, and org lookups
 that skipped the shared resolver (CQ-03)."""
-from conftest import footer_then_credit  # noqa: E402
+from conftest import credit_then_footer  # noqa: E402
 import json
 import os
 import subprocess
@@ -111,7 +111,7 @@ def test_watching_org_profile_ends_with_the_decision_18_footer(brand, tmp_path):
     est.add_meta({"owner": w, "repo": "tool", "fork": True, "visibility": "public", "description": "A followed tool.",
                   "parent": {"full_name": "upstream-org/tool"}, "pushed_at": "2026-10-01T00:00:00Z"}, "x.json")
     res, code = O.profile(est, w)
-    assert code == OK and footer_then_credit(res["readme"])
+    assert code == OK and credit_then_footer(res["readme"])
     assert res["readme"].count("<picture>") == 1
 
 

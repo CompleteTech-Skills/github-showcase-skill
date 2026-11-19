@@ -33,6 +33,13 @@ python -m pytest -q
 python scripts/validate_quality.py
 ```
 
+CI runs the same complete suite with `python scripts/run_ci_tests.py`. It collects
+the full inventory, keeps each file together and runs disjoint batches in two
+ordinary local pytest processes at a time. Every child must return successfully
+after pytest cleanup and record every assigned test exactly once. A failed process,
+missing receipt or changed inventory fails the run; tests are not retried or filtered.
+Use `--report-dir NEW_DIRECTORY` to retain collection, logs and per-batch results.
+
 - **Standard data** lives in `references/brand.yaml` and `references/standard/`. Change a rule there, not in code, then regenerate the stdlib lock copy with `python scripts/showcase.py config --write-lock` (the quality gate checks that it is in sync).
 - **Rules a user decision settled** (dark-only art, banner first, the exact footer) change only after the user changes the decision; see [references/decisions.md](references/decisions.md).
 - **Generators** must stay deterministic: rendering the same inputs twice gives byte-identical files. Add a regression test for every layout change, and compare the php2shell render against the golden layout mask.

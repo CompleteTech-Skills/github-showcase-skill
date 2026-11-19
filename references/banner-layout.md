@@ -115,7 +115,7 @@ Written by `banner` and `card` when their output is under `docs/images/`. Sorted
              "card.svg": {"sha256": "…", "bytes": 27110, "repository_id": 123}}}
 ```
 
-`provenance stamp` (decision 25, a proposal) adds one more key, `provenance` ([schema](provenance.schema.json)): the skill, its version and standard, the resolved target, `first_run_at`, `last_run_at`, `last_changed_at`, `run_count`, the art's `fingerprint` and `surfaces[]`. Its timestamps and count are outside the fingerprint inputs, every generator keeps the block when it rewrites the sidecar, and a new sidecar written by a stamp alone carries an empty `outputs` map.
+`provenance stamp` adds `provenance` and bounded `evidence` keys ([schema](provenance.schema.json)): the skill, its version and standard, the resolved target, `first_run_at`, `last_run_at`, `last_changed_at`, `run_count`, the art's `fingerprint` and `surfaces[]`. Its timestamps and count are outside the fingerprint inputs, every generator keeps the block when it rewrites the sidecar, and a new sidecar written by a stamp alone carries an empty `outputs` map. Empty or unknown output evidence remains incomplete; it never certifies freshness. See [provenance](provenance.md).
 
 `fingerprint` compares the current inputs with `fingerprint` here; the composite Action regenerates only when they differ. Each output record carries `repository_id`, the repository's immutable id from `meta --from-gh` (outside the fingerprint inputs), when the metadata has one.
 

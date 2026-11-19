@@ -18,9 +18,9 @@ The estate uses one dark design per surface on both GitHub themes (decision 21).
 
 Typography: Poppins (eyebrows, subtitles, chips) and JetBrains Mono (slugs) for CompleteTech; Fraunces and Bricolage Grotesque for AI Ascension; Press Start 2P only at 36 px or larger for jevplay.games. All text is outlined to paths at build time.
 
-## Credit line (decision 25, a proposal pending user confirmation)
+## Configured skill credit
 
-Every README and profile README the skill manages ends with the decision 18 footer, then one credit block that credits the skill, not the repository's owner:
+Every README and profile README the skill manages places one skill-credit block immediately before the unchanged final decision 18 footer:
 
 ```html
 <!-- showcase:credit:start -->
