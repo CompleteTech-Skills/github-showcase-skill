@@ -14,6 +14,7 @@
   action_prepare.py drop NAME            remove docs/images/NAME and its sidecar record (the sidecar too when empty)
   action_prepare.py drop NAME KEY        remove the foreign art only if the captured file and record still match
   action_prepare.py summary META_JSON    append the describe and topics proposals to $GITHUB_STEP_SUMMARY
+  action_prepare.py credit               print the skill credit sentence (the brand config's `attribution:` block)
 """
 from __future__ import annotations
 
@@ -32,15 +33,30 @@ from tempfile import TemporaryFile, mkdtemp
 # Keep direct and runpy entry points equivalent when the caller's CWD is a target checkout.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from ctshowcase.config import canonical  # noqa: E402
+from ctshowcase.config import canonical, load_brand  # noqa: E402
 from ctshowcase.fingerprint import (  # noqa: E402
     ART_NAMES, WRITE_SCRATCH_PREFIX, file_record, output_records, read_sidecar, replace_bytes, sidecar_lock,
 )
 
 IMAGES = Path("docs/images")
 SIDECAR = IMAGES / ".showcase.json"
-TEMPLATE_REPO = "CompleteTech-LLC/completetech-repo-template"  # intake.TEMPLATE_REPO, the `new --template` default
 COMMIT_HOOKS = ("pre-commit", "prepare-commit-msg", "commit-msg", "post-commit")
+
+
+def template_repo() -> str:
+    """The operator's repository template (`operator.repo_template`, the `new --template` default), or "" when the
+    brand config names none: then only a sidecar whose recorded type is `template` counts as a template's."""
+    try:
+        return load_brand().operator().get("repo_template") or ""
+    except Exception:  # noqa: BLE001 - an unreadable config names no template
+        return ""
+
+
+def credit() -> str:
+    """One line crediting the skill, from the `attribution:` block only (who made the tool, for every target)."""
+    a = load_brand().raw.get("attribution") or {}
+    return f"Made with {a['skill']} by {a['publisher']}: {a['skill_url']}" if a.get("skill") and a.get("publisher") \
+        and a.get("skill_url") else ""
 
 
 def _sidecar() -> dict:
@@ -83,7 +99,8 @@ def foreign(full_name: str, artifact: str | None = None, *, data: dict | None = 
         return False  # the same repository under another name
     if named.lower() == full_name.lower():
         return False
-    template = inp.get("type") == "template" or named.lower() == TEMPLATE_REPO.lower()
+    tpl = template_repo()
+    template = inp.get("type") == "template" or bool(tpl) and named.lower() == tpl.lower()
     other_id = bool(rid and ids and rid not in ids)
     if artifact is not None:
         return template or other_id
@@ -91,13 +108,13 @@ def foreign(full_name: str, artifact: str | None = None, *, data: dict | None = 
     copied = icon.is_file() and inp.get("icon_sha256") and \
         hashlib.sha256(icon.read_bytes()).hexdigest() == inp["icon_sha256"]
     if not (template or other_id):
-        print(f"::notice title=CompleteTech Showcase::docs/images/.showcase.json names {named}, not {full_name} (a rename "
+        print(f"::notice title=Repo Showcase::docs/images/.showcase.json names {named}, not {full_name} (a rename "
               "or transfer?); kept the art" + (" and assets/icon.png" if copied else "") + ", which regenerate under "
               "this name", file=sys.stderr)
         return False
     if copied:
         icon.unlink()  # another repository's icon must never stand for this one (decision 12)
-        print(f"::notice title=CompleteTech Showcase::removed the icon copied from {named}", file=sys.stderr)
+        print(f"::notice title=Repo Showcase::removed the icon copied from {named}", file=sys.stderr)
     return True
 
 
@@ -426,7 +443,7 @@ def drop(name: str, expected: str | None = None) -> bool:
 def summary(meta: str) -> None:
     target = os.environ.get("GITHUB_STEP_SUMMARY")
     script = Path(__file__).resolve().parent / "showcase.py"
-    lines = ["## CompleteTech Showcase: proposals", "",
+    lines = ["## Repo Showcase: proposals", "",
              "The Action never edits the About box. Apply these by hand (or through the estate orchestrator).", ""]
     for cmd in ("describe", "topics"):
         p = subprocess.run([sys.executable, str(script), "--meta", meta, "--repo-dir", ".", cmd, "--gh"] if cmd == "topics"
@@ -464,6 +481,9 @@ def summary(meta: str) -> None:
 
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ["credit"]:
+        print(credit())
+        sys.exit(0)
     if sys.argv[1:] == ["staged"]:
         print("true" if has_staged_outputs() else "false")
         sys.exit(0)
