@@ -65,6 +65,15 @@ operator:
   login: CompleteDotTech                                       # the operator's own user account
   repo_template: CompleteTech-LLC/completetech-repo-template   # `new OWNER/NAME` default --template
   repo_template_title: CompleteTech Repo Template              # the template README's H1, replaced on bootstrap
+  profile:                                                     # org profile and About wording (org.py)
+    family: completetech                                       # the operator's own family
+    member_line: A CompleteTech LLC organization               # affiliation sentence, T1 orgs
+    steward_line: "Steward: CompleteTech LLC"                  # affiliation sentence, other tiers
+    private_line: "Work in this organization is private. Public CompleteTech projects are listed at [github.com/CompleteTech-LLC](https://github.com/CompleteTech-LLC)."
+    x_handle: CompleteTechLLC                                  # STANDARD §2.3 `twitter_username` (T1)
+    directory_label: All CompleteTech
+    directory_url: https://github.com/CompleteDotTech
+    also_from_heading: Also from CompleteTech
 
 fonts:
   poppins-regular: Poppins-Regular.ttf

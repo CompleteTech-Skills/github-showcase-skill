@@ -17,6 +17,12 @@ from pathlib import Path
 
 import pytest
 
+
+def _operator_login():
+    from ctshowcase.config import load_brand
+    return load_brand().operator()["login"]
+
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 SHOWCASE = [sys.executable, str(ROOT / "scripts" / "showcase.py")]
@@ -565,7 +571,7 @@ def test_star_list_jobs_for_a_t3_org_carry_its_signoff(tmp_path, monkeypatch, br
         assert held["result"] == "hold" and held["jobs"] == []
         assert signoff._granted() == {}
         res = O.star_list_plan(est, OWNER, lists_capture=lists, allow_t3=True)
-        assert res["jobs"] and all(j["org"] == O.USER_LOGIN for j in res["jobs"]), res
+        assert res["jobs"] and all(j["org"] == _operator_login() for j in res["jobs"]), res
         assert all(j["signoff_id"] == "t3s-sl" and "approval_id" not in j for j in res["jobs"]), res["jobs"]
         # A cached grant must not bypass a withdrawal on the next direct call.
         record_path = _file(tmp_path / "bundle")
@@ -679,7 +685,7 @@ def test_t1_star_list_item_for_a_t3_favorite_carries_the_favorites_signoff(tmp_p
         assert est.resolver.owner_status(t1) != "t3"
         res = O.star_list_plan(est, t1, lists_capture=lists, allow_t3=True, repo_ids={fav: "R_synthetic"})
         items = [j for j in res["jobs"] if "list-item" in j["id"]]
-        assert len(items) == 1 and items[0]["org"] == O.USER_LOGIN, res
+        assert len(items) == 1 and items[0]["org"] == _operator_login(), res
         assert items[0]["signoff_id"] == "t3s-fav" and "approval_id" not in items[0], items
     finally:
         signoff.restore(run)

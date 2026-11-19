@@ -13,6 +13,9 @@ from ctshowcase import project as PJ
 from ctshowcase.config import Brand, load_yaml_text
 from ctshowcase.errors import NEEDS_INPUT, OK
 from ctshowcase.resolver import Resolver
+from ctshowcase.config import load_brand as _load_brand  # noqa: E402
+
+PRIVATE_LINE = _load_brand().operator()["profile"]["private_line"]
 
 OFIX = ROOT / "tests" / "fixtures" / "org"
 PFIX = ROOT / "tests" / "fixtures" / "project"
@@ -90,10 +93,10 @@ def test_private_org_profile_keeps_badges_and_contacts(labs_brand):
     est = _estate(labs_brand, private_labs=True)
     data, _ = O.public_slice(est, L)
     text, badges = O.profile_readme(est, L, data)
-    assert data["public_repo_count"] == 0 and O.PRIVATE_LINE in text and "## Featured" not in text
+    assert data["public_repo_count"] == 0 and PRIVATE_LINE in text and "## Featured" not in text
     assert 3 <= len(badges) <= 5 and "profile/assets/badges/website.svg" in text
     assert "[All CompleteTech organizations](https://github.com/CompleteDotTech)" in text
-    assert text.index("badges/website.svg") < text.index(O.PRIVATE_LINE)
+    assert text.index("badges/website.svg") < text.index(PRIVATE_LINE)
     assert "lab-notebook" not in text
 
 

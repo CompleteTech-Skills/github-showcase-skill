@@ -14,6 +14,9 @@ from ctshowcase import org as O
 from ctshowcase.config import Brand, load_yaml_text
 from ctshowcase.errors import CHECK_FAILED, OK, Refused
 from ctshowcase.resolver import Resolver
+from ctshowcase.config import load_brand as _load_brand  # noqa: E402
+
+PRIVATE_LINE = _load_brand().operator()["profile"]["private_line"]
 
 FIX = ROOT / "tests" / "fixtures" / "org"
 N, L = "Northwind-Trading-Co", "Northwind-Labs"
@@ -94,7 +97,7 @@ def test_profile_private_variant(make_estate):
     est = make_estate(registry=reg)
     res, code = O.profile(est, L)
     text = res["readme"]
-    assert code == OK and res["variant"] == "private" and O.PRIVATE_LINE in text
+    assert code == OK and res["variant"] == "private" and PRIVATE_LINE in text
     assert "## Featured" not in text and "## All projects" not in text and "## Favorites" not in text
     assert "secret-lab" not in text and footer_then_credit(text)
 

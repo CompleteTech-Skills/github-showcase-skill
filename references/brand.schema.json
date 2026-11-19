@@ -444,6 +444,39 @@
     },
     "repo_template_title": {
      "type": "string"
+    },
+    "profile": {
+     "type": "object",
+     "additionalProperties": false,
+     "description": "Org profile and About wording. Absent: no row is the operator's own family and these lines are withheld.",
+     "properties": {
+      "family": {
+       "type": "string"
+      },
+      "member_line": {
+       "type": "string"
+      },
+      "steward_line": {
+       "type": "string"
+      },
+      "private_line": {
+       "type": "string"
+      },
+      "x_handle": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9_]{1,15}$"
+      },
+      "directory_label": {
+       "type": "string"
+      },
+      "directory_url": {
+       "type": "string",
+       "pattern": "^https://"
+      },
+      "also_from_heading": {
+       "type": "string"
+      }
+     }
     }
    }
   },
