@@ -502,6 +502,7 @@ def build(snap: dict, brand, *, resolver=None, flags: dict | None = None, allow_
     r.check_owner(login, allow_t3=allow_t3)  # an excluded or HOLD account refuses (exit 2)
     counts = {"public": 0, "named": 0, "withheld": 0, "hidden": 0, "not_public": 0, "organizations": 0,
               "enterprises": 0, "omitted_orgs": 0, "incomplete_orgs": 0, "orgs_without_public": 0, "hidden_by": {}}
+    hidden_categories: set[str] = set()  # categories survive omission; omitted orgs never add repository counts
     languages: dict[str, int] = {}
 
     def hidden_reason(rp: dict) -> str | None:
@@ -532,6 +533,7 @@ def build(snap: dict, brand, *, resolver=None, flags: dict | None = None, allow_
                 continue
             reason = hidden_reason(rp)
             if reason:
+                hidden_categories.add(reason)
                 counts["hidden"] += 1
                 counts["hidden_by"][reason] = counts["hidden_by"].get(reason, 0) + 1
                 continue
@@ -569,13 +571,15 @@ def build(snap: dict, brand, *, resolver=None, flags: dict | None = None, allow_
         status = _capture_state(o, lg)
         observed = status in ("complete", "partial")
         repos = o["repositories"] if observed else []
-        if status == "complete" and "all-orgs" not in show and all(hidden_reason(rp) for rp in repos):
+        held = st == "hold" or r.family_hold(lg)
+        reasons = [hidden_reason(rp) for rp in repos]
+        if status == "complete" and "all-orgs" not in show and not (held and repos) and all(reasons):
             # completely observed and nothing public to show (none at all, only private work, or only repositories a
-            # render option hides): left off unless --show all-orgs
+            # render option hides): left off unless --show all-orgs. HOLD public work stays withheld, not hidden.
+            hidden_categories.update(reason for reason in reasons if reason)
             logs.append(f"no-public:{lg}")
             counts["orgs_without_public"] += 1
             return None
-        held = st == "hold" or r.family_hold(lg)
         if held:
             logs.append(f"hold:{lg}")
         style, neutral, family = org_style(brand, lg)
@@ -702,7 +706,7 @@ def build(snap: dict, brand, *, resolver=None, flags: dict | None = None, allow_
     model = {"account": account, "personal": personal, "enterprises": enterprises, "orgs": standalone, "counts": counts,
              "roles": roles, "legend_languages": legend or ["default"], "title": title, "desc": desc,
              "captured": snap["captured"], "viewer": snap.get("viewer"), "coverage": coverage, "evidence": evidence,
-             "show": sorted(show), "hide": sorted(hide)}
+             "show": sorted(show), "hide": sorted(hide), "hidden_categories": sorted(hidden_categories)}
     return model, sorted(set(logs))
 
 
@@ -755,11 +759,11 @@ def markdown(model: dict, files: dict) -> str:
     if c["withheld"]:
         facts.append(f"{c['withheld']} public repositories are withheld (on hold, awaiting co-owner sign-off or under "
                      "exposure review)")
-    hidden_by = c.get("hidden_by") or {}
-    left_out = [text for on, text in ((c.get("orgs_without_public"), "organizations without public repositories"),
-                                      (hidden_by.get(".github"), "`.github` repositories"),
-                                      (hidden_by.get("forks"), "forks"),
-                                      (hidden_by.get("archived"), "archived repositories")) if on]
+    hidden_categories = model.get("hidden_categories", c.get("hidden_by") or {})
+    left_out = [text for on, text in ((c.get("orgs_without_public"), "organizations with no public repositories shown"),
+                                      (".github" in hidden_categories, "`.github` repositories"),
+                                      ("forks" in hidden_categories, "forks"),
+                                      ("archived" in hidden_categories, "archived repositories")) if on]
     if left_out:  # what the render options leave out, without counts
         facts.append("Not shown: " + (", ".join(left_out[:-1]) + " and " + left_out[-1] if len(left_out) > 1
                                       else left_out[0]))
@@ -869,10 +873,16 @@ def _sources(args, brand, model: dict | None = None) -> list[Path]:
     if root:
         paths += [root / "registry/estate.yaml", *[root / "decisions" / name for name in
                   ("approved.tsv", "APPROVED_ACTIONS.yaml", "estate-actions.json", "decisions.json")]]
+    # Configuration declares source ownership even when a lane or asset is not rendered. Protect those paths in
+    # the first preflight, before visibility or consent gates can remove nodes from the chart model.
+    paths += [brand.asset(row.get("mark")) for row in (brand.raw.get("orgs") or {}).values() if row.get("mark")]
+    assets = brand.raw.get("brand_assets") or {}
+    paths += [brand.asset(assets.get(key)) for key in
+              ("logo_light", "logo_dark", "logo_dark_candidate", "mark_dark", "mark_light", "bulb_dark") if assets.get(key)]
+    paths += [brand.font_file(key) for key in brand.raw.get("fonts") or {}]
     if model is not None:
         nodes = [model["account"], model["personal"], *model["orgs"], *[o for e in model["enterprises"] for o in e["orgs"]]]
         paths += [n["mark"] for n in nodes if n.get("mark")]
-        paths += [brand.font_file(key) for key in brand.raw.get("fonts") or {}]
     if getattr(args, "mmdc", None):
         paths.append(Path(shutil.which(args.mmdc) or args.mmdc))
     return [Path(path) for path in paths if path is not None]

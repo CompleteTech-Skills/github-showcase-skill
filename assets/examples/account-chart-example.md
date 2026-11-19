@@ -4,7 +4,7 @@
   <a href="account-chart-example.png"><img src="account-chart-example.svg" alt="GitHub account map of Northwind Developer (@northwind-dev): personal repositories, 1 enterprise and 4 organizations, each with its public repositories. 22 public repositories are named; the list below repeats each one as a link." width="100%"></a>
 </p>
 
-<sub>22 public repositories across 1 enterprise and 4 organizations. Not shown: organizations without public repositories and `.github` repositories. Captured 2026-11-18. Mermaid source: <a href="account-chart-example.mmd">account-chart-example.mmd</a>.</sub>
+<sub>22 public repositories across 1 enterprise and 4 organizations. Not shown: organizations with no public repositories shown and `.github` repositories. Captured 2026-11-18. Mermaid source: <a href="account-chart-example.mmd">account-chart-example.mmd</a>.</sub>
 
 <details>
 <summary>Every repository in this map</summary>

@@ -310,6 +310,10 @@ def test_a_hold_org_with_public_repositories_stays_and_one_without_is_left_off(b
     assert m["orgs"][0]["notes"] == ["held"]
     m, logs = build(brand, with_orgs(org("TouchedByAnAgent")))
     assert m["orgs"] == [] and "no-public:TouchedByAnAgent" in logs and "hold:TouchedByAnAgent" not in logs
+    m, logs = build(brand, with_orgs(org("TouchedByAnAgent")), show=("all-orgs",))
+    assert m["orgs"][0]["held"] and m["orgs"][0]["notes"] == ["held"]
+    assert m["orgs"][0]["public"] == m["counts"]["withheld"] == 0
+    assert "hold:TouchedByAnAgent" in logs and "no-public:TouchedByAnAgent" not in logs
 
 
 def test_an_enterprise_stays_when_none_of_its_orgs_has_public_repositories(brand, tmp_path):
@@ -395,7 +399,7 @@ def test_markdown_repeats_every_named_repository_as_a_link_with_the_counts(brand
         assert f"(https://github.com/{full})" in md
     assert f"{out['counts']['named']} public repositories across 1 enterprise and 4 organizations" in md
     assert "private or internal" not in md  # private work is shown only on request
-    assert "Not shown: organizations without public repositories and `.github` repositories" in md
+    assert "Not shown: organizations with no public repositories shown and `.github` repositories" in md
     assert "/.github)" not in md and "Northwind-Sandbox" not in md
     assert 'href="account-chart.svg"' in md  # without a PNG the image links to the SVG
     r, out = render(tmp_path, None, "--no-png", "--show", "all-orgs", "--show", "private-work", "--show", ".github",
