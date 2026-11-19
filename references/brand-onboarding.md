@@ -72,6 +72,15 @@ family. Public license sections retain only the captured license reference;
 private license sections wait for explicit wording. Adding an org to a family
 marked `identity_pending: true` also leaves its identity unresolved: rendering
 still returns `needs-input:brand-identity`, including with `--allow-unmeasured`.
+
+Repository-icon art direction is keyed by an optional `art` block on the family row
+and the org row (the org's keys win): `palette` names the rows of the art
+direction's family palette table, `role` narrows them to one org's rows,
+`additions` names the trademark negatives the illustration prompt must carry,
+`seed` names the family seed and `prompt_palette` names the illustration palette
+line. A family or org without an `art` block gets none of these, never another
+operator's palette, negatives or seed. Add them to your own rows when your art
+direction defines them.
 For any non-fork repository whose organization has no configured `brand_topic`,
 `topics` preserves existing topics and logs `needs-input:brand-topic`. For `.github`
 it also suggests the known `github-profile` type. It never substitutes another

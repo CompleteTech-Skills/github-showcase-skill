@@ -170,8 +170,14 @@ def test_icon_prompt_b_holds_when_the_addition_text_is_missing():
 
 
 def test_family_colours_follow_the_org_aliases():
-    assert C.family_colours(ART, "jevplay-games-new", "jevplay-games", ["jevplay-games-new", "jevplay-games"]) == \
-        C.family_colours(ART, "jevplay-games", "jevplay-games")
+    before = load_brand()
+    after = _renamed_brand("jevplay-games", "jevplay-games-new")
+    old_row = Resolver(before, {}, None).brand_org("jevplay-games")
+    expected = C.family_colours(ART, C.org_art(before, old_row, "jevplay-games"))
+    assert expected.get("LINE_HEX")
+    for login in ("jevplay-games-new", "jevplay-games"):
+        row = Resolver(after, {}, None).brand_org(login)
+        assert C.family_colours(ART, C.org_art(after, row, "jevplay-games")) == expected, login
 
 
 # ------------------------------------------------------------------------------------------ sidebar totalCount

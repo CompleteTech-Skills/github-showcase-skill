@@ -1836,12 +1836,6 @@ LIVE_MARGIN = round(82 * ICON_PX / 500)  # 168: the avatar live area (a.3) at 10
 LIVE = ICON_PX - 2 * LIVE_MARGIN          # 688
 KEY_DE, CONTENT_DE = 6.0, 12.0
 FLATTEN_FEATHER = KEY_DE  # width of the soft ramp, in dE (flatten and transparent key)
-ART_FAMILY = {"completetech": "CompleteTech core", "ai-ascension": "AI-Ascension", "jev-engineering": "Jev",
-              "jevplay-games": "Jev", "libreevolve": "LibreEvolve", "touchedbyanagent": "TouchedByAnAgent",
-              "romgenie": "romgenie utility"}
-ART_OWNER = {"CompleteDotTech": ("Founder", None), "Pick-Your-AI": ("Pick Your AI", None),
-             "Jev-Engineering": ("Jev", "Jev-Engineering"), "jevplay-games": ("Jev", "jevplay-games"),
-             "Jevelopers-neatHack-2026": ("Jev", "Jevelopers")}
 WRITER_SLOTS = ("GLYPH_NAME", "GLYPH_DESCRIPTION", "SPARK_PLACEMENT", "SIZE_CLASS")
 SIZE_CLASSES = {
     "WIDE": "the glyph spans close to the full 688 px width and is about 430 to 560 px tall",
@@ -1886,11 +1880,24 @@ def palette_rows(text: str) -> list[dict]:
     return rows
 
 
-def family_colours(text: str, owner: str, family: str, aliases=()) -> dict:
-    """The family palette for the org: its ART_OWNER row under any of its logins (`aliases`, CQ-03), else the family's."""
-    owners = {k.lower(): v for k, v in ART_OWNER.items()}
-    fam, prefix = next((owners[a.lower()] for a in (owner, *aliases) if a and a.lower() in owners),
-                       (ART_FAMILY.get(family), None))
+def org_art(brand, org: dict, family: str) -> dict:
+    """The art-direction keys for an org, from the selected brand config only: the family row's `art` block with the
+    org row's `art` block over it (`palette`, `role`, `additions`, `seed`, `prompt_palette`). The org row arrives
+    through the resolver, so a renamed or re-keyed org keeps its keys (CQ-03). An owner with no row, or a family
+    without an `art` block, gets none: no other operator's palette, additions or seed is ever borrowed."""
+    org = org or {}
+    fam = ((brand.raw.get("families") or {}).get(family) or {}).get("art") or {}
+    own = (org.get("art") or {}) if org.get("known", True) else {}
+    out = dict(fam)
+    if own.get("palette"):
+        out.pop("role", None)  # an org palette names its own rows; the family's role prefix does not carry over
+    out.update(own)
+    return out
+
+
+def family_colours(text: str, art: dict) -> dict:
+    """The palette rows named by `art` (see `org_art`): its `palette` family, narrowed to its `role` prefix."""
+    fam, prefix = (art or {}).get("palette"), (art or {}).get("role")
     rows = [r for r in palette_rows(text) if fam and r["family"].lower().startswith(fam.lower())]
     if prefix:
         own = [r for r in rows if r["role"].lower().startswith(prefix.lower())]
@@ -1927,7 +1934,7 @@ def org_glyph(text: str, owner: str) -> str | None:
 def icon_colours(ctx, text: str, org: dict, resolver: Resolver, *, require_palette: bool = True) -> dict:
     """Keep estate palettes explicit; the bundled template uses the committed brand tokens."""
     family = org_style(resolver, ctx.brand, ctx.owner, repo=ctx.repo)["name"]
-    colours = family_colours(text, org["brand_key"], family, resolver.aliases(ctx.owner))
+    colours = family_colours(text, org_art(ctx.brand, org, family))
     if _section(text, "Repository glyph prompt template") and not _section(text, "(b) Family palette"):
         tokens = ctx.style["tokens"]
         missing = [key for key in ("icon_ink", "icon_spark") if not tokens.get(key)]
@@ -1945,13 +1952,13 @@ def icon_colours(ctx, text: str, org: dict, resolver: Resolver, *, require_palet
     return colours
 
 
-def seed_for(text: str, owner: str | list[str], family: str) -> str | None:
-    """The org's seed (any of its logins, CQ-03), else the family's."""
+def seed_for(text: str, owner: str | list[str], family: str, family_seed: str | None = None) -> str | None:
+    """The org's seed (any of its logins, CQ-03), else the family's (`family_seed`: its config `art.seed` key)."""
     m = re.search(r"seeds \(([^)]*)\)", text)
     if not m:
         return None
     seeds = dict((k.strip(), v) for k, v in re.findall(r"([A-Za-z][\w-]*)\s+`?(\d{3,5})`?", m.group(1)))
-    for key in (*([owner] if isinstance(owner, str) else owner), {"completetech": "CompleteTech"}.get(family), family):
+    for key in (*([owner] if isinstance(owner, str) else owner), family_seed, family):
         for k, v in seeds.items():
             if key and k.lower() == str(key).lower():
                 return v
@@ -2007,28 +2014,25 @@ def icon_prompt(ctx, resolver: Resolver, art_text: str, glyph: dict | None = Non
             cells = [c.strip() for c in ln.strip().strip("|").split("|")]
             if len(cells) == 2 and cells[0].lower() in names:
                 lock = cells[1]
-        adds = dict(re.findall(r"(Security|TCG|Discord orgs|jevplay-games|TouchedByAnAgent) `([^`]*)`",
-                               (re.search(r"Family additions:(.*)", skill_art or "") or re.match("", "")).group(0)))
-        add_map = {"completetech-security": "Security", "completetech-pokemon": "TCG", "completetech-tcg": "TCG",
-                   "completetech-discordapps": "Discord orgs", "completetechdiscord-games": "Discord orgs",
-                   "jevplay-games": "jevplay-games", "touchedbyanagent": "TouchedByAnAgent"}
-        add_names = {"completetech security": "Security", "completetech tcg": "TCG",
-                     "completetech discord apps": "Discord orgs", "completetech discord games": "Discord orgs",
-                     "jevplay.games": "jevplay-games", "touched by an agent": "TouchedByAnAgent"}
-        # any login of the org (CQ-03), else its display name, so a re-keyed brand.yaml row keeps its negatives
-        add_key = next((add_map[a.lower()] for a in logins if a and a.lower() in add_map), None) or \
-            add_names.get(str(org.get("display_name") or "").lower())
+        art = org_art(ctx.brand, org, family)
+        # the org row's `art.additions` names its trademark negatives; the row moves with a rename or re-key (CQ-03)
+        add_key = art.get("additions")
+        additions = (re.search(r"Family additions:(.*)", skill_art or "") or re.match("", "")).group(0)
+        found = add_key and re.search(rf"(?:^|[\s:`]){re.escape(add_key)} `([^`]*)`", additions)
+        adds = {add_key: found.group(1)} if found else {}
         if add_key and not adds.get(add_key):
             # a trademark family whose negatives cannot be found: never a prompt without them (fail closed)
             raise NeedsInput("family-additions", f"{org['current']}: references/art-direction.md has no {add_key} "
                                                  "family addition (trademark negatives)")
-        pal = re.search(r"CompleteTech palette: `([^`]*)`; highlight line `([^`]*)`", skill_art or "")
+        pal_name = art.get("prompt_palette")
+        pal = pal_name and re.search(rf"{re.escape(pal_name)} palette: `([^`]*)`; highlight line `([^`]*)`",
+                                     skill_art or "")
         card = ctx.style["tokens"]["card_fill"]
         prompt = tpl.replace("FAMILY STYLE LOCK, VERBATIM", lock or "{STYLE_LOCK}")
         prompt = prompt.replace("Square 1024x1024 | Wide 1536x1024", "Square 1024x1024")
         prompt = prompt.rstrip() + "\n\nProduce one image." + seed_instruction
         prompt = prompt.replace("untextured BG background", f"untextured {card} background")
-        if family == "completetech" and pal:
+        if pal:
             prompt = prompt.replace("PALETTE. HIGHLIGHT LINE", f"{pal.group(1)}. {pal.group(2)}")
         prompt = prompt.replace("One sentence: the single hero object or scene that represents the repository or "
                                 "org's function.", glyph.get("SUBJECT") or "{SUBJECT}")

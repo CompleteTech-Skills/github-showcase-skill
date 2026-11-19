@@ -235,6 +235,9 @@
     "identity_pending": {
      "type": "boolean",
      "description": "No approved palette and mark; renderers require owner-supplied brand identity."
+    },
+    "art": {
+     "$ref": "#/$defs/art"
     }
    }
   },
@@ -345,6 +348,31 @@
     "skills_license_wording": {
      "type": "string",
      "description": "Explicit owner-supplied legal wording; absence never grants permission to infer legal claims."
+    },
+    "art": {
+     "$ref": "#/$defs/art"
+    }
+   }
+  },
+  "art": {
+   "type": "object",
+   "additionalProperties": false,
+   "description": "Art-direction keys: the palette rows, trademark additions and seed an org or family uses. Absent means none; never inherited from another operator.",
+   "properties": {
+    "palette": {
+     "type": "string"
+    },
+    "role": {
+     "type": "string"
+    },
+    "additions": {
+     "type": "string"
+    },
+    "seed": {
+     "type": "string"
+    },
+    "prompt_palette": {
+     "type": "string"
     }
    }
   }

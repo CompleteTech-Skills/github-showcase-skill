@@ -200,6 +200,9 @@
  },
  "families": {
   "ai-ascension": {
+   "art": {
+    "palette": "AI-Ascension"
+   },
    "badge_accent": "E39B3A",
    "badge_brand": "F2B75C",
    "banner": "keep-existing",
@@ -254,9 +257,17 @@
    }
   },
   "completetech": {
+   "art": {
+    "palette": "CompleteTech core",
+    "prompt_palette": "CompleteTech",
+    "seed": "CompleteTech"
+   },
    "measured": true
   },
   "jev-engineering": {
+   "art": {
+    "palette": "Jev"
+   },
    "badge_accent": "8B5CF6",
    "badge_brand": "22D3EE",
    "canvas": {
@@ -300,6 +311,9 @@
    }
   },
   "jevplay-games": {
+   "art": {
+    "palette": "Jev"
+   },
    "badge_accent": "E551BA",
    "badge_brand": "F386A1",
    "canvas": {
@@ -358,6 +372,9 @@
    }
   },
   "libreevolve": {
+   "art": {
+    "palette": "LibreEvolve"
+   },
    "badge_accent": "065F46",
    "badge_brand": "10B981",
    "canvas": {
@@ -456,6 +473,9 @@
    }
   },
   "romgenie": {
+   "art": {
+    "palette": "romgenie utility"
+   },
    "badge_accent": "B8860B",
    "badge_brand": "F4C430",
    "canvas": {
@@ -502,6 +522,9 @@
    "identity_pending": true
   },
   "touchedbyanagent": {
+   "art": {
+    "palette": "TouchedByAnAgent"
+   },
    "badge_accent": "E11D74",
    "badge_brand": "F59E0B",
    "canvas": {
@@ -617,6 +640,9 @@
    "tier": "T2"
   },
   "CompleteDotTech": {
+   "art": {
+    "palette": "Founder"
+   },
    "brand_topic": "completetech",
    "description": null,
    "display_name": "Timothy Wayne Gregg",
@@ -722,6 +748,9 @@
    "tier": "T1"
   },
   "CompleteTech-DiscordApps": {
+   "art": {
+    "additions": "Discord orgs"
+   },
    "brand_topic": "completetech",
    "description": "Discord apps and community bots. Not affiliated with Discord Inc. A CompleteTech LLC organization.",
    "display_name": "CompleteTech Discord Apps",
@@ -855,6 +884,9 @@
    "tier": "T1"
   },
   "CompleteTech-Pokemon": {
+   "art": {
+    "additions": "TCG"
+   },
    "brand_topic": "completetech",
    "description": "Trading-card shop, community site and Game Boy emulation tools. Not affiliated with Nintendo or The Pokémon Company. A CompleteTech LLC organization.",
    "disclaimer": "Not affiliated with, endorsed by, or sponsored by Nintendo, Game Freak, Creatures or The Pokémon Company.",
@@ -872,6 +904,9 @@
    "tier": "T1"
   },
   "CompleteTech-Security": {
+   "art": {
+    "additions": "Security"
+   },
    "banner_category": "SECURITY TOOLS",
    "brand_topic": "completetech",
    "description": "Offline, dependency-free CVE version checkers for network appliances and Node.js. A CompleteTech LLC organization.",
@@ -928,6 +963,9 @@
    "tier": "T1"
   },
   "CompleteTechDiscord-Games": {
+   "art": {
+    "additions": "Discord orgs"
+   },
    "brand_topic": "completetech",
    "description": "Games built as Discord activities. Not affiliated with Discord Inc. A CompleteTech LLC organization.",
    "display_name": "CompleteTech Discord Games",
@@ -944,6 +982,10 @@
    "tier": "T1"
   },
   "Jev-Engineering": {
+   "art": {
+    "palette": "Jev",
+    "role": "Jev-Engineering"
+   },
    "brand_topic": "jev",
    "description": "Jev structured-decision research and tooling. Steward: CompleteTech LLC.",
    "display_name": "Jev Engineering",
@@ -956,6 +998,10 @@
    "tier": "T2"
   },
   "Jevelopers-neatHack-2026": {
+   "art": {
+    "palette": "Jev",
+    "role": "Jevelopers"
+   },
    "brand_topic": null,
    "description": null,
    "display_name": "TicketStub",
@@ -995,6 +1041,9 @@
    "tier": "T1"
   },
   "Pick-Your-AI": {
+   "art": {
+    "palette": "Pick Your AI"
+   },
    "brand_topic": "pick-your-ai",
    "description": null,
    "display_name": "Pick Your AI",
@@ -1009,6 +1058,9 @@
    "tier": "T3"
   },
   "TouchedByAnAgent": {
+   "art": {
+    "additions": "TouchedByAnAgent"
+   },
    "brand_topic": "touchedbyanagent",
    "description": null,
    "display_name": "Touched By An Agent",
@@ -1022,6 +1074,11 @@
    "tier": "T2"
   },
   "jevplay-games": {
+   "art": {
+    "additions": "jevplay-games",
+    "palette": "Jev",
+    "role": "jevplay-games"
+   },
    "brand_topic": "jev",
    "description": "Browser games played against Jev at jevplay.games. Steward: CompleteTech LLC.",
    "display_name": "jevplay.games",

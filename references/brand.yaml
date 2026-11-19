@@ -224,8 +224,10 @@ families:
     identity_pending: true  # Owner-supplied palette and mark are not available; never inherit CompleteTech art.
     company_label: TicketStub
   completetech:
+    art: {palette: CompleteTech core, seed: CompleteTech, prompt_palette: CompleteTech}
     measured: true
   ai-ascension:
+    art: {palette: AI-Ascension}
     badge_brand: "F2B75C"
     badge_accent: "E39B3A"
     measured: true
@@ -256,6 +258,7 @@ families:
     fonts: {title: fraunces-semibold, eyebrow: mono-medium, subtitle: bricolage-medium, card_name: fraunces-semibold,
             card_body: bricolage-medium, display: fraunces-semibold}
   jev-engineering:
+    art: {palette: Jev}
     badge_brand: "22D3EE"
     badge_accent: "8B5CF6"
     measured: false
@@ -279,6 +282,7 @@ families:
       icon_ink: "#8B5CF6"
       icon_spark: "#22D3EE"
   jevplay-games:
+    art: {palette: Jev}
     badge_brand: "F386A1"
     badge_accent: "E551BA"
     # Dark design (decision 21, "I like the dark ones"): ink canvas with the family's magenta halftone,
@@ -342,6 +346,7 @@ families:
       icon_ink: "#0F766E"
       icon_spark: "#B45309"          # deep amber: readable on the light icon card (the chip and accent stay #FBBF24)
   libreevolve:
+    art: {palette: LibreEvolve}
     badge_brand: "10B981"
     badge_accent: "065F46"
     measured: false
@@ -365,6 +370,7 @@ families:
       icon_ink: "#10B981"
       icon_spark: "#F1F5F9"
   touchedbyanagent:
+    art: {palette: TouchedByAnAgent}
     badge_brand: "F59E0B"
     badge_accent: "E11D74"
     measured: false
@@ -389,6 +395,7 @@ families:
       icon_ink: "#E11D74"
       icon_spark: "#F59E0B"
   romgenie:
+    art: {palette: romgenie utility}
     badge_brand: "F4C430"
     badge_accent: "B8860B"
     measured: false
@@ -467,6 +474,7 @@ orgs:
     family_topics: [ai-research]
     footer: true
   CompleteTech-Security:
+    art: {additions: Security}
     family: completetech
     license_wording: "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project."
     private_license_wording: "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved."
@@ -530,6 +538,7 @@ orgs:
     family_topics: []
     footer: true
   CompleteTech-Pokemon:
+    art: {additions: TCG}
     family: completetech
     license_wording: "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project."
     private_license_wording: "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved."
@@ -606,6 +615,7 @@ orgs:
     family_topics: []
     footer: true
   CompleteTechDiscord-Games:
+    art: {additions: Discord orgs}
     family: completetech
     license_wording: "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project."
     private_license_wording: "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved."
@@ -621,6 +631,7 @@ orgs:
     family_topics: []
     footer: true
   CompleteTech-DiscordApps:
+    art: {additions: Discord orgs}
     family: completetech
     license_wording: "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project."
     private_license_wording: "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved."
@@ -681,6 +692,7 @@ orgs:
     family_topics: []
     footer: true
   CompleteDotTech:
+    art: {palette: Founder}
     family: completetech
     license_wording: "CompleteTech LLC names and logos are reserved and are not licensed for reuse except to identify this project."
     private_license_wording: "Proprietary. Copyright (c) <year> CompleteTech LLC. All rights reserved."
@@ -713,6 +725,7 @@ orgs:
     banner: keep-existing
     footer: true
   Jev-Engineering:
+    art: {palette: Jev, role: Jev-Engineering}
     family: jev-engineering
     former_slugs: []
     tier: T2
@@ -724,6 +737,7 @@ orgs:
     family_topics: []
     footer: true
   jevplay-games:
+    art: {palette: Jev, role: jevplay-games, additions: jevplay-games}
     family: jevplay-games
     former_slugs: []
     tier: T2
@@ -748,6 +762,7 @@ orgs:
     family_topics: []
     footer: true
   TouchedByAnAgent:
+    art: {additions: TouchedByAnAgent}
     family: touchedbyanagent
     former_slugs: []
     tier: T2
@@ -782,6 +797,7 @@ orgs:
     family_topics: []
     footer: true
   Pick-Your-AI:
+    art: {palette: Pick Your AI}
     family: pickyourai
     former_slugs: []
     tier: T3
@@ -795,6 +811,7 @@ orgs:
     hub_url: https://pickyour.ai
     footer: false
   Jevelopers-neatHack-2026:
+    art: {palette: Jev, role: Jevelopers}
     family: ticketstub
     former_slugs: []
     tier: T3
