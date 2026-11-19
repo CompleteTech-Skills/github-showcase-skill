@@ -55,13 +55,17 @@ def _key(fonts: Fonts, font: str, entries: list[dict], avail: float, other: str)
         n, x = 1, 0.0
         for e in es:
             w = width(e)
+            if w > avail:
+                return KEY_ROWS + 1
             if x and x + w > avail:
                 n, x = n + 1, 0.0
             x += w + 28
         return n
 
-    while len(entries) > 1 and rows(entries) > KEY_ROWS:
+    while rows(entries) > KEY_ROWS:
         rest = [e for e in entries if e["language"] is not None or e["name"] != other]
+        if not rest:
+            raise ArtFail("summary-key")
         tail = min(rest, key=lambda e: (e["share"], e["name"]))
         entries.remove(tail)
         merged = next((e for e in entries if e["language"] is None and e["name"] == other), None)

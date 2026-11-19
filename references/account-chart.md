@@ -105,6 +105,8 @@ The image carries no map counts (S16): the Markdown block states how many reposi
 
 When the summary compacts its key, the Markdown retains the original chart share line and adds the actual compacted summary key beside its image. Its image alternative text uses that same compacted key. Segment boundaries are proportional and bounded at SVG precision; very small shares can have zero drawable width, while their names and percentages remain in the key and Markdown.
 
+An individual language label wider than a key row also triggers compaction, including a single-language key. Labels are not truncated. If the final configured `other_languages` label cannot fit, rendering stops with `art-fail:summary-key` (exit 3) before writing any outputs; existing artifacts remain unchanged. An unused aggregate label does not affect a key that already fits.
+
 ## The Mermaid source
 
 `NAME.mmd` is the same tree as a `flowchart LR`: the account, each enterprise (a hexagon), the personal repositories and every organization, each with a cluster of repository pills in rows of `chart.mermaid.columns`. Invisible links (`~~~`) build the rows and tie each row to its organization, so the rows keep their alphabetical order; organizations outside an enterprise hang off one "Organizations" hub. Colours are the brand tokens blended on the canvas (Mermaid styles take no alpha); repositories carry their language as the stroke, forks a dashed outline, archived repositories the muted colour. The init directive sets `fontFamily` at the top level (Mermaid ignores it under `themeVariables`) and `wrappingWidth: 600`, so labels stay on one line.
