@@ -60,6 +60,10 @@
    "fill": "#001F3F",
    "fill_opacity": 0.4
   },
+  "hold": [
+   "romgenie-archive-repostiory",
+   "romgenie-following-repos"
+  ],
   "junction": "#FFC300",
   "labels": {
    "account": "GITHUB ACCOUNT MAP",
@@ -72,8 +76,10 @@
    "language": "Language",
    "legend_private": "Private work is counted, never named",
    "member": "Member",
+   "no_language": "No language",
    "organization": "ORGANIZATION",
    "organizations": "Organizations",
+   "other_languages": "Other languages",
    "owner": "Owner",
    "partial": "partially captured",
    "personal": "PERSONAL",

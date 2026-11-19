@@ -9,7 +9,8 @@ query AccountUser($login: String!, $after: String) {
     repositories(first: 100, after: $after, ownerAffiliations: OWNER, privacy: PUBLIC,
                  orderBy: {field: NAME, direction: ASC}) {
       pageInfo { hasNextPage endCursor }
-      nodes { name description isFork isArchived primaryLanguage { name } }
+      nodes { name description isFork isArchived stargazerCount primaryLanguage { name } parent { nameWithOwner }
+              languages(first: 25, orderBy: {field: SIZE, direction: DESC}) { totalSize edges { size node { name color } } } }
     }
   }
 }

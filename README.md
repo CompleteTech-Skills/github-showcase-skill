@@ -155,9 +155,13 @@ bash examples/render_examples.sh   # every committed example, contact sheets and
   <img src="assets/examples/account-chart-example.svg" alt="GitHub account map of Northwind Developer (@northwind-dev): personal repositories, one enterprise and four organizations, each with its public repositories" width="100%">
 </p>
 
-- Rendered from the synthetic snapshot in `examples/account-chart/northwind.snapshot.json`: [Mermaid source](assets/examples/account-chart-example.mmd), [SVG](assets/examples/account-chart-example.svg), [HD PNG](assets/examples/account-chart-example.png) and the [Markdown block](assets/examples/account-chart-example.md) that links every repository.
+<p align="center">
+  <img src="assets/examples/account-chart-example-summary.svg" alt="Northwind Developer: the languages of the code in this map, excluding forks, as a bar and key with percentages" width="100%">
+</p>
+
+- Rendered from the synthetic snapshot in `examples/account-chart/northwind.snapshot.json`: [Mermaid source](assets/examples/account-chart-example.mmd), [SVG](assets/examples/account-chart-example.svg), [HD PNG](assets/examples/account-chart-example.png), the [Markdown block](assets/examples/account-chart-example.md) that links every repository, and the closing [summary SVG](assets/examples/account-chart-example-summary.svg) in the profile intro's design.
 - `account-chart capture` reads the signed-in account with read-only GraphQL queries; private and internal repositories are counted, never named.
-- The chart shows public work by default: organizations without public repositories, the "private work" note and `.github` repositories are left out, and `--show all-orgs`, `--show private-work` or `--show .github` brings each back.
+- The chart shows public work by default: organizations without public repositories, the "private work" note, `.github` repositories and forks of repositories outside the account are left out (`--show all-orgs`, `--show private-work`, `--show .github` or `--show external-forks` brings each back), and HOLD organizations stay off unless `--allow-hold`. Pills show the stars of non-fork repositories with more than 10, and the legend gives each language's share of the code.
 
 ```bash
 python3 scripts/showcase.py account-chart capture --out account.snapshot.json        # the signed-in account

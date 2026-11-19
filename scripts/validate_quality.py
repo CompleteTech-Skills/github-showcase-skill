@@ -238,11 +238,13 @@ def gate_render_examples() -> None:
         snapshot = ROOT / "examples" / "account-chart" / "northwind.snapshot.json"
         for run in ("a", "b"):
             showcase("account-chart", "render", "--snapshot", str(snapshot), "--out-dir", str(t / run / "chart"))
-        for name in ("account-chart.mmd", "account-chart.svg", "account-chart.png", "account-chart.md"):
+        for name in ("account-chart.mmd", "account-chart.svg", "account-chart.png", "account-chart.md",
+                     "account-chart-summary.svg"):
             a, b = (t / run / "chart" / name for run in ("a", "b"))
             if hashlib.sha256(a.read_bytes()).digest() != hashlib.sha256(b.read_bytes()).digest():
                 raise RuntimeError(f"non-deterministic account chart {name}")
         showcase("lint", "svg", "--kind", "chart", str(t / "a" / "chart" / "account-chart.svg"))
+        showcase("lint", "svg", "--kind", "intro", str(t / "a" / "chart" / "account-chart-summary.svg"))
     print(f"render gates ok ({len(metas)} fixtures and the account chart, rendered twice)")
 
 

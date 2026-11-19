@@ -193,8 +193,11 @@ def test_cli_hold_keeps_precedence_over_exposure_and_visibility(tmp_path, catego
     repo = REPOSITORIES[category]
     report, markdown, rendered = render(tmp_path, snapshot([repo], owner="TouchedByAnAgent"),
                                        exposed=(repo["name"],))
-    assert_counts(report, shown=True, public=1, withheld=1)
+    # user decision (2026-11-18): HOLD leaves the org off the chart whole, still before exposure and visibility
+    assert report["counts"] == {"public": 0, "named": 0, "withheld": 0, "hidden": 0, "not_public": 0, "organizations": 0,
+                                "enterprises": 0, "omitted_orgs": 1, "incomplete_orgs": 0, "orgs_without_public": 0,
+                                "hidden_by": {}}
     assert "hold:TouchedByAnAgent" in report["logs"]
     assert "exposure-withheld" not in report["logs"] and "no-public:TouchedByAnAgent" not in report["logs"]
-    assert "on hold" in markdown and repo["name"] not in rendered + "\n".join(report["logs"])
+    assert "on hold" not in markdown and repo["name"] not in rendered + "\n".join(report["logs"])
     assert_categories(markdown, ())

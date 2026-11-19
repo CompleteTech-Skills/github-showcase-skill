@@ -139,6 +139,9 @@ chart:
   junction: "#FFC300"
   muted: "#94A3B8"
   archived_opacity: 0.5
+  # orgs the account chart treats as HOLD (left off unless --allow-hold), beside the estate-wide HOLD families;
+  # user, 2026-11-18: the romgenie archive and following orgs, as for TouchedByAnAgent
+  hold: [romgenie-archive-repostiory, romgenie-following-repos]
   enterprise: {accent: "#FFC300", eyebrow: "#FFC300", fill: "#001F3F", fill_opacity: 0.4, edge_opacity: 0.45}
   neutral:
     eyebrow: "#94A3B8"
@@ -168,6 +171,8 @@ chart:
     fork: Fork
     archived: Archived
     language: Language
+    no_language: No language
+    other_languages: Other languages
     legend_private: Private work is counted, never named
   mermaid:
     font_family: "Poppins, ui-sans-serif, system-ui, sans-serif"

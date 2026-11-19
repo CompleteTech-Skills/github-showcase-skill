@@ -571,6 +571,14 @@
      "minimum": 0,
      "maximum": 1
     },
+    "hold": {
+     "type": "array",
+     "items": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$"
+     },
+     "uniqueItems": true
+    },
     "enterprise": {
      "type": "object",
      "additionalProperties": false,
@@ -690,6 +698,8 @@
       "fork",
       "archived",
       "language",
+      "no_language",
+      "other_languages",
       "legend_private"
      ],
      "properties": {
@@ -762,6 +772,14 @@
        "minLength": 1
       },
       "language": {
+       "type": "string",
+       "minLength": 1
+      },
+      "no_language": {
+       "type": "string",
+       "minLength": 1
+      },
+      "other_languages": {
        "type": "string",
        "minLength": 1
       },
