@@ -27,7 +27,7 @@
 
 ---
 
-A CompleteTech LLC Claude and Codex skill that makes every repository in the CompleteTech GitHub estate look like part of one collection, and keeps it that way. It typesets the README hero banner, the repo card and the profile art from real metadata, and it checks descriptions, topics, labels and READMEs against the estate standard before anything is written.
+A Claude and Codex skill, made by CompleteTech LLC, that makes every repository of a GitHub user, organization or Enterprise look like part of one collection, and keeps it that way. It typesets the README hero banner, the repo card and the profile art from real metadata, and it checks descriptions, topics, labels and READMEs against the estate standard before anything is written. It ships with CompleteTech's own estate as its configuration and worked example; bring your own brand with [references/own-brand.md](references/own-brand.md).
 
 ## About
 
@@ -183,6 +183,8 @@ python3 scripts/showcase.py account-chart render --snapshot account.snapshot.jso
 | Fonts | `assets/fonts/` | Poppins, JetBrains Mono, Fraunces, Bricolage Grotesque and Press Start 2P under the SIL Open Font License, with sha256 in `FONTS.json`. |
 
 ## Brand Notes
+
+The brand config decides whose brand a target wears. The shipped `references/brand.yaml` is CompleteTech LLC's own estate; pass your own with `--config` (see [references/own-brand.md](references/own-brand.md)). An owner without a row renders neutrally under its own name, with no footer and no brand topic. Whoever the target is, the README ends with the skill credit, *README styled with github-showcase-skill by CompleteTech LLC*, from the config's `attribution:` block.
 
 Precise, factual and quiet: the art carries the brand, the words carry the facts. Every banner chip, subtitle and card line comes from the repository's own description, topics and manifests. Do not invent features, numbers, stars or claims, do not let an image model draw text or marks, and do not crop, recolour or redraw a logo.
 

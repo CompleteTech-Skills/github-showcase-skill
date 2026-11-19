@@ -8,7 +8,7 @@
 
 ## 1. Choose the right skill
 
-This is a `catalog-renderer` in the CompleteTech Skills family. Its install/activation key is **`github-showcase-skill`**. Use it whenever a CompleteTech-family repository, README, org, org profile, GitHub Project board, the CompleteTech Enterprise or the profile page must match the estate standard: it generates the art and checks the metadata, and it hands every proposed GitHub change to a writer instead of applying it. Use the orchestrator when work spans multiple specialists. Install the complete skill directory, including `SKILL.md`, references, scripts and assets, in the directory supported by your agent. Do not install only the Markdown file. Keep this skill separate from its siblings.
+This is a `catalog-renderer` in the CompleteTech Skills family. Its install/activation key is **`github-showcase-skill`**. Use it whenever a repository, README, org, org profile, GitHub Project board, Enterprise or profile page must match its owner's estate standard and brand. The shipped configuration is CompleteTech LLC's own estate; for your own brand, follow [references/own-brand.md](references/own-brand.md) (until then an owner without a row renders neutrally under its own name). The skill generates the art and checks the metadata, and it hands every proposed GitHub change to a writer instead of applying it. Use the orchestrator when work spans multiple specialists. Install the complete skill directory, including `SKILL.md`, references, scripts and assets, in the directory supported by your agent. Do not install only the Markdown file. Keep this skill separate from its siblings.
 
 ## 2. Get a full checkout and prepare Python
 

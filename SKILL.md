@@ -1,15 +1,16 @@
 ---
 name: github-showcase-skill
 description: >-
-  Generate CompleteTech LLC README hero banners, repo cards, social previews, repo icons, org tiles, profile intros
-  and footers; audit repos against the CompleteTech GitHub estate standard (About description, topics, labels, README
-  variants, links, language bar, Actions, images, About sidebar, SVG rules); render org profile READMEs and plan org
-  About fields, pins, star lists, labels and health files; capture, lint and copy GitHub Projects boards from the
-  estate template; snapshot, check and plan the CompleteTech Enterprise; and map one account's repositories,
-  enterprises and organizations as a Mermaid tree with a high-definition render. Read-only toward GitHub: it emits
-  files, JSON plans and gh/writer jobs. Use when creating, polishing or auditing any CompleteTech, AI Ascension, Jev
-  Engineering, jevplay-games, LibreEvolve or TouchedByAnAgent repo, README, org, org profile, GitHub Project or the
-  Enterprise so it matches the rest of the estate.
+  Generate README hero banners, repo cards, social previews, repo icons, org tiles, profile intros and footers for
+  any GitHub user, organization or Enterprise, in the operator's configured brand (neutral under the owner's own
+  name until one is configured); audit repos against a GitHub estate standard (About description, topics, labels,
+  README variants, links, language bar, Actions, images, About sidebar, SVG rules); render org profile READMEs and
+  plan org About fields, pins, star lists, labels and health files; capture, lint and copy GitHub Projects boards;
+  snapshot and check an Enterprise; and map one account's repositories, enterprises and organizations as a Mermaid
+  tree with a high-definition render. Made by CompleteTech LLC, whose own estate (CompleteTech, AI Ascension, Jev
+  Engineering, jevplay-games, LibreEvolve, TouchedByAnAgent) is the shipped configuration and worked example.
+  Read-only toward GitHub: it emits files, JSON plans and gh/writer jobs. Use when creating, polishing or auditing
+  a repo, README, org, org profile, GitHub Project or Enterprise so it matches the rest of its owner's estate.
 version: 1.0.0
 metadata:
   openclaw:
