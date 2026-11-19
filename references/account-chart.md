@@ -64,6 +64,11 @@ An organization left out contributes nothing to the map's counts. Its omitted re
 | Org without a brand row | Neutral style | `needs-input:org-row:<login>` |
 | Org whose family identity is pending | Neutral style, never CompleteTech art | `needs-input:brand-identity:<login>` |
 
+Omitted organizations contribute no numeric map totals. Their repository withholding
+checks still produce the applicable gate logs, including the unnamed `exposure-withheld`
+decision. A withheld repository does not contribute a `.github`, fork or archive
+omission category; those categories describe only records permitted by the estate gates.
+
 With the private registry available (`--registry` or the bundle beside the skill), the Mermaid source, the SVG and the Markdown are also checked with the `lint public-leak` scope before anything is written (exit 1 on a hit).
 
 ## Layout

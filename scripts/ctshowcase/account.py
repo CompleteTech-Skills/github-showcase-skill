@@ -515,20 +515,24 @@ def build(snap: dict, brand, *, resolver=None, flags: dict | None = None, allow_
             return "archived"
         return None
 
+    def repo_withheld(full: str, held: bool) -> bool:
+        """Apply the estate gates and their diagnostics without changing repository counts."""
+        if held:
+            return True
+        if _t3_held(estate, full, allow_t3):
+            logs.append(f"t3-signoff:{full}")  # a repository withdrawn from a wildcard grant stays unnamed
+            return True
+        if estate.exposure(full):
+            logs.append("exposure-withheld")  # never logged by name (q24)
+            return True
+        return False
+
     def gate_repos(owner: str, repos: list[dict], held: bool) -> list[dict]:
         out = []
         for rp in repos:
             full = f"{owner}/{rp['name']}"
             counts["public"] += 1
-            if held:
-                counts["withheld"] += 1
-                continue
-            if _t3_held(estate, full, allow_t3):
-                logs.append(f"t3-signoff:{full}")  # a repository withdrawn from a wildcard grant stays unnamed
-                counts["withheld"] += 1
-                continue
-            if estate.exposure(full):
-                logs.append("exposure-withheld")  # never logged by name (q24)
+            if repo_withheld(full, held):
                 counts["withheld"] += 1
                 continue
             reason = hidden_reason(rp)
@@ -576,7 +580,9 @@ def build(snap: dict, brand, *, resolver=None, flags: dict | None = None, allow_
         if status == "complete" and "all-orgs" not in show and not (held and repos) and all(reasons):
             # completely observed and nothing public to show (none at all, only private work, or only repositories a
             # render option hides): left off unless --show all-orgs. HOLD public work stays withheld, not hidden.
-            hidden_categories.update(reason for reason in reasons if reason)
+            # Withholding diagnostics survive omission, but only permitted repos supply hidden categories.
+            hidden_categories.update(reason for rp, reason in zip(repos, reasons)
+                                     if not repo_withheld(f"{lg}/{rp['name']}", held) and reason)
             logs.append(f"no-public:{lg}")
             counts["orgs_without_public"] += 1
             return None
