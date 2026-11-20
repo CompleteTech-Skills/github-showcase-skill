@@ -1455,11 +1455,18 @@ def cmd_config(args):
     from ctshowcase.detect import STANDARD_LOCK, standard_lock_text
     b = brand(args)
     errs = C.schema_errors(b.raw)
+    lock = C.lock_path(b)  # beside the selected config
+    if args.write_lock and lock is None:  # refuse before any write, including --crop
+        raise ConfigError(f"{b.path} shares the shipped lock's directory; move it to its own directory "
+                          "to give it a lock")
     crops = C.write_crops(b) if args.crop and not errs else None  # NeedsInput (exit 4) until the boxes are measured
     if args.write_lock:
         # LF on every OS: the committed locks are LF, and a CRLF rewrite on Windows would change every line
-        C.LOCK.write_text(C.lock_text(b.raw), encoding="utf-8", newline="\n")
-        STANDARD_LOCK.write_text(standard_lock_text(), encoding="utf-8", newline="\n")
+        lock.write_text(C.lock_text(b.raw), encoding="utf-8", newline="\n")
+        # The standard lock depends on the installation only: rewrite it only when stale, so an outside config's
+        # run never writes into an up-to-date (possibly read-only) installation.
+        if not STANDARD_LOCK.is_file() or STANDARD_LOCK.read_text(encoding="utf-8") != standard_lock_text():
+            STANDARD_LOCK.write_text(standard_lock_text(), encoding="utf-8", newline="\n")
     in_sync = C.lock_in_sync(b) and STANDARD_LOCK.is_file() and STANDARD_LOCK.read_text(encoding="utf-8") == standard_lock_text()
     ok = not errs and in_sync
     out = {"command": "config", "result": "pass" if ok else "fail", "schema_errors": errs, "lock_in_sync": in_sync,

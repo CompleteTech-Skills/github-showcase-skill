@@ -121,10 +121,11 @@ Use only an explicitly selected applicable bundle or sign-off file, and stop if 
 - Prepare WS with `meta/`, `checkouts/`, `tools/`, `art/{prompts,runs,candidates,golden}/`, `proof/`, and
   scratch jobs/records/ledger paths. Use a venv with the pinned requirements; run `I fonts --check` and `I config`
   to check the installed package. For an external config, also retain `S config`'s actual exit and JSON:
-  `schema_errors` describes that config, but `lock_in_sync` compares it with the installed lock, not its own
-  adjacent lock. A changed owned config can therefore exit 1 after successful onboarding. Report that limitation
-  separately from schema errors; never claim a passing external lock check or run `config --write-lock` to
-  repair the shared installation. The `brand` dry run/write validates the proposed config and adjacent lock
+  `schema_errors` describes that config, and `lock_in_sync` compares it with its own adjacent `brand.lock.json`
+  (never the installed lock). A changed owned config whose adjacent lock is stale or missing exits 1; report that
+  separately from schema errors. `S config --write-lock` writes that adjacent lock, never the installed
+  `references/brand.lock.json` (it refuses a config placed beside the installed lock); never run `I config --write-lock` to make an external config pass. The `brand`
+  dry run/write validates the proposed config and adjacent lock
   serialization; record that result and its selected paths without treating it as visual or identity approval.
   Fetch missing fonts only when network use is authorized; otherwise record `needs-input:fonts`.
 - Read only the explicitly selected applicable estate bundle in place, including registry, decisions and
@@ -633,6 +634,7 @@ included refusal and pending-input exits, not just exit-0 output:
 - The documented owned-copy prefix reached onboarding and renderers without changing the shipped config.
   Onboarding wrote the adjacent lock; `config` reported no schema errors but its installed-lock comparison
   still failed for the changed external config. That limitation is reported, not repaired by changing locks.
+  (Superseded by #214: `config` now checks and writes the external config's adjacent lock.)
 - An unknown repository card used the CompleteTech mark. The owned-family review card used its own wordmark;
   missing unmeasured approval and missing brand topic remained pending. Unknown account-chart organization
   lanes were neutral, while an unknown account header used CompleteTech defaults. An owned account chart

@@ -24,8 +24,9 @@ def check_config(tmp_path, capsys, monkeypatch, change):
     code = showcase.main(["--config", str(path), "--format", "json", "config"])
     result = json.loads(capsys.readouterr().out)
     assert path.read_bytes() == before
-    # This CLI compares an owned config with the installed lock. Its expected
-    # lock mismatch must not be mistaken for a schema failure or repaired here.
+    # This CLI compares an owned config with its own adjacent lock, which this
+    # test never writes. Its expected lock mismatch must not be mistaken for a
+    # schema failure or repaired here.
     assert code == 1
     assert result["lock_in_sync"] is False
     return result["schema_errors"]
