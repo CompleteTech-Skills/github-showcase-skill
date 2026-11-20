@@ -276,16 +276,22 @@ def lock_text(raw: dict) -> str:
     return json.dumps(raw, sort_keys=True, indent=1, ensure_ascii=False) + "\n"
 
 
-def lock_path(brand: Brand) -> Path:
+def lock_path(brand: Brand) -> Path | None:
     """The lock beside the selected config (`brand.lock.json` in its directory, as `brand add-family --write` writes
-    it): references/brand.lock.json for the shipped config, never the shipped lock for another operator's config."""
+    it): references/brand.lock.json for the shipped config, never the shipped lock for another operator's config.
+    None when another config shares the shipped lock's directory, so it has no lock of its own."""
     path = getattr(brand, "path", None)
-    return Path(path).with_name("brand.lock.json") if path else LOCK
+    if not path:
+        return LOCK
+    lock = Path(path).with_name("brand.lock.json")
+    if lock.resolve() == LOCK.resolve() and Path(path).resolve() != DEFAULT_CONFIG.resolve():
+        return None
+    return lock
 
 
 def lock_in_sync(brand: Brand) -> bool:
     lock = lock_path(brand)
-    return lock.is_file() and lock.read_text(encoding="utf-8") == lock_text(brand.raw)
+    return lock is not None and lock.is_file() and lock.read_text(encoding="utf-8") == lock_text(brand.raw)
 
 
 # -- repo override file (.github/showcase.yml, A3.5) -------------------------------------------------
