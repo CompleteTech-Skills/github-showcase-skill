@@ -121,10 +121,11 @@ Use only an explicitly selected applicable bundle or sign-off file, and stop if 
 - Prepare WS with `meta/`, `checkouts/`, `tools/`, `art/{prompts,runs,candidates,golden}/`, `proof/`, and
   scratch jobs/records/ledger paths. Use a venv with the pinned requirements; run `I fonts --check` and `I config`
   to check the installed package. For an external config, also retain `S config`'s actual exit and JSON:
-  `schema_errors` describes that config, but `lock_in_sync` compares it with the installed lock, not its own
-  adjacent lock. A changed owned config can therefore exit 1 after successful onboarding. Report that limitation
-  separately from schema errors; never claim a passing external lock check or run `config --write-lock` to
-  repair the shared installation. The `brand` dry run/write validates the proposed config and adjacent lock
+  `schema_errors` describes that config, and `lock_in_sync` compares it with its own adjacent `brand.lock.json`
+  (never the installed lock). A changed owned config whose adjacent lock is stale or missing exits 1; report that
+  separately from schema errors. `S config --write-lock` writes only that adjacent lock and never the installed
+  `references/brand.lock.json`; never run `I config --write-lock` to make an external config pass. The `brand`
+  dry run/write validates the proposed config and adjacent lock
   serialization; record that result and its selected paths without treating it as visual or identity approval.
   Fetch missing fonts only when network use is authorized; otherwise record `needs-input:fonts`.
 - Read only the explicitly selected applicable estate bundle in place, including registry, decisions and
